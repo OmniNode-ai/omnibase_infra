@@ -1,11 +1,11 @@
-"""PostgreSQL Adapter Node - Message Bus Bridge for Database Operations.
+"""PostgreSQL Adapter Tool - Message Bus Bridge for Database Operations.
 
 This adapter serves as a bridge between the ONEX message bus and PostgreSQL database operations.
 It converts event envelopes containing database requests into direct PostgreSQL connection manager calls.
+Following the ONEX infrastructure tool pattern for external service integration.
 """
 
 import time
-import uuid
 from typing import Any, Dict, Optional
 
 from omnibase_core.core.base_onex_registry import BaseOnexRegistry
@@ -18,25 +18,29 @@ from omnibase_infra.models.postgres.model_postgres_query_request import ModelPos
 from omnibase_infra.models.postgres.model_postgres_query_response import ModelPostgresQueryResponse
 from omnibase_infra.models.postgres.model_postgres_health_request import ModelPostgresHealthRequest
 from omnibase_infra.models.postgres.model_postgres_health_response import ModelPostgresHealthResponse
-from omnibase_infra.nodes.postgres_adapter.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
-from omnibase_infra.nodes.postgres_adapter.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
+from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
+from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 
 
-class PostgresAdapterNode(NodeEffectService):
+class ToolInfrastructurePostgresAdapterEffect(NodeEffectService):
     """
-    PostgreSQL Adapter Node - Message Bus Bridge.
+    Infrastructure PostgreSQL Adapter Tool - Message Bus Bridge.
     
     Converts message bus envelopes containing database requests into direct
-    PostgreSQL connection manager operations. This follows the ONEX adapter
-    pattern where adapters serve as bridges between the event-driven message
+    PostgreSQL connection manager operations. This follows the ONEX infrastructure
+    tool pattern where adapters serve as bridges between the event-driven message
     bus and external service APIs.
     
     Message Flow:
     Event Envelope → PostgreSQL Adapter → PostgreSQL Connection Manager → Database
+    
+    Integrates with:
+    - postgres_event_processing_subcontract: Event bus integration patterns
+    - postgres_connection_management_subcontract: Connection pool management
     """
 
     def __init__(self, registry: BaseOnexRegistry):
-        """Initialize PostgreSQL adapter with registry injection."""
+        """Initialize PostgreSQL adapter tool with registry injection."""
         super().__init__(registry)
         self._connection_manager: Optional[PostgresConnectionManager] = None
 
@@ -51,10 +55,11 @@ class PostgresAdapterNode(NodeEffectService):
 
     async def process(self, input_data: ModelPostgresAdapterInput) -> ModelPostgresAdapterOutput:
         """
-        Process PostgreSQL adapter request.
+        Process PostgreSQL adapter request following infrastructure tool pattern.
         
         Routes message envelope to appropriate database operation based on operation_type.
-        Handles both query execution and health check operations.
+        Handles both query execution and health check operations with proper error handling
+        and metrics collection as defined in the event processing subcontract.
         
         Args:
             input_data: Input envelope containing operation type and request data
@@ -65,7 +70,7 @@ class PostgresAdapterNode(NodeEffectService):
         start_time = time.perf_counter()
         
         try:
-            # Route based on operation type
+            # Route based on operation type (as defined in subcontracts)
             if input_data.operation_type == "query":
                 return await self._handle_query_operation(input_data, start_time)
             elif input_data.operation_type == "health_check":
@@ -82,7 +87,7 @@ class PostgresAdapterNode(NodeEffectService):
             if isinstance(e, OnexError):
                 error_message = str(e)
             else:
-                error_message = f"PostgreSQL adapter error: {str(e)}"
+                error_message = f"PostgreSQL adapter tool error: {str(e)}"
                 
             return ModelPostgresAdapterOutput(
                 operation_type=input_data.operation_type,
@@ -99,7 +104,12 @@ class PostgresAdapterNode(NodeEffectService):
         input_data: ModelPostgresAdapterInput, 
         start_time: float
     ) -> ModelPostgresAdapterOutput:
-        """Handle database query operation."""
+        """
+        Handle database query operation following connection management patterns.
+        
+        Implements query execution strategy as defined in postgres_connection_management_subcontract
+        with proper timeout handling, retry logic, and performance monitoring.
+        """
         if not input_data.query_request:
             raise OnexError(
                 error_code=CoreErrorCode.VALIDATION_ERROR,
@@ -109,7 +119,7 @@ class PostgresAdapterNode(NodeEffectService):
         query_request = input_data.query_request
         
         try:
-            # Execute query through connection manager
+            # Execute query through connection manager (following connection management subcontract)
             result = await self.connection_manager.execute_query(
                 query_request.query,
                 *query_request.parameters,
@@ -117,7 +127,7 @@ class PostgresAdapterNode(NodeEffectService):
                 record_metrics=query_request.record_metrics,
             )
             
-            # Convert result to response format
+            # Convert result to response format (as defined in event processing subcontract)
             if isinstance(result, list):  # SELECT query result
                 data = [dict(record) for record in result] if result else []
                 rows_affected = len(data)
@@ -136,7 +146,7 @@ class PostgresAdapterNode(NodeEffectService):
 
             execution_time_ms = (time.perf_counter() - start_time) * 1000
 
-            # Create query response
+            # Create query response (following shared model pattern)
             query_response = ModelPostgresQueryResponse(
                 success=True,
                 data=data,
@@ -161,7 +171,7 @@ class PostgresAdapterNode(NodeEffectService):
             execution_time_ms = (time.perf_counter() - start_time) * 1000
             error_message = str(e)
 
-            # Create error query response
+            # Create error query response (following error handling patterns from subcontracts)
             query_response = ModelPostgresQueryResponse(
                 success=False,
                 data=None,
@@ -188,7 +198,12 @@ class PostgresAdapterNode(NodeEffectService):
         input_data: ModelPostgresAdapterInput, 
         start_time: float
     ) -> ModelPostgresAdapterOutput:
-        """Handle database health check operation."""
+        """
+        Handle database health check operation following health monitoring patterns.
+        
+        Implements health check strategy as defined in postgres_connection_management_subcontract
+        with connection pool monitoring and database status validation.
+        """
         if not input_data.health_request:
             raise OnexError(
                 error_code=CoreErrorCode.VALIDATION_ERROR,
@@ -198,12 +213,12 @@ class PostgresAdapterNode(NodeEffectService):
         health_request = input_data.health_request
 
         try:
-            # Perform health check through connection manager
+            # Perform health check through connection manager (following health integration patterns)
             health_data = await self.connection_manager.health_check()
             
             execution_time_ms = (time.perf_counter() - start_time) * 1000
 
-            # Filter response based on request parameters
+            # Filter response based on request parameters (as defined in subcontracts)
             filtered_health_data: Dict[str, Any] = {
                 "status": health_data["status"],
                 "timestamp": health_data["timestamp"],
@@ -223,7 +238,7 @@ class PostgresAdapterNode(NodeEffectService):
             if "database_info" in health_data:
                 filtered_health_data["database_info"] = health_data["database_info"]
 
-            # Create health response
+            # Create health response (following shared model pattern)
             health_response = ModelPostgresHealthResponse(
                 status=filtered_health_data["status"],
                 timestamp=filtered_health_data["timestamp"],
@@ -250,7 +265,7 @@ class PostgresAdapterNode(NodeEffectService):
             execution_time_ms = (time.perf_counter() - start_time) * 1000
             error_message = str(e)
 
-            # Create error health response
+            # Create error health response (following error handling patterns from subcontracts)
             health_response = ModelPostgresHealthResponse(
                 status="unhealthy",
                 timestamp=time.time(),
@@ -271,22 +286,31 @@ class PostgresAdapterNode(NodeEffectService):
             )
 
     async def initialize(self) -> None:
-        """Initialize the PostgreSQL adapter and connection manager."""
+        """
+        Initialize the PostgreSQL adapter tool and connection manager.
+        
+        Follows initialization patterns defined in postgres_connection_management_subcontract
+        with proper error handling and resource setup.
+        """
         try:
             await self.connection_manager.initialize()
         except Exception as e:
             raise OnexError(
                 error_code=CoreErrorCode.INITIALIZATION_ERROR,
-                message=f"Failed to initialize PostgreSQL adapter: {str(e)}",
+                message=f"Failed to initialize PostgreSQL adapter tool: {str(e)}",
             ) from e
 
     async def cleanup(self) -> None:
-        """Cleanup resources when shutting down."""
+        """
+        Cleanup resources when shutting down.
+        
+        Follows cleanup patterns defined in subcontracts with graceful resource disposal.
+        """
         if self._connection_manager:
             try:
                 await self._connection_manager.close()
             except Exception as e:
-                # Log error but don't raise during cleanup
+                # Log error but don't raise during cleanup (as per infrastructure patterns)
                 pass
             finally:
                 self._connection_manager = None

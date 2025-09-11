@@ -1,1 +1,0 @@
-"""PostgreSQL adapter node v1.0.0."""
