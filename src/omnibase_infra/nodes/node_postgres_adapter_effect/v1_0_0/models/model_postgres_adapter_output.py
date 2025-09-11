@@ -10,7 +10,7 @@ from omnibase_infra.models.postgres.model_postgres_query_response import ModelPo
 from omnibase_infra.models.postgres.model_postgres_health_response import ModelPostgresHealthResponse
 from omnibase_infra.models.postgres.model_postgres_context import ModelPostgresContext
 from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
-from .enum_postgres_operation_type import EnumPostgresOperationType
+from ..enums.enum_postgres_operation_type import EnumPostgresOperationType
 
 
 class ModelPostgresAdapterOutput(BaseModel):
