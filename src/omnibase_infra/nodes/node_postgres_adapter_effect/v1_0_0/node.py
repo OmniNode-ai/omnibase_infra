@@ -8,6 +8,7 @@ Following the ONEX infrastructure tool pattern for external service integration.
 import asyncio
 import os
 import re
+import threading
 import time
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Union, Pattern
@@ -85,6 +86,24 @@ class NodePostgresAdapterEffect(NodeEffectService):
         (re.compile(r'table "[\w_-]+"'), 'table "***"'),
         (re.compile(r'[A-Za-z0-9+/=]{32,}'), '***REDACTED_TOKEN***'),
     ]
+    
+    # Pre-compiled regex patterns for PostgreSQL status parsing (performance optimization)
+    _ROWS_AFFECTED_PATTERNS = [
+        # INSERT operations: "INSERT 0 5" -> 5 rows
+        (re.compile(r'^INSERT\s+\d+\s+(\d+)$', re.IGNORECASE), 1),
+        
+        # UPDATE operations: "UPDATE 3" -> 3 rows
+        (re.compile(r'^UPDATE\s+(\d+)$', re.IGNORECASE), 1),
+        
+        # DELETE operations: "DELETE 2" -> 2 rows
+        (re.compile(r'^DELETE\s+(\d+)$', re.IGNORECASE), 1),
+        
+        # COPY operations: "COPY 100" -> 100 rows
+        (re.compile(r'^COPY\s+(\d+)$', re.IGNORECASE), 1),
+        
+        # Generic pattern for any command followed by a number
+        (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
+    ]
 
     def __init__(self, container: ONEXContainer):
         """Initialize PostgreSQL adapter tool with container injection."""
@@ -93,6 +112,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         self.domain = "infrastructure"
         self._connection_manager: Optional[PostgresConnectionManager] = None
         self._connection_manager_lock = asyncio.Lock()
+        self._connection_manager_sync_lock = threading.Lock()
         
         # Initialize configuration from environment or container
         self.config = self._load_configuration(container)
@@ -164,27 +184,28 @@ class NodePostgresAdapterEffect(NodeEffectService):
     @property
     def connection_manager(self) -> PostgresConnectionManager:
         """
-        Get PostgreSQL connection manager instance via registry injection.
+        Get PostgreSQL connection manager instance via registry injection with thread safety.
         
-        Note: For async operations, prefer get_connection_manager_async() to avoid race conditions.
+        Note: For async operations, prefer get_connection_manager_async() to avoid mixing sync/async patterns.
         """
-        if self._connection_manager is None:
-            # Validate container service interface before resolution
-            self._validate_container_service_interface()
-            
-            # Use registry injection per ONEX standards (CLAUDE.md)
-            self._connection_manager = self.container.get_service("postgres_connection_manager")
+        with self._connection_manager_sync_lock:
             if self._connection_manager is None:
-                # Fallback for development/testing - create with proper error
-                raise OnexError(
-                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
-                    message="PostgresConnectionManager not available in registry - ensure proper container setup"
-                )
-            
-            # Validate the resolved service interface
-            self._validate_connection_manager_interface(self._connection_manager)
-            
-        return self._connection_manager
+                # Validate container service interface before resolution
+                self._validate_container_service_interface()
+                
+                # Use registry injection per ONEX standards (CLAUDE.md)
+                self._connection_manager = self.container.get_service("postgres_connection_manager")
+                if self._connection_manager is None:
+                    # Fallback for development/testing - create with proper error
+                    raise OnexError(
+                        code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                        message="PostgresConnectionManager not available in registry - ensure proper container setup"
+                    )
+                
+                # Validate the resolved service interface
+                self._validate_connection_manager_interface(self._connection_manager)
+                
+            return self._connection_manager
     
     async def get_connection_manager_async(self) -> PostgresConnectionManager:
         """
@@ -254,9 +275,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
 
     async def _check_database_connectivity_async(self) -> ModelHealthStatus:
-        """Check basic PostgreSQL database connectivity (async version - fixes event loop anti-pattern)."""
+        """Check basic PostgreSQL database connectivity (async version for operation handlers)."""
         try:
-            # Simple connectivity test via connection manager (now properly async)
+            # Async connectivity test via connection manager
             connection_manager = await self.get_connection_manager_async()
             health_data = await connection_manager.health_check()
             status = health_data.get("status", "unknown")
@@ -288,7 +309,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
 
     def _check_connection_pool_health(self) -> ModelHealthStatus:
-        """Check PostgreSQL connection pool health and capacity."""
+        """Check PostgreSQL connection pool health and capacity (sync version for mixin)."""
         try:
             # Check if connection manager is available
             if self._connection_manager is None:
@@ -302,6 +323,34 @@ class NodePostgresAdapterEffect(NodeEffectService):
             return ModelHealthStatus(
                 status=EnumHealthStatus.HEALTHY,
                 message="Connection pool operational",
+                timestamp=datetime.utcnow().isoformat()
+            )
+            
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Connection pool check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    async def _check_connection_pool_health_async(self) -> ModelHealthStatus:
+        """Check PostgreSQL connection pool health and capacity (async version for operation handlers)."""
+        try:
+            # Check if connection manager is available with proper async access
+            connection_manager = await self.get_connection_manager_async()
+            stats = connection_manager.get_connection_stats()
+            
+            # Check pool health based on connection stats
+            if stats.failed_connections > stats.total_connections * 0.1:  # More than 10% failures
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message=f"High connection failure rate: {stats.failed_connections}/{stats.total_connections}",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message=f"Connection pool healthy: {stats.size}/{stats.total_connections} connections",
                 timestamp=datetime.utcnow().isoformat()
             )
             
@@ -501,15 +550,15 @@ class NodePostgresAdapterEffect(NodeEffectService):
         connection pool status, and adapter functionality.
         """
         try:
-            # Run health checks using async versions for proper health operation
+            # Run health checks using async versions for consistent async operation
             health_results = []
             
             # Run async database connectivity check
             db_health = await self._check_database_connectivity_async()
             health_results.append(db_health)
             
-            # Run sync connection pool check
-            pool_health = self._check_connection_pool_health()
+            # Run async connection pool check (fixed async/sync mixing)
+            pool_health = await self._check_connection_pool_health_async()
             health_results.append(pool_health)
             
             # Determine overall health status
@@ -805,26 +854,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
         if not status_clean:
             return 0
         
-        # Common PostgreSQL status patterns with compiled regex for performance
-        status_patterns = [
-            # INSERT operations: "INSERT 0 5" -> 5 rows
-            (re.compile(r'^INSERT\s+\d+\s+(\d+)$', re.IGNORECASE), 1),
-            
-            # UPDATE operations: "UPDATE 3" -> 3 rows
-            (re.compile(r'^UPDATE\s+(\d+)$', re.IGNORECASE), 1),
-            
-            # DELETE operations: "DELETE 2" -> 2 rows
-            (re.compile(r'^DELETE\s+(\d+)$', re.IGNORECASE), 1),
-            
-            # COPY operations: "COPY 100" -> 100 rows
-            (re.compile(r'^COPY\s+(\d+)$', re.IGNORECASE), 1),
-            
-            # Generic pattern for any command followed by a number
-            (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
-        ]
-        
-        # Try each pattern to extract rows affected
-        for pattern, group_index in status_patterns:
+        # Try each pre-compiled pattern to extract rows affected (performance optimized)
+        for pattern, group_index in self._ROWS_AFFECTED_PATTERNS:
             match = pattern.match(status_clean)
             if match:
                 try:
