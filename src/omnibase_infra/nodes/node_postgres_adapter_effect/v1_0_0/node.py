@@ -5,9 +5,11 @@ It converts event envelopes containing database requests into direct PostgreSQL 
 Following the ONEX infrastructure tool pattern for external service integration.
 """
 
+import os
+import re
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Callable, Union
+from typing import Dict, List, Optional, Callable, Union, Pattern
 from uuid import UUID
 
 from omnibase_core.core.core_error_codes import CoreErrorCode
@@ -24,6 +26,7 @@ from omnibase_infra.models.postgres.model_postgres_query_result import ModelPost
 from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
 from .models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from .models.model_postgres_adapter_output import ModelPostgresAdapterOutput
+from .models.model_postgres_adapter_config import ModelPostgresAdapterConfig
 
 
 class NodePostgresAdapterEffect(NodeEffectService):
@@ -42,6 +45,45 @@ class NodePostgresAdapterEffect(NodeEffectService):
     - postgres_event_processing_subcontract: Event bus integration patterns
     - postgres_connection_management_subcontract: Connection pool management
     """
+    
+    # Configuration will be loaded from environment or container
+    config: ModelPostgresAdapterConfig
+    
+    # Pre-compiled regex patterns for performance
+    _SQL_INJECTION_PATTERNS = [
+        re.compile(r';.*drop\s+table', re.IGNORECASE),
+        re.compile(r';.*delete\s+from', re.IGNORECASE), 
+        re.compile(r';.*truncate\s+table', re.IGNORECASE),
+        re.compile(r'union.*select.*password', re.IGNORECASE),
+        re.compile(r'union.*select.*admin', re.IGNORECASE),
+    ]
+    
+    _COMPLEXITY_PATTERNS = {
+        'joins': re.compile(r'\bjoin\b', re.IGNORECASE),
+        'selects': re.compile(r'\bselect\b', re.IGNORECASE),
+        'unions': re.compile(r'\bunion\b', re.IGNORECASE),
+        'leading_wildcards': re.compile(r'like\s+[\'"]%', re.IGNORECASE),
+        'regex_ops': re.compile(r'~[*]?\s*[\'"]', re.IGNORECASE),
+    }
+    
+    _ERROR_SANITIZATION_PATTERNS = [
+        (re.compile(r'password=[^\s&]*', re.IGNORECASE), 'password=***'),
+        (re.compile(r'postgresql://[^\s]*@[^\s]*/', re.IGNORECASE), 'postgresql://***@***/'),
+        (re.compile(r'eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*'), '***JWT_TOKEN***'),
+        (re.compile(r'ghp_[A-Za-z0-9]{36}'), '***GITHUB_TOKEN***'),
+        (re.compile(r'gho_[A-Za-z0-9]{36}'), '***GITHUB_OAUTH_TOKEN***'),
+        (re.compile(r'ghu_[A-Za-z0-9]{36}'), '***GITHUB_USER_TOKEN***'),
+        (re.compile(r'AKIA[0-9A-Z]{16}'), '***AWS_ACCESS_KEY***'),
+        (re.compile(r'[A-Za-z0-9/+=]{40}'), '***AWS_SECRET_KEY***'),
+        (re.compile(r'api[_-]?key[_-]*[:=][^\s&]*', re.IGNORECASE), 'api_key=***'),
+        (re.compile(r'bearer[\s]+[A-Za-z0-9+/=]{20,}', re.IGNORECASE), 'bearer ***'),
+        (re.compile(r'auth[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'auth_token=***'),
+        (re.compile(r'access[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'access_token=***'),
+        (re.compile(r'/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*', re.IGNORECASE), '/***sensitive_path***'),
+        (re.compile(r'schema "[\w_-]+"'), 'schema "***"'),
+        (re.compile(r'table "[\w_-]+"'), 'table "***"'),
+        (re.compile(r'[A-Za-z0-9+/=]{32,}'), '***REDACTED_TOKEN***'),
+    ]
 
     def __init__(self, container: ONEXContainer):
         """Initialize PostgreSQL adapter tool with container injection."""
@@ -49,6 +91,31 @@ class NodePostgresAdapterEffect(NodeEffectService):
         self.node_type = "effect"
         self.domain = "infrastructure"
         self._connection_manager: Optional[PostgresConnectionManager] = None
+        
+        # Initialize configuration from environment or container
+        self.config = self._load_configuration(container)
+
+    def _load_configuration(self, container: ONEXContainer) -> ModelPostgresAdapterConfig:
+        """
+        Load PostgreSQL adapter configuration from container or environment.
+        
+        Args:
+            container: ONEX container for dependency injection
+            
+        Returns:
+            Configured ModelPostgresAdapterConfig instance
+        """
+        try:
+            # Try to get configuration from container first (ONEX pattern)
+            config = container.get_service("postgres_adapter_config")
+            if config and isinstance(config, ModelPostgresAdapterConfig):
+                return config
+        except Exception:
+            pass  # Fall back to environment configuration
+        
+        # Fall back to environment-based configuration
+        environment = os.getenv("DEPLOYMENT_ENVIRONMENT", "development")
+        return ModelPostgresAdapterConfig.for_environment(environment)
 
     @property
     def connection_manager(self) -> PostgresConnectionManager:
@@ -268,14 +335,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
             else:  # Non-SELECT query result (status string)
                 query_result = None
                 status_message = str(result) if result else "Query executed successfully"
-                # Parse rows affected from status string
-                if result and result.split():
-                    try:
-                        rows_affected = int(result.split()[-1])
-                    except (ValueError, IndexError):
-                        rows_affected = 0
-                else:
-                    rows_affected = 0
+                # More robust parsing of rows affected from status string
+                rows_affected = self._parse_rows_affected_from_status(result)
 
             execution_time_ms = (time.perf_counter() - start_time) * 1000
 
@@ -303,8 +364,11 @@ class NodePostgresAdapterEffect(NodeEffectService):
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
             
-            # Sanitize error message to prevent sensitive information leakage
-            sanitized_error = self._sanitize_error_message(str(e))
+            # Sanitize error message to prevent sensitive information leakage (configurable)
+            if self.config.enable_error_sanitization:
+                sanitized_error = self._sanitize_error_message(str(e))
+            else:
+                sanitized_error = str(e)
 
             # Create structured error model (ONEX compliance)
             postgres_error = ModelPostgresError(
@@ -399,7 +463,11 @@ class NodePostgresAdapterEffect(NodeEffectService):
             
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = self._sanitize_error_message(f"Health check operation failed: {str(e)}")
+            # Sanitize error message (configurable)
+            if self.config.enable_error_sanitization:
+                sanitized_error = self._sanitize_error_message(f"Health check operation failed: {str(e)}")
+            else:
+                sanitized_error = f"Health check operation failed: {str(e)}"
             
             return ModelPostgresAdapterOutput(
                 operation_type="health_check",
@@ -452,58 +520,48 @@ class NodePostgresAdapterEffect(NodeEffectService):
         - Basic SQL injection patterns prevention
         """
         # Query size validation (prevent memory exhaustion)
-        max_query_size = 50000  # 50KB limit for queries
-        if len(query_request.query) > max_query_size:
+        if len(query_request.query) > self.config.max_query_size:
             raise OnexError(
                 code=CoreErrorCode.VALIDATION_ERROR,
-                message=f"Query size exceeds maximum allowed length ({max_query_size} characters)",
+                message=f"Query size exceeds maximum allowed length ({self.config.max_query_size} characters)",
             )
         
         # Parameter count validation (prevent resource exhaustion)
-        max_parameter_count = 100
-        if len(query_request.parameters) > max_parameter_count:
+        if len(query_request.parameters) > self.config.max_parameter_count:
             raise OnexError(
                 code=CoreErrorCode.VALIDATION_ERROR,
-                message=f"Parameter count exceeds maximum allowed ({max_parameter_count} parameters)",
+                message=f"Parameter count exceeds maximum allowed ({self.config.max_parameter_count} parameters)",
             )
         
         # Parameter size validation (prevent payload attacks)
-        max_parameter_size = 10000  # 10KB per parameter
         for i, param in enumerate(query_request.parameters):
             param_size = len(str(param))
-            if param_size > max_parameter_size:
+            if param_size > self.config.max_parameter_size:
                 raise OnexError(
                     code=CoreErrorCode.VALIDATION_ERROR,
-                    message=f"Parameter {i} size exceeds maximum allowed ({max_parameter_size} characters)",
+                    message=f"Parameter {i} size exceeds maximum allowed ({self.config.max_parameter_size} characters)",
                 )
         
         # Timeout validation
-        if query_request.timeout and query_request.timeout > 300:  # 5 minute max
+        if query_request.timeout and query_request.timeout > self.config.max_timeout_seconds:
             raise OnexError(
                 code=CoreErrorCode.VALIDATION_ERROR,
-                message="Query timeout exceeds maximum allowed (300 seconds)",
+                message=f"Query timeout exceeds maximum allowed ({self.config.max_timeout_seconds} seconds)",
             )
         
-        # Basic SQL injection pattern detection (additional layer of defense)
-        dangerous_patterns = [
-            r';.*drop\s+table',
-            r';.*delete\s+from',
-            r';.*truncate\s+table',
-            r'union.*select.*password',
-            r'union.*select.*admin',
-        ]
+        # Basic SQL injection pattern detection using pre-compiled patterns (configurable)
+        if self.config.enable_sql_injection_detection:
+            query_lower = query_request.query.lower()
+            for pattern in self._SQL_INJECTION_PATTERNS:
+                if pattern.search(query_lower):
+                    raise OnexError(
+                        code=CoreErrorCode.SECURITY_VIOLATION_ERROR,
+                        message="Query contains potentially dangerous SQL patterns",
+                    )
         
-        import re
-        query_lower = query_request.query.lower()
-        for pattern in dangerous_patterns:
-            if re.search(pattern, query_lower, re.IGNORECASE):
-                raise OnexError(
-                    code=CoreErrorCode.SECURITY_VIOLATION_ERROR,
-                    message="Query contains potentially dangerous SQL patterns",
-                )
-        
-        # Query complexity validation to prevent DoS attacks
-        self._validate_query_complexity(query_request.query)
+        # Query complexity validation to prevent DoS attacks (configurable)
+        if self.config.enable_query_complexity_validation:
+            self._validate_query_complexity(query_request.query)
 
     def _validate_query_complexity(self, query: str) -> None:
         """
@@ -516,50 +574,49 @@ class NodePostgresAdapterEffect(NodeEffectService):
         - Presence of expensive operations (LIKE %, regex patterns)
         - Complex aggregation functions
         """
-        import re
-        
         query_lower = query.lower()
         complexity_score = 0
         
-        # Count JOINs (each JOIN adds complexity)
-        join_count = len(re.findall(r'\bjoin\b', query_lower))
-        complexity_score += join_count * 2
+        # Get environment-specific complexity weights
+        weights = self.config.get_complexity_weights()
         
-        # Count subqueries and nested selects
-        select_count = len(re.findall(r'\bselect\b', query_lower)) - 1  # Subtract main SELECT
-        complexity_score += select_count * 3
+        # Count JOINs using pre-compiled pattern (each JOIN adds complexity)
+        join_count = len(self._COMPLEXITY_PATTERNS['joins'].findall(query_lower))
+        complexity_score += join_count * weights["join"]
         
-        # Count UNION operations (expensive)
-        union_count = len(re.findall(r'\bunion\b', query_lower))
-        complexity_score += union_count * 4
+        # Count subqueries and nested selects using pre-compiled pattern
+        select_count = len(self._COMPLEXITY_PATTERNS['selects'].findall(query_lower)) - 1  # Subtract main SELECT
+        complexity_score += select_count * weights["subquery"]
         
-        # Check for expensive LIKE operations with leading wildcards
-        leading_wildcard_count = len(re.findall(r'like\s+[\'"]%', query_lower))
-        complexity_score += leading_wildcard_count * 5
+        # Count UNION operations using pre-compiled pattern (expensive)
+        union_count = len(self._COMPLEXITY_PATTERNS['unions'].findall(query_lower))
+        complexity_score += union_count * weights["union"]
         
-        # Check for regex operations (very expensive)
-        regex_count = len(re.findall(r'~[*]?\s*[\'"]', query_lower))
-        complexity_score += regex_count * 10
+        # Check for expensive LIKE operations with leading wildcards using pre-compiled pattern
+        leading_wildcard_count = len(self._COMPLEXITY_PATTERNS['leading_wildcards'].findall(query_lower))
+        complexity_score += leading_wildcard_count * weights["leading_wildcard"]
+        
+        # Check for regex operations using pre-compiled pattern (very expensive)
+        regex_count = len(self._COMPLEXITY_PATTERNS['regex_ops'].findall(query_lower))
+        complexity_score += regex_count * weights["regex"]
         
         # Check for expensive functions
         expensive_functions = ['array_agg', 'string_agg', 'generate_series', 'recursive']
         for func in expensive_functions:
             if func in query_lower:
-                complexity_score += 3
+                complexity_score += weights["expensive_function"]
         
         # Check for potentially problematic ORDER BY without LIMIT
         has_order_by = 'order by' in query_lower
         has_limit = 'limit' in query_lower
         if has_order_by and not has_limit:
-            complexity_score += 2
+            complexity_score += weights["order_without_limit"]
         
-        # Complexity threshold (adjust based on system capacity)
-        max_complexity_score = 20
-        
-        if complexity_score > max_complexity_score:
+        # Complexity threshold (configurable via configuration)
+        if complexity_score > self.config.max_complexity_score:
             raise OnexError(
                 code=CoreErrorCode.SECURITY_VIOLATION_ERROR,
-                message=f"Query complexity score ({complexity_score}) exceeds maximum allowed ({max_complexity_score})",
+                message=f"Query complexity score ({complexity_score}) exceeds maximum allowed ({self.config.max_complexity_score})",
             )
 
     def _validate_container_service_interface(self) -> None:
@@ -624,50 +681,84 @@ class NodePostgresAdapterEffect(NodeEffectService):
         - Internal system paths
         - Stack traces with sensitive info
         """
-        import re
-        
-        # Remove password patterns
-        sanitized = re.sub(r'password=[^\s&]*', 'password=***', error_message, flags=re.IGNORECASE)
-        
-        # Remove connection string details
-        sanitized = re.sub(r'postgresql://[^\s]*@[^\s]*/', 'postgresql://***@***/', sanitized, flags=re.IGNORECASE)
-        
-        # Remove JWT tokens (Base64-encoded with dots)
-        sanitized = re.sub(r'eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*', '***JWT_TOKEN***', sanitized)
-        
-        # Remove API keys (common patterns)
-        # GitHub tokens
-        sanitized = re.sub(r'ghp_[A-Za-z0-9]{36}', '***GITHUB_TOKEN***', sanitized)
-        sanitized = re.sub(r'gho_[A-Za-z0-9]{36}', '***GITHUB_OAUTH_TOKEN***', sanitized)
-        sanitized = re.sub(r'ghu_[A-Za-z0-9]{36}', '***GITHUB_USER_TOKEN***', sanitized)
-        
-        # AWS keys
-        sanitized = re.sub(r'AKIA[0-9A-Z]{16}', '***AWS_ACCESS_KEY***', sanitized)
-        sanitized = re.sub(r'[A-Za-z0-9/+=]{40}', '***AWS_SECRET_KEY***', sanitized)
-        
-        # Generic API key patterns
-        sanitized = re.sub(r'api[_-]?key[_-]*[:=][^\s&]*', 'api_key=***', sanitized, flags=re.IGNORECASE)
-        sanitized = re.sub(r'bearer[\s]+[A-Za-z0-9+/=]{20,}', 'bearer ***', sanitized, flags=re.IGNORECASE)
-        
-        # Authentication tokens
-        sanitized = re.sub(r'auth[_-]?token[_-]*[:=][^\s&]*', 'auth_token=***', sanitized, flags=re.IGNORECASE)
-        sanitized = re.sub(r'access[_-]?token[_-]*[:=][^\s&]*', 'access_token=***', sanitized, flags=re.IGNORECASE)
-        
-        # Remove file paths that might contain sensitive info
-        sanitized = re.sub(r'/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*', '/***sensitive_path***', sanitized, flags=re.IGNORECASE)
-        
-        # Generic schema information masking
-        sanitized = re.sub(r'schema "[\w_-]+"', 'schema "***"', sanitized)
-        sanitized = re.sub(r'table "[\w_-]+"', 'table "***"', sanitized)
-        
-        # Remove any remaining long alphanumeric strings that might be sensitive
-        sanitized = re.sub(r'[A-Za-z0-9+/=]{32,}', '***REDACTED_TOKEN***', sanitized)
+        # Apply all sanitization patterns using pre-compiled regex for performance
+        sanitized = error_message
+        for pattern, replacement in self._ERROR_SANITIZATION_PATTERNS:
+            sanitized = pattern.sub(replacement, sanitized)
         
         # If error is too generic, provide a more specific safe message
         if len(sanitized.strip()) < 10 or "connection" in sanitized.lower():
             return "Database operation failed - please check connection and query parameters"
         
         return sanitized
+
+    def _parse_rows_affected_from_status(self, status_result: str) -> int:
+        """
+        Parse rows affected from PostgreSQL status strings with robust error handling.
+        
+        PostgreSQL returns different status formats:
+        - INSERT: "INSERT 0 5" (5 rows inserted)
+        - UPDATE: "UPDATE 3" (3 rows updated)  
+        - DELETE: "DELETE 2" (2 rows deleted)
+        - CREATE: "CREATE TABLE"
+        - DROP: "DROP TABLE"
+        - Other commands may return various formats
+        
+        Args:
+            status_result: Status string returned by PostgreSQL
+            
+        Returns:
+            Number of rows affected, or 0 if parsing fails
+        """
+        if not status_result or not isinstance(status_result, str):
+            return 0
+            
+        # Clean the status string
+        status_clean = status_result.strip()
+        if not status_clean:
+            return 0
+        
+        # Common PostgreSQL status patterns with compiled regex for performance
+        status_patterns = [
+            # INSERT operations: "INSERT 0 5" -> 5 rows
+            (re.compile(r'^INSERT\s+\d+\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # UPDATE operations: "UPDATE 3" -> 3 rows
+            (re.compile(r'^UPDATE\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # DELETE operations: "DELETE 2" -> 2 rows
+            (re.compile(r'^DELETE\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # COPY operations: "COPY 100" -> 100 rows
+            (re.compile(r'^COPY\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # Generic pattern for any command followed by a number
+            (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
+        ]
+        
+        # Try each pattern to extract rows affected
+        for pattern, group_index in status_patterns:
+            match = pattern.match(status_clean)
+            if match:
+                try:
+                    return int(match.group(group_index))
+                except (ValueError, IndexError):
+                    continue
+        
+        # Fallback: try to extract any number from the end of the string
+        try:
+            # Split and find the last token that's a valid integer
+            tokens = status_clean.split()
+            for token in reversed(tokens):
+                try:
+                    return int(token)
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+            
+        # No rows affected for DDL operations or parsing failures
+        return 0
 
 
 async def main():
