@@ -288,4 +288,4 @@ kibana/data/
 
 # Container registry credentials
 config.json
-auth.json
+auth.json.env

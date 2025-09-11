@@ -22,8 +22,8 @@ services:
   postgres-adapter:
     build: 
       context: .
-      args:
-        GITHUB_TOKEN: ${GITHUB_TOKEN}
+      secrets:
+        - github_token
     container_name: omnibase-infra-postgres-adapter
     environment:
       POSTGRES_HOST: postgres
@@ -41,6 +41,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"
 
 volumes:
   postgres_data:

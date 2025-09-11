@@ -1,8 +1,6 @@
 FROM python:3.12-slim
 
-# Accept GitHub token as build argument
-ARG GITHUB_TOKEN
-RUN test -n "$GITHUB_TOKEN" || (echo "GITHUB_TOKEN build arg is required" && false)
+# GitHub token will be provided via Docker secret
 
 WORKDIR /app
 
@@ -12,8 +10,10 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure git with GitHub token for private repos
-RUN git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+# Configure git with GitHub token for private repos (using mount to avoid layer exposure)
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN=$(cat /run/secrets/github_token) && \
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
 
 # Install Poetry
 RUN pip install poetry

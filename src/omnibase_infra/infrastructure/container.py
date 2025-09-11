@@ -95,16 +95,24 @@ def _setup_infrastructure_dependencies(container: ONEXContainer):
     schema_loader = UtilitySchemaLoader()
     print(f"Created schema loader: {type(schema_loader).__name__}")
 
+    # PostgreSQL Connection Manager - required by infrastructure services
+    from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
+    connection_manager = PostgresConnectionManager()
+    print(f"Created connection manager: {type(connection_manager).__name__}")
+    
     # Register services in the container's service registry
     _register_service(container, "event_bus", event_bus)
     _register_service(container, "ProtocolEventBus", event_bus)
     _register_service(container, "schema_loader", schema_loader)
     _register_service(container, "ProtocolSchemaLoader", schema_loader)
+    _register_service(container, "postgres_connection_manager", connection_manager)
+    _register_service(container, "PostgresConnectionManager", connection_manager)
     
     # Verify registration
     print(f"Registered services verification:")
     print(f"  ProtocolEventBus: {type(container.get_service('ProtocolEventBus')).__name__ if container.get_service('ProtocolEventBus') else 'None'}")
     print(f"  event_bus: {type(container.get_service('event_bus')).__name__ if container.get_service('event_bus') else 'None'}")
+    print(f"  postgres_connection_manager: {type(container.get_service('postgres_connection_manager')).__name__ if container.get_service('postgres_connection_manager') else 'None'}")
 
 
 def _register_service(container: ONEXContainer, service_name: str, service_instance):

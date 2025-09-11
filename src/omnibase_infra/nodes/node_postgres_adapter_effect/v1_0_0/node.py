@@ -7,7 +7,7 @@ Following the ONEX infrastructure tool pattern for external service integration.
 
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Callable, Union
+from typing import Dict, List, Optional, Callable, Union
 from uuid import UUID
 
 from omnibase_core.core.core_error_codes import CoreErrorCode
@@ -50,11 +50,16 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
     @property
     def connection_manager(self) -> PostgresConnectionManager:
-        """Get PostgreSQL connection manager instance (lazy initialization)."""
+        """Get PostgreSQL connection manager instance via registry injection."""
         if self._connection_manager is None:
-            # In production, this would be injected via registry
-            # For now, use direct instantiation
-            self._connection_manager = PostgresConnectionManager()
+            # Use registry injection per ONEX standards (CLAUDE.md)
+            self._connection_manager = self.container.get_service("postgres_connection_manager")
+            if self._connection_manager is None:
+                # Fallback for development/testing - create with proper error
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="PostgresConnectionManager not available in registry - ensure proper container setup"
+                )
         return self._connection_manager
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
