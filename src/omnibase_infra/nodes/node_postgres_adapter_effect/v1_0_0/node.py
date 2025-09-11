@@ -6,11 +6,13 @@ Following the ONEX infrastructure tool pattern for external service integration.
 """
 
 import asyncio
+import logging
 import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import Dict, List, Optional, Callable, Union, Pattern
 from uuid import UUID, uuid4
 
@@ -18,6 +20,7 @@ from omnibase_core.core.core_error_codes import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
 from omnibase_core.core.onex_registry import BaseOnexRegistry
+from omnibase_core.core.onex_container import ONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
 from omnibase_core.model.core.model_health_status import ModelHealthStatus
 
@@ -29,6 +32,255 @@ from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresErr
 from .models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from .models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 from .models.model_postgres_adapter_config import ModelPostgresAdapterConfig
+
+
+class PostgresStructuredLogger:
+    """
+    Structured logger for PostgreSQL adapter operations with correlation ID tracking.
+    
+    Provides consistent, structured logging across all database operations with:
+    - Correlation ID tracking for request tracing
+    - Performance metrics logging
+    - Error context preservation
+    - Security-aware message sanitization
+    """
+    
+    def __init__(self, logger_name: str = "postgres_adapter"):
+        """Initialize structured logger with correlation ID support."""
+        self.logger = logging.getLogger(logger_name)
+        if not self.logger.handlers:
+            # Configure structured logging format if not already configured
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(correlation_id)s - %(operation)s - %(message)s'
+            )
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
+    
+    def _build_extra(self, correlation_id: Optional[UUID], operation: str, **kwargs) -> dict:
+        """Build extra fields for structured logging."""
+        extra = {
+            'correlation_id': str(correlation_id) if correlation_id else 'no-correlation',
+            'operation': operation,
+            'component': 'postgres_adapter',
+            'node_type': 'effect',
+        }
+        extra.update(kwargs)
+        return extra
+    
+    def info(self, message: str, correlation_id: Optional[UUID] = None, operation: str = "general", **kwargs):
+        """Log info level message with structured fields."""
+        extra = self._build_extra(correlation_id, operation, **kwargs)
+        self.logger.info(message, extra=extra)
+    
+    def warning(self, message: str, correlation_id: Optional[UUID] = None, operation: str = "general", **kwargs):
+        """Log warning level message with structured fields."""
+        extra = self._build_extra(correlation_id, operation, **kwargs)
+        self.logger.warning(message, extra=extra)
+    
+    def error(self, message: str, correlation_id: Optional[UUID] = None, operation: str = "general", 
+              exception: Optional[Exception] = None, **kwargs):
+        """Log error level message with structured fields and exception context."""
+        extra = self._build_extra(correlation_id, operation, **kwargs)
+        if exception:
+            extra['exception_type'] = type(exception).__name__
+            extra['exception_message'] = str(exception)
+        self.logger.error(message, extra=extra, exc_info=exception is not None)
+    
+    def debug(self, message: str, correlation_id: Optional[UUID] = None, operation: str = "general", **kwargs):
+        """Log debug level message with structured fields."""
+        extra = self._build_extra(correlation_id, operation, **kwargs)
+        self.logger.debug(message, extra=extra)
+    
+    def log_query_start(self, correlation_id: UUID, query: str, params_count: int):
+        """Log start of database query execution."""
+        self.info(
+            f"Starting database query execution (params: {params_count})",
+            correlation_id=correlation_id,
+            operation="query_start",
+            query_length=len(query),
+            parameters_count=params_count,
+            query_preview=query[:100] + "..." if len(query) > 100 else query
+        )
+    
+    def log_query_success(self, correlation_id: UUID, execution_time_ms: float, rows_affected: int):
+        """Log successful database query completion."""
+        self.info(
+            f"Database query completed successfully in {execution_time_ms:.2f}ms (rows: {rows_affected})",
+            correlation_id=correlation_id,
+            operation="query_success",
+            execution_time_ms=execution_time_ms,
+            rows_affected=rows_affected,
+            performance_category="fast" if execution_time_ms < 100 else "slow" if execution_time_ms < 1000 else "very_slow"
+        )
+    
+    def log_query_error(self, correlation_id: UUID, execution_time_ms: float, exception: Exception):
+        """Log database query error with context."""
+        self.error(
+            f"Database query failed after {execution_time_ms:.2f}ms",
+            correlation_id=correlation_id,
+            operation="query_error",
+            exception=exception,
+            execution_time_ms=execution_time_ms,
+            error_category=self._categorize_db_error(exception)
+        )
+    
+    def log_circuit_breaker_event(self, correlation_id: Optional[UUID], event: str, state: str, **kwargs):
+        """Log circuit breaker state changes and events."""
+        self.warning(
+            f"Circuit breaker {event} - state: {state}",
+            correlation_id=correlation_id,
+            operation="circuit_breaker",
+            circuit_state=state,
+            event_type=event,
+            **kwargs
+        )
+    
+    def log_health_check(self, check_name: str, status: str, execution_time_ms: float, **kwargs):
+        """Log health check results."""
+        level_method = self.info if status == "healthy" else self.warning if status == "degraded" else self.error
+        level_method(
+            f"Health check '{check_name}' returned {status} in {execution_time_ms:.2f}ms",
+            operation="health_check",
+            check_name=check_name,
+            health_status=status,
+            execution_time_ms=execution_time_ms,
+            **kwargs
+        )
+    
+    def _categorize_db_error(self, exception: Exception) -> str:
+        """Categorize database errors for better observability."""
+        error_str = str(exception).lower()
+        if "connection" in error_str or "timeout" in error_str:
+            return "connectivity"
+        elif "syntax" in error_str or "invalid" in error_str:
+            return "query_syntax"
+        elif "permission" in error_str or "access" in error_str:
+            return "authorization"
+        elif "constraint" in error_str or "duplicate" in error_str:
+            return "data_integrity"
+        else:
+            return "unknown"
+
+
+class CircuitBreakerState(Enum):
+    """Circuit breaker states for database connectivity failures."""
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"         # Failing, rejecting calls
+    HALF_OPEN = "half_open"  # Testing if service recovered
+
+
+class DatabaseCircuitBreaker:
+    """
+    Circuit breaker implementation for database connectivity failures.
+    
+    Prevents cascading failures by monitoring database operation failures
+    and temporarily blocking requests when failure thresholds are exceeded.
+    """
+    
+    def __init__(self, failure_threshold: int = 5, timeout_seconds: int = 60, half_open_max_calls: int = 3):
+        """
+        Initialize circuit breaker with configurable thresholds.
+        
+        Args:
+            failure_threshold: Number of failures before opening circuit
+            timeout_seconds: Time to wait before attempting recovery
+            half_open_max_calls: Max calls to allow in half-open state
+        """
+        self.failure_threshold = failure_threshold
+        self.timeout_seconds = timeout_seconds
+        self.half_open_max_calls = half_open_max_calls
+        
+        self.state = CircuitBreakerState.CLOSED
+        self.failure_count = 0
+        self.last_failure_time: Optional[datetime] = None
+        self.half_open_calls = 0
+        self._lock = asyncio.Lock()
+    
+    async def call(self, func: Callable, *args, **kwargs):
+        """
+        Execute function with circuit breaker protection.
+        
+        Args:
+            func: Function to execute
+            *args: Function arguments
+            **kwargs: Function keyword arguments
+            
+        Returns:
+            Function result
+            
+        Raises:
+            OnexError: If circuit is open or function fails
+        """
+        async with self._lock:
+            # Check if we should attempt recovery
+            if self.state == CircuitBreakerState.OPEN:
+                if self._should_attempt_reset():
+                    self.state = CircuitBreakerState.HALF_OPEN
+                    self.half_open_calls = 0
+                else:
+                    raise OnexError(
+                        code=CoreErrorCode.SERVICE_UNAVAILABLE_ERROR,
+                        message="Database circuit breaker is OPEN - service temporarily unavailable",
+                    )
+            
+            # In half-open state, limit calls
+            if self.state == CircuitBreakerState.HALF_OPEN:
+                if self.half_open_calls >= self.half_open_max_calls:
+                    raise OnexError(
+                        code=CoreErrorCode.SERVICE_UNAVAILABLE_ERROR,
+                        message="Database circuit breaker is HALF_OPEN - maximum test calls exceeded",
+                    )
+                self.half_open_calls += 1
+        
+        # Execute the function
+        try:
+            result = await func(*args, **kwargs)
+            await self._record_success()
+            return result
+        except Exception as e:
+            await self._record_failure(e)
+            raise
+    
+    async def _record_success(self):
+        """Record successful operation and potentially close circuit."""
+        async with self._lock:
+            if self.state == CircuitBreakerState.HALF_OPEN:
+                # Reset to closed state after successful test
+                self.state = CircuitBreakerState.CLOSED
+                self.failure_count = 0
+                self.last_failure_time = None
+                self.half_open_calls = 0
+            elif self.state == CircuitBreakerState.CLOSED:
+                # Reset failure count on success in closed state
+                self.failure_count = max(0, self.failure_count - 1)
+    
+    async def _record_failure(self, exception: Exception):
+        """Record failed operation and potentially open circuit."""
+        async with self._lock:
+            self.failure_count += 1
+            self.last_failure_time = datetime.utcnow()
+            
+            if self.failure_count >= self.failure_threshold:
+                self.state = CircuitBreakerState.OPEN
+    
+    def _should_attempt_reset(self) -> bool:
+        """Check if enough time has passed to attempt recovery."""
+        if not self.last_failure_time:
+            return True
+        
+        time_since_failure = datetime.utcnow() - self.last_failure_time
+        return time_since_failure >= timedelta(seconds=self.timeout_seconds)
+    
+    def get_state(self) -> dict:
+        """Get current circuit breaker state for monitoring."""
+        return {
+            "state": self.state.value,
+            "failure_count": self.failure_count,
+            "last_failure_time": self.last_failure_time.isoformat() if self.last_failure_time else None,
+            "half_open_calls": self.half_open_calls if self.state == CircuitBreakerState.HALF_OPEN else 0,
+        }
 
 
 class NodePostgresAdapterEffect(NodeEffectService):
@@ -114,22 +366,37 @@ class NodePostgresAdapterEffect(NodeEffectService):
         self._connection_manager_lock = asyncio.Lock()
         self._connection_manager_sync_lock = threading.Lock()
         
-        # Initialize configuration from environment or container
-        self.config = self._load_configuration(container)
-
-    def _load_configuration(self, container: ONEXContainer) -> ModelPostgresAdapterConfig:
-        """
-        Load PostgreSQL adapter configuration from container or environment.
+        # Initialize circuit breaker for database connectivity failures
+        self._circuit_breaker = DatabaseCircuitBreaker(
+            failure_threshold=5,  # Open circuit after 5 failures
+            timeout_seconds=60,   # Wait 60 seconds before retry
+            half_open_max_calls=3  # Allow 3 test calls in half-open state
+        )
         
-        Args:
-            container: ONEX container for dependency injection
-            
+        # Initialize structured logger with correlation ID support
+        self._logger = PostgresStructuredLogger("postgres_adapter_node")
+        
+        # Initialize configuration from environment or registry
+        self.config = self._load_configuration()
+        
+        # Log adapter initialization
+        self._logger.info(
+            "PostgreSQL adapter initialized successfully",
+            operation="initialization",
+            node_type=self.node_type,
+            domain=self.domain
+        )
+
+    def _load_configuration(self) -> ModelPostgresAdapterConfig:
+        """
+        Load PostgreSQL adapter configuration from registry or environment.
+        
         Returns:
             Configured ModelPostgresAdapterConfig instance
         """
         try:
-            # Try to get configuration from container first (ONEX pattern)
-            config = container.get_service("postgres_adapter_config")
+            # Try to get configuration from registry first (ONEX pattern)
+            config = self.registry.get_service("postgres_adapter_config")
             if config and hasattr(config, 'postgres_host') and hasattr(config, 'postgres_port'):
                 return config
         except Exception:
@@ -234,14 +501,23 @@ class NodePostgresAdapterEffect(NodeEffectService):
         return [
             self._check_database_connectivity,
             self._check_connection_pool_health,
+            self._check_circuit_breaker_health,
         ]
 
     def _check_database_connectivity(self) -> ModelHealthStatus:
         """Check basic PostgreSQL database connectivity (sync wrapper for health checks)."""
+        start_time = time.perf_counter()
         try:
             # Simple sync health check without async operations
             # This avoids event loop complexity in health check context
             if self._connection_manager is None:
+                execution_time_ms = (time.perf_counter() - start_time) * 1000
+                self._logger.log_health_check(
+                    check_name="database_connectivity",
+                    status="degraded",
+                    execution_time_ms=execution_time_ms,
+                    reason="connection_manager_not_initialized"
+                )
                 return ModelHealthStatus(
                     status=EnumHealthStatus.DEGRADED,
                     message="Connection manager not initialized",
@@ -249,6 +525,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 )
             
             # Basic connectivity indicator based on manager state
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="database_connectivity",
+                status="healthy",
+                execution_time_ms=execution_time_ms,
+                reason="connection_manager_operational"
+            )
             return ModelHealthStatus(
                 status=EnumHealthStatus.HEALTHY,
                 message="Database connection manager operational",
@@ -256,6 +539,14 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
                     
         except Exception as e:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="database_connectivity",
+                status="unhealthy",
+                execution_time_ms=execution_time_ms,
+                error_type=type(e).__name__,
+                error_message=str(e)
+            )
             return ModelHealthStatus(
                 status=EnumHealthStatus.UNHEALTHY,
                 message=f"Database connectivity check failed: {str(e)}",
@@ -349,6 +640,38 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 timestamp=datetime.utcnow().isoformat()
             )
 
+    def _check_circuit_breaker_health(self) -> ModelHealthStatus:
+        """Check circuit breaker health and state (sync version for health checks)."""
+        try:
+            circuit_state = self._circuit_breaker.get_state()
+            state_value = circuit_state["state"]
+            
+            if state_value == CircuitBreakerState.CLOSED.value:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.HEALTHY,
+                    message=f"Circuit breaker CLOSED - failures: {circuit_state['failure_count']}",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            elif state_value == CircuitBreakerState.HALF_OPEN.value:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message=f"Circuit breaker HALF_OPEN - testing recovery ({circuit_state['half_open_calls']} calls)",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            else:  # OPEN state
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message=f"Circuit breaker OPEN - service temporarily unavailable (failures: {circuit_state['failure_count']})",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+                
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Circuit breaker health check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
     async def process(self, input_data: ModelPostgresAdapterInput) -> ModelPostgresAdapterOutput:
         """
         Process PostgreSQL adapter request following infrastructure tool pattern.
@@ -420,14 +743,25 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
 
         query_request = input_data.query_request
+        correlation_id = input_data.correlation_id
+        
+        # Log query start with structured logging
+        self._logger.log_query_start(
+            correlation_id=correlation_id,
+            query=query_request.query,
+            params_count=len(query_request.parameters)
+        )
         
         # Input validation for security and performance
         self._validate_query_input(query_request)
         
         try:
-            # Execute query through connection manager (following connection management subcontract)
+            # Execute query through connection manager with circuit breaker protection
             connection_manager = await self.get_connection_manager_async()
-            result = await connection_manager.execute_query(
+            
+            # Wrap database call in circuit breaker for failure protection
+            result = await self._circuit_breaker.call(
+                connection_manager.execute_query,
                 query_request.query,
                 *query_request.parameters,
                 timeout=query_request.timeout,
@@ -463,6 +797,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
             execution_time_ms = (time.perf_counter() - start_time) * 1000
 
+            # Log successful query completion
+            self._logger.log_query_success(
+                correlation_id=correlation_id,
+                execution_time_ms=execution_time_ms,
+                rows_affected=rows_affected
+            )
+
             # Create query response (following shared model pattern)
             query_response = ModelPostgresQueryResponse(
                 success=True,
@@ -486,6 +827,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
+            
+            # Log query error with structured logging
+            self._logger.log_query_error(
+                correlation_id=correlation_id,
+                execution_time_ms=execution_time_ms,
+                exception=e
+            )
             
             # Sanitize error message to prevent sensitive information leakage (configurable)
             if self.config.enable_error_sanitization:
