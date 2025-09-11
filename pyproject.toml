@@ -1,0 +1,90 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "omnibase_infra"
+version = "0.1.0"
+description = "ONEX Infrastructure - Service integration and database infrastructure tools"
+authors = ["OmniNode Team <team@omninode.ai>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "omnibase_infra", from = "src"}]
+
+[tool.poetry.scripts]
+omni-infra = "omnibase_infra.cli.commands:cli"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+# ONEX dependencies - HTTPS format for improved CI/CD compatibility
+# Authentication via git config with Personal Access Token
+omnibase_spi = {git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main"}
+omnibase_core = {git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "main"}
+
+# Core dependencies
+pydantic = "^2.11.7"
+fastapi = "^0.115.0"
+uvicorn = "^0.32.0"
+pyyaml = "^6.0.2"
+aiohttp = "^3.9.0"
+
+# Database dependencies (for PostgreSQL connection manager)
+asyncpg = "^0.29.0"
+psycopg2-binary = "^2.9.10"
+
+# Service integration dependencies (for the actual tools we're migrating)
+python-consul = "^1.1.0"  # For Consul adapter tools
+redis = "^6.4.0"  # For Redis/Kafka integration
+aiokafka = "^0.11.0"  # For Kafka tools
+hvac = "^2.1.0"  # For Vault adapter tools
+
+# CLI Dependencies
+click = "^8.1.0"
+rich = "^13.7.0"
+
+# System utilities
+cryptography = "^41.0.0"
+jinja2 = "^3.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.0"
+pytest-asyncio = "^0.25.0"
+pytest-mock = "^3.11.0"
+mypy = "^1.13.0"
+black = "^24.10.0"
+isort = "^5.13.0"
+ruff = "^0.8.0"
+types-pyyaml = "^6.0.12.20250822"
+pre-commit = "^3.6.0"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C90", "I", "N", "UP", "YTT", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
+ignore = ["S101"]  # Allow assert statements in tests
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3

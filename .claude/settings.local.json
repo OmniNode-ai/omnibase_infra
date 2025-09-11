@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__archon__perform_rag_query",
+      "mcp__serena__find_file",
+      "mcp__serena__think_about_collected_information"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

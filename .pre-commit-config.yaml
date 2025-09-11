@@ -1,0 +1,152 @@
+# ONEX Infrastructure Pre-commit Configuration
+# Aligned with omnibase_3 parent project standards
+
+repos:
+  # YAML formatting (matching parent)
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.17.2
+    hooks:
+      - id: yamlfmt
+        args: [--formatter, retain_line_breaks=true]
+        exclude: ^(work_tickets/|terraform/|ansible/playbooks/)
+
+  # Essential file formatting (matching parent)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-yaml
+        exclude: ^(kubernetes/.*\.ya?ml|ansible/.*\.ya?ml)$
+      - id: check-json
+      - id: check-xml
+      - id: mixed-line-ending
+
+  # Python formatting (matching parent exactly)
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        args: [--line-length, "88", --target-version, py312]
+
+  # Python imports (matching parent exactly)
+  - repo: https://github.com/pycqa/isort
+    rev: 6.0.1
+    hooks:
+      - id: isort
+        args: [--profile, black, --line-length, "88"]
+
+  # Ruff linting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.0
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+
+  # Infrastructure-specific hooks
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.83.6
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+        exclude: ^terraform/environments/
+      - id: terraform_docs
+      - id: terraform_tflint
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+
+  # Docker hooks
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+        args: [--ignore, DL3008, --ignore, DL3009]
+
+  # Shell script validation
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        args: [--severity=warning]
+
+  # Type checking with mypy using poetry environment (matching parent)
+  - repo: local
+    hooks:
+      - id: mypy-poetry
+        name: mypy via poetry
+        entry: poetry run mypy
+        language: system
+        types: [python]
+        args: [--ignore-missing-imports, --show-error-codes, --no-strict-optional, --no-error-summary, --follow-imports=skip]
+        # Focus on infrastructure framework components
+        files: ^src/omnibase_infra/(core|deployment|provisioning|monitoring).*\.py$
+        # Exclude test files and examples
+        exclude: ^(tests/|src/omnibase_infra/examples|scripts/).*\.py$
+
+      # Infrastructure Validation
+      - id: validate-infrastructure-config
+        name: ONEX Infrastructure Config Validation
+        entry: poetry run python scripts/validate-infrastructure.py
+        language: system
+        pass_filenames: false
+        files: ^(terraform/|ansible/|kubernetes/|docker/).*$
+        stages: [commit]
+
+      # Docker Compose Validation
+      - id: validate-docker-compose
+        name: Docker Compose Validation
+        entry: docker compose config
+        language: system
+        files: ^docker-compose.*\.ya?ml$
+        stages: [commit]
+
+      # Kubernetes Manifest Validation
+      - id: validate-k8s-manifests
+        name: Kubernetes Manifest Validation
+        entry: poetry run python scripts/validate-k8s-manifests.py
+        language: system
+        pass_filenames: true
+        files: ^kubernetes/.*\.ya?ml$
+        stages: [commit]
+
+      # Security scanning for infrastructure
+      - id: infrastructure-security-scan
+        name: Infrastructure Security Scan
+        entry: poetry run python scripts/security-scan.py
+        language: system
+        pass_filenames: true
+        files: ^(terraform/|ansible/|kubernetes/|docker/).*$
+        stages: [commit]
+
+      # String Version Validation (inherited from parent)
+      - id: validate-string-versions
+        name: ONEX String Version Validation
+        entry: poetry run python scripts/validate-string-versions.py
+        language: system
+        pass_filenames: true
+        files: ^.*\.(yaml|yml)$
+        stages: [commit]
+
+      # Prevent Manual YAML Validation (inherited from parent)
+      - id: validate-no-manual-yaml
+        name: ONEX Prevent Manual YAML Validation
+        entry: poetry run python scripts/validate-no-manual-yaml.py
+        language: system
+        pass_filenames: true
+        files: ^.*\.py$
+        exclude: ^scripts/validate-.*\.py$
+        stages: [commit]
+
+# Configuration
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes for omnibase-infra
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_schedule: weekly
+  submodules: false
