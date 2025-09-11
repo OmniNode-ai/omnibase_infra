@@ -9,9 +9,14 @@ Event Envelope → PostgreSQL Adapter → PostgreSQL Connection Manager → Data
 import asyncio
 import json
 import logging
+import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, Any
+
+# Add src to path for imports when running as script
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
 from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput

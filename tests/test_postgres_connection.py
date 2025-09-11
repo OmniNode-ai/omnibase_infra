@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Simple test script to verify PostgreSQL connection works in Docker environment."""
+"""Integration test to verify PostgreSQL connection works in Docker environment."""
 
 import asyncio
 import logging
 import os
+import sys
+from pathlib import Path
+
+# Add src to path for imports when running as script
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
 
 # Configure logging following omnibase_3 infrastructure pattern  
