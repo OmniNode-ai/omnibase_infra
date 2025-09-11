@@ -1,4 +1,7 @@
--- Initialize omnibase_infrastructure database
+-- Migration: 001_init_infrastructure_schema.sql
+-- Description: Initialize omnibase_infrastructure database with core infrastructure schema
+-- Version: 1.0.0
+-- Created: Initial infrastructure setup
 CREATE SCHEMA IF NOT EXISTS infrastructure;
 
 -- Create service registry table
