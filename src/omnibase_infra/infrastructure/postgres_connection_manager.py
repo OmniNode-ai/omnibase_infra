@@ -169,7 +169,7 @@ class PostgresConnectionManager:
                 result = await conn.fetchval("SELECT current_schema()")
                 if result != self.config.schema:
                     raise OnexError(
-                        error_code=CoreErrorCode.DATABASE_CONNECTION_ERROR,
+                        code=CoreErrorCode.DATABASE_CONNECTION_ERROR,
                         message=f"Failed to set schema to {self.config.schema}, got {result}",
                     )
 
@@ -178,7 +178,7 @@ class PostgresConnectionManager:
         except Exception as e:
             self.connection_stats.failed_connections += 1
             raise OnexError(
-                error_code=CoreErrorCode.DATABASE_CONNECTION_ERROR,
+                code=CoreErrorCode.DATABASE_CONNECTION_ERROR,
                 message=f"Failed to initialize PostgreSQL connection pool: {str(e)}",
             ) from e
 
@@ -214,7 +214,7 @@ class PostgresConnectionManager:
         except Exception as e:
             self.connection_stats.failed_connections += 1
             raise OnexError(
-                error_code=CoreErrorCode.DATABASE_OPERATION_ERROR,
+                code=CoreErrorCode.DATABASE_OPERATION_ERROR,
                 message=f"Database connection error: {str(e)}",
             ) from e
         finally:
@@ -295,7 +295,7 @@ class PostgresConnectionManager:
         except Exception as e:
             error_message = str(e)
             raise OnexError(
-                error_code=CoreErrorCode.DATABASE_QUERY_ERROR,
+                code=CoreErrorCode.DATABASE_QUERY_ERROR,
                 message=f"Query execution failed: {str(e)}",
             ) from e
         finally:
@@ -329,7 +329,7 @@ class PostgresConnectionManager:
                 return await conn.fetchrow(query, *args, timeout=timeout)
         except Exception as e:
             raise OnexError(
-                error_code=CoreErrorCode.DATABASE_QUERY_ERROR,
+                code=CoreErrorCode.DATABASE_QUERY_ERROR,
                 message=f"Single record fetch failed: {str(e)}",
             ) from e
 
@@ -352,7 +352,7 @@ class PostgresConnectionManager:
                 return await conn.fetchval(query, *args, timeout=timeout)
         except Exception as e:
             raise OnexError(
-                error_code=CoreErrorCode.DATABASE_QUERY_ERROR,
+                code=CoreErrorCode.DATABASE_QUERY_ERROR,
                 message=f"Value fetch failed: {str(e)}",
             ) from e
 

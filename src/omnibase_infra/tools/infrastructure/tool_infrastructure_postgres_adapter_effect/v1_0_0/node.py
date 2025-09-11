@@ -8,10 +8,10 @@ Following the ONEX infrastructure tool pattern for external service integration.
 import time
 from typing import Any, Dict, Optional
 
-from omnibase_core.core.base_onex_registry import BaseOnexRegistry
+from omnibase_core.core.model_onex_container import ModelONEXContainer
 from omnibase_core.core.errors.core_errors import CoreErrorCode
-from omnibase_core.exceptions.base_onex_error import OnexError
-from omnibase_core.nodes.base.node_effect_service import NodeEffectService
+from omnibase_core.core.errors.onex_error import OnexError
+from omnibase_core.core.node_effect_service import NodeEffectService
 
 from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
@@ -39,9 +39,11 @@ class ToolInfrastructurePostgresAdapterEffect(NodeEffectService):
     - postgres_connection_management_subcontract: Connection pool management
     """
 
-    def __init__(self, registry: BaseOnexRegistry):
-        """Initialize PostgreSQL adapter tool with registry injection."""
-        super().__init__(registry)
+    def __init__(self, container: ModelONEXContainer):
+        """Initialize PostgreSQL adapter tool with container injection."""
+        super().__init__(container)
+        self.node_type = "effect"
+        self.domain = "infrastructure"
         self._connection_manager: Optional[PostgresConnectionManager] = None
 
     @property

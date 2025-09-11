@@ -1,0 +1,83 @@
+# ONEX PostgreSQL Adapter Infrastructure Tool Dockerfile
+ARG BASE_IMAGE=python:3.12-slim
+FROM ${BASE_IMAGE}
+
+ARG SERVICE_NAME=postgres_adapter_effect
+ARG SERVICE_GROUP=infrastructure
+ARG ONEX_NODE_PATH=omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.node
+ARG PYTHON_VERSION=3.12
+ARG POETRY_VERSION=1.8.4
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Poetry
+RUN pip install poetry==$POETRY_VERSION
+RUN poetry config virtualenvs.create false
+
+# Configure git for private repositories
+ARG GITHUB_TOKEN
+RUN git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+WORKDIR /app
+
+# Copy poetry files
+COPY pyproject.toml poetry.lock* ./
+RUN poetry install --no-interaction --no-ansi
+
+# PostgreSQL adapter effect service environment
+ENV ONEX_NODE_TYPE=effect \
+    ONEX_SERVICE_TYPE=${SERVICE_NAME} \
+    ONEX_SERVICE_GROUP=${SERVICE_GROUP} \
+    PYTHONPATH=/app/src \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    POSTGRES_SCHEMA=infrastructure
+
+# Copy source
+COPY src/ /app/src/
+RUN mkdir -p /app/logs /app/config /app/data
+
+# Health check for PostgreSQL adapter
+HEALTHCHECK --interval=30s \
+    --timeout=10s \
+    --retries=3 \
+    --start-period=60s \
+    CMD python -c "\
+import asyncio; \
+import sys; \
+from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager; \
+async def health_check(): \
+    try: \
+        manager = PostgresConnectionManager(); \
+        await manager.initialize(); \
+        result = await manager.health_check(); \
+        await manager.close(); \
+        sys.exit(0 if result['status'] in ['healthy', 'degraded'] else 1); \
+    except Exception: \
+        sys.exit(1); \
+asyncio.run(health_check()) \
+"
+
+# Labels for service identification
+LABEL com.onex.service.name="${SERVICE_NAME}" \
+      com.onex.service.group="${SERVICE_GROUP}" \
+      com.onex.service.type="effect" \
+      com.onex.service.tier="adapter" \
+      com.onex.database="postgresql" \
+      com.onex.integration="message_bus_bridge"
+
+# Create non-root user for security
+RUN groupadd -r onex && useradd -r -g onex onex
+RUN chown -R onex:onex /app
+USER onex
+
+# Expose health check port (internal only)
+EXPOSE 8080
+
+CMD ["python", "-m", "omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.main"]

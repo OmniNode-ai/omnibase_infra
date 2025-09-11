@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Optional
 
-from omnibase_core.core.base_onex_registry import BaseOnexRegistry
+from omnibase_core.core.spi_service_registry import SPIServiceRegistry
 
 from omnibase_infra.infrastructure.postgres_connection_manager import (
     PostgresConnectionManager,
@@ -10,7 +10,7 @@ from omnibase_infra.infrastructure.postgres_connection_manager import (
 )
 
 
-class PostgresAdapterRegistry(BaseOnexRegistry):
+class PostgresAdapterRegistry(SPIServiceRegistry):
     """Registry for PostgreSQL adapter dependencies."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
