@@ -266,13 +266,15 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
-            error_message = str(e)
+            
+            # Sanitize error message to prevent sensitive information leakage
+            sanitized_error = self._sanitize_error_message(str(e))
 
             # Create structured error model (ONEX compliance)
             from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
             postgres_error = ModelPostgresError(
                 error_code=type(e).__name__,
-                error_message=error_message,
+                error_message=sanitized_error,
                 severity="ERROR",
                 error_context=f"Query execution failed in {self.__class__.__name__}",
                 timestamp=time.time(),
@@ -286,7 +288,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 rows_affected=0,
                 execution_time_ms=execution_time_ms,
                 correlation_id=query_request.correlation_id or input_data.correlation_id,
-                status_message=error_message,
+                status_message=sanitized_error,
                 error=postgres_error,  # Use structured error model
                 context=query_request.context,
             )
@@ -295,7 +297,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 operation_type="query",
                 query_response=query_response,
                 success=False,
-                error_message=error_message,
+                error_message=sanitized_error,
                 correlation_id=input_data.correlation_id,
                 timestamp=time.time(),
                 execution_time_ms=execution_time_ms,
@@ -360,12 +362,12 @@ class NodePostgresAdapterEffect(NodeEffectService):
             
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
-            error_message = f"Health check operation failed: {str(e)}"
+            sanitized_error = self._sanitize_error_message(f"Health check operation failed: {str(e)}")
             
             return ModelPostgresAdapterOutput(
                 operation_type="health_check",
                 success=False,
-                error_message=error_message,
+                error_message=sanitized_error,
                 correlation_id=input_data.correlation_id,
                 timestamp=time.time(),
                 execution_time_ms=execution_time_ms,
@@ -401,6 +403,37 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 pass
             finally:
                 self._connection_manager = None
+
+    def _sanitize_error_message(self, error_message: str) -> str:
+        """
+        Sanitize error messages to prevent sensitive information leakage.
+        
+        Removes or masks sensitive information like:
+        - Connection strings and passwords
+        - Database schema details  
+        - Internal system paths
+        - Stack traces with sensitive info
+        """
+        import re
+        
+        # Remove password patterns
+        sanitized = re.sub(r'password=[^\s&]*', 'password=***', error_message, flags=re.IGNORECASE)
+        
+        # Remove connection string details
+        sanitized = re.sub(r'postgresql://[^\s]*@[^\s]*/', 'postgresql://***@***/', sanitized, flags=re.IGNORECASE)
+        
+        # Remove file paths that might contain sensitive info
+        sanitized = re.sub(r'/[\w/.-]*(?:password|secret|key|token)[\w/.-]*', '/***sensitive_path***', sanitized, flags=re.IGNORECASE)
+        
+        # Generic schema information masking
+        sanitized = re.sub(r'schema "[\w_-]+"', 'schema "***"', sanitized)
+        sanitized = re.sub(r'table "[\w_-]+"', 'table "***"', sanitized)
+        
+        # If error is too generic, provide a more specific safe message
+        if len(sanitized.strip()) < 10 or "connection" in sanitized.lower():
+            return "Database operation failed - please check connection and query parameters"
+        
+        return sanitized
 
 
 async def main():

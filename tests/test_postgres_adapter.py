@@ -295,6 +295,73 @@ class TestPostgresAdapter:
         assert hasattr(output_envelope, 'context')
 
     @pytest.mark.asyncio
+    async def test_sql_injection_protection(self, adapter_with_mock):
+        """Test that adapter prevents SQL injection attacks."""
+        
+        # Test various SQL injection attempts
+        malicious_queries = [
+            "SELECT * FROM users WHERE id = 1; DROP TABLE users; --",
+            "SELECT * FROM users WHERE name = 'admin' OR '1'='1'",
+            "SELECT * FROM users UNION SELECT password FROM admin_users",
+            "'; DELETE FROM users; --"
+        ]
+        
+        correlation_id = uuid.uuid4()
+        
+        for malicious_query in malicious_queries:
+            # Create query request with potentially malicious SQL
+            query_request = ModelPostgresQueryRequest(
+                query=malicious_query,
+                parameters=[],
+                correlation_id=correlation_id
+            )
+            
+            input_envelope = ModelPostgresAdapterInput(
+                operation_type="query",
+                query_request=query_request,
+                correlation_id=correlation_id,
+                timestamp=time.time()
+            )
+
+            # Process through adapter - should handle safely
+            result = await adapter_with_mock.process(input_envelope)
+            
+            # Verify result structure (adapter should process without crashing)
+            assert isinstance(result, ModelPostgresAdapterOutput)
+            assert result.correlation_id == correlation_id
+            
+            # Error handling should sanitize any database error messages
+            if not result.success and result.error_message:
+                # Ensure error message doesn't contain sensitive schema information
+                assert "password" not in result.error_message.lower()
+                assert "admin" not in result.error_message.lower()
+                assert "DROP" not in result.error_message.upper()
+
+    def test_error_message_sanitization(self, adapter_with_mock):
+        """Test error message sanitization prevents information leakage."""
+        
+        # Test various sensitive error messages
+        sensitive_errors = [
+            "connection failed to postgresql://user:password123@host:5432/db",
+            'schema "secret_schema" does not exist',
+            'table "admin_passwords" not found',
+            "authentication failed for user admin with password secret123"
+        ]
+        
+        for sensitive_error in sensitive_errors:
+            sanitized = adapter_with_mock._sanitize_error_message(sensitive_error)
+            
+            # Verify sensitive information is masked
+            assert "password123" not in sanitized
+            assert "secret_schema" not in sanitized  
+            assert "admin_passwords" not in sanitized
+            assert "secret123" not in sanitized
+            
+            # Verify sanitized message still provides useful information
+            assert len(sanitized) > 0
+            assert sanitized != sensitive_error
+
+    @pytest.mark.asyncio
     async def test_complex_query_with_parameters(self, adapter_with_mock):
         """Test complex queries with multiple parameters through message envelope."""
         

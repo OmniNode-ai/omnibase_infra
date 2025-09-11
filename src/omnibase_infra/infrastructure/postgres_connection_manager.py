@@ -15,9 +15,9 @@ from typing import AsyncIterator, Dict, List, Optional, Union
 import asyncpg
 from asyncpg import Connection, Pool, Record
 
-# Updated import to use omnibase-core
-from omnibase_core.exceptions.base_onex_error import OnexError
-from omnibase_core.core.errors.core_errors import CoreErrorCode
+# Updated import to use omnibase_core consistently
+from omnibase_core.core.errors.onex_error import OnexError
+from omnibase_core.core.core_error_codes import CoreErrorCode
 
 
 @dataclass

@@ -1,7 +1,6 @@
 """PostgreSQL adapter input envelope model."""
 
 from typing import Optional
-from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -27,7 +26,7 @@ class ModelPostgresAdapterInput(BaseModel):
     
     correlation_id: UUID = Field(description="Request correlation ID for tracing")
     
-    timestamp: datetime = Field(description="Request timestamp")
+    timestamp: float = Field(description="Request timestamp as Unix timestamp", ge=0)
     
     context: Optional[ModelPostgresContext] = Field(
         default=None, description="Additional request context"

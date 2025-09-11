@@ -1,7 +1,6 @@
 """PostgreSQL adapter output envelope model."""
 
 from typing import Optional
-from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -28,15 +27,15 @@ class ModelPostgresAdapterOutput(BaseModel):
     
     success: bool = Field(description="Whether the operation was successful")
     
-    error: Optional[ModelPostgresError] = Field(
-        default=None, description="Error details if operation failed"
+    error_message: Optional[str] = Field(
+        default=None, description="Error message if operation failed"
     )
     
     correlation_id: UUID = Field(description="Request correlation ID for tracing")
     
-    timestamp: datetime = Field(description="Response timestamp")
+    timestamp: float = Field(description="Response timestamp as Unix timestamp", ge=0)
     
-    execution_time_ms: float = Field(description="Total operation execution time in milliseconds")
+    execution_time_ms: float = Field(description="Total operation execution time in milliseconds", ge=0)
     
     context: Optional[ModelPostgresContext] = Field(
         default=None, description="Additional response context"
