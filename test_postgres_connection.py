@@ -25,13 +25,12 @@ async def test_postgres_connection():
         logger.info(f"Health check result: {health}")
         
         logger.info("Testing simple query...")
-        result = await manager.execute_query("SELECT version();", {})
+        result = await manager.execute_query("SELECT version();")
         logger.info(f"PostgreSQL version: {result}")
         
         logger.info("Testing infrastructure schema query...")
         result = await manager.execute_query(
-            "SELECT COUNT(*) as service_count FROM infrastructure.service_registry;", 
-            {}
+            "SELECT COUNT(*) as service_count FROM infrastructure.service_registry;"
         )
         logger.info(f"Service registry entries: {result}")
         

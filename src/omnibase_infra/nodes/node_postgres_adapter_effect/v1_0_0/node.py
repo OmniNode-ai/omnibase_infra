@@ -10,12 +10,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable, Union
 from uuid import UUID
 
-from omnibase_core.core.model_onex_container import ModelONEXContainer
-from omnibase_core.core.errors.core_errors import CoreErrorCode
+from omnibase_core.core.core_error_codes import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
-from omnibase_core.model.core.model_health_status import ModelHealthStatus
+from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
+from omnibase_core.model.core.model_health_status import ModelHealthStatus
 
 from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
@@ -41,7 +41,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     - postgres_connection_management_subcontract: Connection pool management
     """
 
-    def __init__(self, container: ModelONEXContainer):
+    def __init__(self, container: ONEXContainer):
         """Initialize PostgreSQL adapter tool with container injection."""
         super().__init__(container)
         self.node_type = "effect"
@@ -303,3 +303,25 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 pass
             finally:
                 self._connection_manager = None
+
+
+async def main():
+    """Main entry point for PostgreSQL Adapter - runs in service mode with NodeEffectService"""
+    from omnibase_infra.infrastructure.container import create_infrastructure_container
+
+    # Create infrastructure container with all shared dependencies
+    container = create_infrastructure_container()
+
+    adapter = NodePostgresAdapterEffect(container)
+
+    # Initialize the adapter
+    await adapter.initialize()
+
+    # Start service mode using NodeEffectService capabilities
+    await adapter.start_service_mode()
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(main())

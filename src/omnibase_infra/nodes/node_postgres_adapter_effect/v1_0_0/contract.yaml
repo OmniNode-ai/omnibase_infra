@@ -37,7 +37,7 @@ dependencies:
     class_name: "ProtocolConnectionPool"
     module: "omnibase_core.protocol.protocol_connection_pool"
   - name: "postgres_connection_manager"
-    type: "service"
+    type: "protocol"
     class_name: "PostgresConnectionManager"
     module: "omnibase_infra.infrastructure.postgres_connection_manager"
 
