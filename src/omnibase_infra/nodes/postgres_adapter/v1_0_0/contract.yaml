@@ -1,0 +1,166 @@
+contract_version: "1.0.0"
+node_version: "1.0.0"
+version: "1.0.0"
+node_name: "postgres_adapter"
+contract_name: "postgres_adapter_contract"
+name: "PostgreSQL Adapter Contract"
+description: "Message bus bridge adapter for PostgreSQL database operations"
+node_type: "EFFECT"  # Handles external database operations
+
+# Input and output models for the node
+input_model: "ModelPostgresAdapterInput"
+output_model: "ModelPostgresAdapterOutput"
+
+# Dependencies - references to shared models
+dependencies:
+  - name: "model_postgres_query_request"
+    type: "model"
+    class_name: "ModelPostgresQueryRequest"
+    module: "omnibase_infra.models.postgres.model_postgres_query_request"
+    description: "Shared PostgreSQL query request model"
+  
+  - name: "model_postgres_query_response"
+    type: "model"
+    class_name: "ModelPostgresQueryResponse"
+    module: "omnibase_infra.models.postgres.model_postgres_query_response"
+    description: "Shared PostgreSQL query response model"
+  
+  - name: "model_postgres_health_request"
+    type: "model"
+    class_name: "ModelPostgresHealthRequest"
+    module: "omnibase_infra.models.postgres.model_postgres_health_request"
+    description: "Shared PostgreSQL health check request model"
+  
+  - name: "model_postgres_health_response"
+    type: "model"
+    class_name: "ModelPostgresHealthResponse"
+    module: "omnibase_infra.models.postgres.model_postgres_health_response"
+    description: "Shared PostgreSQL health check response model"
+  
+  - name: "model_postgres_connection_config"
+    type: "model"
+    class_name: "ModelPostgresConnectionConfig"
+    module: "omnibase_infra.models.postgres.model_postgres_connection_config"
+    description: "Shared PostgreSQL connection configuration model"
+  
+  - name: "postgres_connection_manager"
+    type: "service"
+    class_name: "PostgresConnectionManager"
+    module: "omnibase_infra.infrastructure.postgres_connection_manager"
+    description: "PostgreSQL connection manager service"
+
+# IO operations for EFFECT node
+io_operations:
+  - operation: "execute_query"
+    description: "Execute SQL query through connection manager"
+    input_type: "ModelPostgresQueryRequest"
+    output_type: "ModelPostgresQueryResponse"
+    
+  - operation: "health_check"
+    description: "Perform database health check"
+    input_type: "ModelPostgresHealthRequest"
+    output_type: "ModelPostgresHealthResponse"
+
+# Node-specific model definitions (adapter-specific models only)
+definitions:
+  ModelPostgresAdapterInput:
+    type: "object"
+    description: "Input envelope for PostgreSQL adapter operations"
+    properties:
+      operation_type:
+        type: "string"
+        description: "Type of operation: query, health_check"
+        enum: ["query", "health_check"]
+      
+      query_request:
+        $ref: "#/components/schemas/ModelPostgresQueryRequest"
+        description: "Query request payload (when operation_type is 'query')"
+      
+      health_request:
+        $ref: "#/components/schemas/ModelPostgresHealthRequest"
+        description: "Health check request payload (when operation_type is 'health_check')"
+      
+      correlation_id:
+        type: "string"
+        description: "Request correlation ID for tracing"
+        format: "uuid"
+      
+      timestamp:
+        type: "number"
+        description: "Request timestamp"
+      
+      context:
+        type: "object"
+        description: "Additional request context"
+        additionalProperties: true
+    
+    required: ["operation_type", "correlation_id", "timestamp"]
+
+  ModelPostgresAdapterOutput:
+    type: "object"
+    description: "Output envelope for PostgreSQL adapter operations"
+    properties:
+      operation_type:
+        type: "string"
+        description: "Type of operation that was executed"
+        enum: ["query", "health_check"]
+      
+      query_response:
+        $ref: "#/components/schemas/ModelPostgresQueryResponse"
+        description: "Query response payload (when operation_type is 'query')"
+      
+      health_response:
+        $ref: "#/components/schemas/ModelPostgresHealthResponse"
+        description: "Health check response payload (when operation_type is 'health_check')"
+      
+      success:
+        type: "boolean"
+        description: "Whether the operation was successful"
+      
+      error_message:
+        type: "string"
+        description: "Error message if operation failed"
+        nullable: true
+      
+      correlation_id:
+        type: "string"
+        description: "Request correlation ID for tracing"
+        format: "uuid"
+      
+      timestamp:
+        type: "number"
+        description: "Response timestamp"
+      
+      execution_time_ms:
+        type: "number"
+        description: "Total operation execution time in milliseconds"
+      
+      context:
+        type: "object"
+        description: "Additional response context"
+        additionalProperties: true
+    
+    required: ["operation_type", "success", "correlation_id", "timestamp", "execution_time_ms"]
+
+# Component schemas referenced by adapter models
+components:
+  schemas:
+    ModelPostgresQueryRequest:
+      type: "external"
+      module: "omnibase_infra.models.postgres.model_postgres_query_request"
+      class_name: "ModelPostgresQueryRequest"
+    
+    ModelPostgresQueryResponse:
+      type: "external"
+      module: "omnibase_infra.models.postgres.model_postgres_query_response"
+      class_name: "ModelPostgresQueryResponse"
+    
+    ModelPostgresHealthRequest:
+      type: "external"
+      module: "omnibase_infra.models.postgres.model_postgres_health_request"
+      class_name: "ModelPostgresHealthRequest"
+    
+    ModelPostgresHealthResponse:
+      type: "external"
+      module: "omnibase_infra.models.postgres.model_postgres_health_response"
+      class_name: "ModelPostgresHealthResponse"
