@@ -1,1 +1,0 @@
-"""PostgreSQL adapter tool models."""
