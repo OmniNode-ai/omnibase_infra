@@ -17,8 +17,8 @@ from typing import Dict, Any, List
 logger = logging.getLogger(__name__)
 
 from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
-from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
-from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
+from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
+from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
 
 

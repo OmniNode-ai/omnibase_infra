@@ -12,12 +12,12 @@ import uuid
 from unittest.mock import Mock, AsyncMock, patch
 from typing import Dict, Any
 
-from omnibase_core.core.model_onex_container import ModelONEXContainer
-from omnibase_core.core.errors.core_errors import CoreErrorCode
+from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
+from omnibase_core.core.core_error_codes import CoreErrorCode
 
-from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.node import ToolInfrastructurePostgresAdapterEffect
-from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
-from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
+from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.node import NodePostgresAdapterEffect
+from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
+from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
 
 
@@ -26,8 +26,8 @@ class TestPostgresAdapter:
 
     @pytest.fixture
     def container(self):
-        """Create a basic ModelONEXContainer for testing."""
-        return ModelONEXContainer()
+        """Create a basic ONEXContainer for testing."""
+        return ONEXContainer()
 
     @pytest.fixture
     def mock_connection_manager(self):
@@ -58,12 +58,12 @@ class TestPostgresAdapter:
     def adapter_with_mock(self, container, mock_connection_manager):
         """Create adapter with mocked connection manager."""
         # For testing purposes, we'll mock the container to avoid service resolution issues
-        mock_container = Mock(spec=ModelONEXContainer)
+        mock_container = Mock(spec=ONEXContainer)
         
-        with patch('omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.node.PostgresConnectionManager') as mock_manager_class:
+        with patch('omnibase_infra.infrastructure.postgres_connection_manager.PostgresConnectionManager') as mock_manager_class:
             mock_manager_class.return_value = mock_connection_manager
             
-            adapter = ToolInfrastructurePostgresAdapterEffect(mock_container)
+            adapter = NodePostgresAdapterEffect(mock_container)
             adapter._connection_manager = mock_connection_manager
             
             return adapter
@@ -71,12 +71,12 @@ class TestPostgresAdapter:
     def test_adapter_initialization(self, container):
         """Test adapter can be initialized with container."""
         # We'll test just the class structure since full initialization requires event bus setup
-        assert ToolInfrastructurePostgresAdapterEffect is not None
+        assert NodePostgresAdapterEffect is not None
         
         # Test that the class has the expected attributes without instantiation
-        assert hasattr(ToolInfrastructurePostgresAdapterEffect, 'process')
-        assert hasattr(ToolInfrastructurePostgresAdapterEffect, 'initialize')
-        assert hasattr(ToolInfrastructurePostgresAdapterEffect, 'cleanup')
+        assert hasattr(NodePostgresAdapterEffect, 'process')
+        assert hasattr(NodePostgresAdapterEffect, 'initialize')
+        assert hasattr(NodePostgresAdapterEffect, 'cleanup')
 
     @pytest.mark.asyncio
     async def test_query_message_envelope_conversion(self, adapter_with_mock):

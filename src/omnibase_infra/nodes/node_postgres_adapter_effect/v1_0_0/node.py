@@ -70,23 +70,15 @@ class NodePostgresAdapterEffect(NodeEffectService):
         connection pool status, and database accessibility.
         """
         return [
-            self._check_database_connectivity,
+            self._check_database_connectivity_async,
             self._check_connection_pool_health,
         ]
 
-    def _check_database_connectivity(self) -> ModelHealthStatus:
-        """Check basic PostgreSQL database connectivity."""
+    async def _check_database_connectivity_async(self) -> ModelHealthStatus:
+        """Check basic PostgreSQL database connectivity (async version - fixes event loop anti-pattern)."""
         try:
-            # Simple connectivity test via connection manager
-            import asyncio
-            loop = asyncio.new_event_loop()
-            try:
-                health_data = loop.run_until_complete(self.connection_manager.health_check())
-                loop.close()
-            except Exception:
-                loop.close()
-                raise
-                
+            # Simple connectivity test via connection manager (now properly async)
+            health_data = await self.connection_manager.health_check()
             status = health_data.get("status", "unknown")
             
             if status == "healthy":
@@ -160,6 +152,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
             # Route based on operation type (as defined in subcontracts)
             if input_data.operation_type == "query":
                 return await self._handle_query_operation(input_data, start_time)
+            elif input_data.operation_type == "health_check":
+                return await self._handle_health_check_operation(input_data, start_time)
             else:
                 raise OnexError(
                     code=CoreErrorCode.VALIDATION_ERROR,
@@ -214,11 +208,29 @@ class NodePostgresAdapterEffect(NodeEffectService):
             
             # Convert result to response format (as defined in event processing subcontract)
             if isinstance(result, list):  # SELECT query result
-                data = [dict(record) for record in result] if result else []
-                rows_affected = len(data)
+                # Create properly typed ModelPostgresQueryRow objects
+                from ..models.model_postgres_adapter_input import ModelPostgresAdapterInput
+                from omnibase_infra.models.postgres.model_postgres_query_result import ModelPostgresQueryResult, ModelPostgresQueryRow
+                
+                query_rows = []
+                if result:
+                    for record in result:
+                        row_values = dict(record)
+                        query_rows.append(ModelPostgresQueryRow(values=row_values))
+                
+                rows_affected = len(query_rows)
                 status_message = f"SELECT returned {rows_affected} rows"
+                
+                # Create properly typed query result
+                query_result = ModelPostgresQueryResult(
+                    rows=query_rows,
+                    column_names=list(result[0].keys()) if result else [],
+                    row_count=rows_affected,
+                    has_more=False  # TODO: Implement pagination if needed
+                )
+                
             else:  # Non-SELECT query result (status string)
-                data = None
+                query_result = None
                 status_message = str(result) if result else "Query executed successfully"
                 # Parse rows affected from status string
                 if result and result.split():
@@ -234,7 +246,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             # Create query response (following shared model pattern)
             query_response = ModelPostgresQueryResponse(
                 success=True,
-                data=data,
+                data=query_result,
                 status_message=status_message,
                 rows_affected=rows_affected,
                 execution_time_ms=execution_time_ms,
@@ -256,14 +268,26 @@ class NodePostgresAdapterEffect(NodeEffectService):
             execution_time_ms = (time.perf_counter() - start_time) * 1000
             error_message = str(e)
 
-            # Create error query response (following error handling patterns from subcontracts)
+            # Create structured error model (ONEX compliance)
+            from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
+            postgres_error = ModelPostgresError(
+                error_code=type(e).__name__,
+                error_message=error_message,
+                severity="ERROR",
+                error_context=f"Query execution failed in {self.__class__.__name__}",
+                timestamp=time.time(),
+                query_id=str(query_request.correlation_id or input_data.correlation_id)
+            )
+
+            # Create error query response with structured error handling
             query_response = ModelPostgresQueryResponse(
                 success=False,
                 data=None,
                 rows_affected=0,
                 execution_time_ms=execution_time_ms,
                 correlation_id=query_request.correlation_id or input_data.correlation_id,
-                error_message=error_message,
+                status_message=error_message,
+                error=postgres_error,  # Use structured error model
                 context=query_request.context,
             )
 
@@ -278,6 +302,75 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 context=input_data.context,
             )
 
+    async def _handle_health_check_operation(
+        self, 
+        input_data: ModelPostgresAdapterInput, 
+        start_time: float
+    ) -> ModelPostgresAdapterOutput:
+        """
+        Handle health check operation for PostgreSQL adapter.
+        
+        Performs comprehensive health checks including database connectivity,
+        connection pool status, and adapter functionality.
+        """
+        try:
+            # Run health checks (using existing health check methods)
+            health_results = []
+            for health_check_func in self.get_health_checks():
+                health_result = health_check_func()
+                # Handle both sync and async health checks
+                if hasattr(health_result, '__await__'):
+                    health_result = await health_result
+                health_results.append(health_result)
+            
+            # Determine overall health status
+            overall_healthy = all(
+                result.status == EnumHealthStatus.HEALTHY 
+                for result in health_results
+            )
+            
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            
+            # Create health check response
+            health_data = {
+                "overall_status": "healthy" if overall_healthy else "unhealthy",
+                "checks": [
+                    {
+                        "name": f"check_{i}",
+                        "status": result.status.value,
+                        "message": result.message,
+                        "timestamp": result.timestamp
+                    }
+                    for i, result in enumerate(health_results)
+                ],
+                "execution_time_ms": execution_time_ms
+            }
+            
+            return ModelPostgresAdapterOutput(
+                operation_type="health_check",
+                success=overall_healthy,
+                correlation_id=input_data.correlation_id,
+                timestamp=time.time(),
+                execution_time_ms=execution_time_ms,
+                context={
+                    "health_data": health_data,
+                    **(input_data.context if input_data.context else {})
+                }
+            )
+            
+        except Exception as e:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            error_message = f"Health check operation failed: {str(e)}"
+            
+            return ModelPostgresAdapterOutput(
+                operation_type="health_check",
+                success=False,
+                error_message=error_message,
+                correlation_id=input_data.correlation_id,
+                timestamp=time.time(),
+                execution_time_ms=execution_time_ms,
+                context=input_data.context
+            )
 
     async def initialize(self) -> None:
         """
