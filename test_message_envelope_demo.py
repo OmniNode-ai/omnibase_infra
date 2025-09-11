@@ -31,7 +31,7 @@ async def demo_service_registration_envelope():
     logger.info("=" * 60)
     
     # Step 1: Create event envelope (as would come from message bus)
-    correlation_id = str(uuid.uuid4())
+    correlation_id = uuid.uuid4()
     
     # This represents a service wanting to register itself
     service_data = {
@@ -167,7 +167,7 @@ async def demo_service_discovery_envelope():
     logger.info("=" * 60)
     
     # Create service discovery request
-    correlation_id = str(uuid.uuid4())
+    correlation_id = uuid.uuid4()
     
     query_request = ModelPostgresQueryRequest(
         query="""
@@ -247,7 +247,7 @@ async def demo_health_check_envelope():
     logger.info("=" * 60)
     
     # Create health check request
-    correlation_id = str(uuid.uuid4())
+    correlation_id = uuid.uuid4()
     
     health_request = ModelPostgresHealthRequest(
         include_connection_stats=True,

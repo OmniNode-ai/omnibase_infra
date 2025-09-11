@@ -8,6 +8,7 @@ Following the ONEX infrastructure tool pattern for external service integration.
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable, Union
+from uuid import UUID
 
 from omnibase_core.core.model_onex_container import ModelONEXContainer
 from omnibase_core.core.errors.core_errors import CoreErrorCode
@@ -23,7 +24,7 @@ from .models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from .models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 
 
-class Node(NodeEffectService):
+class NodePostgresAdapterEffect(NodeEffectService):
     """
     Infrastructure PostgreSQL Adapter Node - Message Bus Bridge.
     

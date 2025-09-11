@@ -1,6 +1,7 @@
 """PostgreSQL query request model for message bus integration."""
 
 from typing import Any, List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -16,5 +17,5 @@ class ModelPostgresQueryRequest(BaseModel):
     timeout: Optional[float] = Field(default=None, description="Query timeout in seconds")
     record_metrics: bool = Field(default=True, description="Whether to record query metrics")
     query_type: EnumPostgresQueryType = Field(default=EnumPostgresQueryType.GENERAL, description="Type of query")
-    correlation_id: Optional[str] = Field(default=None, description="Request correlation ID")
+    correlation_id: Optional[UUID] = Field(default=None, description="Request correlation ID")
     context: Optional[ModelPostgresContext] = Field(default=None, description="Additional request context")

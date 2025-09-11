@@ -2,6 +2,7 @@
 
 from typing import Optional
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -31,7 +32,7 @@ class ModelPostgresAdapterOutput(BaseModel):
         default=None, description="Error details if operation failed"
     )
     
-    correlation_id: str = Field(description="Request correlation ID for tracing")
+    correlation_id: UUID = Field(description="Request correlation ID for tracing")
     
     timestamp: datetime = Field(description="Response timestamp")
     

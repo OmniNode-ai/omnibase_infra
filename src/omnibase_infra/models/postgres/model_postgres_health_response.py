@@ -1,6 +1,7 @@
 """PostgreSQL health check response model."""
 
 from typing import List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -30,5 +31,5 @@ class ModelPostgresHealthResponse(BaseModel):
         default=None, description="Performance metrics"
     )
     errors: List[ModelPostgresError] = Field(default_factory=list, description="List of errors or warnings")
-    correlation_id: Optional[str] = Field(default=None, description="Request correlation ID")
+    correlation_id: Optional[UUID] = Field(default=None, description="Request correlation ID")
     context: Optional[ModelPostgresContext] = Field(default=None, description="Additional response context")

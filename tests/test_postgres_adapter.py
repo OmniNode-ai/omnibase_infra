@@ -83,7 +83,7 @@ class TestPostgresAdapter:
         """Test converting event envelope with query request to PostgreSQL operation."""
         
         # Create event envelope with query request
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query="SELECT * FROM infrastructure.service_registry WHERE service_type = $1",
             parameters=["database"],
@@ -153,7 +153,7 @@ class TestPostgresAdapter:
         """Test handling of invalid operation types in message envelope."""
         
         # Create event envelope with invalid operation
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         input_envelope = ModelPostgresAdapterInput(
             operation_type="invalid_operation",
             correlation_id=correlation_id,
@@ -176,7 +176,7 @@ class TestPostgresAdapter:
         """Test handling of query operation without query request."""
         
         # Create event envelope with query operation but no query request
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         input_envelope = ModelPostgresAdapterInput(
             operation_type="query",
             # query_request=None  # Missing required field
@@ -201,7 +201,7 @@ class TestPostgresAdapter:
         adapter_with_mock.connection_manager.execute_query.side_effect = Exception("Connection timeout")
         
         # Create valid query request
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query="SELECT * FROM infrastructure.service_registry",
             parameters=[],
@@ -234,7 +234,7 @@ class TestPostgresAdapter:
         """Test that adapter tracks performance metrics for envelope processing."""
         
         # Create query request
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query="SELECT COUNT(*) FROM infrastructure.service_registry",
             parameters=[],
@@ -305,7 +305,7 @@ class TestPostgresAdapter:
         ]
         
         # Create complex query request
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query="""
                 INSERT INTO infrastructure.service_registry 

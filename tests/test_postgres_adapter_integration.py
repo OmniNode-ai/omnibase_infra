@@ -98,7 +98,7 @@ class TestPostgresAdapterIntegration:
         """Test complete flow: message envelope → adapter → PostgreSQL INSERT."""
         
         # Create query request for service registration
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query=f"""
                 INSERT INTO infrastructure.{clean_test_table} 
@@ -163,7 +163,7 @@ class TestPostgresAdapterIntegration:
             )
 
         # Create query request to retrieve services
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query=f"""
                 SELECT service_name, service_type, status, metadata 
@@ -209,7 +209,7 @@ class TestPostgresAdapterIntegration:
         service_id = dict(insert_result[0])['id']
 
         # Create update request
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query=f"""
                 UPDATE infrastructure.{clean_test_table} 
@@ -282,7 +282,7 @@ class TestPostgresAdapterIntegration:
         )
 
         # Create query request that will fail (duplicate key violation)
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         
         # Try to insert duplicate service name (assuming unique constraint)
         try:
@@ -315,7 +315,7 @@ class TestPostgresAdapterIntegration:
         
         async def process_service_registration(service_id: int):
             """Simulate concurrent service registration through message envelopes."""
-            correlation_id = str(uuid.uuid4())
+            correlation_id = uuid.uuid4()
             
             await connection_manager.execute_query(
                 f"""INSERT INTO infrastructure.{clean_test_table} 
@@ -351,7 +351,7 @@ class TestPostgresAdapterIntegration:
         start_time = time.perf_counter()
         
         # Execute a moderately complex query
-        correlation_id = str(uuid.uuid4())
+        correlation_id = uuid.uuid4()
         result = await connection_manager.execute_query(
             f"""
             WITH service_stats AS (

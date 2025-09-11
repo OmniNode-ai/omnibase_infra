@@ -1,6 +1,7 @@
 """PostgreSQL query response model for message bus integration."""
 
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +19,7 @@ class ModelPostgresQueryResponse(BaseModel):
     status_message: Optional[str] = Field(default=None, description="Database status message")
     rows_affected: int = Field(default=0, description="Number of rows affected/returned")
     execution_time_ms: float = Field(description="Query execution time in milliseconds")
-    correlation_id: Optional[str] = Field(default=None, description="Request correlation ID")
+    correlation_id: Optional[UUID] = Field(default=None, description="Request correlation ID")
     error: Optional[ModelPostgresError] = Field(default=None, description="Error details if query failed")
     query_metrics: Optional[ModelPostgresQueryMetrics] = Field(default=None, description="Detailed query metrics")
     context: Optional[ModelPostgresContext] = Field(default=None, description="Additional response context")
