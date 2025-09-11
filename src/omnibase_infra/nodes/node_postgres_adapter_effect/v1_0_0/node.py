@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 from omnibase_core.core.core_error_codes import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
-from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
+from omnibase_core.core.onex_registry import BaseOnexRegistry
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
 from omnibase_core.model.core.model_health_status import ModelHealthStatus
 
@@ -105,9 +105,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
         (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
     ]
 
-    def __init__(self, container: ONEXContainer):
-        """Initialize PostgreSQL adapter tool with container injection."""
-        super().__init__(container)
+    def __init__(self, registry: BaseOnexRegistry):
+        """Initialize PostgreSQL adapter tool with registry injection."""
+        super().__init__(registry)
         self.node_type = "effect"
         self.domain = "infrastructure"
         self._connection_manager: Optional[PostgresConnectionManager] = None
@@ -130,7 +130,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         try:
             # Try to get configuration from container first (ONEX pattern)
             config = container.get_service("postgres_adapter_config")
-            if config and isinstance(config, ModelPostgresAdapterConfig):
+            if config and hasattr(config, 'postgres_host') and hasattr(config, 'postgres_port'):
                 return config
         except Exception:
             pass  # Fall back to environment configuration
@@ -156,17 +156,17 @@ class NodePostgresAdapterEffect(NodeEffectService):
             # Generate a new correlation ID if none provided
             return uuid4()
             
-        if isinstance(correlation_id, str):
+        if hasattr(correlation_id, 'replace') and hasattr(correlation_id, 'split'):  # String-like
             try:
                 # Try to parse string as UUID to validate format
                 correlation_id = UUID(correlation_id)
-            except ValueError:
+            except ValueError as e:
                 raise OnexError(
                     code=CoreErrorCode.VALIDATION_ERROR,
                     message="Invalid correlation ID format - must be valid UUID"
-                )
+                ) from e
                 
-        if not isinstance(correlation_id, UUID):
+        if not hasattr(correlation_id, 'hex'):
             raise OnexError(
                 code=CoreErrorCode.VALIDATION_ERROR,
                 message="Correlation ID must be UUID type"
@@ -194,13 +194,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 self._validate_container_service_interface()
                 
                 # Use registry injection per ONEX standards (CLAUDE.md)
-                self._connection_manager = self.container.get_service("postgres_connection_manager")
-                if self._connection_manager is None:
-                    # Fallback for development/testing - create with proper error
-                    raise OnexError(
-                        code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
-                        message="PostgresConnectionManager not available in registry - ensure proper container setup"
-                    )
+                self._connection_manager = self.registry.get_service("postgres_connection_manager")
                 
                 # Validate the resolved service interface
                 self._validate_connection_manager_interface(self._connection_manager)
@@ -223,13 +217,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 self._validate_container_service_interface()
                 
                 # Use registry injection per ONEX standards (CLAUDE.md)
-                self._connection_manager = self.container.get_service("postgres_connection_manager")
-                if self._connection_manager is None:
-                    # Fallback for development/testing - create with proper error
-                    raise OnexError(
-                        code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
-                        message="PostgresConnectionManager not available in registry - ensure proper container setup"
-                    )
+                self._connection_manager = self.registry.get_service("postgres_connection_manager")
                 
                 # Validate the resolved service interface
                 self._validate_connection_manager_interface(self._connection_manager)
@@ -399,7 +387,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
             
-            if isinstance(e, OnexError):
+            if hasattr(e, 'code') and hasattr(e, 'message'):  # OnexError-like
                 error_message = str(e)
             else:
                 error_message = f"PostgreSQL adapter tool error: {str(e)}"
@@ -447,7 +435,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
             
             # Convert result to response format (as defined in event processing subcontract)
-            if isinstance(result, list):  # SELECT query result
+            if hasattr(result, '__iter__') and hasattr(result, '__len__'):  # List-like (SELECT query result)
                 # Create properly typed ModelPostgresQueryRow objects
                 
                 query_rows = []
@@ -764,17 +752,17 @@ class NodePostgresAdapterEffect(NodeEffectService):
         - Supports proper service registration patterns
         - Follows dependency injection protocols
         """
-        if not hasattr(self.container, 'get_service'):
+        if not hasattr(self.registry, 'get_service'):
             raise OnexError(
                 code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
-                message="Container does not implement required get_service interface",
+                message="Registry does not implement required get_service interface",
             )
         
-        # Validate container is not None
-        if self.container is None:
+        # Validate registry is not None
+        if self.registry is None:
             raise OnexError(
                 code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
-                message="Container is None - proper ONEX container injection required",
+                message="Registry is None - proper ONEX registry injection required",
             )
 
     def _validate_connection_manager_interface(self, connection_manager) -> None:
@@ -846,7 +834,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         Returns:
             Number of rows affected, or 0 if parsing fails
         """
-        if not status_result or not isinstance(status_result, str):
+        if not status_result or not (hasattr(status_result, 'strip') and hasattr(status_result, 'split')):  # String-like check
             return 0
             
         # Clean the status string
