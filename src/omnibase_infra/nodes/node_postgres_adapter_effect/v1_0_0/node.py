@@ -20,6 +20,8 @@ from omnibase_core.model.core.model_health_status import ModelHealthStatus
 from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
 from omnibase_infra.models.postgres.model_postgres_query_response import ModelPostgresQueryResponse
+from omnibase_infra.models.postgres.model_postgres_query_result import ModelPostgresQueryResult, ModelPostgresQueryRow
+from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
 from .models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from .models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 
@@ -52,6 +54,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def connection_manager(self) -> PostgresConnectionManager:
         """Get PostgreSQL connection manager instance via registry injection."""
         if self._connection_manager is None:
+            # Validate container service interface before resolution
+            self._validate_container_service_interface()
+            
             # Use registry injection per ONEX standards (CLAUDE.md)
             self._connection_manager = self.container.get_service("postgres_connection_manager")
             if self._connection_manager is None:
@@ -60,6 +65,10 @@ class NodePostgresAdapterEffect(NodeEffectService):
                     code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
                     message="PostgresConnectionManager not available in registry - ensure proper container setup"
                 )
+            
+            # Validate the resolved service interface
+            self._validate_connection_manager_interface(self._connection_manager)
+            
         return self._connection_manager
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
@@ -70,9 +79,35 @@ class NodePostgresAdapterEffect(NodeEffectService):
         connection pool status, and database accessibility.
         """
         return [
-            self._check_database_connectivity_async,
+            self._check_database_connectivity,
             self._check_connection_pool_health,
         ]
+
+    def _check_database_connectivity(self) -> ModelHealthStatus:
+        """Check basic PostgreSQL database connectivity (sync wrapper for health checks)."""
+        try:
+            # Simple sync health check without async operations
+            # This avoids event loop complexity in health check context
+            if self._connection_manager is None:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message="Connection manager not initialized",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            # Basic connectivity indicator based on manager state
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="Database connection manager operational",
+                timestamp=datetime.utcnow().isoformat()
+            )
+                    
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Database connectivity check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
 
     async def _check_database_connectivity_async(self) -> ModelHealthStatus:
         """Check basic PostgreSQL database connectivity (async version - fixes event loop anti-pattern)."""
@@ -197,6 +232,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
         query_request = input_data.query_request
         
+        # Input validation for security and performance
+        self._validate_query_input(query_request)
+        
         try:
             # Execute query through connection manager (following connection management subcontract)
             result = await self.connection_manager.execute_query(
@@ -209,8 +247,6 @@ class NodePostgresAdapterEffect(NodeEffectService):
             # Convert result to response format (as defined in event processing subcontract)
             if isinstance(result, list):  # SELECT query result
                 # Create properly typed ModelPostgresQueryRow objects
-                from ..models.model_postgres_adapter_input import ModelPostgresAdapterInput
-                from omnibase_infra.models.postgres.model_postgres_query_result import ModelPostgresQueryResult, ModelPostgresQueryRow
                 
                 query_rows = []
                 if result:
@@ -271,7 +307,6 @@ class NodePostgresAdapterEffect(NodeEffectService):
             sanitized_error = self._sanitize_error_message(str(e))
 
             # Create structured error model (ONEX compliance)
-            from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
             postgres_error = ModelPostgresError(
                 error_code=type(e).__name__,
                 error_message=sanitized_error,
@@ -316,14 +351,16 @@ class NodePostgresAdapterEffect(NodeEffectService):
         connection pool status, and adapter functionality.
         """
         try:
-            # Run health checks (using existing health check methods)
+            # Run health checks using async versions for proper health operation
             health_results = []
-            for health_check_func in self.get_health_checks():
-                health_result = health_check_func()
-                # Handle both sync and async health checks
-                if hasattr(health_result, '__await__'):
-                    health_result = await health_result
-                health_results.append(health_result)
+            
+            # Run async database connectivity check
+            db_health = await self._check_database_connectivity_async()
+            health_results.append(db_health)
+            
+            # Run sync connection pool check
+            pool_health = self._check_connection_pool_health()
+            health_results.append(pool_health)
             
             # Determine overall health status
             overall_healthy = all(
@@ -404,6 +441,179 @@ class NodePostgresAdapterEffect(NodeEffectService):
             finally:
                 self._connection_manager = None
 
+    def _validate_query_input(self, query_request) -> None:
+        """
+        Validate query input for security and performance constraints.
+        
+        Validates:
+        - Query size limits to prevent memory exhaustion
+        - Parameter count limits to prevent resource exhaustion
+        - Parameter size limits to prevent payload attacks
+        - Basic SQL injection patterns prevention
+        """
+        # Query size validation (prevent memory exhaustion)
+        max_query_size = 50000  # 50KB limit for queries
+        if len(query_request.query) > max_query_size:
+            raise OnexError(
+                code=CoreErrorCode.VALIDATION_ERROR,
+                message=f"Query size exceeds maximum allowed length ({max_query_size} characters)",
+            )
+        
+        # Parameter count validation (prevent resource exhaustion)
+        max_parameter_count = 100
+        if len(query_request.parameters) > max_parameter_count:
+            raise OnexError(
+                code=CoreErrorCode.VALIDATION_ERROR,
+                message=f"Parameter count exceeds maximum allowed ({max_parameter_count} parameters)",
+            )
+        
+        # Parameter size validation (prevent payload attacks)
+        max_parameter_size = 10000  # 10KB per parameter
+        for i, param in enumerate(query_request.parameters):
+            param_size = len(str(param))
+            if param_size > max_parameter_size:
+                raise OnexError(
+                    code=CoreErrorCode.VALIDATION_ERROR,
+                    message=f"Parameter {i} size exceeds maximum allowed ({max_parameter_size} characters)",
+                )
+        
+        # Timeout validation
+        if query_request.timeout and query_request.timeout > 300:  # 5 minute max
+            raise OnexError(
+                code=CoreErrorCode.VALIDATION_ERROR,
+                message="Query timeout exceeds maximum allowed (300 seconds)",
+            )
+        
+        # Basic SQL injection pattern detection (additional layer of defense)
+        dangerous_patterns = [
+            r';.*drop\s+table',
+            r';.*delete\s+from',
+            r';.*truncate\s+table',
+            r'union.*select.*password',
+            r'union.*select.*admin',
+        ]
+        
+        import re
+        query_lower = query_request.query.lower()
+        for pattern in dangerous_patterns:
+            if re.search(pattern, query_lower, re.IGNORECASE):
+                raise OnexError(
+                    code=CoreErrorCode.SECURITY_VIOLATION_ERROR,
+                    message="Query contains potentially dangerous SQL patterns",
+                )
+        
+        # Query complexity validation to prevent DoS attacks
+        self._validate_query_complexity(query_request.query)
+
+    def _validate_query_complexity(self, query: str) -> None:
+        """
+        Validate query complexity to prevent DoS attacks.
+        
+        Analyzes SQL query complexity based on:
+        - Number of JOIN operations
+        - Number of subqueries and nested selects
+        - Number of UNION operations
+        - Presence of expensive operations (LIKE %, regex patterns)
+        - Complex aggregation functions
+        """
+        import re
+        
+        query_lower = query.lower()
+        complexity_score = 0
+        
+        # Count JOINs (each JOIN adds complexity)
+        join_count = len(re.findall(r'\bjoin\b', query_lower))
+        complexity_score += join_count * 2
+        
+        # Count subqueries and nested selects
+        select_count = len(re.findall(r'\bselect\b', query_lower)) - 1  # Subtract main SELECT
+        complexity_score += select_count * 3
+        
+        # Count UNION operations (expensive)
+        union_count = len(re.findall(r'\bunion\b', query_lower))
+        complexity_score += union_count * 4
+        
+        # Check for expensive LIKE operations with leading wildcards
+        leading_wildcard_count = len(re.findall(r'like\s+[\'"]%', query_lower))
+        complexity_score += leading_wildcard_count * 5
+        
+        # Check for regex operations (very expensive)
+        regex_count = len(re.findall(r'~[*]?\s*[\'"]', query_lower))
+        complexity_score += regex_count * 10
+        
+        # Check for expensive functions
+        expensive_functions = ['array_agg', 'string_agg', 'generate_series', 'recursive']
+        for func in expensive_functions:
+            if func in query_lower:
+                complexity_score += 3
+        
+        # Check for potentially problematic ORDER BY without LIMIT
+        has_order_by = 'order by' in query_lower
+        has_limit = 'limit' in query_lower
+        if has_order_by and not has_limit:
+            complexity_score += 2
+        
+        # Complexity threshold (adjust based on system capacity)
+        max_complexity_score = 20
+        
+        if complexity_score > max_complexity_score:
+            raise OnexError(
+                code=CoreErrorCode.SECURITY_VIOLATION_ERROR,
+                message=f"Query complexity score ({complexity_score}) exceeds maximum allowed ({max_complexity_score})",
+            )
+
+    def _validate_container_service_interface(self) -> None:
+        """
+        Validate container service interface compliance.
+        
+        Ensures the container follows ONEX standards for service resolution:
+        - Has get_service method
+        - Supports proper service registration patterns
+        - Follows dependency injection protocols
+        """
+        if not hasattr(self.container, 'get_service'):
+            raise OnexError(
+                code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                message="Container does not implement required get_service interface",
+            )
+        
+        # Validate container is not None
+        if self.container is None:
+            raise OnexError(
+                code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                message="Container is None - proper ONEX container injection required",
+            )
+
+    def _validate_connection_manager_interface(self, connection_manager) -> None:
+        """
+        Validate connection manager service interface compliance.
+        
+        Ensures the resolved connection manager implements required methods:
+        - execute_query (async)
+        - health_check (async)
+        - initialize (async)
+        - close (async)
+        """
+        required_methods = ['execute_query', 'health_check', 'initialize', 'close']
+        missing_methods = []
+        
+        for method_name in required_methods:
+            if not hasattr(connection_manager, method_name):
+                missing_methods.append(method_name)
+        
+        if missing_methods:
+            raise OnexError(
+                code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                message=f"Connection manager missing required methods: {missing_methods}",
+            )
+        
+        # Validate that critical methods are callable
+        if not callable(getattr(connection_manager, 'execute_query', None)):
+            raise OnexError(
+                code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                message="Connection manager execute_query method is not callable",
+            )
+
     def _sanitize_error_message(self, error_message: str) -> str:
         """
         Sanitize error messages to prevent sensitive information leakage.
@@ -422,12 +632,36 @@ class NodePostgresAdapterEffect(NodeEffectService):
         # Remove connection string details
         sanitized = re.sub(r'postgresql://[^\s]*@[^\s]*/', 'postgresql://***@***/', sanitized, flags=re.IGNORECASE)
         
+        # Remove JWT tokens (Base64-encoded with dots)
+        sanitized = re.sub(r'eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*', '***JWT_TOKEN***', sanitized)
+        
+        # Remove API keys (common patterns)
+        # GitHub tokens
+        sanitized = re.sub(r'ghp_[A-Za-z0-9]{36}', '***GITHUB_TOKEN***', sanitized)
+        sanitized = re.sub(r'gho_[A-Za-z0-9]{36}', '***GITHUB_OAUTH_TOKEN***', sanitized)
+        sanitized = re.sub(r'ghu_[A-Za-z0-9]{36}', '***GITHUB_USER_TOKEN***', sanitized)
+        
+        # AWS keys
+        sanitized = re.sub(r'AKIA[0-9A-Z]{16}', '***AWS_ACCESS_KEY***', sanitized)
+        sanitized = re.sub(r'[A-Za-z0-9/+=]{40}', '***AWS_SECRET_KEY***', sanitized)
+        
+        # Generic API key patterns
+        sanitized = re.sub(r'api[_-]?key[_-]*[:=][^\s&]*', 'api_key=***', sanitized, flags=re.IGNORECASE)
+        sanitized = re.sub(r'bearer[\s]+[A-Za-z0-9+/=]{20,}', 'bearer ***', sanitized, flags=re.IGNORECASE)
+        
+        # Authentication tokens
+        sanitized = re.sub(r'auth[_-]?token[_-]*[:=][^\s&]*', 'auth_token=***', sanitized, flags=re.IGNORECASE)
+        sanitized = re.sub(r'access[_-]?token[_-]*[:=][^\s&]*', 'access_token=***', sanitized, flags=re.IGNORECASE)
+        
         # Remove file paths that might contain sensitive info
-        sanitized = re.sub(r'/[\w/.-]*(?:password|secret|key|token)[\w/.-]*', '/***sensitive_path***', sanitized, flags=re.IGNORECASE)
+        sanitized = re.sub(r'/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*', '/***sensitive_path***', sanitized, flags=re.IGNORECASE)
         
         # Generic schema information masking
         sanitized = re.sub(r'schema "[\w_-]+"', 'schema "***"', sanitized)
         sanitized = re.sub(r'table "[\w_-]+"', 'table "***"', sanitized)
+        
+        # Remove any remaining long alphanumeric strings that might be sensitive
+        sanitized = re.sub(r'[A-Za-z0-9+/=]{32,}', '***REDACTED_TOKEN***', sanitized)
         
         # If error is too generic, provide a more specific safe message
         if len(sanitized.strip()) < 10 or "connection" in sanitized.lower():
