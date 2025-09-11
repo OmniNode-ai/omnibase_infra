@@ -1,8 +1,10 @@
 """PostgreSQL health check request model."""
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from .model_postgres_context import ModelPostgresContext
 
 
 class ModelPostgresHealthRequest(BaseModel):
@@ -12,4 +14,4 @@ class ModelPostgresHealthRequest(BaseModel):
     include_connection_stats: bool = Field(default=True, description="Include connection pool statistics")
     include_schema_info: bool = Field(default=True, description="Include schema validation information")
     correlation_id: Optional[str] = Field(default=None, description="Request correlation ID")
-    context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional request context")
+    context: Optional[ModelPostgresContext] = Field(default=None, description="Additional request context")
