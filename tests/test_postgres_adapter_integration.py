@@ -20,7 +20,6 @@ from omnibase_infra.infrastructure.postgres_connection_manager import PostgresCo
 from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
-from omnibase_infra.models.postgres.model_postgres_health_request import ModelPostgresHealthRequest
 
 
 # Skip integration tests if PostgreSQL is not available

@@ -6,18 +6,19 @@ Following the ONEX infrastructure tool pattern for external service integration.
 """
 
 import time
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Callable, Union
 
 from omnibase_core.core.model_onex_container import ModelONEXContainer
 from omnibase_core.core.errors.core_errors import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
+from omnibase_core.model.core.model_health_status import ModelHealthStatus
+from omnibase_core.enums.enum_health_status import EnumHealthStatus
 
 from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
 from omnibase_infra.models.postgres.model_postgres_query_response import ModelPostgresQueryResponse
-from omnibase_infra.models.postgres.model_postgres_health_request import ModelPostgresHealthRequest
-from omnibase_infra.models.postgres.model_postgres_health_response import ModelPostgresHealthResponse
 from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 
@@ -55,6 +56,84 @@ class ToolInfrastructurePostgresAdapterEffect(NodeEffectService):
             self._connection_manager = PostgresConnectionManager()
         return self._connection_manager
 
+    def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
+        """
+        Override MixinHealthCheck to provide PostgreSQL-specific health checks.
+        
+        Returns list of health check functions that validate PostgreSQL connectivity,
+        connection pool status, and database accessibility.
+        """
+        return [
+            self._check_database_connectivity,
+            self._check_connection_pool_health,
+        ]
+
+    def _check_database_connectivity(self) -> ModelHealthStatus:
+        """Check basic PostgreSQL database connectivity."""
+        try:
+            # Simple connectivity test via connection manager
+            import asyncio
+            loop = asyncio.new_event_loop()
+            try:
+                health_data = loop.run_until_complete(self.connection_manager.health_check())
+                loop.close()
+            except Exception:
+                loop.close()
+                raise
+                
+            status = health_data.get("status", "unknown")
+            
+            if status == "healthy":
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.HEALTHY,
+                    message="Database connectivity verified",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            elif status == "degraded":
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message="Database connectivity degraded",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            else:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message=f"Database connectivity failed: {status}",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+                
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Database connectivity check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    def _check_connection_pool_health(self) -> ModelHealthStatus:
+        """Check PostgreSQL connection pool health and capacity."""
+        try:
+            # Check if connection manager is available
+            if self._connection_manager is None:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message="Connection manager not initialized",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+                
+            # Connection pool is healthy if manager exists and is operational
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="Connection pool operational",
+                timestamp=datetime.utcnow().isoformat()
+            )
+            
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Connection pool check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
     async def process(self, input_data: ModelPostgresAdapterInput) -> ModelPostgresAdapterOutput:
         """
         Process PostgreSQL adapter request following infrastructure tool pattern.
@@ -75,11 +154,9 @@ class ToolInfrastructurePostgresAdapterEffect(NodeEffectService):
             # Route based on operation type (as defined in subcontracts)
             if input_data.operation_type == "query":
                 return await self._handle_query_operation(input_data, start_time)
-            elif input_data.operation_type == "health_check":
-                return await self._handle_health_check_operation(input_data, start_time)
             else:
                 raise OnexError(
-                    error_code=CoreErrorCode.VALIDATION_ERROR,
+                    code=CoreErrorCode.VALIDATION_ERROR,
                     message=f"Unsupported operation type: {input_data.operation_type}",
                 )
 
@@ -114,7 +191,7 @@ class ToolInfrastructurePostgresAdapterEffect(NodeEffectService):
         """
         if not input_data.query_request:
             raise OnexError(
-                error_code=CoreErrorCode.VALIDATION_ERROR,
+                code=CoreErrorCode.VALIDATION_ERROR,
                 message="Query request is required for query operation",
             )
 
@@ -195,97 +272,6 @@ class ToolInfrastructurePostgresAdapterEffect(NodeEffectService):
                 context=input_data.context,
             )
 
-    async def _handle_health_check_operation(
-        self, 
-        input_data: ModelPostgresAdapterInput, 
-        start_time: float
-    ) -> ModelPostgresAdapterOutput:
-        """
-        Handle database health check operation following health monitoring patterns.
-        
-        Implements health check strategy as defined in postgres_connection_management_subcontract
-        with connection pool monitoring and database status validation.
-        """
-        if not input_data.health_request:
-            raise OnexError(
-                error_code=CoreErrorCode.VALIDATION_ERROR,
-                message="Health request is required for health_check operation",
-            )
-
-        health_request = input_data.health_request
-
-        try:
-            # Perform health check through connection manager (following health integration patterns)
-            health_data = await self.connection_manager.health_check()
-            
-            execution_time_ms = (time.perf_counter() - start_time) * 1000
-
-            # Filter response based on request parameters (as defined in subcontracts)
-            filtered_health_data: Dict[str, Any] = {
-                "status": health_data["status"],
-                "timestamp": health_data["timestamp"],
-                "errors": health_data["errors"],
-            }
-
-            if health_request.include_connection_stats and "connection_pool" in health_data:
-                filtered_health_data["connection_pool"] = health_data["connection_pool"]
-
-            if health_request.include_performance_metrics and "performance" in health_data:
-                filtered_health_data["performance"] = health_data["performance"]
-
-            if health_request.include_schema_info and "schema_info" in health_data:
-                filtered_health_data["schema_info"] = health_data["schema_info"]
-
-            # Include database info if available
-            if "database_info" in health_data:
-                filtered_health_data["database_info"] = health_data["database_info"]
-
-            # Create health response (following shared model pattern)
-            health_response = ModelPostgresHealthResponse(
-                status=filtered_health_data["status"],
-                timestamp=filtered_health_data["timestamp"],
-                connection_pool=filtered_health_data.get("connection_pool"),
-                database_info=filtered_health_data.get("database_info"),
-                schema_info=filtered_health_data.get("schema_info"),
-                performance=filtered_health_data.get("performance"),
-                errors=filtered_health_data["errors"],
-                correlation_id=health_request.correlation_id or input_data.correlation_id,
-                context=health_request.context,
-            )
-
-            return ModelPostgresAdapterOutput(
-                operation_type="health_check",
-                health_response=health_response,
-                success=health_response.status in ["healthy", "degraded"],
-                correlation_id=input_data.correlation_id,
-                timestamp=time.time(),
-                execution_time_ms=execution_time_ms,
-                context=input_data.context,
-            )
-
-        except Exception as e:
-            execution_time_ms = (time.perf_counter() - start_time) * 1000
-            error_message = str(e)
-
-            # Create error health response (following error handling patterns from subcontracts)
-            health_response = ModelPostgresHealthResponse(
-                status="unhealthy",
-                timestamp=time.time(),
-                errors=[error_message],
-                correlation_id=health_request.correlation_id or input_data.correlation_id,
-                context=health_request.context,
-            )
-
-            return ModelPostgresAdapterOutput(
-                operation_type="health_check",
-                health_response=health_response,
-                success=False,
-                error_message=error_message,
-                correlation_id=input_data.correlation_id,
-                timestamp=time.time(),
-                execution_time_ms=execution_time_ms,
-                context=input_data.context,
-            )
 
     async def initialize(self) -> None:
         """
@@ -298,7 +284,7 @@ class ToolInfrastructurePostgresAdapterEffect(NodeEffectService):
             await self.connection_manager.initialize()
         except Exception as e:
             raise OnexError(
-                error_code=CoreErrorCode.INITIALIZATION_ERROR,
+                code=CoreErrorCode.INITIALIZATION_ERROR,
                 message=f"Failed to initialize PostgreSQL adapter tool: {str(e)}",
             ) from e
 

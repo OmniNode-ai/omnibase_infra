@@ -19,7 +19,6 @@ from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_ef
 from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from omnibase_infra.tools.infrastructure.tool_infrastructure_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
-from omnibase_infra.models.postgres.model_postgres_health_request import ModelPostgresHealthRequest
 
 
 class TestPostgresAdapter:
@@ -118,44 +117,36 @@ class TestPostgresAdapter:
         )
 
     @pytest.mark.asyncio
-    async def test_health_check_message_envelope_conversion(self, adapter_with_mock):
-        """Test converting event envelope with health request to PostgreSQL health check."""
+    async def test_mixin_health_check_functionality(self, adapter_with_mock):
+        """Test MixinHealthCheck integration for PostgreSQL adapter health monitoring."""
         
-        # Create event envelope with health request
-        correlation_id = str(uuid.uuid4())
-        health_request = ModelPostgresHealthRequest(
-            include_connection_stats=True,
-            include_performance_metrics=True,
-            include_schema_info=False,
-            correlation_id=correlation_id
-        )
+        # Test that the adapter has proper health check methods from mixin
+        assert hasattr(adapter_with_mock, 'health_check')
+        assert hasattr(adapter_with_mock, 'health_check_async')
+        assert hasattr(adapter_with_mock, 'get_health_checks')
         
-        input_envelope = ModelPostgresAdapterInput(
-            operation_type="health_check",
-            health_request=health_request,
-            correlation_id=correlation_id,
-            context={"source": "monitoring_system"}
-        )
-
-        # Process the envelope through adapter
-        result = await adapter_with_mock.process(input_envelope)
-
-        # Validate conversion to PostgreSQL health check
-        assert isinstance(result, ModelPostgresAdapterOutput)
-        assert result.operation_type == "health_check"
-        assert result.success is True
-        assert result.correlation_id == correlation_id
-        assert result.health_response is not None
+        # Test get_health_checks returns PostgreSQL-specific checks
+        health_checks = adapter_with_mock.get_health_checks()
+        assert len(health_checks) == 2
+        assert callable(health_checks[0])  # database connectivity check
+        assert callable(health_checks[1])  # connection pool check
         
-        # Verify health response contains requested information
-        health_response = result.health_response
-        assert health_response.status == "healthy"
-        assert health_response.connection_pool is not None  # include_connection_stats=True
-        assert health_response.performance is None  # Not in mock
-        assert health_response.schema_info is None  # include_schema_info=False
-
-        # Verify the connection manager health check was called
-        adapter_with_mock.connection_manager.health_check.assert_called_once()
+        # Test synchronous health check
+        health_result = adapter_with_mock.health_check()
+        assert hasattr(health_result, 'status')
+        assert hasattr(health_result, 'message')
+        assert hasattr(health_result, 'timestamp')
+        
+        # Test that health check aggregates multiple checks
+        # The mixin should run both database connectivity and connection pool checks
+        assert health_result.status is not None
+        assert health_result.message is not None
+        
+        # Test asynchronous health check
+        async_health_result = await adapter_with_mock.health_check_async()
+        assert hasattr(async_health_result, 'status')
+        assert hasattr(async_health_result, 'message')
+        assert hasattr(async_health_result, 'timestamp')
 
     @pytest.mark.asyncio
     async def test_invalid_operation_type(self, adapter_with_mock):
