@@ -5,12 +5,13 @@ It converts event envelopes containing database requests into direct PostgreSQL 
 Following the ONEX infrastructure tool pattern for external service integration.
 """
 
+import asyncio
 import os
 import re
 import time
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Union, Pattern
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_core.core.core_error_codes import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
@@ -91,6 +92,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         self.node_type = "effect"
         self.domain = "infrastructure"
         self._connection_manager: Optional[PostgresConnectionManager] = None
+        self._connection_manager_lock = asyncio.Lock()
         
         # Initialize configuration from environment or container
         self.config = self._load_configuration(container)
@@ -116,10 +118,56 @@ class NodePostgresAdapterEffect(NodeEffectService):
         # Fall back to environment-based configuration
         environment = os.getenv("DEPLOYMENT_ENVIRONMENT", "development")
         return ModelPostgresAdapterConfig.for_environment(environment)
+    
+    def _validate_correlation_id(self, correlation_id: Optional[UUID]) -> UUID:
+        """
+        Validate and normalize correlation ID to prevent injection attacks.
+        
+        Args:
+            correlation_id: Optional correlation ID to validate
+            
+        Returns:
+            Valid UUID correlation ID
+            
+        Raises:
+            OnexError: If correlation ID format is invalid
+        """
+        if correlation_id is None:
+            # Generate a new correlation ID if none provided
+            return uuid4()
+            
+        if isinstance(correlation_id, str):
+            try:
+                # Try to parse string as UUID to validate format
+                correlation_id = UUID(correlation_id)
+            except ValueError:
+                raise OnexError(
+                    code=CoreErrorCode.VALIDATION_ERROR,
+                    message="Invalid correlation ID format - must be valid UUID"
+                )
+                
+        if not isinstance(correlation_id, UUID):
+            raise OnexError(
+                code=CoreErrorCode.VALIDATION_ERROR,
+                message="Correlation ID must be UUID type"
+            )
+            
+        # Additional validation: ensure it's not an empty UUID
+        if correlation_id == UUID('00000000-0000-0000-0000-000000000000'):
+            raise OnexError(
+                code=CoreErrorCode.VALIDATION_ERROR,
+                message="Correlation ID cannot be empty UUID"
+            )
+            
+        return correlation_id
 
     @property
     def connection_manager(self) -> PostgresConnectionManager:
-        """Get PostgreSQL connection manager instance via registry injection."""
+        """
+        Get PostgreSQL connection manager instance via registry injection.
+        
+        Note: For async operations, prefer get_connection_manager_async() to avoid race conditions.
+        """
         if self._connection_manager is None:
             # Validate container service interface before resolution
             self._validate_container_service_interface()
@@ -137,6 +185,35 @@ class NodePostgresAdapterEffect(NodeEffectService):
             self._validate_connection_manager_interface(self._connection_manager)
             
         return self._connection_manager
+    
+    async def get_connection_manager_async(self) -> PostgresConnectionManager:
+        """
+        Get PostgreSQL connection manager instance via registry injection with thread safety.
+        
+        Returns:
+            PostgresConnectionManager instance
+            
+        Raises:
+            OnexError: If connection manager cannot be resolved
+        """
+        async with self._connection_manager_lock:
+            if self._connection_manager is None:
+                # Validate container service interface before resolution
+                self._validate_container_service_interface()
+                
+                # Use registry injection per ONEX standards (CLAUDE.md)
+                self._connection_manager = self.container.get_service("postgres_connection_manager")
+                if self._connection_manager is None:
+                    # Fallback for development/testing - create with proper error
+                    raise OnexError(
+                        code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                        message="PostgresConnectionManager not available in registry - ensure proper container setup"
+                    )
+                
+                # Validate the resolved service interface
+                self._validate_connection_manager_interface(self._connection_manager)
+                
+            return self._connection_manager
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
         """
@@ -180,7 +257,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
         """Check basic PostgreSQL database connectivity (async version - fixes event loop anti-pattern)."""
         try:
             # Simple connectivity test via connection manager (now properly async)
-            health_data = await self.connection_manager.health_check()
+            connection_manager = await self.get_connection_manager_async()
+            health_data = await connection_manager.health_check()
             status = health_data.get("status", "unknown")
             
             if status == "healthy":
@@ -251,6 +329,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
         start_time = time.perf_counter()
         
         try:
+            # Validate and normalize correlation ID to prevent injection attacks
+            validated_correlation_id = self._validate_correlation_id(input_data.correlation_id)
+            
+            # Update the input data with validated correlation ID if it was modified
+            if validated_correlation_id != input_data.correlation_id:
+                input_data.correlation_id = validated_correlation_id
+            
             # Route based on operation type (as defined in subcontracts)
             if input_data.operation_type == "query":
                 return await self._handle_query_operation(input_data, start_time)
@@ -304,7 +389,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
         
         try:
             # Execute query through connection manager (following connection management subcontract)
-            result = await self.connection_manager.execute_query(
+            connection_manager = await self.get_connection_manager_async()
+            result = await connection_manager.execute_query(
                 query_request.query,
                 *query_request.parameters,
                 timeout=query_request.timeout,
@@ -487,7 +573,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
         with proper error handling and resource setup.
         """
         try:
-            await self.connection_manager.initialize()
+            connection_manager = await self.get_connection_manager_async()
+            await connection_manager.initialize()
         except Exception as e:
             raise OnexError(
                 code=CoreErrorCode.INITIALIZATION_ERROR,

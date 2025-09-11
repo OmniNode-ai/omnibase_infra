@@ -1,8 +1,12 @@
 """PostgreSQL Adapter Configuration Model."""
 
 import os
+import logging
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
+
+from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError
 
 
 class ModelPostgresAdapterConfig(BaseModel):
@@ -70,10 +74,48 @@ class ModelPostgresAdapterConfig(BaseModel):
         description="Deployment environment (development, staging, production)",
     )
     
-    @classmethod
-    def from_environment(cls) -> "ModelPostgresAdapterConfig":
+    @validator('environment')
+    def validate_environment(cls, v):
+        """Validate environment is a known value."""
+        allowed_environments = {'development', 'staging', 'production'}
+        if v not in allowed_environments:
+            raise ValueError(f"Environment must be one of: {', '.join(allowed_environments)}")
+        return v
+    
+    def validate_security_config(self) -> None:
         """
-        Create configuration from environment variables.
+        Validate security configuration for production environments.
+        
+        Raises:
+            OnexError: If production security requirements are not met
+        """
+        if self.environment == "production":
+            if not self.enable_error_sanitization:
+                raise OnexError(
+                    code=CoreErrorCode.CONFIGURATION_ERROR,
+                    message="Error sanitization must be enabled in production environment"
+                )
+            
+            if not self.enable_sql_injection_detection:
+                raise OnexError(
+                    code=CoreErrorCode.CONFIGURATION_ERROR,
+                    message="SQL injection detection must be enabled in production environment"
+                )
+            
+            # Production should have stricter limits
+            if self.max_query_size > 50000:
+                logging.warning("Large query size limit in production may impact performance")
+            
+            if self.max_complexity_score > 20:
+                logging.warning("High complexity score threshold in production may allow expensive queries")
+
+    @classmethod
+    def from_environment(cls, secure_mode: bool = True) -> "ModelPostgresAdapterConfig":
+        """
+        Create configuration from environment variables with security considerations.
+        
+        Args:
+            secure_mode: If True, avoids logging configuration values that might contain sensitive data
         
         Environment variable mapping:
         - POSTGRES_ADAPTER_MAX_QUERY_SIZE
@@ -89,17 +131,55 @@ class ModelPostgresAdapterConfig(BaseModel):
         Returns:
             Configured ModelPostgresAdapterConfig instance
         """
-        return cls(
-            max_query_size=int(os.getenv("POSTGRES_ADAPTER_MAX_QUERY_SIZE", "50000")),
-            max_parameter_count=int(os.getenv("POSTGRES_ADAPTER_MAX_PARAMETER_COUNT", "100")),
-            max_parameter_size=int(os.getenv("POSTGRES_ADAPTER_MAX_PARAMETER_SIZE", "10000")),
-            max_timeout_seconds=int(os.getenv("POSTGRES_ADAPTER_MAX_TIMEOUT_SECONDS", "300")),
-            max_complexity_score=int(os.getenv("POSTGRES_ADAPTER_MAX_COMPLEXITY_SCORE", "20")),
-            enable_query_complexity_validation=os.getenv("POSTGRES_ADAPTER_ENABLE_COMPLEXITY_VALIDATION", "true").lower() == "true",
-            enable_sql_injection_detection=os.getenv("POSTGRES_ADAPTER_ENABLE_INJECTION_DETECTION", "true").lower() == "true",
-            enable_error_sanitization=os.getenv("POSTGRES_ADAPTER_ENABLE_ERROR_SANITIZATION", "true").lower() == "true",
-            environment=os.getenv("POSTGRES_ADAPTER_ENVIRONMENT", "development"),
-        )
+        def safe_int_env(key: str, default: str, secure_mode: bool = secure_mode) -> int:
+            """Safely get integer from environment with optional logging suppression."""
+            value = os.getenv(key, default)
+            try:
+                result = int(value)
+                if not secure_mode:
+                    logging.debug(f"Loaded {key}={result}")
+                return result
+            except ValueError:
+                if not secure_mode:
+                    logging.warning(f"Invalid {key} value '{value}', using default {default}")
+                return int(default)
+        
+        def safe_bool_env(key: str, default: str, secure_mode: bool = secure_mode) -> bool:
+            """Safely get boolean from environment with optional logging suppression."""
+            value = os.getenv(key, default).lower()
+            result = value == "true"
+            if not secure_mode:
+                logging.debug(f"Loaded {key}={result}")
+            return result
+        
+        environment = os.getenv("POSTGRES_ADAPTER_ENVIRONMENT", "development")
+        
+        try:
+            config = cls(
+                max_query_size=safe_int_env("POSTGRES_ADAPTER_MAX_QUERY_SIZE", "50000"),
+                max_parameter_count=safe_int_env("POSTGRES_ADAPTER_MAX_PARAMETER_COUNT", "100"),
+                max_parameter_size=safe_int_env("POSTGRES_ADAPTER_MAX_PARAMETER_SIZE", "10000"),
+                max_timeout_seconds=safe_int_env("POSTGRES_ADAPTER_MAX_TIMEOUT_SECONDS", "300"),
+                max_complexity_score=safe_int_env("POSTGRES_ADAPTER_MAX_COMPLEXITY_SCORE", "20"),
+                enable_query_complexity_validation=safe_bool_env("POSTGRES_ADAPTER_ENABLE_COMPLEXITY_VALIDATION", "true"),
+                enable_sql_injection_detection=safe_bool_env("POSTGRES_ADAPTER_ENABLE_INJECTION_DETECTION", "true"),
+                enable_error_sanitization=safe_bool_env("POSTGRES_ADAPTER_ENABLE_ERROR_SANITIZATION", "true"),
+                environment=environment,
+            )
+            
+            # Validate security settings
+            config.validate_security_config()
+            
+            if not secure_mode:
+                logging.info(f"PostgreSQL adapter configuration loaded for environment: {environment}")
+            
+            return config
+            
+        except Exception as e:
+            raise OnexError(
+                code=CoreErrorCode.CONFIGURATION_ERROR,
+                message=f"Failed to load PostgreSQL adapter configuration: {str(e)}"
+            ) from e
     
     @classmethod
     def for_environment(cls, environment: str) -> "ModelPostgresAdapterConfig":
