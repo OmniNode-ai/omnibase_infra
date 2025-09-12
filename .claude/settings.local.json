@@ -3,7 +3,12 @@
     "allow": [
       "mcp__archon__perform_rag_query",
       "mcp__serena__find_file",
-      "mcp__serena__think_about_collected_information"
+      "mcp__serena__think_about_collected_information",
+      "mcp__serena__find_symbol",
+      "mcp__archon__create_document",
+      "mcp__archon__search_code_examples",
+      "mcp__archon__create_version",
+      "Bash(POSTGRES_HOST=localhost POSTGRES_PORT=5435 POSTGRES_PASSWORD=\"9#mK2$vP8@xL3&nQ7*wR5!zE6^uY4%tA1$bN3\" poetry run python test_postgres_connection.py)"
     ],
     "deny": [],
     "ask": []
