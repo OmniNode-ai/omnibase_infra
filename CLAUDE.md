@@ -44,7 +44,7 @@ Claude Code operates in agent-driven mode for ONEX infrastructure development. F
 
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
-- **Registry Injection** - All dependencies injected via registry: `def __init__(self, registry: BaseOnexRegistry)`
+- **Container Injection** - All dependencies injected via container: `def __init__(self, container: ONEXContainer)`
 - **Protocol Resolution** - Use duck typing through protocols, never isinstance
 - **OnexError Only** - All exceptions converted to OnexError with chaining: `raise OnexError(...) from e`
 
@@ -433,7 +433,7 @@ For each infrastructure node:
 **Step 5: Registry Creation**
 - Create registry/ directory with dependency injection setup
 - Define protocol dependencies and injection patterns  
-- Follow registry injection pattern: `def __init__(self, registry: BaseOnexRegistry)`
+- Follow container injection pattern: `def __init__(self, container: ONEXContainer)`
 
 ### Phase 3: Target Directory Structure
 
