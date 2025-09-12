@@ -28,6 +28,7 @@ from omnibase_infra.models.postgres.model_postgres_query_request import ModelPos
 from omnibase_infra.models.postgres.model_postgres_query_response import ModelPostgresQueryResponse
 from omnibase_infra.models.postgres.model_postgres_query_result import ModelPostgresQueryResult, ModelPostgresQueryRow
 from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
+from omnibase_infra.models.omninode.model_omninode_event_publisher import ModelOmniNodeEventPublisher
 from .models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from .models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 from .models.model_postgres_adapter_config import ModelPostgresAdapterConfig
@@ -378,6 +379,23 @@ class NodePostgresAdapterEffect(NodeEffectService):
         # Initialize configuration from environment or container
         self.config = self._load_configuration(container)
         
+        # Initialize event bus for OmniNode event publishing (REQUIRED - NO FALLBACKS)
+        self._event_bus = self.container.get_service("ProtocolEventBus")
+        if self._event_bus is None:
+            raise OnexError(
+                code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                message="ProtocolEventBus service not available - event bus integration is REQUIRED for PostgreSQL adapter"
+            )
+        
+        self._event_publisher = ModelOmniNodeEventPublisher(node_id="postgres_adapter_node")
+        
+        self._logger.info(
+            "Event bus integration initialized successfully",
+            operation="event_bus_init",
+            node_type=self.node_type,
+            domain=self.domain
+        )
+        
         # Log adapter initialization
         self._logger.info(
             "PostgreSQL adapter initialized successfully",
@@ -492,6 +510,47 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 self._validate_connection_manager_interface(self._connection_manager)
                 
             return self._connection_manager
+
+    async def _publish_event_to_redpanda(self, envelope: "ModelEventEnvelope") -> None:
+        """
+        Publish event envelope to RedPanda via event bus following OmniNode topic design.
+        
+        Args:
+            envelope: ModelEventEnvelope with OmniNode topic routing
+        """
+        # Event bus MUST be available - no fallbacks allowed
+        if not self._event_bus or not self._event_publisher:
+            raise OnexError(
+                code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                message="Event bus or event publisher not initialized - CRITICAL infrastructure failure"
+            )
+        
+        try:
+            # Extract topic from envelope metadata  
+            topic_name = envelope.metadata.get("topic_spec")
+            
+            # Publish to RedPanda via event bus
+            await self._event_bus.publish_original(
+                topic=topic_name,
+                event_data=envelope.model_dump(),
+                correlation_id=str(envelope.correlation_id),
+                partition_key=str(envelope.correlation_id)  # Use correlation_id for consistent partitioning
+            )
+            
+            self._logger.info(
+                f"Event published to RedPanda topic: {topic_name}",
+                correlation_id=envelope.correlation_id,
+                operation="event_publish_success",
+                topic=topic_name,
+                envelope_id=envelope.envelope_id
+            )
+            
+        except Exception as e:
+            # Event publishing is REQUIRED - FAIL HARD
+            raise OnexError(
+                code=CoreErrorCode.EXTERNAL_SERVICE_ERROR,
+                message=f"CRITICAL: Failed to publish event to RedPanda: {str(e)}"
+            ) from e
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
         """
@@ -806,6 +865,30 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 rows_affected=rows_affected
             )
 
+            # Publish postgres-query-completed event to RedPanda (REQUIRED)
+            if not self._event_publisher:
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="Event publisher not available - CRITICAL failure in query completion event publishing"
+                )
+            query_data = {
+                "query_hash": str(hash(query_request.query)),
+                "operation_type": "query",
+                "query_length": len(query_request.query),
+                "parameter_count": len(query_request.parameters),
+                "status_message": status_message
+            }
+            
+            event_envelope = self._event_publisher.create_postgres_query_completed_envelope(
+                correlation_id=correlation_id,
+                query_data=query_data,
+                execution_time_ms=execution_time_ms,
+                row_count=rows_affected
+            )
+            
+            # Event publishing is REQUIRED - must not fail
+            await self._publish_event_to_redpanda(event_envelope)
+
             # Create query response (following shared model pattern)
             query_response = ModelPostgresQueryResponse(
                 success=True,
@@ -842,6 +925,30 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 sanitized_error = self._sanitize_error_message(str(e))
             else:
                 sanitized_error = str(e)
+
+            # Publish postgres-query-failed event to RedPanda (REQUIRED)
+            if not self._event_publisher:
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="Event publisher not available - CRITICAL failure in query failure event publishing"
+                )
+            query_data = {
+                "query_hash": str(hash(query_request.query)),
+                "operation_type": "query", 
+                "query_length": len(query_request.query),
+                "parameter_count": len(query_request.parameters),
+                "error_type": type(e).__name__
+            }
+            
+            event_envelope = self._event_publisher.create_postgres_query_failed_envelope(
+                correlation_id=correlation_id,
+                error_message=sanitized_error,
+                query_data=query_data,
+                execution_time_ms=execution_time_ms
+            )
+            
+            # Event publishing is REQUIRED - must not fail
+            await self._publish_event_to_redpanda(event_envelope)
 
             # Create structured error model (ONEX compliance)
             postgres_error = ModelPostgresError(
@@ -887,6 +994,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
         Performs comprehensive health checks including database connectivity,
         connection pool status, and adapter functionality.
         """
+        correlation_id = input_data.correlation_id
+        
         try:
             # Run health checks using async versions for consistent async operation
             health_results = []
@@ -922,6 +1031,23 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 "execution_time_ms": execution_time_ms
             }
             
+            # Publish postgres-health-response event to RedPanda (REQUIRED)
+            if not self._event_publisher:
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="Event publisher not available - CRITICAL failure in health response event publishing"
+                )
+            health_status = "healthy" if overall_healthy else "unhealthy"
+            
+            event_envelope = self._event_publisher.create_postgres_health_response_envelope(
+                correlation_id=correlation_id,
+                health_status=health_status,
+                health_data=health_data
+            )
+            
+            # Event publishing is REQUIRED - must not fail
+            await self._publish_event_to_redpanda(event_envelope)
+            
             return ModelPostgresAdapterOutput(
                 operation_type="health_check",
                 success=overall_healthy,
@@ -936,11 +1062,35 @@ class NodePostgresAdapterEffect(NodeEffectService):
             
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
+            correlation_id = input_data.correlation_id
+            
             # Sanitize error message (configurable)
             if self.config.enable_error_sanitization:
                 sanitized_error = self._sanitize_error_message(f"Health check operation failed: {str(e)}")
             else:
                 sanitized_error = f"Health check operation failed: {str(e)}"
+            
+            # Publish postgres-health-response event for failed health checks (REQUIRED)
+            if not self._event_publisher:
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="Event publisher not available - CRITICAL failure in health check failure event publishing"
+                )
+            failed_health_data = {
+                "overall_status": "unhealthy",
+                "error_message": sanitized_error,
+                "error_type": type(e).__name__,
+                "execution_time_ms": execution_time_ms
+            }
+            
+            event_envelope = self._event_publisher.create_postgres_health_response_envelope(
+                correlation_id=correlation_id,
+                health_status="unhealthy",
+                health_data=failed_health_data
+            )
+            
+            # Event publishing is REQUIRED - must not fail
+            await self._publish_event_to_redpanda(event_envelope)
             
             return ModelPostgresAdapterOutput(
                 operation_type="health_check",

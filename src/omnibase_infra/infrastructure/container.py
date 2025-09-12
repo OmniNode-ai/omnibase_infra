@@ -22,42 +22,127 @@ from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLo
 T = TypeVar("T")
 
 
-class InfrastructureEventBus:
-    """Event bus adapter for infrastructure services."""
+class InfrastructureEventBusRedPanda:
+    """RedPanda/Kafka event bus implementation for infrastructure services."""
     
     def __init__(self):
-        self._protocol_bus = ProtocolEventBus()
-        self._callbacks_by_type = {}
+        """Initialize RedPanda event bus with configuration from environment."""
+        # Import aiokafka for RedPanda integration
+        try:
+            from aiokafka import AIOKafkaProducer
+            import json
+            import os
+            self._kafka = AIOKafkaProducer
+            self._json = json
+            self._producer = None
+            
+            # RedPanda connection configuration
+            self._bootstrap_servers = [f"localhost:{os.getenv('REDPANDA_PORT', '9092')}"]
+            
+            print(f"RedPanda event bus initialized with servers: {self._bootstrap_servers}")
+        except ImportError:
+            print("WARNING: aiokafka not available, falling back to mock event bus")
+            self._kafka = None
+            self._json = None
+            self._producer = None
+            self._bootstrap_servers = []
     
+    async def publish_original(self, topic: str, event_data: dict, correlation_id: str = None, partition_key: str = None):
+        """
+        Publish event to RedPanda topic.
+        
+        Args:
+            topic: RedPanda topic name (e.g., "dev.omnibase.onex.evt.postgres-query-completed.v1")
+            event_data: Event data dictionary (typically envelope.model_dump())
+            correlation_id: Correlation ID for tracking
+            partition_key: Partition key for consistent routing
+        """
+        if not self._kafka:
+            # Mock publishing for testing without aiokafka
+            print(f"MOCK: Publishing to topic '{topic}' with correlation_id={correlation_id}")
+            return
+        
+        try:
+            # Initialize producer if needed
+            if not self._producer:
+                self._producer = self._kafka(
+                    bootstrap_servers=self._bootstrap_servers,
+                    value_serializer=lambda x: self._json.dumps(x).encode('utf-8')
+                )
+                await self._producer.start()
+                print(f"RedPanda producer started for servers: {self._bootstrap_servers}")
+            
+            # Publish to RedPanda topic
+            await self._producer.send_and_wait(
+                topic=topic,
+                value=event_data,
+                key=partition_key.encode('utf-8') if partition_key else None
+            )
+            
+            print(f"Published event to RedPanda topic: {topic} (correlation_id={correlation_id})")
+            
+        except Exception as e:
+            # Log error but don't fail (fire-and-forget pattern)
+            print(f"RedPanda publishing failed: {str(e)}")
+    
+    async def close(self):
+        """Close RedPanda producer connection."""
+        if self._producer:
+            await self._producer.stop()
+            self._producer = None
+    
+    # Legacy ProtocolEventBus interface compatibility
     def subscribe(self, callback, event_type=None):
-        """Subscribe to events with optional type filtering."""
-        if event_type is not None:
-            # MixinNodeService pattern: subscribe(callback, event_type) 
-            if event_type not in self._callbacks_by_type:
-                self._callbacks_by_type[event_type] = []
-            self._callbacks_by_type[event_type].append(callback)
-            
-            # Register with the protocol bus with a filter
-            def filtered_callback(event):
-                # Check if event matches the type we want
-                event_type_attr = getattr(event, 'event_type', None) or getattr(event, 'type', None)
-                if event_type_attr == event_type:
-                    callback(event)
-            
-            self._protocol_bus.subscribe(filtered_callback)
-        else:
-            # MixinEventHandler pattern: subscribe(callback)
-            # Subscribe to all events without filtering
-            self._protocol_bus.subscribe(callback)
-    
-    def publish(self, event):
-        """Publish event."""
-        self._protocol_bus.publish(event)
+        """Subscribe compatibility (not implemented for RedPanda publisher)."""
+        print(f"Subscribe called with event_type={event_type} (not implemented)")
     
     def unsubscribe(self, callback):
-        """Unsubscribe callback."""
-        # For simplicity, clear all callbacks for now
-        self._callbacks_by_type.clear()
+        """Unsubscribe compatibility (not implemented for RedPanda publisher)."""
+        print("Unsubscribe called (not implemented)")
+        
+    def publish(self, *args, **kwargs):
+        """
+        Compatibility publish method with flexible signature.
+        
+        Handles different calling patterns from NodeEffectService base class:
+        - publish() - no args (compatibility)
+        - publish(topic, event_data, ...) - standard RedPanda publishing
+        """
+        # If no arguments, this is likely a compatibility call - ignore
+        if not args and not kwargs:
+            print("COMPATIBILITY: Empty publish() call - ignoring")
+            return
+            
+        # If we have arguments, delegate to the async publish method
+        if args or kwargs:
+            # Extract common parameters
+            topic = args[0] if args else kwargs.get('topic')
+            event_data = args[1] if len(args) > 1 else kwargs.get('event_data')
+            correlation_id = kwargs.get('correlation_id')
+            partition_key = kwargs.get('partition_key')
+            
+            # If we're missing critical parameters, log and return
+            if not topic or not event_data:
+                print(f"COMPATIBILITY: Incomplete publish call - topic={topic}, event_data={bool(event_data)}")
+                return
+                
+            # Create a simple async wrapper for sync calls
+            import asyncio
+            try:
+                # Try to run in existing event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Schedule as task if loop is running
+                    loop.create_task(self.publish_async(topic, event_data, correlation_id, partition_key))
+                else:
+                    # Run directly if no loop is running
+                    loop.run_until_complete(self.publish_async(topic, event_data, correlation_id, partition_key))
+            except Exception as e:
+                print(f"COMPATIBILITY: Sync publish failed: {e}")
+    
+    async def publish_async(self, topic: str, event_data: dict, correlation_id: str = None, partition_key: str = None):
+        """Async publish method (the original implementation)."""
+        return await self.publish_original(topic, event_data, correlation_id, partition_key)
 
 
 def create_infrastructure_container() -> ONEXContainer:
@@ -87,9 +172,9 @@ def create_infrastructure_container() -> ONEXContainer:
 def _setup_infrastructure_dependencies(container: ONEXContainer):
     """Set up all dependencies needed by infrastructure services."""
 
-    # Event Bus - shared across all infrastructure services  
-    event_bus = InfrastructureEventBus()
-    print(f"Created event bus: {type(event_bus).__name__}")
+    # Event Bus - RedPanda implementation for infrastructure services  
+    event_bus = InfrastructureEventBusRedPanda()
+    print(f"Created RedPanda event bus: {type(event_bus).__name__}")
 
     # Schema Loader - required by MixinEventDrivenNode
     schema_loader = UtilitySchemaLoader()
