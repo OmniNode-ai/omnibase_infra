@@ -14,7 +14,9 @@
       "mcp__codanna__semantic_search_with_context",
       "mcp__archon__list_documents",
       "mcp__archon__update_document",
-      "Bash(agent-security-audit:*)"
+      "Bash(agent-security-audit:*)",
+      "mcp__archon__create_project",
+      "mcp__archon__create_task"
     ],
     "deny": [],
     "ask": []

@@ -20,8 +20,14 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
+
+from ..models.outbox.model_outbox_event_data import (
+    ModelOutboxEventData, 
+    ModelOutboxStatistics, 
+    ModelOutboxConfiguration
+)
 from enum import Enum
 
 import asyncpg
@@ -48,7 +54,7 @@ class OutboxEvent:
     aggregate_type: str
     aggregate_id: str
     event_type: str
-    event_data: Dict[str, Any]
+    event_data: ModelOutboxEventData
     status: EventStatus
     created_at: datetime
     updated_at: datetime
@@ -71,7 +77,7 @@ class OutboxEvent:
         if not self.partition_key:
             self.partition_key = self.aggregate_id
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> Dict[str, object]:
         """Convert to dictionary for serialization."""
         result = asdict(self)
         result['status'] = self.status.value
@@ -211,7 +217,7 @@ class PostgreSQLOutboxPattern:
                            aggregate_type: str,
                            aggregate_id: str,
                            event_type: str,
-                           event_data: Dict[str, Any],
+                           event_data: ModelOutboxEventData,
                            topic: str,
                            correlation_id: Optional[str] = None) -> str:
         """
@@ -567,7 +573,7 @@ class PostgreSQLOutboxPattern:
         except Exception as e:
             self._logger.error(f"Failed to cleanup old events: {str(e)}")
     
-    async def get_outbox_statistics(self) -> Dict[str, Any]:
+    async def get_outbox_statistics(self) -> ModelOutboxStatistics:
         """
         Get outbox statistics for monitoring.
         
