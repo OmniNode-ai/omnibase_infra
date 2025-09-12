@@ -12,16 +12,23 @@ when circuit is open but graceful degradation for non-critical operations.
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, Union
 from uuid import UUID, uuid4
 
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.core_error_codes import CoreErrorCode
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+
+# Import new environment configuration model
+from ..models.infrastructure.model_circuit_breaker_environment_config import (
+    ModelCircuitBreakerEnvironmentConfig,
+    ModelCircuitBreakerConfig
+)
 
 
 class CircuitBreakerState(Enum):
@@ -33,7 +40,11 @@ class CircuitBreakerState(Enum):
 
 @dataclass
 class CircuitBreakerConfig:
-    """Configuration for event bus circuit breaker."""
+    """Configuration for event bus circuit breaker.
+    
+    Note: This dataclass is maintained for backward compatibility.
+    For environment-specific configuration, use ModelCircuitBreakerEnvironmentConfig.
+    """
     failure_threshold: int = 5          # Number of failures before opening circuit
     recovery_timeout: int = 60          # Seconds before transitioning to half-open
     success_threshold: int = 3          # Successes needed in half-open to close
@@ -41,6 +52,19 @@ class CircuitBreakerConfig:
     max_queue_size: int = 1000         # Max queued events when circuit is open
     dead_letter_enabled: bool = True   # Enable dead letter queue for failed events
     graceful_degradation: bool = True  # Allow operations to continue without events
+    
+    @classmethod
+    def from_environment_config(cls, env_config: ModelCircuitBreakerConfig) -> "CircuitBreakerConfig":
+        """Create CircuitBreakerConfig from environment-specific configuration."""
+        return cls(
+            failure_threshold=env_config.failure_threshold,
+            recovery_timeout=env_config.recovery_timeout,
+            success_threshold=env_config.success_threshold,
+            timeout_seconds=env_config.timeout_seconds,
+            max_queue_size=env_config.max_queue_size,
+            dead_letter_enabled=env_config.dead_letter_enabled,
+            graceful_degradation=env_config.graceful_degradation
+        )
 
 
 @dataclass
@@ -68,11 +92,21 @@ class EventBusCircuitBreaker:
     - Dead letter queue for permanently failed events
     - Recovery testing and automatic circuit closing
     - Comprehensive metrics and observability
+    - Environment-specific configuration support
     """
     
-    def __init__(self, config: CircuitBreakerConfig):
-        """Initialize circuit breaker with configuration."""
-        self.config = config
+    def __init__(self, config: Union[CircuitBreakerConfig, ModelCircuitBreakerConfig]):
+        """Initialize circuit breaker with configuration.
+        
+        Args:
+            config: Circuit breaker configuration (legacy dataclass or new Pydantic model)
+        """
+        # Convert Pydantic model to dataclass for internal use (backward compatibility)
+        if isinstance(config, ModelCircuitBreakerConfig):
+            self.config = CircuitBreakerConfig.from_environment_config(config)
+        else:
+            self.config = config
+            
         self.state = CircuitBreakerState.CLOSED
         self.failure_count = 0
         self.success_count = 0
@@ -82,6 +116,83 @@ class EventBusCircuitBreaker:
         self.metrics = EventBusMetrics()
         self.logger = logging.getLogger(f"{__name__}.EventBusCircuitBreaker")
         self._lock = asyncio.Lock()
+    
+    @classmethod
+    def from_environment(
+        cls, 
+        environment_config: Optional[ModelCircuitBreakerEnvironmentConfig] = None,
+        environment: Optional[str] = None
+    ) -> "EventBusCircuitBreaker":
+        """Create circuit breaker with environment-specific configuration.
+        
+        Args:
+            environment_config: Environment configuration model (optional)
+            environment: Target environment name (optional, detected from ENV if not provided)
+            
+        Returns:
+            EventBusCircuitBreaker configured for the environment
+            
+        Raises:
+            OnexError: If environment detection or configuration fails
+        """
+        # Use provided environment config or create default
+        if environment_config is None:
+            environment_config = ModelCircuitBreakerEnvironmentConfig.create_default_config()
+        
+        # Detect environment from ENV variable if not provided
+        if environment is None:
+            environment = cls._detect_environment()
+        
+        try:
+            env_config = environment_config.get_config_for_environment(
+                environment, 
+                default_environment="development"
+            )
+            
+            # Create circuit breaker with environment-specific config
+            instance = cls(env_config)
+            instance.logger.info(f"Circuit breaker initialized for environment: {environment}")
+            return instance
+            
+        except Exception as e:
+            raise OnexError(
+                code=CoreErrorCode.CONFIGURATION_ERROR,
+                message=f"Failed to create environment-specific circuit breaker: {str(e)}"
+            ) from e
+    
+    @staticmethod
+    def _detect_environment() -> str:
+        """Detect current deployment environment from environment variables.
+        
+        Returns:
+            Environment name (production, staging, or development)
+        """
+        # Check multiple common environment variable patterns
+        env_vars_to_check = [
+            "ENVIRONMENT",
+            "ENV", 
+            "DEPLOYMENT_ENV",
+            "NODE_ENV",
+            "OMNIBASE_ENV",
+            "ONEX_ENV"
+        ]
+        
+        for env_var in env_vars_to_check:
+            env_value = os.getenv(env_var)
+            if env_value:
+                env_value = env_value.lower()
+                # Map common variations to standard environment names
+                if env_value in ["prod", "production", "live"]:
+                    return "production"
+                elif env_value in ["stage", "staging", "stg"]:
+                    return "staging"
+                elif env_value in ["dev", "development", "local"]:
+                    return "development"
+                elif env_value in ["test", "testing"]:
+                    return "development"  # Map test to development config
+        
+        # Default to development if no environment detected
+        return "development"
     
     async def publish_event(self, event: ModelOnexEvent, publisher_func: Callable) -> bool:
         """
@@ -310,6 +421,16 @@ class EventBusCircuitBreaker:
             "failure_count": self.failure_count,
             "queued_events": len(self.event_queue),
             "dead_letter_events": len(self.dead_letter_queue),
+            "configuration": {
+                "failure_threshold": self.config.failure_threshold,
+                "recovery_timeout": self.config.recovery_timeout,
+                "success_threshold": self.config.success_threshold,
+                "timeout_seconds": self.config.timeout_seconds,
+                "max_queue_size": self.config.max_queue_size,
+                "dead_letter_enabled": self.config.dead_letter_enabled,
+                "graceful_degradation": self.config.graceful_degradation,
+                "environment": self._detect_environment()
+            },
             "metrics": {
                 "total_events": self.metrics.total_events,
                 "successful_events": self.metrics.successful_events,

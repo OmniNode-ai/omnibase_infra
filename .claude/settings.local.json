@@ -16,7 +16,8 @@
       "mcp__archon__update_document",
       "Bash(agent-security-audit:*)",
       "mcp__archon__create_project",
-      "mcp__archon__create_task"
+      "mcp__archon__create_task",
+      "Bash(claude-agent:*)"
     ],
     "deny": [],
     "ask": []
