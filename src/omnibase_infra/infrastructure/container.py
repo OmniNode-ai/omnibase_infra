@@ -14,42 +14,101 @@ Per user requirements:
 
 import asyncio
 import json
+import logging
 import os
-from typing import Callable, Optional, Type, TypeVar, Union
+import time
+from typing import Callable, Optional, Type, TypeVar, Union, Dict, Any
 
 from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
 from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLoader
 
+# ONEX Security modules
+from omnibase_infra.security.credential_manager import get_credential_manager
+from omnibase_infra.security.tls_config import get_tls_manager
+from omnibase_infra.security.rate_limiter import get_rate_limiter
+
 T = TypeVar("T")
 
 
 class KafkaProducerPool:
-    """Singleton connection pool for Kafka producers to avoid connection overhead."""
+    """
+    Connection pool for Kafka producers with proper lifecycle management.
     
-    _instance = None
-    _producers = {}
-    _failed_producers = {}  # Track failed producers for cleanup
+    Replaces singleton pattern with dependency injection to prevent memory leaks
+    and improve testability. Implements proper cleanup and resource management.
+    """
     
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    def __init__(self, max_producers: int = 10, cleanup_interval: int = 300):
+        self._max_producers = max_producers
+        self._cleanup_interval = cleanup_interval
+        self._producers: Dict[str, Any] = {}
+        self._failed_producers: Dict[str, float] = {}
+        self._producer_usage: Dict[str, int] = {}  # Track usage count
+        self._last_cleanup = time.time()
+        self._logger = logging.getLogger(__name__)
+        
+        # Background cleanup task
+        self._cleanup_task: Optional[asyncio.Task] = None
+        self._start_background_cleanup()
     
-    def __init__(self):
-        # Only initialize once
-        if not hasattr(self, '_initialized'):
-            self._producers = {}
-            self._failed_producers = {}
-            self._initialized = True
+    def _start_background_cleanup(self):
+        """Start background cleanup task."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._background_cleanup_loop())
     
-    async def get_producer(self, bootstrap_servers: list, **config):
+    async def _background_cleanup_loop(self):
+        """Background loop for periodic cleanup."""
+        try:
+            while True:
+                await asyncio.sleep(self._cleanup_interval)
+                await self._cleanup_idle_producers()
+        except asyncio.CancelledError:
+            self._logger.info("Background cleanup task cancelled")
+        except Exception as e:
+            self._logger.error(f"Background cleanup error: {e}")
+    
+    async def _cleanup_idle_producers(self):
+        """Clean up idle and unhealthy producers."""
+        current_time = time.time()
+        producers_to_remove = []
+        
+        for servers_key, producer in self._producers.items():
+            # Check if producer is still healthy
+            if not await self._is_producer_healthy(producer):
+                producers_to_remove.append(servers_key)
+                continue
+            
+            # Remove low-usage producers if pool is at capacity
+            if (len(self._producers) > self._max_producers // 2 and
+                self._producer_usage.get(servers_key, 0) < 10):  # Low usage threshold
+                producers_to_remove.append(servers_key)
+        
+        # Clean up selected producers
+        for servers_key in producers_to_remove:
+            await self._remove_producer(servers_key)
+        
+        # Clean up old failure records
+        failed_to_remove = []
+        for servers_key, fail_time in self._failed_producers.items():
+            if current_time - fail_time > 3600:  # 1 hour cleanup
+                failed_to_remove.append(servers_key)
+        
+        for servers_key in failed_to_remove:
+            del self._failed_producers[servers_key]
+        
+        if producers_to_remove or failed_to_remove:
+            self._logger.debug(f"Cleaned up {len(producers_to_remove)} producers, "
+                              f"{len(failed_to_remove)} failure records")
+    
+    async def get_producer(self, bootstrap_servers: list, security_config=None, **config):
         """
         Get or create a producer for the given server configuration.
         
         Args:
             bootstrap_servers: List of Kafka bootstrap servers
+            security_config: Security configuration for TLS/SASL
             **config: Additional producer configuration
             
         Returns:
@@ -63,18 +122,27 @@ class KafkaProducerPool:
             producer = self._producers[servers_key]
             # Validate producer is still connected
             if await self._is_producer_healthy(producer):
+                # Track usage
+                self._producer_usage[servers_key] = self._producer_usage.get(servers_key, 0) + 1
                 return producer
             else:
                 # Remove unhealthy producer
-                print(f"Removing unhealthy Kafka producer for servers: {bootstrap_servers}")
+                self._logger.info(f"Removing unhealthy Kafka producer for servers: {bootstrap_servers}")
                 await self._remove_producer(servers_key)
         
         # Skip creation if this producer has failed recently
         if servers_key in self._failed_producers:
             fail_time = self._failed_producers[servers_key]
-            if (asyncio.get_event_loop().time() - fail_time) < 60:  # 60 second backoff
-                print(f"Skipping producer creation for {servers_key} - recent failure")
+            if (time.time() - fail_time) < 60:  # 60 second backoff
+                self._logger.debug(f"Skipping producer creation for {servers_key} - recent failure")
                 return None
+        
+        # Check pool capacity
+        if len(self._producers) >= self._max_producers:
+            # Remove least used producer to make room
+            least_used_key = min(self._producer_usage.items(), key=lambda x: x[1])[0]
+            await self._remove_producer(least_used_key)
+            self._logger.info(f"Removed least used producer {least_used_key} to make room")
         
         # Create new producer
         try:
@@ -93,24 +161,49 @@ class KafkaProducerPool:
                 **config
             }
             
+            # Add security configuration if provided
+            if security_config:
+                if security_config.security_protocol != "PLAINTEXT":
+                    producer_config['security_protocol'] = security_config.security_protocol
+                    
+                    # SASL configuration
+                    if security_config.sasl_mechanism:
+                        producer_config['sasl_mechanism'] = security_config.sasl_mechanism
+                        producer_config['sasl_plain_username'] = security_config.sasl_username
+                        producer_config['sasl_plain_password'] = security_config.sasl_password
+                    
+                    # SSL configuration  
+                    if security_config.security_protocol in ['SSL', 'SASL_SSL']:
+                        if security_config.ssl_ca_location:
+                            producer_config['ssl_cafile'] = security_config.ssl_ca_location
+                        if security_config.ssl_cert_location:
+                            producer_config['ssl_certfile'] = security_config.ssl_cert_location
+                        if security_config.ssl_key_location:
+                            producer_config['ssl_keyfile'] = security_config.ssl_key_location
+                        if security_config.ssl_key_password:
+                            producer_config['ssl_password'] = security_config.ssl_key_password
+            
             producer = AIOKafkaProducer(**producer_config)
             await producer.start()
             self._producers[servers_key] = producer
+            
+            # Initialize usage tracking
+            self._producer_usage[servers_key] = 1
             
             # Clear failure tracking on success
             if servers_key in self._failed_producers:
                 del self._failed_producers[servers_key]
             
-            print(f"Created new Kafka producer in pool for servers: {bootstrap_servers}")
+            self._logger.info(f"Created new Kafka producer in pool for servers: {bootstrap_servers}")
             return producer
             
         except ImportError:
-            print("WARNING: aiokafka not available, producer pool disabled")
+            self._logger.warning("aiokafka not available, producer pool disabled")
             return None
         except Exception as e:
-            print(f"Failed to create Kafka producer: {e}")
+            self._logger.error(f"Failed to create Kafka producer: {e}")
             # Track failure for backoff
-            self._failed_producers[servers_key] = asyncio.get_event_loop().time()
+            self._failed_producers[servers_key] = time.time()
             return None
     
     async def _is_producer_healthy(self, producer) -> bool:
@@ -129,21 +222,49 @@ class KafkaProducerPool:
             producer = self._producers[servers_key]
             try:
                 await producer.stop()
-                print(f"Stopped producer for servers: {servers_key}")
+                self._logger.debug(f"Stopped producer for servers: {servers_key}")
             except Exception as e:
-                print(f"Error stopping producer: {e}")
+                self._logger.error(f"Error stopping producer: {e}")
             finally:
                 del self._producers[servers_key]
+                # Clean up usage tracking
+                if servers_key in self._producer_usage:
+                    del self._producer_usage[servers_key]
     
     async def close_all(self):
-        """Close all producers in the pool."""
-        for servers_key, producer in self._producers.items():
+        """Close all producers in the pool and cleanup resources."""
+        # Cancel background cleanup task
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Close all producers
+        for servers_key, producer in list(self._producers.items()):
             try:
                 await producer.stop()
-                print(f"Closed Kafka producer for servers: {servers_key}")
+                self._logger.info(f"Closed Kafka producer for servers: {servers_key}")
             except Exception as e:
-                print(f"Error closing Kafka producer: {e}")
+                self._logger.error(f"Error closing Kafka producer: {e}")
+        
+        # Clear all tracking data
         self._producers.clear()
+        self._producer_usage.clear()
+        self._failed_producers.clear()
+        
+        self._logger.info("Kafka producer pool closed")
+    
+    def get_pool_stats(self) -> Dict[str, Any]:
+        """Get producer pool statistics."""
+        return {
+            "active_producers": len(self._producers),
+            "max_producers": self._max_producers,
+            "failed_producers": len(self._failed_producers),
+            "total_usage": sum(self._producer_usage.values()),
+            "cleanup_task_running": self._cleanup_task is not None and not self._cleanup_task.done()
+        }
 
 
 class RedPandaEventBus(ProtocolEventBus):
@@ -155,17 +276,28 @@ class RedPandaEventBus(ProtocolEventBus):
     """
     
     def __init__(self, credentials=None, **kwargs):
-        """Initialize RedPanda event bus with proper protocol compliance."""
-        # RedPanda connection configuration - use ONEX environment patterns
-        redpanda_host = os.getenv('REDPANDA_HOST', 'localhost')
-        redpanda_port = os.getenv('REDPANDA_EXTERNAL_PORT', '29102')
-        self._bootstrap_servers = [f"{redpanda_host}:{redpanda_port}"]
+        """Initialize RedPanda event bus with proper protocol compliance and security."""
+        # Get secure credentials from credential manager
+        credential_manager = get_credential_manager()
+        event_bus_credentials = credential_manager.get_event_bus_credentials()
+        
+        self._bootstrap_servers = event_bus_credentials.bootstrap_servers
+        self._security_config = event_bus_credentials
+        
+        # Get TLS configuration
+        tls_manager = get_tls_manager()
+        self._tls_config = tls_manager.get_kafka_tls_config()
+        
+        # Get rate limiter for event publishing
+        self._rate_limiter = get_rate_limiter()
         
         # Use producer pool for efficient connection management
-        self._producer_pool = KafkaProducerPool()
+        self._producer_pool = KafkaProducerPool(max_producers=5, cleanup_interval=300)
         self._producer = None
+        self._logger = logging.getLogger(__name__)
         
-        print(f"RedPanda event bus initialized with servers: {self._bootstrap_servers}")
+        self._logger.info(f"RedPanda event bus initialized with servers: {self._bootstrap_servers}")
+        self._logger.info(f"Security protocol: {self._tls_config.security_protocol}")
         
         # Protocol-compliant subscriber management
         self._subscribers = []
@@ -187,26 +319,42 @@ class RedPandaEventBus(ProtocolEventBus):
                 # Run directly if no loop is running
                 loop.run_until_complete(self.publish_async(event))
         except Exception as e:
-            print(f"RedPanda sync publish failed: {str(e)}")
+            self._logger.error(f"RedPanda sync publish failed: {str(e)}")
     
     async def publish_async(self, event: ModelOnexEvent) -> None:
         """
-        Publish an event to the bus (asynchronous) with retry and exponential backoff.
+        Publish an event to the bus (asynchronous) with retry, rate limiting, and exponential backoff.
         
         Args:
             event: OnexEvent to emit
         """
+        # Extract client ID for rate limiting (use correlation ID or default)
+        client_id = str(event.correlation_id) if event.correlation_id else "default_client"
+        
+        # Apply rate limiting
+        rate_limit_allowed = await self._rate_limiter.check_rate_limit(
+            client_id=client_id,
+            operation_type="event_publish"
+        )
+        
+        if not rate_limit_allowed:
+            self._logger.warning(f"Rate limit exceeded for client {client_id}, event publish denied")
+            return
+        
         max_retries = int(os.getenv('REDPANDA_MAX_RETRIES', '3'))
         base_delay = float(os.getenv('REDPANDA_BASE_DELAY_SECONDS', '0.1'))
         
         for attempt in range(max_retries + 1):
             try:
-                # Get producer from pool (creates if needed)
-                producer = await self._producer_pool.get_producer(self._bootstrap_servers)
+                # Get producer from pool (creates if needed) with security config
+                producer = await self._producer_pool.get_producer(
+                    self._bootstrap_servers,
+                    security_config=self._security_config
+                )
                 
                 if not producer:
                     # Mock publishing for testing without aiokafka
-                    print(f"MOCK: Publishing OnexEvent {event.event_type} with correlation_id={event.correlation_id}")
+                    self._logger.info(f"MOCK: Publishing OnexEvent {event.event_type} with correlation_id={event.correlation_id}")
                     return
                 
                 # Convert OnexEvent to RedPanda topic and message
@@ -221,18 +369,18 @@ class RedPandaEventBus(ProtocolEventBus):
                     key=partition_key.encode('utf-8') if partition_key else None
                 )
                 
-                print(f"Published OnexEvent to RedPanda topic: {topic} (correlation_id={event.correlation_id})")
+                self._logger.info(f"Published OnexEvent to RedPanda topic: {topic} (correlation_id={event.correlation_id})")
                 return  # Success - exit retry loop
                 
             except Exception as e:
                 if attempt == max_retries:
                     # Final attempt failed - log error but don't raise
-                    print(f"RedPanda async publish failed after {max_retries + 1} attempts: {str(e)}")
+                    self._logger.error(f"RedPanda async publish failed after {max_retries + 1} attempts: {str(e)}")
                     return
                 
                 # Calculate exponential backoff delay
                 delay = base_delay * (2 ** attempt)
-                print(f"RedPanda publish attempt {attempt + 1} failed, retrying in {delay:.2f}s: {str(e)}")
+                self._logger.warning(f"RedPanda publish attempt {attempt + 1} failed, retrying in {delay:.2f}s: {str(e)}")
                 await asyncio.sleep(delay)
     
     def subscribe(self, callback: Callable[[ModelOnexEvent], None]) -> None:
@@ -244,7 +392,7 @@ class RedPandaEventBus(ProtocolEventBus):
         """
         if callback not in self._subscribers:
             self._subscribers.append(callback)
-            print(f"Subscribed callback to RedPanda event bus")
+            self._logger.debug(f"Subscribed callback to RedPanda event bus")
     
     async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None]) -> None:
         """
@@ -264,7 +412,7 @@ class RedPandaEventBus(ProtocolEventBus):
         """
         if callback in self._subscribers:
             self._subscribers.remove(callback)
-            print(f"Unsubscribed callback from RedPanda event bus")
+            self._logger.debug(f"Unsubscribed callback from RedPanda event bus")
     
     async def unsubscribe_async(self, callback: Callable[[ModelOnexEvent], None]) -> None:
         """
@@ -278,7 +426,7 @@ class RedPandaEventBus(ProtocolEventBus):
     def clear(self) -> None:
         """Remove all subscribers from the event bus."""
         self._subscribers.clear()
-        print("Cleared all subscribers from RedPanda event bus")
+        self._logger.info("Cleared all subscribers from RedPanda event bus")
     
     async def close(self):
         """Close RedPanda producer connection."""
@@ -351,18 +499,21 @@ def create_infrastructure_container() -> ONEXContainer:
 def _setup_infrastructure_dependencies(container: ONEXContainer):
     """Set up all dependencies needed by infrastructure services."""
 
+    # Get logger for container setup
+    logger = logging.getLogger(__name__)
+    
     # Event Bus - Proper ProtocolEventBus implementation for RedPanda
     event_bus = RedPandaEventBus()
-    print(f"Created RedPanda event bus: {type(event_bus).__name__}")
+    logger.info(f"Created RedPanda event bus: {type(event_bus).__name__}")
 
     # Schema Loader - required by MixinEventDrivenNode
     schema_loader = UtilitySchemaLoader()
-    print(f"Created schema loader: {type(schema_loader).__name__}")
+    logger.info(f"Created schema loader: {type(schema_loader).__name__}")
 
     # PostgreSQL Connection Manager - required by infrastructure services
     from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
     connection_manager = PostgresConnectionManager()
-    print(f"Created connection manager: {type(connection_manager).__name__}")
+    logger.info(f"Created connection manager: {type(connection_manager).__name__}")
     
     # Register services in the container's service registry
     _register_service(container, "event_bus", event_bus)
@@ -373,10 +524,10 @@ def _setup_infrastructure_dependencies(container: ONEXContainer):
     _register_service(container, "PostgresConnectionManager", connection_manager)
     
     # Verify registration
-    print(f"Registered services verification:")
-    print(f"  ProtocolEventBus: {type(container.get_service('ProtocolEventBus')).__name__ if container.get_service('ProtocolEventBus') else 'None'}")
-    print(f"  event_bus: {type(container.get_service('event_bus')).__name__ if container.get_service('event_bus') else 'None'}")
-    print(f"  postgres_connection_manager: {type(container.get_service('postgres_connection_manager')).__name__ if container.get_service('postgres_connection_manager') else 'None'}")
+    logger.info("Registered services verification:")
+    logger.info(f"  ProtocolEventBus: {type(container.get_service('ProtocolEventBus')).__name__ if container.get_service('ProtocolEventBus') else 'None'}")
+    logger.info(f"  event_bus: {type(container.get_service('event_bus')).__name__ if container.get_service('event_bus') else 'None'}")
+    logger.info(f"  postgres_connection_manager: {type(container.get_service('postgres_connection_manager')).__name__ if container.get_service('postgres_connection_manager') else 'None'}")
 
 
 def _register_service(container: ONEXContainer, service_name: str, service_instance):

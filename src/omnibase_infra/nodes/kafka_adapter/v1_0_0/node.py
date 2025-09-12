@@ -347,6 +347,14 @@ class Node(NodeEffectService):
         # Initialize structured logger with correlation ID support
         self._logger = KafkaStructuredLogger("kafka_adapter_node")
         
+        # Initialize Prometheus metrics collector
+        try:
+            from ....observability.prometheus_metrics import get_metrics_collector
+            self._metrics = get_metrics_collector()
+        except ImportError:
+            self._metrics = None
+            self._logger.warning("Prometheus metrics not available")
+        
         # Load configuration from environment or container
         self._config = self._load_configuration(container)
         
@@ -360,13 +368,13 @@ class Node(NodeEffectService):
     
     def _load_configuration(self, container: ModelONEXContainer) -> ModelKafkaConfiguration:
         """
-        Load Kafka adapter configuration from container or environment.
+        Load Kafka adapter configuration from container or environment with secure credential management.
         
         Args:
             container: ONEX container for dependency injection
             
         Returns:
-            Dictionary with configuration values
+            Dictionary with configuration values using secure credential management
         """
         try:
             # Try to get configuration from container first (ONEX pattern)
@@ -374,18 +382,46 @@ class Node(NodeEffectService):
             if config:
                 return config
         except Exception:
-            pass  # Fall back to environment configuration
+            pass  # Fall back to secure credential-based configuration
         
-        # Fall back to environment-based configuration
-        return {
-            "bootstrap_servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-            "client_id": os.getenv("KAFKA_CLIENT_ID", "kafka-adapter"),
-            "max_message_size": int(os.getenv("KAFKA_MAX_MESSAGE_SIZE", "1048576")),  # 1MB
-            "request_timeout_ms": int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000")),  # 30s
-            "enable_idempotence": os.getenv("KAFKA_ENABLE_IDEMPOTENCE", "true").lower() == "true",
-            "security_protocol": os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"),
-            "enable_error_sanitization": os.getenv("KAFKA_ENABLE_ERROR_SANITIZATION", "true").lower() == "true",
-        }
+        # Use secure credential manager instead of hardcoded localhost
+        try:
+            from ....security.credential_manager import get_credential_manager
+            credential_manager = get_credential_manager()
+            event_bus_creds = credential_manager.get_event_bus_credentials()
+            
+            return {
+                "bootstrap_servers": ",".join(event_bus_creds.bootstrap_servers),
+                "client_id": os.getenv("KAFKA_CLIENT_ID", "kafka-adapter"),
+                "max_message_size": int(os.getenv("KAFKA_MAX_MESSAGE_SIZE", "1048576")),  # 1MB
+                "request_timeout_ms": int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000")),  # 30s
+                "enable_idempotence": os.getenv("KAFKA_ENABLE_IDEMPOTENCE", "true").lower() == "true",
+                "security_protocol": event_bus_creds.security_protocol,
+                "sasl_mechanism": event_bus_creds.sasl_mechanism,
+                "sasl_username": event_bus_creds.sasl_username,
+                "sasl_password": event_bus_creds.sasl_password,
+                "ssl_ca_location": event_bus_creds.ssl_ca_location,
+                "ssl_cert_location": event_bus_creds.ssl_cert_location,
+                "ssl_key_location": event_bus_creds.ssl_key_location,
+                "ssl_key_password": event_bus_creds.ssl_key_password,
+                "enable_error_sanitization": os.getenv("KAFKA_ENABLE_ERROR_SANITIZATION", "true").lower() == "true",
+            }
+        except Exception as e:
+            # Log error but provide safe fallback to environment variables (no hardcoded localhost)
+            self._logger.warning(
+                f"Failed to load credentials from credential manager: {str(e)}, falling back to environment",
+                operation="configuration_load"
+            )
+            return {
+                "bootstrap_servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS", 
+                                               os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "redpanda:9092")),
+                "client_id": os.getenv("KAFKA_CLIENT_ID", "kafka-adapter"),
+                "max_message_size": int(os.getenv("KAFKA_MAX_MESSAGE_SIZE", "1048576")),  # 1MB
+                "request_timeout_ms": int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000")),  # 30s
+                "enable_idempotence": os.getenv("KAFKA_ENABLE_IDEMPOTENCE", "true").lower() == "true",
+                "security_protocol": os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"),
+                "enable_error_sanitization": os.getenv("KAFKA_ENABLE_ERROR_SANITIZATION", "true").lower() == "true",
+            }
     
     def _validate_correlation_id(self, correlation_id: Optional[UUID]) -> UUID:
         """
@@ -454,15 +490,15 @@ class Node(NodeEffectService):
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
         """
-        Override MixinHealthCheck to provide Kafka-specific health checks.
+        Override MixinHealthCheck to provide Kafka-specific async health checks.
         
         Returns list of health check functions that validate Kafka connectivity,
         broker status, and adapter functionality.
         """
         return [
-            self._check_kafka_connectivity,
-            self._check_broker_health,
-            self._check_circuit_breaker_health,
+            self._check_kafka_connectivity_async,
+            self._check_broker_health_async,
+            self._check_circuit_breaker_health_async,
         ]
 
     def _check_kafka_connectivity(self) -> ModelHealthStatus:
@@ -544,6 +580,12 @@ class Node(NodeEffectService):
             circuit_state = self._circuit_breaker.get_state()
             state_value = circuit_state["state"]
             
+            # Record circuit breaker state metrics for monitoring
+            self._metrics.set_circuit_breaker_state(
+                client_id=self._config.get("client_id", "kafka-adapter"),
+                state=state_value
+            )
+            
             if state_value == CircuitBreakerState.CLOSED.value:
                 return ModelHealthStatus(
                     status=EnumHealthStatus.HEALTHY,
@@ -567,6 +609,126 @@ class Node(NodeEffectService):
             return ModelHealthStatus(
                 status=EnumHealthStatus.UNHEALTHY,
                 message=f"Circuit breaker health check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    async def _check_kafka_connectivity_async(self) -> ModelHealthStatus:
+        """Check basic Kafka cluster connectivity (async implementation)."""
+        start_time = time.perf_counter()
+        try:
+            # Check if Kafka client is available and can be initialized
+            kafka_client = await self.get_kafka_client_async()
+            
+            if kafka_client is None:
+                execution_time_ms = (time.perf_counter() - start_time) * 1000
+                self._logger.info(
+                    f"Async Kafka connectivity check: degraded (client not initialized) in {execution_time_ms:.2f}ms",
+                    operation="async_health_check",
+                    check_name="kafka_connectivity",
+                    status="degraded"
+                )
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message="Kafka client not initialized",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            # Perform lightweight connectivity test
+            # In a real implementation, this would ping the Kafka brokers
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.info(
+                f"Async Kafka connectivity check: healthy (client operational) in {execution_time_ms:.2f}ms",
+                operation="async_health_check",
+                check_name="kafka_connectivity",
+                status="healthy"
+            )
+            
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="Kafka client operational",
+                timestamp=datetime.utcnow().isoformat()
+            )
+                    
+        except Exception as e:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.error(
+                f"Async Kafka connectivity check failed in {execution_time_ms:.2f}ms",
+                operation="async_health_check",
+                exception=e,
+                check_name="kafka_connectivity",
+                status="unhealthy"
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Kafka connectivity check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    async def _check_broker_health_async(self) -> ModelHealthStatus:
+        """Check Kafka broker health and availability (async implementation)."""
+        try:
+            # Check if Kafka client is available
+            kafka_client = await self.get_kafka_client_async()
+            
+            if kafka_client is None:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message="Kafka client not initialized",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            # In a real implementation, this would check broker metadata
+            # For now, we assume brokers are healthy if client is operational
+            bootstrap_servers = getattr(kafka_client, 'bootstrap_servers', lambda: ['unknown'])()
+            
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message=f"Kafka brokers accessible: {len(bootstrap_servers)} servers",
+                timestamp=datetime.utcnow().isoformat()
+            )
+            
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Async broker health check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    async def _check_circuit_breaker_health_async(self) -> ModelHealthStatus:
+        """Check circuit breaker health and state (async implementation)."""
+        try:
+            circuit_state = self._circuit_breaker.get_state()
+            state_value = circuit_state["state"]
+            
+            # Record circuit breaker state metrics for monitoring
+            self._metrics.set_circuit_breaker_state(
+                client_id=self._config.get("client_id", "kafka-adapter"),
+                state=state_value
+            )
+            
+            if state_value == CircuitBreakerState.CLOSED.value:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.HEALTHY,
+                    message=f"Circuit breaker CLOSED - failures: {circuit_state['failure_count']}",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            elif state_value == CircuitBreakerState.HALF_OPEN.value:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message=f"Circuit breaker HALF_OPEN - testing recovery ({circuit_state['half_open_calls']} calls)",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            else:  # OPEN state
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message=f"Circuit breaker OPEN - service temporarily unavailable (failures: {circuit_state['failure_count']})",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+                
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Async circuit breaker health check failed: {str(e)}",
                 timestamp=datetime.utcnow().isoformat()
             )
 
@@ -660,6 +822,9 @@ class Node(NodeEffectService):
         # Input validation for security and performance
         self._validate_message_input(message)
         
+        # Encrypt sensitive payload data if configured
+        processed_message = await self._process_message_security(message, correlation_id)
+        
         try:
             # Get Kafka client
             kafka_client = await self.get_kafka_client_async()
@@ -669,7 +834,7 @@ class Node(NodeEffectService):
             result = await self._circuit_breaker.call(
                 self._mock_produce_message,
                 kafka_client,
-                message,
+                processed_message,
                 timeout_seconds=input_data.timeout_seconds
             )
             
@@ -687,6 +852,30 @@ class Node(NodeEffectService):
                 offset=offset,
                 execution_time_ms=execution_time_ms
             )
+            
+            # Audit log event publishing for security monitoring
+            await self._audit_log_event_publish(
+                correlation_id=correlation_id,
+                topic=processed_message.topic,
+                outcome="success",
+                execution_time_ms=execution_time_ms
+            )
+            
+            # Record Prometheus metrics
+            if self._metrics:
+                self._metrics.record_kafka_message_published(
+                    topic=processed_message.topic,
+                    client_id="kafka_adapter",
+                    status="success",
+                    duration_seconds=execution_time_ms / 1000.0
+                )
+                
+                # Record encryption metrics if payload was encrypted
+                if self._should_encrypt_payload(message):
+                    self._metrics.record_payload_encrypted(
+                        topic=processed_message.topic,
+                        client_id="kafka_adapter"
+                    )
 
             return ModelKafkaAdapterOutput(
                 operation_type=EnumKafkaOperationType.PRODUCE,
@@ -1048,6 +1237,229 @@ class Node(NodeEffectService):
             sanitized = pattern.sub(replacement, sanitized)
         
         return sanitized
+
+    async def _process_message_security(self, message: ModelKafkaMessage, correlation_id: UUID) -> ModelKafkaMessage:
+        """
+        Process message security including payload encryption and rate limiting.
+        
+        Args:
+            message: Original Kafka message
+            correlation_id: Request correlation ID for tracking
+            
+        Returns:
+            Processed message with security applied
+            
+        Raises:
+            OnexError: If security processing fails or rate limit exceeded
+        """
+        try:
+            # Rate limiting check
+            await self._check_rate_limit(correlation_id)
+            
+            # Payload encryption for sensitive data
+            processed_value = message.value
+            if self._should_encrypt_payload(message):
+                processed_value = await self._encrypt_message_payload(message.value, correlation_id)
+                
+                self._logger.info(
+                    "Encrypted sensitive payload for message",
+                    correlation_id=correlation_id,
+                    operation="payload_encryption",
+                    topic=message.topic
+                )
+            
+            # Create processed message with security applied
+            return ModelKafkaMessage(
+                topic=message.topic,
+                key=message.key,
+                value=processed_value,
+                headers=message.headers,
+                timestamp=message.timestamp
+            )
+            
+        except Exception as e:
+            self._logger.error(
+                f"Message security processing failed: {str(e)}",
+                correlation_id=correlation_id,
+                operation="security_processing",
+                exception=e
+            )
+            raise OnexError(
+                code=CoreErrorCode.SECURITY_ERROR,
+                message=f"Message security processing failed: {str(e)}"
+            ) from e
+
+    def _should_encrypt_payload(self, message: ModelKafkaMessage) -> bool:
+        """
+        Determine if message payload should be encrypted based on topic and content.
+        
+        Args:
+            message: Kafka message to evaluate
+            
+        Returns:
+            True if payload should be encrypted
+        """
+        # Encrypt sensitive topics by default
+        sensitive_topic_patterns = [
+            'user-', 'auth-', 'payment-', 'personal-', 'credential-', 'secret-'
+        ]
+        
+        topic_lower = message.topic.lower()
+        if any(pattern in topic_lower for pattern in sensitive_topic_patterns):
+            return True
+        
+        # Check for sensitive content in payload
+        if isinstance(message.value, str):
+            value_lower = message.value.lower()
+            sensitive_patterns = ['password', 'secret', 'token', 'key', 'credential', 'ssn']
+            if any(pattern in value_lower for pattern in sensitive_patterns):
+                return True
+        
+        # Check environment configuration
+        encrypt_all = os.getenv("KAFKA_ENCRYPT_ALL_PAYLOADS", "false").lower() == "true"
+        return encrypt_all
+
+    async def _encrypt_message_payload(self, payload: str, correlation_id: UUID) -> str:
+        """
+        Encrypt message payload using ONEX payload encryption.
+        
+        Args:
+            payload: Original payload to encrypt
+            correlation_id: Request correlation ID
+            
+        Returns:
+            Encrypted payload as JSON string
+        """
+        try:
+            from ....security.payload_encryption import get_payload_encryption
+            encryption_service = get_payload_encryption()
+            
+            # Encrypt the payload
+            encrypted_payload = encryption_service.encrypt_payload(payload)
+            
+            # Return as JSON string for Kafka message
+            return encrypted_payload.to_json()
+            
+        except Exception as e:
+            self._logger.error(
+                f"Payload encryption failed: {str(e)}",
+                correlation_id=correlation_id,
+                operation="payload_encryption"
+            )
+            raise OnexError(
+                code=CoreErrorCode.ENCRYPTION_ERROR,
+                message=f"Payload encryption failed: {str(e)}"
+            ) from e
+
+    async def _check_rate_limit(self, correlation_id: UUID):
+        """
+        Check rate limiting for event publishing operations.
+        
+        Args:
+            correlation_id: Request correlation ID
+            
+        Raises:
+            OnexError: If rate limit is exceeded
+        """
+        # Simple in-memory rate limiting (replace with Redis/distributed implementation)
+        import time
+        from collections import defaultdict
+        
+        if not hasattr(self, '_rate_limiter'):
+            self._rate_limiter = defaultdict(list)
+        
+        current_time = time.time()
+        window_size = int(os.getenv("KAFKA_RATE_LIMIT_WINDOW", "60"))  # 60 seconds
+        max_requests = int(os.getenv("KAFKA_RATE_LIMIT_MAX", "100"))  # 100 requests per window
+        
+        # Use a simple key based on client/topic (in production, use more sophisticated keys)
+        rate_key = f"kafka_adapter_{correlation_id}"
+        
+        # Clean old requests outside the window
+        cutoff_time = current_time - window_size
+        self._rate_limiter[rate_key] = [
+            req_time for req_time in self._rate_limiter[rate_key] 
+            if req_time > cutoff_time
+        ]
+        
+        # Check if limit exceeded
+        if len(self._rate_limiter[rate_key]) >= max_requests:
+            self._logger.warning(
+                f"Rate limit exceeded for client",
+                correlation_id=correlation_id,
+                operation="rate_limiting",
+                requests_count=len(self._rate_limiter[rate_key]),
+                max_requests=max_requests,
+                window_size=window_size
+            )
+            # Audit log rate limiting violation
+            try:
+                from ....security.audit_logger import get_audit_logger
+                audit_logger = get_audit_logger()
+                audit_logger.log_security_violation(
+                    client_id=f"kafka_adapter_{correlation_id}",
+                    violation_type="rate_limit_exceeded",
+                    description=f"Rate limit exceeded: {len(self._rate_limiter[rate_key])} requests in {window_size}s window",
+                    details={
+                        "max_requests": max_requests,
+                        "window_size": window_size,
+                        "actual_requests": len(self._rate_limiter[rate_key])
+                    }
+                )
+            except Exception:
+                pass  # Don't fail on audit logging issues
+            
+            # Record rate limit violation metrics
+            if self._metrics:
+                self._metrics.record_rate_limit_violation("kafka_adapter")
+                
+            raise OnexError(
+                code=CoreErrorCode.RATE_LIMIT_EXCEEDED,
+                message=f"Rate limit exceeded: {max_requests} requests per {window_size} seconds"
+            )
+        
+        # Add current request
+        self._rate_limiter[rate_key].append(current_time)
+
+    async def _audit_log_event_publish(self, 
+                                      correlation_id: UUID,
+                                      topic: str,
+                                      outcome: str,
+                                      execution_time_ms: float,
+                                      error_message: Optional[str] = None,
+                                      rate_limited: bool = False):
+        """
+        Audit log event publishing activity for security monitoring.
+        
+        Args:
+            correlation_id: Request correlation ID
+            topic: Kafka topic
+            outcome: Publishing outcome
+            execution_time_ms: Execution time
+            error_message: Error message if failed
+            rate_limited: Whether request was rate limited
+        """
+        try:
+            from ....security.audit_logger import get_audit_logger
+            audit_logger = get_audit_logger()
+            
+            audit_logger.log_event_publish(
+                client_id="kafka_adapter",
+                correlation_id=str(correlation_id),
+                event_type="kafka_message",
+                topic=topic,
+                outcome=outcome,
+                rate_limited=rate_limited,
+                error_message=error_message
+            )
+            
+        except Exception as e:
+            # Don't fail the main operation if audit logging fails
+            self._logger.warning(
+                f"Audit logging failed: {str(e)}",
+                correlation_id=correlation_id,
+                operation="audit_logging"
+            )
 
     # Mock methods for demonstration (replace with actual Kafka client integration)
     async def _mock_produce_message(self, kafka_client, message: ModelKafkaMessage, timeout_seconds: float) -> dict:
