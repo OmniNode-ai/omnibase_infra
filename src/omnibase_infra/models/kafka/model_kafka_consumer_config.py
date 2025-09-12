@@ -1,7 +1,9 @@
 """Kafka consumer configuration model."""
 
-from typing import Dict, Any, Optional, List
+from typing import Optional, List
 from pydantic import BaseModel, Field
+
+from .model_kafka_security_config import ModelKafkaSecurityConfig
 
 
 class ModelKafkaConsumerConfig(BaseModel):
@@ -55,7 +57,7 @@ class ModelKafkaConsumerConfig(BaseModel):
         default="read_uncommitted",
         description="Transaction isolation level (read_uncommitted, read_committed)"
     )
-    security_config: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Security configuration (SSL, SASL, etc.)"
+    security_config: ModelKafkaSecurityConfig = Field(
+        default_factory=ModelKafkaSecurityConfig,
+        description="Strongly typed security configuration (SSL, SASL, etc.)"
     )

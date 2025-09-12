@@ -376,9 +376,10 @@ class CircuitBreakerTestSuite:
         # Wait for all tasks to complete
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Analyze results
+        # Analyze results using duck typing
         for result in results:
-            if isinstance(result, Exception):
+            if hasattr(result, '__traceback__') and hasattr(result, 'args'):
+                # Exception-like object
                 metrics.failed_calls += 1
             else:
                 metrics.successful_calls += 1

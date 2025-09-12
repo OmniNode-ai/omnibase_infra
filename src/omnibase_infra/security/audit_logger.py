@@ -93,7 +93,7 @@ class AuditEvent:
                 sanitized[key] = "***REDACTED***"
             elif key_lower in ['ssn', 'credit_card', 'account_number']:
                 sanitized[key] = "***REDACTED***"
-            elif isinstance(value, str) and len(value) > 500:
+            elif hasattr(value, '__len__') and hasattr(value, 'strip') and len(value) > 500:
                 # Truncate very long strings
                 sanitized[key] = value[:497] + "..."
             else:

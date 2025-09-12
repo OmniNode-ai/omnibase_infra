@@ -176,10 +176,12 @@ class ONEXPayloadEncryption:
                     CoreErrorCode.CONFIGURATION_ERROR
                 )
             
-            # Serialize payload
-            if isinstance(payload, dict):
+            # Serialize payload using duck typing
+            if hasattr(payload, 'keys') and hasattr(payload, 'items'):
+                # Dict-like object
                 payload_data = json.dumps(payload, sort_keys=True).encode('utf-8')
             else:
+                # String-like object
                 payload_data = payload.encode('utf-8')
             
             # Compress if requested
@@ -356,13 +358,15 @@ class ONEXPayloadEncryption:
             True if data appears to be encrypted payload
         """
         try:
-            if isinstance(data, str):
+            # Check if data is string-like and parse if needed
+            if hasattr(data, 'strip') and hasattr(data, 'replace'):
                 data = json.loads(data)
             
-            return (isinstance(data, dict) and 
+            # Check if data is dict-like and has required keys
+            return (hasattr(data, 'keys') and hasattr(data, 'get') and 
                    "encrypted_data" in data and 
                    "metadata" in data and
-                   "algorithm" in data["metadata"])
+                   "algorithm" in data.get("metadata", {}))
         
         except (json.JSONDecodeError, KeyError, TypeError):
             return False
@@ -392,7 +396,13 @@ class ONEXPayloadEncryption:
             # Check if field should be encrypted
             should_encrypt = any(pattern in key.lower() for pattern in sensitive_fields)
             
-            if should_encrypt and isinstance(value, (str, dict)):
+            # Check if value should be encrypted using duck typing
+            should_encrypt_value = should_encrypt and (
+                (hasattr(value, 'strip') and hasattr(value, 'replace')) or  # String-like
+                (hasattr(value, 'keys') and hasattr(value, 'items'))       # Dict-like
+            )
+            
+            if should_encrypt_value:
                 # Encrypt sensitive field
                 encrypted = self.encrypt_payload(value)
                 result[f"{key}_encrypted"] = encrypted.to_dict()

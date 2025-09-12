@@ -1,12 +1,13 @@
 """Kafka message model for message streaming integration."""
 
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Optional, Union
 from uuid import UUID
 from datetime import datetime
 
 from pydantic import BaseModel, Field
 
 from ...enums.enum_kafka_message_format import EnumKafkaMessageFormat
+from .model_kafka_message_payload import KafkaMessagePayload
 
 
 class ModelKafkaMessage(BaseModel):
@@ -14,7 +15,7 @@ class ModelKafkaMessage(BaseModel):
 
     topic: str = Field(description="Kafka topic name")
     key: Optional[Union[str, bytes]] = Field(default=None, description="Message key for partitioning")
-    value: Union[str, bytes, Dict[str, Any]] = Field(description="Message payload")
+    value: KafkaMessagePayload = Field(description="Message payload with strongly typed structure")
     headers: Dict[str, Union[str, bytes]] = Field(
         default_factory=dict, 
         description="Message headers"

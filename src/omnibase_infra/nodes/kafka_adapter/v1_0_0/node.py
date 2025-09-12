@@ -1308,8 +1308,8 @@ class Node(NodeEffectService):
         if any(pattern in topic_lower for pattern in sensitive_topic_patterns):
             return True
         
-        # Check for sensitive content in payload
-        if isinstance(message.value, str):
+        # Check for sensitive content in payload using duck typing
+        if hasattr(message.value, 'lower') and hasattr(message.value, 'replace'):
             value_lower = message.value.lower()
             sensitive_patterns = ['password', 'secret', 'token', 'key', 'credential', 'ssn']
             if any(pattern in value_lower for pattern in sensitive_patterns):
