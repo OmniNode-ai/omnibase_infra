@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -17,6 +17,8 @@ from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 from omnibase_core.model.core.model_route_spec import ModelRouteSpec
 
 from .model_omninode_topic_spec import ModelOmniNodeTopicSpec
+from ..postgres.model_postgres_query_data import ModelPostgresQueryData
+from ..postgres.model_postgres_health_data import ModelPostgresHealthData
 
 
 class ModelOmniNodeEventPublisher(BaseModel):
@@ -35,7 +37,7 @@ class ModelOmniNodeEventPublisher(BaseModel):
     def create_postgres_query_completed_envelope(
         self, 
         correlation_id: UUID,
-        query_data: Dict[str, Any],
+        query_data: ModelPostgresQueryData,
         execution_time_ms: float,
         row_count: Optional[int] = None
     ) -> ModelEventEnvelope:
@@ -60,9 +62,12 @@ class ModelOmniNodeEventPublisher(BaseModel):
                 "database_type": "postgresql",
                 "execution_time_ms": execution_time_ms,
                 "row_count": row_count,
-                "query_hash": query_data.get("query_hash"),
-                "operation_type": query_data.get("operation_type", "query"),
-                **query_data
+                "query_hash": query_data.query_hash,
+                "operation_type": query_data.operation_type,
+                "query_length": query_data.query_length,
+                "parameter_count": query_data.parameter_count,
+                "status_message": query_data.status_message,
+                "affected_tables": query_data.affected_tables
             }
         )
         
@@ -94,7 +99,7 @@ class ModelOmniNodeEventPublisher(BaseModel):
         self,
         correlation_id: UUID, 
         error_message: str,
-        query_data: Dict[str, Any],
+        query_data: ModelPostgresQueryData,
         execution_time_ms: float
     ) -> ModelEventEnvelope:
         """
@@ -118,9 +123,12 @@ class ModelOmniNodeEventPublisher(BaseModel):
                 "database_type": "postgresql",
                 "error_message": error_message,
                 "execution_time_ms": execution_time_ms,
-                "query_hash": query_data.get("query_hash"),
-                "operation_type": query_data.get("operation_type", "query"),
-                **query_data
+                "query_hash": query_data.query_hash,
+                "operation_type": query_data.operation_type,
+                "query_length": query_data.query_length,
+                "parameter_count": query_data.parameter_count,
+                "status_message": query_data.status_message,
+                "affected_tables": query_data.affected_tables
             }
         )
         
@@ -152,7 +160,7 @@ class ModelOmniNodeEventPublisher(BaseModel):
         self,
         correlation_id: UUID,
         health_status: str,
-        health_data: Dict[str, Any]
+        health_data: ModelPostgresHealthData
     ) -> ModelEventEnvelope:
         """
         Create event envelope for PostgreSQL health check response.
@@ -173,7 +181,15 @@ class ModelOmniNodeEventPublisher(BaseModel):
             data={
                 "database_type": "postgresql",
                 "health_status": health_status,
-                **health_data
+                "overall_status": health_data.overall_status,
+                "response_time_ms": health_data.response_time_ms,
+                "check_timestamp": health_data.check_timestamp,
+                "error_messages": health_data.error_messages,
+                "warnings": health_data.warnings,
+                "circuit_breaker_state": health_data.circuit_breaker_state,
+                "last_failure_time": health_data.last_failure_time,
+                "connection_pool": health_data.connection_pool,
+                "database": health_data.database
             }
         )
         

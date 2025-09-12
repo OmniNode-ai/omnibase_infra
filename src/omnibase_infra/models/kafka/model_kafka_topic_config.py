@@ -1,7 +1,9 @@
 """Kafka topic configuration model."""
 
-from typing import Dict, Any, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
+
+from .model_kafka_topic_overrides import ModelKafkaTopicOverrides
 
 
 class ModelKafkaTopicConfig(BaseModel):
@@ -10,8 +12,8 @@ class ModelKafkaTopicConfig(BaseModel):
     topic_name: str = Field(description="Name of the Kafka topic")
     num_partitions: int = Field(default=1, description="Number of partitions for the topic")
     replication_factor: int = Field(default=1, description="Replication factor for the topic")
-    config_overrides: Dict[str, Any] = Field(
-        default_factory=dict,
+    config_overrides: Optional[ModelKafkaTopicOverrides] = Field(
+        default=None,
         description="Topic configuration overrides (e.g., retention.ms, cleanup.policy)"
     )
     cleanup_policy: Optional[str] = Field(

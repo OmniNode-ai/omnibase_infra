@@ -1,6 +1,6 @@
 """Kafka adapter output model - node-specific envelope for message bus responses."""
 
-from typing import List, Optional, Any
+from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
 
@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from ....enums.enum_kafka_operation_type import EnumKafkaOperationType
 from ....models.kafka.model_kafka_message import ModelKafkaMessage
 from ....models.kafka.model_kafka_health_response import ModelKafkaHealthResponse
+from ....models.common.model_request_context import ModelRequestContext
+from ....models.common.model_kafka_metadata import ModelKafkaTopicInfo, ModelKafkaOffsetInfo, ModelKafkaBrokerInfo
 
 
 class ModelKafkaAdapterOutput(BaseModel):
@@ -23,7 +25,7 @@ class ModelKafkaAdapterOutput(BaseModel):
         default_factory=list,
         description="Consumed messages (for consume operations)"
     )
-    topic_info: Optional[dict[str, Any]] = Field(
+    topic_info: Optional[ModelKafkaTopicInfo] = Field(
         default=None,
         description="Topic information (for topic operations)"
     )
@@ -57,17 +59,17 @@ class ModelKafkaAdapterOutput(BaseModel):
     )
     
     # Additional context
-    context: Optional[dict[str, Any]] = Field(
+    context: Optional[ModelRequestContext] = Field(
         default=None,
         description="Additional response context"
     )
     
     # Kafka-specific metrics
-    offset_info: Optional[dict[str, Any]] = Field(
+    offset_info: Optional[ModelKafkaOffsetInfo] = Field(
         default=None,
         description="Kafka offset information (for produce/consume operations)"
     )
-    broker_info: Optional[dict[str, Any]] = Field(
+    broker_info: Optional[ModelKafkaBrokerInfo] = Field(
         default=None,
         description="Broker information used for the operation"
     )

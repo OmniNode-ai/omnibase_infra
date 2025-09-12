@@ -1,7 +1,9 @@
 """Kafka producer configuration model."""
 
-from typing import Dict, Any, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
+
+from .model_kafka_security_config import ModelKafkaSecurityConfig
 
 
 class ModelKafkaProducerConfig(BaseModel):
@@ -38,7 +40,7 @@ class ModelKafkaProducerConfig(BaseModel):
         default=True,
         description="Enable idempotent producer"
     )
-    security_config: Dict[str, Any] = Field(
-        default_factory=dict,
+    security_config: Optional[ModelKafkaSecurityConfig] = Field(
+        default=None,
         description="Security configuration (SSL, SASL, etc.)"
     )

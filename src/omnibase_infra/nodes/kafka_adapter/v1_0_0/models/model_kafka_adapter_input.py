@@ -1,6 +1,6 @@
 """Kafka adapter input model - node-specific envelope for message bus integration."""
 
-from typing import Optional, Any
+from typing import Optional
 from uuid import UUID
 from datetime import datetime
 
@@ -11,6 +11,7 @@ from ....models.kafka.model_kafka_message import ModelKafkaMessage
 from ....models.kafka.model_kafka_topic_config import ModelKafkaTopicConfig
 from ....models.kafka.model_kafka_producer_config import ModelKafkaProducerConfig
 from ....models.kafka.model_kafka_consumer_config import ModelKafkaConsumerConfig
+from ....models.common.model_request_context import ModelRequestContext
 
 
 class ModelKafkaAdapterInput(BaseModel):
@@ -41,7 +42,7 @@ class ModelKafkaAdapterInput(BaseModel):
     # Envelope metadata
     correlation_id: UUID = Field(description="Request correlation ID for tracing")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Request timestamp")
-    context: Optional[dict[str, Any]] = Field(
+    context: Optional[ModelRequestContext] = Field(
         default=None, 
         description="Additional request context"
     )
@@ -53,7 +54,7 @@ class ModelKafkaAdapterInput(BaseModel):
     )
     retry_count: int = Field(default=3, description="Number of retries on failure")
     
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, __context: Optional[dict]) -> None:
         """Validate operation-specific payload requirements."""
         if self.operation_type == EnumKafkaOperationType.PRODUCE:
             if not self.message:

@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Callable, Union, Pattern, Any
+from typing import Dict, List, Optional, Callable, Union, Pattern, Protocol
 from uuid import UUID, uuid4
 
 from omnibase_core.core.core_error_codes import CoreErrorCode
@@ -35,9 +35,30 @@ from ....models.kafka.model_kafka_topic_config import ModelKafkaTopicConfig
 from ....models.kafka.model_kafka_producer_config import ModelKafkaProducerConfig
 from ....models.kafka.model_kafka_consumer_config import ModelKafkaConsumerConfig
 from ....models.kafka.model_kafka_health_response import ModelKafkaHealthResponse
+from ....models.common.model_kafka_configuration import ModelKafkaConfiguration
 from ....enums.enum_kafka_operation_type import EnumKafkaOperationType
 from .models.model_kafka_adapter_input import ModelKafkaAdapterInput
 from .models.model_kafka_adapter_output import ModelKafkaAdapterOutput
+
+
+class ProtocolKafkaClient(Protocol):
+    """Protocol interface for Kafka client implementations."""
+    
+    async def start(self) -> None:
+        """Start the Kafka client connection."""
+        ...
+    
+    async def stop(self) -> None:
+        """Stop the Kafka client connection."""
+        ...
+    
+    async def send_and_wait(self, topic: str, value: bytes, key: Optional[bytes] = None) -> None:
+        """Send message to Kafka topic and wait for acknowledgment."""
+        ...
+    
+    def bootstrap_servers(self) -> List[str]:
+        """Get list of bootstrap servers."""
+        ...
 
 
 class KafkaStructuredLogger:
@@ -312,7 +333,7 @@ class Node(NodeEffectService):
         super().__init__(container)
         self.node_type = "effect"
         self.domain = "infrastructure"
-        self._kafka_client: Optional[Any] = None  # Will be resolved from container
+        self._kafka_client: Optional[ProtocolKafkaClient] = None  # Will be resolved from container
         self._kafka_client_lock = asyncio.Lock()
         self._kafka_client_sync_lock = threading.Lock()
         
@@ -337,7 +358,7 @@ class Node(NodeEffectService):
             domain=self.domain
         )
     
-    def _load_configuration(self, container: ModelONEXContainer) -> Dict[str, Any]:
+    def _load_configuration(self, container: ModelONEXContainer) -> ModelKafkaConfiguration:
         """
         Load Kafka adapter configuration from container or environment.
         
@@ -408,7 +429,7 @@ class Node(NodeEffectService):
             
         return correlation_id
 
-    async def get_kafka_client_async(self) -> Any:
+    async def get_kafka_client_async(self) -> ProtocolKafkaClient:
         """
         Get Kafka client instance via registry injection with thread safety.
         
