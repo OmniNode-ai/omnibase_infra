@@ -93,15 +93,48 @@ class PostgresStructuredLogger:
         extra = self._build_extra(correlation_id, operation, **kwargs)
         self.logger.debug(message, extra=extra)
     
+    def _sanitize_query_for_logging(self, query: str) -> str:
+        """
+        Sanitize query for safe logging by removing sensitive data.
+        
+        Args:
+            query: SQL query to sanitize
+            
+        Returns:
+            Sanitized query safe for logging
+        """
+        sanitized = query
+        
+        # Remove common sensitive patterns
+        sensitive_patterns = [
+            (r"password\s*=\s*'[^']*'", "password='***'"),
+            (r'password\s*=\s*"[^"]*"', 'password="***"'),
+            (r"token\s*=\s*'[^']*'", "token='***'"),
+            (r'token\s*=\s*"[^"]*"', 'token="***"'),
+            (r"secret\s*=\s*'[^']*'", "secret='***'"),
+            (r'secret\s*=\s*"[^"]*"', 'secret="***"'),
+            (r"api_key\s*=\s*'[^']*'", "api_key='***'"),
+            (r'api_key\s*=\s*"[^"]*"', 'api_key="***"'),
+            (r"'[A-Za-z0-9+/=]{32,}'", "'***REDACTED***'"),  # Long tokens
+            (r'"[A-Za-z0-9+/=]{32,}"', '"***REDACTED***"'),  # Long tokens
+        ]
+        
+        import re
+        for pattern, replacement in sensitive_patterns:
+            sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+        
+        return sanitized
+
     def log_query_start(self, correlation_id: UUID, query: str, params_count: int):
         """Log start of database query execution."""
+        sanitized_query = self._sanitize_query_for_logging(query)
         self.info(
             f"Starting database query execution (params: {params_count})",
             correlation_id=correlation_id,
             operation="query_start",
             query_length=len(query),
             parameters_count=params_count,
-            query_preview=query[:100] + "..." if len(query) > 100 else query
+            query_preview=sanitized_query[:100] + "..." if len(sanitized_query) > 100 else sanitized_query
         )
     
     def log_query_success(self, correlation_id: UUID, execution_time_ms: float, rows_affected: int):
@@ -302,60 +335,6 @@ class NodePostgresAdapterEffect(NodeEffectService):
     
     # Configuration will be loaded from environment or container
     config: ModelPostgresAdapterConfig
-    
-    # Pre-compiled regex patterns for performance
-    _SQL_INJECTION_PATTERNS = [
-        re.compile(r';.*drop\s+table', re.IGNORECASE),
-        re.compile(r';.*delete\s+from', re.IGNORECASE), 
-        re.compile(r';.*truncate\s+table', re.IGNORECASE),
-        re.compile(r'union.*select.*password', re.IGNORECASE),
-        re.compile(r'union.*select.*admin', re.IGNORECASE),
-    ]
-    
-    _COMPLEXITY_PATTERNS = {
-        'joins': re.compile(r'\bjoin\b', re.IGNORECASE),
-        'selects': re.compile(r'\bselect\b', re.IGNORECASE),
-        'unions': re.compile(r'\bunion\b', re.IGNORECASE),
-        'leading_wildcards': re.compile(r'like\s+[\'"]%', re.IGNORECASE),
-        'regex_ops': re.compile(r'~[*]?\s*[\'"]', re.IGNORECASE),
-    }
-    
-    _ERROR_SANITIZATION_PATTERNS = [
-        (re.compile(r'password=[^\s&]*', re.IGNORECASE), 'password=***'),
-        (re.compile(r'postgresql://[^\s]*@[^\s]*/', re.IGNORECASE), 'postgresql://***@***/'),
-        (re.compile(r'eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*'), '***JWT_TOKEN***'),
-        (re.compile(r'ghp_[A-Za-z0-9]{36}'), '***GITHUB_TOKEN***'),
-        (re.compile(r'gho_[A-Za-z0-9]{36}'), '***GITHUB_OAUTH_TOKEN***'),
-        (re.compile(r'ghu_[A-Za-z0-9]{36}'), '***GITHUB_USER_TOKEN***'),
-        (re.compile(r'AKIA[0-9A-Z]{16}'), '***AWS_ACCESS_KEY***'),
-        (re.compile(r'[A-Za-z0-9/+=]{40}'), '***AWS_SECRET_KEY***'),
-        (re.compile(r'api[_-]?key[_-]*[:=][^\s&]*', re.IGNORECASE), 'api_key=***'),
-        (re.compile(r'bearer[\s]+[A-Za-z0-9+/=]{20,}', re.IGNORECASE), 'bearer ***'),
-        (re.compile(r'auth[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'auth_token=***'),
-        (re.compile(r'access[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'access_token=***'),
-        (re.compile(r'/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*', re.IGNORECASE), '/***sensitive_path***'),
-        (re.compile(r'schema "[\w_-]+"'), 'schema "***"'),
-        (re.compile(r'table "[\w_-]+"'), 'table "***"'),
-        (re.compile(r'[A-Za-z0-9+/=]{32,}'), '***REDACTED_TOKEN***'),
-    ]
-    
-    # Pre-compiled regex patterns for PostgreSQL status parsing (performance optimization)
-    _ROWS_AFFECTED_PATTERNS = [
-        # INSERT operations: "INSERT 0 5" -> 5 rows
-        (re.compile(r'^INSERT\s+\d+\s+(\d+)$', re.IGNORECASE), 1),
-        
-        # UPDATE operations: "UPDATE 3" -> 3 rows
-        (re.compile(r'^UPDATE\s+(\d+)$', re.IGNORECASE), 1),
-        
-        # DELETE operations: "DELETE 2" -> 2 rows
-        (re.compile(r'^DELETE\s+(\d+)$', re.IGNORECASE), 1),
-        
-        # COPY operations: "COPY 100" -> 100 rows
-        (re.compile(r'^COPY\s+(\d+)$', re.IGNORECASE), 1),
-        
-        # Generic pattern for any command followed by a number
-        (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
-    ]
 
     def __init__(self, container: ModelONEXContainer):
         """Initialize PostgreSQL adapter tool with container injection."""
@@ -396,6 +375,60 @@ class NodePostgresAdapterEffect(NodeEffectService):
             domain=self.domain
         )
         
+        # Initialize pre-compiled regex patterns for performance (moved from class level)
+        self._sql_injection_patterns = [
+            re.compile(r';.*drop\s+table', re.IGNORECASE),
+            re.compile(r';.*delete\s+from', re.IGNORECASE), 
+            re.compile(r';.*truncate\s+table', re.IGNORECASE),
+            re.compile(r'union.*select.*password', re.IGNORECASE),
+            re.compile(r'union.*select.*admin', re.IGNORECASE),
+        ]
+        
+        self._complexity_patterns = {
+            'joins': re.compile(r'\bjoin\b', re.IGNORECASE),
+            'selects': re.compile(r'\bselect\b', re.IGNORECASE),
+            'unions': re.compile(r'\bunion\b', re.IGNORECASE),
+            'leading_wildcards': re.compile(r'like\s+[\'"]%', re.IGNORECASE),
+            'regex_ops': re.compile(r'~[*]?\s*[\'"]', re.IGNORECASE),
+        }
+        
+        self._error_sanitization_patterns = [
+            (re.compile(r'password=[^\s&]*', re.IGNORECASE), 'password=***'),
+            (re.compile(r'postgresql://[^\s]*@[^\s]*/', re.IGNORECASE), 'postgresql://***@***/'),
+            (re.compile(r'eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*'), '***JWT_TOKEN***'),
+            (re.compile(r'ghp_[A-Za-z0-9]{36}'), '***GITHUB_TOKEN***'),
+            (re.compile(r'gho_[A-Za-z0-9]{36}'), '***GITHUB_OAUTH_TOKEN***'),
+            (re.compile(r'ghu_[A-Za-z0-9]{36}'), '***GITHUB_USER_TOKEN***'),
+            (re.compile(r'AKIA[0-9A-Z]{16}'), '***AWS_ACCESS_KEY***'),
+            (re.compile(r'[A-Za-z0-9/+=]{40}'), '***AWS_SECRET_KEY***'),
+            (re.compile(r'api[_-]?key[_-]*[:=][^\s&]*', re.IGNORECASE), 'api_key=***'),
+            (re.compile(r'bearer[\s]+[A-Za-z0-9+/=]{20,}', re.IGNORECASE), 'bearer ***'),
+            (re.compile(r'auth[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'auth_token=***'),
+            (re.compile(r'access[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'access_token=***'),
+            (re.compile(r'/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*', re.IGNORECASE), '/***sensitive_path***'),
+            (re.compile(r'schema "[\w_-]+"'), 'schema "***"'),
+            (re.compile(r'table "[\w_-]+"'), 'table "***"'),
+            (re.compile(r'[A-Za-z0-9+/=]{32,}'), '***REDACTED_TOKEN***'),
+        ]
+        
+        # Pre-compiled regex patterns for PostgreSQL status parsing (performance optimization)
+        self._rows_affected_patterns = [
+            # INSERT operations: "INSERT 0 5" -> 5 rows
+            (re.compile(r'^INSERT\s+\d+\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # UPDATE operations: "UPDATE 3" -> 3 rows
+            (re.compile(r'^UPDATE\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # DELETE operations: "DELETE 2" -> 2 rows
+            (re.compile(r'^DELETE\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # COPY operations: "COPY 100" -> 100 rows
+            (re.compile(r'^COPY\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # Generic pattern for any command followed by a number
+            (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
+        ]
+
         # Log adapter initialization
         self._logger.info(
             "PostgreSQL adapter initialized successfully",
@@ -483,6 +516,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 # Use container injection per ONEX standards
                 self._connection_manager = self.container.get_service("postgres_connection_manager")
                 
+                # Null check for resolved service
+                if self._connection_manager is None:
+                    raise OnexError(
+                        code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                        message="PostgreSQL connection manager service not available in container"
+                    )
+                
                 # Validate the resolved service interface
                 self._validate_connection_manager_interface(self._connection_manager)
                 
@@ -505,6 +545,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 
                 # Use container injection per ONEX standards
                 self._connection_manager = self.container.get_service("postgres_connection_manager")
+                
+                # Null check for resolved service
+                if self._connection_manager is None:
+                    raise OnexError(
+                        code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                        message="PostgreSQL connection manager service not available in container"
+                    )
                 
                 # Validate the resolved service interface
                 self._validate_connection_manager_interface(self._connection_manager)
@@ -547,11 +594,17 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
             
         except Exception as e:
-            # Event publishing is REQUIRED - FAIL HARD
-            raise OnexError(
-                code=CoreErrorCode.EXTERNAL_SERVICE_ERROR,
-                message=f"CRITICAL: Failed to publish OnexEvent to RedPanda: {str(e)}"
-            ) from e
+            # Event publishing failure should not fail the database operation
+            # Log the error but allow the DB operation to succeed
+            self._logger.error(
+                f"Event publishing failed but database operation succeeded: {str(e)}",
+                correlation_id=envelope.correlation_id,
+                operation="event_publish_failed",
+                event_type=getattr(envelope.payload, 'event_type', 'unknown'),
+                envelope_id=envelope.envelope_id,
+                error_details=str(e)
+            )
+            # Note: Database operation continues successfully despite event publishing failure
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
         """
@@ -1177,7 +1230,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         # Basic SQL injection pattern detection using pre-compiled patterns (configurable)
         if self.config.enable_sql_injection_detection:
             query_lower = query_request.query.lower()
-            for pattern in self._SQL_INJECTION_PATTERNS:
+            for pattern in self._sql_injection_patterns:
                 if pattern.search(query_lower):
                     raise OnexError(
                         code=CoreErrorCode.SECURITY_VIOLATION_ERROR,
@@ -1206,23 +1259,23 @@ class NodePostgresAdapterEffect(NodeEffectService):
         weights = self.config.get_complexity_weights()
         
         # Count JOINs using pre-compiled pattern (each JOIN adds complexity)
-        join_count = len(self._COMPLEXITY_PATTERNS['joins'].findall(query_lower))
+        join_count = len(self._complexity_patterns['joins'].findall(query_lower))
         complexity_score += join_count * weights["join"]
         
         # Count subqueries and nested selects using pre-compiled pattern
-        select_count = len(self._COMPLEXITY_PATTERNS['selects'].findall(query_lower)) - 1  # Subtract main SELECT
+        select_count = len(self._complexity_patterns['selects'].findall(query_lower)) - 1  # Subtract main SELECT
         complexity_score += select_count * weights["subquery"]
         
         # Count UNION operations using pre-compiled pattern (expensive)
-        union_count = len(self._COMPLEXITY_PATTERNS['unions'].findall(query_lower))
+        union_count = len(self._complexity_patterns['unions'].findall(query_lower))
         complexity_score += union_count * weights["union"]
         
         # Check for expensive LIKE operations with leading wildcards using pre-compiled pattern
-        leading_wildcard_count = len(self._COMPLEXITY_PATTERNS['leading_wildcards'].findall(query_lower))
+        leading_wildcard_count = len(self._complexity_patterns['leading_wildcards'].findall(query_lower))
         complexity_score += leading_wildcard_count * weights["leading_wildcard"]
         
         # Check for regex operations using pre-compiled pattern (very expensive)
-        regex_count = len(self._COMPLEXITY_PATTERNS['regex_ops'].findall(query_lower))
+        regex_count = len(self._complexity_patterns['regex_ops'].findall(query_lower))
         complexity_score += regex_count * weights["regex"]
         
         # Check for expensive functions
@@ -1308,7 +1361,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         """
         # Apply all sanitization patterns using pre-compiled regex for performance
         sanitized = error_message
-        for pattern, replacement in self._ERROR_SANITIZATION_PATTERNS:
+        for pattern, replacement in self._error_sanitization_patterns:
             sanitized = pattern.sub(replacement, sanitized)
         
         # If error is too generic, provide a more specific safe message
@@ -1344,7 +1397,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             return 0
         
         # Try each pre-compiled pattern to extract rows affected (performance optimized)
-        for pattern, group_index in self._ROWS_AFFECTED_PATTERNS:
+        for pattern, group_index in self._rows_affected_patterns:
             match = pattern.match(status_clean)
             if match:
                 try:

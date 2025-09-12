@@ -25,6 +25,127 @@ from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLo
 T = TypeVar("T")
 
 
+class KafkaProducerPool:
+    """Singleton connection pool for Kafka producers to avoid connection overhead."""
+    
+    _instance = None
+    _producers = {}
+    _failed_producers = {}  # Track failed producers for cleanup
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        # Only initialize once
+        if not hasattr(self, '_initialized'):
+            self._producers = {}
+            self._failed_producers = {}
+            self._initialized = True
+    
+    async def get_producer(self, bootstrap_servers: list, **config):
+        """
+        Get or create a producer for the given server configuration.
+        
+        Args:
+            bootstrap_servers: List of Kafka bootstrap servers
+            **config: Additional producer configuration
+            
+        Returns:
+            AIOKafkaProducer instance or None if unavailable
+        """
+        # Create a key from the server configuration
+        servers_key = ','.join(sorted(bootstrap_servers))
+        
+        # Check if producer exists and is healthy
+        if servers_key in self._producers:
+            producer = self._producers[servers_key]
+            # Validate producer is still connected
+            if await self._is_producer_healthy(producer):
+                return producer
+            else:
+                # Remove unhealthy producer
+                print(f"Removing unhealthy Kafka producer for servers: {bootstrap_servers}")
+                await self._remove_producer(servers_key)
+        
+        # Skip creation if this producer has failed recently
+        if servers_key in self._failed_producers:
+            fail_time = self._failed_producers[servers_key]
+            if (asyncio.get_event_loop().time() - fail_time) < 60:  # 60 second backoff
+                print(f"Skipping producer creation for {servers_key} - recent failure")
+                return None
+        
+        # Create new producer
+        try:
+            from aiokafka import AIOKafkaProducer
+            
+            # Default configuration optimized for event publishing
+            producer_config = {
+                'bootstrap_servers': bootstrap_servers,
+                'value_serializer': lambda x: json.dumps(x).encode('utf-8'),
+                'acks': 1,  # Wait for leader acknowledgment
+                'retries': 3,  # Retry failed sends
+                'max_in_flight_requests_per_connection': 5,
+                'batch_size': 16384,  # 16KB batches
+                'linger_ms': 5,  # Wait 5ms for batching
+                'connections_max_idle_ms': 300000,  # 5 minutes idle timeout
+                **config
+            }
+            
+            producer = AIOKafkaProducer(**producer_config)
+            await producer.start()
+            self._producers[servers_key] = producer
+            
+            # Clear failure tracking on success
+            if servers_key in self._failed_producers:
+                del self._failed_producers[servers_key]
+            
+            print(f"Created new Kafka producer in pool for servers: {bootstrap_servers}")
+            return producer
+            
+        except ImportError:
+            print("WARNING: aiokafka not available, producer pool disabled")
+            return None
+        except Exception as e:
+            print(f"Failed to create Kafka producer: {e}")
+            # Track failure for backoff
+            self._failed_producers[servers_key] = asyncio.get_event_loop().time()
+            return None
+    
+    async def _is_producer_healthy(self, producer) -> bool:
+        """Check if a producer is still healthy and connected."""
+        try:
+            # Check if producer client is available and started
+            if producer and hasattr(producer, '_sender') and producer._sender:
+                return True
+            return False
+        except Exception:
+            return False
+    
+    async def _remove_producer(self, servers_key: str):
+        """Safely remove a producer from the pool."""
+        if servers_key in self._producers:
+            producer = self._producers[servers_key]
+            try:
+                await producer.stop()
+                print(f"Stopped producer for servers: {servers_key}")
+            except Exception as e:
+                print(f"Error stopping producer: {e}")
+            finally:
+                del self._producers[servers_key]
+    
+    async def close_all(self):
+        """Close all producers in the pool."""
+        for servers_key, producer in self._producers.items():
+            try:
+                await producer.stop()
+                print(f"Closed Kafka producer for servers: {servers_key}")
+            except Exception as e:
+                print(f"Error closing Kafka producer: {e}")
+        self._producers.clear()
+
+
 class RedPandaEventBus(ProtocolEventBus):
     """
     Proper ProtocolEventBus implementation for RedPanda/Kafka integration.
@@ -35,21 +156,16 @@ class RedPandaEventBus(ProtocolEventBus):
     
     def __init__(self, credentials=None, **kwargs):
         """Initialize RedPanda event bus with proper protocol compliance."""
-        # Import aiokafka for RedPanda integration
-        try:
-            from aiokafka import AIOKafkaProducer
-            self._kafka_producer_class = AIOKafkaProducer
-            self._producer = None
-            
-            # RedPanda connection configuration
-            self._bootstrap_servers = [f"localhost:{os.getenv('REDPANDA_EXTERNAL_PORT', '29102')}"]
-            
-            print(f"RedPanda event bus initialized with servers: {self._bootstrap_servers}")
-        except ImportError:
-            print("WARNING: aiokafka not available, using mock event bus")
-            self._kafka_producer_class = None
-            self._producer = None
-            self._bootstrap_servers = []
+        # RedPanda connection configuration - use ONEX environment patterns
+        redpanda_host = os.getenv('REDPANDA_HOST', 'localhost')
+        redpanda_port = os.getenv('REDPANDA_EXTERNAL_PORT', '29102')
+        self._bootstrap_servers = [f"{redpanda_host}:{redpanda_port}"]
+        
+        # Use producer pool for efficient connection management
+        self._producer_pool = KafkaProducerPool()
+        self._producer = None
+        
+        print(f"RedPanda event bus initialized with servers: {self._bootstrap_servers}")
         
         # Protocol-compliant subscriber management
         self._subscribers = []
@@ -75,42 +191,49 @@ class RedPandaEventBus(ProtocolEventBus):
     
     async def publish_async(self, event: ModelOnexEvent) -> None:
         """
-        Publish an event to the bus (asynchronous).
+        Publish an event to the bus (asynchronous) with retry and exponential backoff.
         
         Args:
             event: OnexEvent to emit
         """
-        if not self._kafka_producer_class:
-            # Mock publishing for testing without aiokafka
-            print(f"MOCK: Publishing OnexEvent {event.event_type} with correlation_id={event.correlation_id}")
-            return
+        max_retries = int(os.getenv('REDPANDA_MAX_RETRIES', '3'))
+        base_delay = float(os.getenv('REDPANDA_BASE_DELAY_SECONDS', '0.1'))
         
-        try:
-            # Initialize producer if needed
-            if not self._producer:
-                self._producer = self._kafka_producer_class(
-                    bootstrap_servers=self._bootstrap_servers,
-                    value_serializer=lambda x: json.dumps(x).encode('utf-8')
+        for attempt in range(max_retries + 1):
+            try:
+                # Get producer from pool (creates if needed)
+                producer = await self._producer_pool.get_producer(self._bootstrap_servers)
+                
+                if not producer:
+                    # Mock publishing for testing without aiokafka
+                    print(f"MOCK: Publishing OnexEvent {event.event_type} with correlation_id={event.correlation_id}")
+                    return
+                
+                # Convert OnexEvent to RedPanda topic and message
+                topic = self._event_to_topic(event)
+                message_data = event.model_dump()
+                partition_key = str(event.correlation_id) if event.correlation_id else None
+                
+                # Publish to RedPanda topic using pooled producer
+                await producer.send_and_wait(
+                    topic=topic,
+                    value=message_data,
+                    key=partition_key.encode('utf-8') if partition_key else None
                 )
-                await self._producer.start()
-                print(f"RedPanda producer started for servers: {self._bootstrap_servers}")
-            
-            # Convert OnexEvent to RedPanda topic and message
-            topic = self._event_to_topic(event)
-            message_data = event.model_dump()
-            partition_key = str(event.correlation_id) if event.correlation_id else None
-            
-            # Publish to RedPanda topic
-            await self._producer.send_and_wait(
-                topic=topic,
-                value=message_data,
-                key=partition_key.encode('utf-8') if partition_key else None
-            )
-            
-            print(f"Published OnexEvent to RedPanda topic: {topic} (correlation_id={event.correlation_id})")
-            
-        except Exception as e:
-            print(f"RedPanda async publish failed: {str(e)}")
+                
+                print(f"Published OnexEvent to RedPanda topic: {topic} (correlation_id={event.correlation_id})")
+                return  # Success - exit retry loop
+                
+            except Exception as e:
+                if attempt == max_retries:
+                    # Final attempt failed - log error but don't raise
+                    print(f"RedPanda async publish failed after {max_retries + 1} attempts: {str(e)}")
+                    return
+                
+                # Calculate exponential backoff delay
+                delay = base_delay * (2 ** attempt)
+                print(f"RedPanda publish attempt {attempt + 1} failed, retrying in {delay:.2f}s: {str(e)}")
+                await asyncio.sleep(delay)
     
     def subscribe(self, callback: Callable[[ModelOnexEvent], None]) -> None:
         """
