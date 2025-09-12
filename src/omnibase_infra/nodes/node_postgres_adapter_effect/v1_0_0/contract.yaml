@@ -72,6 +72,12 @@ shared_model_dependencies:
     class_name: "ModelPostgresConnectionConfig"
     module: "omnibase_infra.models.postgres.model_postgres_connection_config"
     description: "Shared PostgreSQL connection configuration model"
+    
+  - name: "model_configuration_subcontract"
+    type: "model"
+    class_name: "ModelConfigurationSubcontract"
+    module: "omnibase_infra.models.infrastructure.model_configuration_subcontract"
+    description: "Shared configuration management subcontract model (temporary - will move to omnibase_core)"
 
 # === EVENT TYPE CONFIGURATION ===
 event_type:
@@ -196,6 +202,11 @@ io_operations:
 
 # === SUBCONTRACTS ===
 subcontracts:
+  - name: "configuration_subcontract"
+    path: "./contracts/configuration_subcontract.yaml"
+    description: "Standardized configuration management for infrastructure nodes"
+    integration_type: "mixin"
+    
   - name: "postgres_event_processing_subcontract"
     path: "./contracts/postgres_event_processing_subcontract.yaml"
     description: "Event bus integration patterns for PostgreSQL operations"

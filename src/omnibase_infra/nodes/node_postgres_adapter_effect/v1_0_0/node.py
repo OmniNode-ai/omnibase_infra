@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 from omnibase_core.core.core_error_codes import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
-from omnibase_core.core.onex_container import ONEXContainer
+from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
 from omnibase_core.model.core.model_health_status import ModelHealthStatus
 
@@ -356,7 +356,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
     ]
 
-    def __init__(self, container: ONEXContainer):
+    def __init__(self, container: ModelONEXContainer):
         """Initialize PostgreSQL adapter tool with container injection."""
         super().__init__(container)
         self.node_type = "effect"
@@ -386,7 +386,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             domain=self.domain
         )
 
-    def _load_configuration(self, container: ONEXContainer) -> ModelPostgresAdapterConfig:
+    def _load_configuration(self, container: ModelONEXContainer) -> ModelPostgresAdapterConfig:
         """
         Load PostgreSQL adapter configuration from container or environment.
         

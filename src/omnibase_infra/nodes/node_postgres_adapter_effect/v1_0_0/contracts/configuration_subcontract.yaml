@@ -1,0 +1,187 @@
+# Configuration Management Subcontract - ONEX Infrastructure Standards
+# Provides standardized configuration loading, validation, and environment management
+
+# === SUBCONTRACT METADATA ===
+subcontract_version: {major: 1, minor: 0, patch: 0}
+subcontract_name: "configuration_subcontract"
+description: "Configuration management patterns for ONEX infrastructure nodes"
+integration_type: "mixin"
+
+# === CONFIGURATION STRATEGY ===
+configuration_strategy:
+  loading_order: ["container", "environment", "defaults"]
+  validation_enabled: true
+  environment_prefix_required: true
+  secret_detection_enabled: true
+  hot_reload_supported: false
+  
+# === ENVIRONMENT CONFIGURATION ===
+environment_configuration:
+  prefix_pattern: "ONEX_INFRA_{NODE_NAME}_"
+  required_variables: []
+  optional_variables: []
+  validation_rules:
+    - type: "format"
+      pattern: "^[A-Z_][A-Z0-9_]*$"
+    - type: "length"
+      min_length: 1
+      max_length: 256
+
+# === CONTAINER CONFIGURATION ===
+container_configuration:
+  service_resolution_enabled: true
+  fallback_to_environment: true
+  configuration_service_key: "configuration_service"
+  cache_configuration: true
+
+# === VALIDATION PATTERNS ===
+validation_patterns:
+  database_connection_string:
+    pattern: "^postgresql://[^:]+:[^@]+@[^:]+:[0-9]+/[^/]+$"
+    required: true
+    sensitive: true
+  
+  port_number:
+    pattern: "^[1-9][0-9]{0,4}$"
+    range: [1, 65535]
+    required: true
+    
+  boolean_flag:
+    pattern: "^(true|false|0|1|yes|no)$"
+    required: false
+    
+  timeout_seconds:
+    pattern: "^[1-9][0-9]*$"
+    range: [1, 3600]
+    required: false
+
+# === SECURITY CONFIGURATION ===
+security_configuration:
+  sanitize_logs: true
+  mask_sensitive_values: true
+  sensitive_patterns:
+    - "password"
+    - "secret"
+    - "key"
+    - "token"
+    - "credential"
+  redaction_replacement: "[REDACTED]"
+
+# === ERROR HANDLING ===
+error_handling:
+  fail_on_missing_required: true
+  fail_on_invalid_format: true
+  log_configuration_errors: true
+  provide_detailed_validation_messages: true
+
+# === MODELS DEFINITION ===
+models:
+  ModelConfigurationSource:
+    type: "object"
+    description: "Configuration source with priority and validation"
+    properties:
+      source_type:
+        type: "string"
+        enum: ["container", "environment", "defaults", "file"]
+      priority:
+        type: "integer"
+        minimum: 1
+        maximum: 100
+      validation_enabled:
+        type: "boolean"
+        default: true
+    required: ["source_type", "priority"]
+
+  ModelEnvironmentConfiguration:
+    type: "object" 
+    description: "Environment-based configuration loading"
+    properties:
+      prefix:
+        type: "string"
+        pattern: "^[A-Z_][A-Z0-9_]*_$"
+        description: "Environment variable prefix"
+      required_variables:
+        type: "array"
+        items:
+          type: "string"
+      optional_variables:
+        type: "array"
+        items:
+          type: "string"
+      fallback_values:
+        type: "object"
+        additionalProperties:
+          type: "string"
+    required: ["prefix"]
+
+  ModelConfigurationValidation:
+    type: "object"
+    description: "Configuration validation rules and patterns"
+    properties:
+      validation_rules:
+        type: "array"
+        items:
+          $ref: "#/models/ModelValidationRule"
+      sensitive_field_patterns:
+        type: "array"
+        items:
+          type: "string"
+      required_fields:
+        type: "array"
+        items:
+          type: "string"
+    required: ["validation_rules"]
+
+  ModelValidationRule:
+    type: "object"
+    description: "Individual validation rule for configuration values"
+    properties:
+      field_name:
+        type: "string"
+      rule_type:
+        type: "string"
+        enum: ["format", "range", "enum", "required"]
+      pattern:
+        type: "string"
+      range_min:
+        type: "number"
+      range_max:
+        type: "number"
+      allowed_values:
+        type: "array"
+        items:
+          type: "string"
+      error_message:
+        type: "string"
+    required: ["field_name", "rule_type"]
+
+# === INTEGRATION PATTERNS ===
+integration_patterns:
+  container_service_resolution:
+    enabled: true
+    service_key: "configuration_service"
+    fallback_enabled: true
+    
+  environment_variable_loading:
+    enabled: true
+    prefix_required: true
+    validation_enabled: true
+    
+  default_value_fallback:
+    enabled: true
+    log_fallback_usage: true
+    
+  configuration_caching:
+    enabled: true
+    cache_duration_seconds: 300
+    invalidation_on_error: true
+
+# === MIXIN CAPABILITIES ===
+mixin_capabilities:
+  - "load_configuration_from_container"
+  - "load_configuration_from_environment" 
+  - "validate_configuration_values"
+  - "sanitize_sensitive_configuration"
+  - "provide_configuration_defaults"
+  - "cache_configuration_results"
+  - "handle_configuration_errors"
