@@ -28,6 +28,15 @@ from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLo
 from omnibase_infra.security.credential_manager import get_credential_manager
 from omnibase_infra.security.tls_config import get_tls_manager
 from omnibase_infra.security.rate_limiter import get_rate_limiter
+from omnibase_infra.infrastructure.event_bus_circuit_breaker import (
+    EventBusCircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerState
+)
+from omnibase_infra.infrastructure.infrastructure_observability import (
+    InfrastructureObservability,
+    MetricType
+)
 
 T = TypeVar("T")
 
@@ -296,34 +305,109 @@ class RedPandaEventBus(ProtocolEventBus):
         self._producer = None
         self._logger = logging.getLogger(__name__)
         
+        # Initialize circuit breaker for reliability
+        circuit_breaker_config = CircuitBreakerConfig(
+            failure_threshold=int(os.getenv('CIRCUIT_BREAKER_FAILURE_THRESHOLD', '5')),
+            recovery_timeout=int(os.getenv('CIRCUIT_BREAKER_RECOVERY_TIMEOUT', '60')),
+            success_threshold=int(os.getenv('CIRCUIT_BREAKER_SUCCESS_THRESHOLD', '3')),
+            timeout_seconds=int(os.getenv('CIRCUIT_BREAKER_TIMEOUT', '30')),
+            max_queue_size=int(os.getenv('CIRCUIT_BREAKER_MAX_QUEUE', '1000')),
+            dead_letter_enabled=os.getenv('CIRCUIT_BREAKER_DEAD_LETTER', 'true').lower() == 'true',
+            graceful_degradation=os.getenv('CIRCUIT_BREAKER_GRACEFUL_DEGRADATION', 'true').lower() == 'true'
+        )
+        self._circuit_breaker = EventBusCircuitBreaker(circuit_breaker_config)
+        
+        # Initialize observability system
+        self._observability = InfrastructureObservability(retention_hours=24)
+        self._observability.register_circuit_breaker("redpanda_event_bus", self._circuit_breaker)
+        
         self._logger.info(f"RedPanda event bus initialized with servers: {self._bootstrap_servers}")
         self._logger.info(f"Security protocol: {self._tls_config.security_protocol}")
+        self._logger.info(f"Circuit breaker enabled with failure threshold: {circuit_breaker_config.failure_threshold}")
+        self._logger.info(f"Observability system initialized with 24h retention")
         
         # Protocol-compliant subscriber management
         self._subscribers = []
     
     def publish(self, event: ModelOnexEvent) -> None:
         """
-        Publish an event to the bus (synchronous).
+        Publish an event to the bus (synchronous) through circuit breaker protection.
         
         Args:
             event: OnexEvent to emit
         """
-        # Run async publish in sync context
+        # Run async publish in sync context through circuit breaker
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # Schedule as task if loop is running
-                loop.create_task(self.publish_async(event))
+                loop.create_task(self._circuit_breaker_publish(event))
             else:
                 # Run directly if no loop is running
-                loop.run_until_complete(self.publish_async(event))
+                loop.run_until_complete(self._circuit_breaker_publish(event))
         except Exception as e:
             self._logger.error(f"RedPanda sync publish failed: {str(e)}")
     
+    async def _circuit_breaker_publish(self, event: ModelOnexEvent) -> bool:
+        """
+        Publish event through circuit breaker protection with observability.
+        
+        Args:
+            event: OnexEvent to emit
+            
+        Returns:
+            bool: True if published successfully, False if queued or dropped
+        """
+        start_time = time.time()
+        
+        try:
+            result = await self._circuit_breaker.publish_event(event, self._raw_publish_async)
+            
+            # Record successful latency
+            latency = time.time() - start_time
+            self._observability.record_event_latency(latency)
+            
+            # Record success metric
+            self._observability.record_metric(
+                "event_publishing_success_total",
+                1,
+                labels={"event_type": event.event_type},
+                metric_type=MetricType.COUNTER
+            )
+            
+            return result
+            
+        except Exception as e:
+            # Record error latency
+            latency = time.time() - start_time
+            self._observability.record_event_latency(latency)
+            
+            # Record error metric
+            self._observability.record_metric(
+                "event_publishing_error_total",
+                1,
+                labels={"event_type": event.event_type, "error": type(e).__name__},
+                metric_type=MetricType.COUNTER
+            )
+            
+            # Calculate and record error rate
+            error_rate = await self._calculate_recent_error_rate()
+            self._observability.record_error_rate("redpanda_event_bus", error_rate)
+            
+            raise
+    
     async def publish_async(self, event: ModelOnexEvent) -> None:
         """
-        Publish an event to the bus (asynchronous) with retry, rate limiting, and exponential backoff.
+        Publish an event to the bus (asynchronous) through circuit breaker protection.
+        
+        Args:
+            event: OnexEvent to emit
+        """
+        await self._circuit_breaker_publish(event)
+    
+    async def _raw_publish_async(self, event: ModelOnexEvent) -> None:
+        """
+        Raw event publishing without circuit breaker protection (used by circuit breaker).
         
         Args:
             event: OnexEvent to emit
@@ -429,10 +513,54 @@ class RedPandaEventBus(ProtocolEventBus):
         self._logger.info("Cleared all subscribers from RedPanda event bus")
     
     async def close(self):
-        """Close RedPanda producer connection."""
+        """Close RedPanda producer connection, circuit breaker, and observability cleanup."""
         if self._producer:
             await self._producer.stop()
             self._producer = None
+        
+        # Clean up producer pool
+        await self._producer_pool.close_all()
+        
+        # Clean up observability system
+        await self._observability.close()
+    
+    def get_circuit_breaker_status(self) -> Dict[str, Any]:
+        """Get circuit breaker status for monitoring and health checks."""
+        return self._circuit_breaker.get_health_status()
+    
+    def is_healthy(self) -> bool:
+        """Check if the event bus and circuit breaker are healthy."""
+        return self._circuit_breaker.is_healthy()
+    
+    def get_observability_metrics(self) -> Dict[str, Any]:
+        """Get comprehensive observability metrics."""
+        return self._observability.get_current_metrics()
+    
+    def get_infrastructure_health_summary(self) -> Dict[str, Any]:
+        """Get infrastructure health summary."""
+        return self._observability.get_health_summary()
+    
+    def get_performance_trends(self, hours: int = 1) -> Dict[str, Any]:
+        """Get performance trends over specified hours."""
+        return self._observability.get_performance_trends(hours)
+    
+    def get_active_alerts(self) -> List[Dict[str, Any]]:
+        """Get active infrastructure alerts."""
+        return self._observability.get_alerts(active_only=True)
+    
+    def export_prometheus_metrics(self) -> str:
+        """Export metrics in Prometheus format."""
+        return self._observability.export_prometheus_metrics()
+    
+    async def _calculate_recent_error_rate(self) -> float:
+        """Calculate recent error rate for observability."""
+        # Get recent metrics from circuit breaker
+        metrics = self._circuit_breaker.get_metrics()
+        
+        if metrics.total_events == 0:
+            return 0.0
+        
+        return metrics.failed_events / metrics.total_events
     
     def _event_to_topic(self, event: ModelOnexEvent) -> str:
         """

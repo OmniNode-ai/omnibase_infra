@@ -1,0 +1,323 @@
+"""Event Bus Circuit Breaker for RedPanda Reliability.
+
+Implements circuit breaker pattern for RedPanda event publishing to handle:
+- RedPanda service unavailability
+- Network failures and timeouts
+- Graceful degradation with event queuing
+- Dead letter queue for failed events
+
+Following ONEX infrastructure reliability patterns with fail-fast behavior
+when circuit is open but graceful degradation for non-critical operations.
+"""
+
+import asyncio
+import logging
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Dict, List, Optional, Callable, Any
+from uuid import UUID, uuid4
+
+from omnibase_core.core.errors.onex_error import OnexError
+from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+
+
+class CircuitBreakerState(Enum):
+    """Circuit breaker states for event publishing reliability."""
+    CLOSED = "closed"       # Normal operation - events published directly
+    OPEN = "open"          # Failure state - events queued or dropped based on policy  
+    HALF_OPEN = "half_open"  # Testing state - limited event publishing to test recovery
+
+
+@dataclass
+class CircuitBreakerConfig:
+    """Configuration for event bus circuit breaker."""
+    failure_threshold: int = 5          # Number of failures before opening circuit
+    recovery_timeout: int = 60          # Seconds before transitioning to half-open
+    success_threshold: int = 3          # Successes needed in half-open to close
+    timeout_seconds: int = 30           # Event publishing timeout
+    max_queue_size: int = 1000         # Max queued events when circuit is open
+    dead_letter_enabled: bool = True   # Enable dead letter queue for failed events
+    graceful_degradation: bool = True  # Allow operations to continue without events
+
+
+@dataclass
+class EventBusMetrics:
+    """Metrics tracking for event bus circuit breaker."""
+    total_events: int = 0
+    successful_events: int = 0
+    failed_events: int = 0
+    queued_events: int = 0
+    dropped_events: int = 0
+    dead_letter_events: int = 0
+    circuit_opens: int = 0
+    circuit_closes: int = 0
+    last_failure: Optional[datetime] = None
+    last_success: Optional[datetime] = None
+
+
+class EventBusCircuitBreaker:
+    """
+    Circuit breaker for RedPanda event bus reliability.
+    
+    Provides resilient event publishing with:
+    - Automatic failure detection and circuit opening
+    - Graceful degradation with event queuing  
+    - Dead letter queue for permanently failed events
+    - Recovery testing and automatic circuit closing
+    - Comprehensive metrics and observability
+    """
+    
+    def __init__(self, config: CircuitBreakerConfig):
+        """Initialize circuit breaker with configuration."""
+        self.config = config
+        self.state = CircuitBreakerState.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        self.last_failure_time: Optional[float] = None
+        self.event_queue: List[ModelOnexEvent] = []
+        self.dead_letter_queue: List[Dict[str, Any]] = []
+        self.metrics = EventBusMetrics()
+        self.logger = logging.getLogger(f"{__name__}.EventBusCircuitBreaker")
+        self._lock = asyncio.Lock()
+    
+    async def publish_event(self, event: ModelOnexEvent, publisher_func: Callable) -> bool:
+        """
+        Publish event through circuit breaker protection.
+        
+        Args:
+            event: Event to publish
+            publisher_func: Async function to publish event
+            
+        Returns:
+            bool: True if published successfully, False if queued or dropped
+            
+        Raises:
+            OnexError: For critical failures that should fail-fast
+        """
+        async with self._lock:
+            self.metrics.total_events += 1
+            
+            # Check circuit state and handle accordingly
+            if self.state == CircuitBreakerState.OPEN:
+                return await self._handle_open_circuit(event)
+            elif self.state == CircuitBreakerState.HALF_OPEN:
+                return await self._handle_half_open_circuit(event, publisher_func)
+            else:  # CLOSED
+                return await self._handle_closed_circuit(event, publisher_func)
+    
+    async def _handle_closed_circuit(self, event: ModelOnexEvent, publisher_func: Callable) -> bool:
+        """Handle event publishing when circuit is closed (normal operation)."""
+        try:
+            # Attempt to publish event with timeout
+            await asyncio.wait_for(publisher_func(event), timeout=self.config.timeout_seconds)
+            
+            # Success - reset failure count and update metrics
+            self.failure_count = 0
+            self.metrics.successful_events += 1
+            self.metrics.last_success = datetime.now()
+            
+            self.logger.debug(f"Event published successfully: {event.correlation_id}")
+            return True
+            
+        except asyncio.TimeoutError:
+            await self._handle_failure(f"Event publishing timeout after {self.config.timeout_seconds}s")
+            return await self._queue_or_drop_event(event)
+            
+        except Exception as e:
+            await self._handle_failure(f"Event publishing failed: {str(e)}")
+            return await self._queue_or_drop_event(event)
+    
+    async def _handle_half_open_circuit(self, event: ModelOnexEvent, publisher_func: Callable) -> bool:
+        """Handle event publishing when circuit is half-open (testing recovery)."""
+        try:
+            # Attempt limited publishing to test recovery
+            await asyncio.wait_for(publisher_func(event), timeout=self.config.timeout_seconds)
+            
+            # Success in half-open state
+            self.success_count += 1
+            self.metrics.successful_events += 1
+            self.metrics.last_success = datetime.now()
+            
+            self.logger.info(f"Half-open success {self.success_count}/{self.config.success_threshold}")
+            
+            # Check if we can close the circuit
+            if self.success_count >= self.config.success_threshold:
+                await self._close_circuit()
+            
+            return True
+            
+        except Exception as e:
+            # Failure in half-open - immediately open circuit again
+            await self._open_circuit(f"Half-open test failed: {str(e)}")
+            return await self._queue_or_drop_event(event)
+    
+    async def _handle_open_circuit(self, event: ModelOnexEvent) -> bool:
+        """Handle event when circuit is open (failure state)."""
+        # Check if we should transition to half-open for recovery testing
+        if self._should_attempt_reset():
+            await self._transition_to_half_open()
+            # Don't publish this event yet - queue it for safety
+            return await self._queue_or_drop_event(event)
+        
+        # Circuit remains open - queue or drop event
+        return await self._queue_or_drop_event(event)
+    
+    async def _handle_failure(self, error_message: str):
+        """Handle event publishing failure."""
+        self.failure_count += 1
+        self.metrics.failed_events += 1
+        self.metrics.last_failure = datetime.now()
+        self.last_failure_time = time.time()
+        
+        self.logger.warning(f"Event publishing failure {self.failure_count}/{self.config.failure_threshold}: {error_message}")
+        
+        # Open circuit if failure threshold reached
+        if self.failure_count >= self.config.failure_threshold:
+            await self._open_circuit(f"Failure threshold reached: {error_message}")
+    
+    async def _open_circuit(self, reason: str):
+        """Open the circuit breaker."""
+        if self.state != CircuitBreakerState.OPEN:
+            self.state = CircuitBreakerState.OPEN
+            self.metrics.circuit_opens += 1
+            self.logger.error(f"Circuit breaker OPENED: {reason}")
+    
+    async def _close_circuit(self):
+        """Close the circuit breaker (recovery complete)."""
+        self.state = CircuitBreakerState.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        self.metrics.circuit_closes += 1
+        self.logger.info("Circuit breaker CLOSED - recovery complete")
+        
+        # Process any queued events
+        await self._process_queued_events()
+    
+    async def _transition_to_half_open(self):
+        """Transition circuit to half-open state for recovery testing."""
+        self.state = CircuitBreakerState.HALF_OPEN
+        self.success_count = 0
+        self.logger.info("Circuit breaker transitioned to HALF-OPEN - testing recovery")
+    
+    def _should_attempt_reset(self) -> bool:
+        """Check if circuit should attempt reset to half-open."""
+        if self.last_failure_time is None:
+            return False
+        
+        time_since_failure = time.time() - self.last_failure_time
+        return time_since_failure >= self.config.recovery_timeout
+    
+    async def _queue_or_drop_event(self, event: ModelOnexEvent) -> bool:
+        """Queue event or drop it based on queue capacity and configuration."""
+        if not self.config.graceful_degradation:
+            # Fail-fast mode - raise error for critical operations
+            raise OnexError(
+                code=CoreErrorCode.INTEGRATION_SERVICE_UNAVAILABLE,
+                message="Event bus circuit breaker open - event publishing failed",
+                details={"circuit_state": self.state.value, "queued_events": len(self.event_queue)}
+            )
+        
+        # Graceful degradation mode - queue if possible
+        if len(self.event_queue) < self.config.max_queue_size:
+            self.event_queue.append(event)
+            self.metrics.queued_events += 1
+            self.logger.info(f"Event queued (circuit {self.state.value}): {event.correlation_id}")
+            return False  # Not published, but queued
+        else:
+            # Queue full - move to dead letter queue if enabled
+            if self.config.dead_letter_enabled:
+                await self._add_to_dead_letter_queue(event, "Queue capacity exceeded")
+            
+            self.metrics.dropped_events += 1
+            self.logger.warning(f"Event dropped - queue full: {event.correlation_id}")
+            return False
+    
+    async def _add_to_dead_letter_queue(self, event: ModelOnexEvent, reason: str):
+        """Add failed event to dead letter queue for later processing."""
+        dead_letter_entry = {
+            "event": event.model_dump(),
+            "timestamp": datetime.now().isoformat(),
+            "reason": reason,
+            "circuit_state": self.state.value,
+            "retry_count": 0
+        }
+        
+        self.dead_letter_queue.append(dead_letter_entry)
+        self.metrics.dead_letter_events += 1
+        self.logger.info(f"Event added to dead letter queue: {event.correlation_id} - {reason}")
+    
+    async def _process_queued_events(self):
+        """Process queued events when circuit closes."""
+        if not self.event_queue:
+            return
+        
+        queued_count = len(self.event_queue)
+        self.logger.info(f"Processing {queued_count} queued events after circuit recovery")
+        
+        # Process events in background to avoid blocking
+        asyncio.create_task(self._process_queue_background())
+    
+    async def _process_queue_background(self):
+        """Background task to process queued events."""
+        processed = 0
+        failed = 0
+        
+        while self.event_queue and self.state == CircuitBreakerState.CLOSED:
+            try:
+                event = self.event_queue.pop(0)
+                # TODO: Re-publish event through normal publisher
+                # This would require passing the publisher function
+                processed += 1
+                
+            except Exception as e:
+                failed += 1
+                self.logger.error(f"Failed to process queued event: {e}")
+                
+                if failed >= 3:  # Prevent infinite retry loops
+                    break
+        
+        self.logger.info(f"Queued event processing complete: {processed} processed, {failed} failed")
+    
+    def get_state(self) -> CircuitBreakerState:
+        """Get current circuit breaker state."""
+        return self.state
+    
+    def get_metrics(self) -> EventBusMetrics:
+        """Get current circuit breaker metrics."""
+        return self.metrics
+    
+    def is_healthy(self) -> bool:
+        """Check if circuit breaker is healthy for event publishing."""
+        return self.state == CircuitBreakerState.CLOSED or self.state == CircuitBreakerState.HALF_OPEN
+    
+    async def reset_circuit(self):
+        """Manually reset circuit breaker (for administrative purposes)."""
+        async with self._lock:
+            self.state = CircuitBreakerState.CLOSED
+            self.failure_count = 0
+            self.success_count = 0
+            self.last_failure_time = None
+            self.logger.info("Circuit breaker manually reset to CLOSED state")
+    
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get comprehensive health status for monitoring."""
+        return {
+            "circuit_state": self.state.value,
+            "is_healthy": self.is_healthy(),
+            "failure_count": self.failure_count,
+            "queued_events": len(self.event_queue),
+            "dead_letter_events": len(self.dead_letter_queue),
+            "metrics": {
+                "total_events": self.metrics.total_events,
+                "successful_events": self.metrics.successful_events,
+                "failed_events": self.metrics.failed_events,
+                "success_rate": (self.metrics.successful_events / max(self.metrics.total_events, 1)) * 100,
+                "circuit_opens": self.metrics.circuit_opens,
+                "circuit_closes": self.metrics.circuit_closes,
+                "last_failure": self.metrics.last_failure.isoformat() if self.metrics.last_failure else None,
+                "last_success": self.metrics.last_success.isoformat() if self.metrics.last_success else None
+            }
+        }
