@@ -234,7 +234,7 @@ dependencies:
     - name: "omnibase_infra.models.postgres"
       purpose: "Shared PostgreSQL data models"
       
-    - name: "omnibase_infra.models.omninode"
+    - name: "omnibase_infra.models.event_publishing"
       purpose: "OmniNode event publishing models"
 
 # === CHANGELOG ===

@@ -28,7 +28,7 @@ from omnibase_infra.models.postgres.model_postgres_query_request import ModelPos
 from omnibase_infra.models.postgres.model_postgres_query_response import ModelPostgresQueryResponse
 from omnibase_infra.models.postgres.model_postgres_query_result import ModelPostgresQueryResult, ModelPostgresQueryRow
 from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
-from omnibase_infra.models.omninode.model_omninode_event_publisher import ModelOmniNodeEventPublisher
+from omnibase_infra.models.event_publishing.model_omninode_event_publisher import ModelOmniNodeEventPublisher
 from .models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from .models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 from .models.model_postgres_adapter_config import ModelPostgresAdapterConfig
@@ -513,10 +513,10 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
     async def _publish_event_to_redpanda(self, envelope: "ModelEventEnvelope") -> None:
         """
-        Publish event envelope to RedPanda via event bus following OmniNode topic design.
+        Publish event envelope to RedPanda via proper ProtocolEventBus interface.
         
         Args:
-            envelope: ModelEventEnvelope with OmniNode topic routing
+            envelope: ModelEventEnvelope containing OnexEvent payload
         """
         # Event bus MUST be available - no fallbacks allowed
         if not self._event_bus or not self._event_publisher:
@@ -526,22 +526,23 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
         
         try:
-            # Extract topic from envelope metadata  
-            topic_name = envelope.metadata.get("topic_spec")
+            # Extract the OnexEvent from the envelope payload
+            onex_event = envelope.payload
             
-            # Publish to RedPanda via event bus
-            await self._event_bus.publish_original(
-                topic=topic_name,
-                event_data=envelope.model_dump(),
-                correlation_id=str(envelope.correlation_id),
-                partition_key=str(envelope.correlation_id)  # Use correlation_id for consistent partitioning
-            )
+            if not hasattr(onex_event, 'event_type'):
+                raise OnexError(
+                    code=CoreErrorCode.VALIDATION_ERROR,
+                    message="Envelope payload is not a valid OnexEvent"
+                )
+            
+            # Publish OnexEvent via proper ProtocolEventBus interface
+            await self._event_bus.publish_async(onex_event)
             
             self._logger.info(
-                f"Event published to RedPanda topic: {topic_name}",
+                f"OnexEvent published via ProtocolEventBus",
                 correlation_id=envelope.correlation_id,
                 operation="event_publish_success",
-                topic=topic_name,
+                event_type=onex_event.event_type,
                 envelope_id=envelope.envelope_id
             )
             
@@ -549,7 +550,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             # Event publishing is REQUIRED - FAIL HARD
             raise OnexError(
                 code=CoreErrorCode.EXTERNAL_SERVICE_ERROR,
-                message=f"CRITICAL: Failed to publish event to RedPanda: {str(e)}"
+                message=f"CRITICAL: Failed to publish OnexEvent to RedPanda: {str(e)}"
             ) from e
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:

@@ -12,78 +12,150 @@ Per user requirements:
   each base class. that's dumb"
 """
 
-import types
-from typing import Optional, Type, TypeVar, Union
+import asyncio
+import json
+import os
+from typing import Callable, Optional, Type, TypeVar, Union
 
 from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
 from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
+from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLoader
 
 T = TypeVar("T")
 
 
-class InfrastructureEventBusRedPanda:
-    """RedPanda/Kafka event bus implementation for infrastructure services."""
+class RedPandaEventBus(ProtocolEventBus):
+    """
+    Proper ProtocolEventBus implementation for RedPanda/Kafka integration.
     
-    def __init__(self):
-        """Initialize RedPanda event bus with configuration from environment."""
+    Conforms to the standard ProtocolEventBus interface using OnexEvent objects
+    and publishes them to appropriate RedPanda topics using OmniNode topic routing.
+    """
+    
+    def __init__(self, credentials=None, **kwargs):
+        """Initialize RedPanda event bus with proper protocol compliance."""
         # Import aiokafka for RedPanda integration
         try:
             from aiokafka import AIOKafkaProducer
-            import json
-            import os
-            self._kafka = AIOKafkaProducer
-            self._json = json
+            self._kafka_producer_class = AIOKafkaProducer
             self._producer = None
             
             # RedPanda connection configuration
-            self._bootstrap_servers = [f"localhost:{os.getenv('REDPANDA_PORT', '9092')}"]
+            self._bootstrap_servers = [f"localhost:{os.getenv('REDPANDA_EXTERNAL_PORT', '29102')}"]
             
             print(f"RedPanda event bus initialized with servers: {self._bootstrap_servers}")
         except ImportError:
-            print("WARNING: aiokafka not available, falling back to mock event bus")
-            self._kafka = None
-            self._json = None
+            print("WARNING: aiokafka not available, using mock event bus")
+            self._kafka_producer_class = None
             self._producer = None
             self._bootstrap_servers = []
+        
+        # Protocol-compliant subscriber management
+        self._subscribers = []
     
-    async def publish_original(self, topic: str, event_data: dict, correlation_id: str = None, partition_key: str = None):
+    def publish(self, event: ModelOnexEvent) -> None:
         """
-        Publish event to RedPanda topic.
+        Publish an event to the bus (synchronous).
         
         Args:
-            topic: RedPanda topic name (e.g., "dev.omnibase.onex.evt.postgres-query-completed.v1")
-            event_data: Event data dictionary (typically envelope.model_dump())
-            correlation_id: Correlation ID for tracking
-            partition_key: Partition key for consistent routing
+            event: OnexEvent to emit
         """
-        if not self._kafka:
+        # Run async publish in sync context
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Schedule as task if loop is running
+                loop.create_task(self.publish_async(event))
+            else:
+                # Run directly if no loop is running
+                loop.run_until_complete(self.publish_async(event))
+        except Exception as e:
+            print(f"RedPanda sync publish failed: {str(e)}")
+    
+    async def publish_async(self, event: ModelOnexEvent) -> None:
+        """
+        Publish an event to the bus (asynchronous).
+        
+        Args:
+            event: OnexEvent to emit
+        """
+        if not self._kafka_producer_class:
             # Mock publishing for testing without aiokafka
-            print(f"MOCK: Publishing to topic '{topic}' with correlation_id={correlation_id}")
+            print(f"MOCK: Publishing OnexEvent {event.event_type} with correlation_id={event.correlation_id}")
             return
         
         try:
             # Initialize producer if needed
             if not self._producer:
-                self._producer = self._kafka(
+                self._producer = self._kafka_producer_class(
                     bootstrap_servers=self._bootstrap_servers,
-                    value_serializer=lambda x: self._json.dumps(x).encode('utf-8')
+                    value_serializer=lambda x: json.dumps(x).encode('utf-8')
                 )
                 await self._producer.start()
                 print(f"RedPanda producer started for servers: {self._bootstrap_servers}")
             
+            # Convert OnexEvent to RedPanda topic and message
+            topic = self._event_to_topic(event)
+            message_data = event.model_dump()
+            partition_key = str(event.correlation_id) if event.correlation_id else None
+            
             # Publish to RedPanda topic
             await self._producer.send_and_wait(
                 topic=topic,
-                value=event_data,
+                value=message_data,
                 key=partition_key.encode('utf-8') if partition_key else None
             )
             
-            print(f"Published event to RedPanda topic: {topic} (correlation_id={correlation_id})")
+            print(f"Published OnexEvent to RedPanda topic: {topic} (correlation_id={event.correlation_id})")
             
         except Exception as e:
-            # Log error but don't fail (fire-and-forget pattern)
-            print(f"RedPanda publishing failed: {str(e)}")
+            print(f"RedPanda async publish failed: {str(e)}")
+    
+    def subscribe(self, callback: Callable[[ModelOnexEvent], None]) -> None:
+        """
+        Subscribe a callback to receive events (synchronous).
+        
+        Args:
+            callback: Callable invoked with each OnexEvent
+        """
+        if callback not in self._subscribers:
+            self._subscribers.append(callback)
+            print(f"Subscribed callback to RedPanda event bus")
+    
+    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None]) -> None:
+        """
+        Subscribe a callback to receive events (asynchronous).
+        
+        Args:
+            callback: Callable invoked with each OnexEvent
+        """
+        self.subscribe(callback)
+    
+    def unsubscribe(self, callback: Callable[[ModelOnexEvent], None]) -> None:
+        """
+        Unsubscribe a previously registered callback (synchronous).
+        
+        Args:
+            callback: Callable to remove
+        """
+        if callback in self._subscribers:
+            self._subscribers.remove(callback)
+            print(f"Unsubscribed callback from RedPanda event bus")
+    
+    async def unsubscribe_async(self, callback: Callable[[ModelOnexEvent], None]) -> None:
+        """
+        Unsubscribe a previously registered callback (asynchronous).
+        
+        Args:
+            callback: Callable to remove
+        """
+        self.unsubscribe(callback)
+    
+    def clear(self) -> None:
+        """Remove all subscribers from the event bus."""
+        self._subscribers.clear()
+        print("Cleared all subscribers from RedPanda event bus")
     
     async def close(self):
         """Close RedPanda producer connection."""
@@ -91,58 +163,42 @@ class InfrastructureEventBusRedPanda:
             await self._producer.stop()
             self._producer = None
     
-    # Legacy ProtocolEventBus interface compatibility
-    def subscribe(self, callback, event_type=None):
-        """Subscribe compatibility (not implemented for RedPanda publisher)."""
-        print(f"Subscribe called with event_type={event_type} (not implemented)")
-    
-    def unsubscribe(self, callback):
-        """Unsubscribe compatibility (not implemented for RedPanda publisher)."""
-        print("Unsubscribe called (not implemented)")
-        
-    def publish(self, *args, **kwargs):
+    def _event_to_topic(self, event: ModelOnexEvent) -> str:
         """
-        Compatibility publish method with flexible signature.
+        Convert OnexEvent to appropriate RedPanda topic using OmniNode namespace.
         
-        Handles different calling patterns from NodeEffectService base class:
-        - publish() - no args (compatibility)
-        - publish(topic, event_data, ...) - standard RedPanda publishing
+        Args:
+            event: OnexEvent to route
+            
+        Returns:
+            RedPanda topic name following OmniNode format
         """
-        # If no arguments, this is likely a compatibility call - ignore
-        if not args and not kwargs:
-            print("COMPATIBILITY: Empty publish() call - ignoring")
-            return
-            
-        # If we have arguments, delegate to the async publish method
-        if args or kwargs:
-            # Extract common parameters
-            topic = args[0] if args else kwargs.get('topic')
-            event_data = args[1] if len(args) > 1 else kwargs.get('event_data')
-            correlation_id = kwargs.get('correlation_id')
-            partition_key = kwargs.get('partition_key')
-            
-            # If we're missing critical parameters, log and return
-            if not topic or not event_data:
-                print(f"COMPATIBILITY: Incomplete publish call - topic={topic}, event_data={bool(event_data)}")
-                return
-                
-            # Create a simple async wrapper for sync calls
-            import asyncio
-            try:
-                # Try to run in existing event loop
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # Schedule as task if loop is running
-                    loop.create_task(self.publish_async(topic, event_data, correlation_id, partition_key))
-                else:
-                    # Run directly if no loop is running
-                    loop.run_until_complete(self.publish_async(topic, event_data, correlation_id, partition_key))
-            except Exception as e:
-                print(f"COMPATIBILITY: Sync publish failed: {e}")
-    
-    async def publish_async(self, topic: str, event_data: dict, correlation_id: str = None, partition_key: str = None):
-        """Async publish method (the original implementation)."""
-        return await self.publish_original(topic, event_data, correlation_id, partition_key)
+        # Extract environment configuration
+        env = os.getenv('OMNINODE_ENV', 'dev')
+        tenant = os.getenv('OMNINODE_TENANT', 'omnibase')
+        context = os.getenv('OMNINODE_CONTEXT', 'onex')
+        
+        # Map event types to topic classes and names
+        if event.event_type.startswith('core.database.'):
+            topic_class = 'evt'
+            if 'query_completed' in event.event_type:
+                topic_name = 'postgres-query-completed'
+            elif 'query_failed' in event.event_type:
+                topic_name = 'postgres-query-failed'
+            elif 'health_check' in event.event_type:
+                topic_name = 'postgres-health-response'
+                topic_class = 'qrs'
+            else:
+                topic_name = 'postgres-operation'
+        else:
+            # Default topic routing
+            topic_class = 'evt'
+            topic_name = event.event_type.replace('.', '-').lower()
+        
+        # Build OmniNode topic: <env>.<tenant>.<context>.<class>.<topic>.<version>
+        topic = f"{env}.{tenant}.{context}.{topic_class}.{topic_name}.v1"
+        
+        return topic
 
 
 def create_infrastructure_container() -> ONEXContainer:
@@ -172,8 +228,8 @@ def create_infrastructure_container() -> ONEXContainer:
 def _setup_infrastructure_dependencies(container: ONEXContainer):
     """Set up all dependencies needed by infrastructure services."""
 
-    # Event Bus - RedPanda implementation for infrastructure services  
-    event_bus = InfrastructureEventBusRedPanda()
+    # Event Bus - Proper ProtocolEventBus implementation for RedPanda
+    event_bus = RedPandaEventBus()
     print(f"Created RedPanda event bus: {type(event_bus).__name__}")
 
     # Schema Loader - required by MixinEventDrivenNode
