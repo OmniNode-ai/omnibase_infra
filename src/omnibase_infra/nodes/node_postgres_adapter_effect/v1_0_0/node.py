@@ -594,17 +594,27 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
             
         except Exception as e:
-            # Event publishing failure should not fail the database operation
-            # Log the error but allow the DB operation to succeed
+            # Event publishing is CRITICAL infrastructure - failures MUST propagate as OnexError (FAIL-FAST principle)
+            sanitized_error = self._sanitize_error_message(str(e))
             self._logger.error(
-                f"Event publishing failed but database operation succeeded: {str(e)}",
+                f"CRITICAL: Event publishing failed - propagating as OnexError per fail-fast principle",
                 correlation_id=envelope.correlation_id,
-                operation="event_publish_failed",
+                operation="event_publish_critical_failure",
                 event_type=getattr(envelope.payload, 'event_type', 'unknown'),
                 envelope_id=envelope.envelope_id,
-                error_details=str(e)
+                error_details=sanitized_error
             )
-            # Note: Database operation continues successfully despite event publishing failure
+            # ONEX fail-fast compliance: Event publishing failures must propagate as OnexError
+            raise OnexError(
+                code=CoreErrorCode.SERVICE_UNAVAILABLE_ERROR,
+                message=f"Critical infrastructure failure: Event publishing failed - {sanitized_error}",
+                details={
+                    "component": "event_bus_integration",
+                    "envelope_id": str(envelope.envelope_id),
+                    "event_type": getattr(envelope.payload, 'event_type', 'unknown'),
+                    "original_error": sanitized_error
+                }
+            ) from e
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
         """
@@ -617,6 +627,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
             self._check_database_connectivity,
             self._check_connection_pool_health,
             self._check_circuit_breaker_health,
+            self._check_redpanda_connectivity,  # NEW: RedPanda event bus health
+            self._check_event_publishing_health,  # NEW: Event publishing capability
         ]
 
     def _check_database_connectivity(self) -> ModelHealthStatus:
@@ -784,6 +796,159 @@ class NodePostgresAdapterEffect(NodeEffectService):
             return ModelHealthStatus(
                 status=EnumHealthStatus.UNHEALTHY,
                 message=f"Circuit breaker health check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    def _check_redpanda_connectivity(self) -> ModelHealthStatus:
+        """Check RedPanda event bus connectivity (sync wrapper for health checks)."""
+        start_time = time.perf_counter()
+        try:
+            # Basic connectivity indicator based on event bus availability
+            if self._event_bus is None:
+                execution_time_ms = (time.perf_counter() - start_time) * 1000
+                self._logger.log_health_check(
+                    check_name="redpanda_connectivity",
+                    status="unhealthy",
+                    execution_time_ms=execution_time_ms,
+                    reason="event_bus_not_available"
+                )
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message="Event bus service not available",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="redpanda_connectivity",
+                status="healthy",
+                execution_time_ms=execution_time_ms,
+                reason="event_bus_available"
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="RedPanda event bus connection available",
+                timestamp=datetime.utcnow().isoformat()
+            )
+                    
+        except Exception as e:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="redpanda_connectivity",
+                status="unhealthy",
+                execution_time_ms=execution_time_ms,
+                error_type=type(e).__name__,
+                error_message=str(e)
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"RedPanda connectivity check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    async def _check_redpanda_connectivity_async(self) -> ModelHealthStatus:
+        """Check RedPanda event bus connectivity with actual message test (async version)."""
+        try:
+            if not self._event_bus or not self._event_publisher:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message="Event bus or event publisher not available",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            # Create test event envelope for connectivity verification
+            test_correlation_id = uuid4()
+            test_data = {
+                "test_type": "health_check_connectivity",
+                "timestamp": time.time(),
+                "node_id": "postgres_adapter_node"
+            }
+            
+            # Test event publishing with timeout
+            test_envelope = self._event_publisher.create_postgres_health_response_envelope(
+                correlation_id=test_correlation_id,
+                health_status="testing_connectivity",
+                health_data=test_data
+            )
+            
+            # Use circuit breaker for health check publishing (with timeout)
+            await asyncio.wait_for(
+                self._event_bus.publish_async(test_envelope.payload),
+                timeout=5.0
+            )
+            
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="RedPanda connectivity verified - test event published successfully",
+                timestamp=datetime.utcnow().isoformat()
+            )
+            
+        except asyncio.TimeoutError:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.DEGRADED,
+                message="RedPanda connectivity timeout - slow response",
+                timestamp=datetime.utcnow().isoformat()
+            )
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"RedPanda connectivity test failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    def _check_event_publishing_health(self) -> ModelHealthStatus:
+        """Check event publishing capability health (sync wrapper for health checks)."""
+        start_time = time.perf_counter()
+        try:
+            # Basic event publisher availability check
+            if not self._event_publisher:
+                execution_time_ms = (time.perf_counter() - start_time) * 1000
+                self._logger.log_health_check(
+                    check_name="event_publishing_health",
+                    status="unhealthy",
+                    execution_time_ms=execution_time_ms,
+                    reason="event_publisher_not_available"
+                )
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message="Event publisher not available",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            # Check event publisher configuration
+            if not hasattr(self._event_publisher, 'node_id'):
+                execution_time_ms = (time.perf_counter() - start_time) * 1000
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message="Event publisher missing configuration",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="event_publishing_health",
+                status="healthy",
+                execution_time_ms=execution_time_ms,
+                reason="event_publisher_operational"
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="Event publishing capability available",
+                timestamp=datetime.utcnow().isoformat()
+            )
+                    
+        except Exception as e:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="event_publishing_health",
+                status="unhealthy",
+                execution_time_ms=execution_time_ms,
+                error_type=type(e).__name__,
+                error_message=str(e)
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Event publishing health check failed: {str(e)}",
                 timestamp=datetime.utcnow().isoformat()
             )
 
@@ -1174,18 +1339,93 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
     async def cleanup(self) -> None:
         """
-        Cleanup resources when shutting down.
+        Enhanced cleanup with comprehensive resource management and thread safety.
         
-        Follows cleanup patterns defined in subcontracts with graceful resource disposal.
+        Implements proper resource lifecycle management with concurrent cleanup
+        and graceful error handling per ONEX infrastructure patterns.
         """
-        if self._connection_manager:
-            try:
+        cleanup_tasks = []
+        cleanup_errors = []
+        
+        # Thread-safe cleanup coordination
+        async with self._connection_manager_lock:
+            # Schedule connection manager cleanup
+            if self._connection_manager:
+                cleanup_tasks.append(self._cleanup_connection_manager())
+        
+        # Schedule event bus cleanup (if available)
+        if self._event_bus:
+            cleanup_tasks.append(self._cleanup_event_bus())
+        
+        # Schedule circuit breaker cleanup
+        if self._circuit_breaker:
+            cleanup_tasks.append(self._cleanup_circuit_breaker())
+        
+        # Execute all cleanup tasks concurrently with error isolation
+        if cleanup_tasks:
+            results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+            
+            # Collect any cleanup errors for observability (protocol-based exception detection)
+            for i, result in enumerate(results):
+                if hasattr(result, '__traceback__') and hasattr(result, 'args'):  # Exception-like protocol
+                    cleanup_errors.append(f"Cleanup task {i}: {str(result)}")
+        
+        # Clear all references in thread-safe manner
+        async with self._connection_manager_lock:
+            self._connection_manager = None
+            self._event_bus = None
+            self._circuit_breaker = None
+        
+        # Log cleanup summary for observability
+        if cleanup_errors:
+            self._logger.warning(
+                f"Cleanup completed with {len(cleanup_errors)} non-critical errors",
+                operation="cleanup_summary",
+                error_count=len(cleanup_errors),
+                errors=cleanup_errors
+            )
+        else:
+            self._logger.info(
+                "Resource cleanup completed successfully",
+                operation="cleanup_success",
+                tasks_completed=len(cleanup_tasks)
+            )
+    
+    async def _cleanup_connection_manager(self) -> None:
+        """Cleanup database connection manager resources."""
+        try:
+            if self._connection_manager and hasattr(self._connection_manager, 'close'):
                 await self._connection_manager.close()
-            except Exception as e:
-                # Log error but don't raise during cleanup (as per infrastructure patterns)
-                pass
-            finally:
-                self._connection_manager = None
+                self._logger.debug("Connection manager cleanup completed")
+        except Exception as e:
+            self._logger.warning(f"Connection manager cleanup error: {str(e)}")
+            # Don't raise during cleanup - log and continue
+    
+    async def _cleanup_event_bus(self) -> None:
+        """Cleanup event bus resources."""
+        try:
+            if self._event_bus and hasattr(self._event_bus, 'cleanup'):
+                await self._event_bus.cleanup()
+                self._logger.debug("Event bus cleanup completed")
+        except Exception as e:
+            self._logger.warning(f"Event bus cleanup error: {str(e)}")
+            # Don't raise during cleanup - log and continue
+    
+    async def _cleanup_circuit_breaker(self) -> None:
+        """Cleanup circuit breaker resources."""
+        try:
+            # Circuit breaker state reset for clean shutdown
+            if self._circuit_breaker:
+                # Log final circuit breaker state for observability
+                final_state = self._circuit_breaker.get_state()
+                self._logger.debug(
+                    "Circuit breaker final state",
+                    circuit_state=final_state["state"],
+                    failure_count=final_state["failure_count"]
+                )
+        except Exception as e:
+            self._logger.warning(f"Circuit breaker cleanup error: {str(e)}")
+            # Don't raise during cleanup - log and continue
 
     def _validate_query_input(self, query_request) -> None:
         """

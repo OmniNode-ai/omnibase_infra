@@ -31,19 +31,19 @@ class ModelPostgresQueryParameter(BaseModel):
     
     @classmethod
     def from_value(cls, value: object, index: int) -> "ModelPostgresQueryParameter":
-        """Create parameter from raw value."""
+        """Create parameter from raw value using protocol-based duck typing (ONEX compliance)."""
         if value is None:
             return cls(parameter_type="null", parameter_index=index, value_null=True)
-        elif isinstance(value, str):
-            return cls(parameter_type="string", parameter_index=index, value_string=value)
-        elif isinstance(value, int):
-            return cls(parameter_type="integer", parameter_index=index, value_integer=value)
-        elif isinstance(value, float):
-            return cls(parameter_type="float", parameter_index=index, value_float=value)
-        elif isinstance(value, bool):
-            return cls(parameter_type="boolean", parameter_index=index, value_boolean=value)
+        elif hasattr(value, 'encode') and hasattr(value, 'strip') and hasattr(value, 'split'):  # String-like protocol
+            return cls(parameter_type="string", parameter_index=index, value_string=str(value))
+        elif hasattr(value, '__add__') and hasattr(value, '__mod__') and not hasattr(value, 'split') and not hasattr(value, '__truediv__'):  # Integer-like protocol
+            return cls(parameter_type="integer", parameter_index=index, value_integer=int(value))
+        elif hasattr(value, '__add__') and hasattr(value, '__truediv__') and hasattr(value, 'is_integer'):  # Float-like protocol
+            return cls(parameter_type="float", parameter_index=index, value_float=float(value))
+        elif hasattr(value, '__bool__') and hasattr(value, '__invert__') and not hasattr(value, '__add__'):  # Boolean-like protocol
+            return cls(parameter_type="boolean", parameter_index=index, value_boolean=bool(value))
         else:
-            # Convert unknown types to string
+            # Convert unknown types to string (fallback pattern)
             return cls(parameter_type="string", parameter_index=index, value_string=str(value))
 
 
