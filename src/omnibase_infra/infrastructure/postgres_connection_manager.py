@@ -22,13 +22,13 @@ from omnibase_core.core.core_error_codes import CoreErrorCode
 
 @dataclass
 class ConnectionConfig:
-    """PostgreSQL connection configuration."""
+    """PostgreSQL connection configuration with secure credential management."""
 
-    host: str = "localhost"
+    host: str = None  # No hardcoded host - use secure credential manager
     port: int = 5432
-    database: str = "omnibase_infrastructure"
-    user: str = "postgres"
-    password: str = ""
+    database: str = None  # No hardcoded database - use credential manager
+    user: str = None  # No hardcoded user - use credential manager
+    password: str = None  # No hardcoded password - use credential manager  
     schema: str = "infrastructure"
 
     # Pool configuration
@@ -49,25 +49,58 @@ class ConnectionConfig:
 
     @classmethod
     def from_environment(cls) -> "ConnectionConfig":
-        """Create configuration from environment variables."""
-        return cls(
-            host=os.getenv("POSTGRES_HOST", "localhost"),
-            port=int(os.getenv("POSTGRES_PORT", "5432")),
-            database=os.getenv("POSTGRES_DATABASE", "omnibase_infrastructure"),
-            user=os.getenv("POSTGRES_USER", "postgres"),
-            password=os.getenv("POSTGRES_PASSWORD", ""),
-            schema=os.getenv("POSTGRES_SCHEMA", "infrastructure"),
-            min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS", "5")),
-            max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS", "50")),
-            max_inactive_connection_lifetime=float(
-                os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME", "300.0")
-            ),
-            command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT", "60.0")),
-            ssl_mode=os.getenv("POSTGRES_SSL_MODE", "prefer"),
-            ssl_cert_file=os.getenv("POSTGRES_SSL_CERT_FILE"),
-            ssl_key_file=os.getenv("POSTGRES_SSL_KEY_FILE"),
-            ssl_ca_file=os.getenv("POSTGRES_SSL_CA_FILE"),
-        )
+        """Create configuration from environment variables with secure credential management."""
+        try:
+            # Try to use secure credential manager first
+            from ..security.credential_manager import get_credential_manager
+            credential_manager = get_credential_manager()
+            db_creds = credential_manager.get_database_credentials()
+            
+            return cls(
+                host=db_creds.host,
+                port=db_creds.port,
+                database=db_creds.database,
+                user=db_creds.username,
+                password=db_creds.password,
+                schema=os.getenv("POSTGRES_SCHEMA", "infrastructure"),
+                min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS", "5")),
+                max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS", "50")),
+                max_inactive_connection_lifetime=float(
+                    os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME", "300.0")
+                ),
+                command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT", "60.0")),
+                ssl_mode=db_creds.ssl_mode,
+                ssl_cert_file=os.getenv("POSTGRES_SSL_CERT_FILE"),
+                ssl_key_file=os.getenv("POSTGRES_SSL_KEY_FILE"),
+                ssl_ca_file=os.getenv("POSTGRES_SSL_CA_FILE"),
+            )
+        except Exception:
+            # Fallback to environment variables (no hardcoded defaults)
+            host = os.getenv("POSTGRES_HOST")
+            if not host:
+                raise OnexError(
+                    code=CoreErrorCode.CONFIGURATION_ERROR,
+                    message="POSTGRES_HOST environment variable is required when credential manager is unavailable",
+                )
+            
+            return cls(
+                host=host,
+                port=int(os.getenv("POSTGRES_PORT", "5432")),
+                database=os.getenv("POSTGRES_DATABASE", "omnibase_infrastructure"),
+                user=os.getenv("POSTGRES_USER", "postgres"),
+                password=os.getenv("POSTGRES_PASSWORD", ""),
+                schema=os.getenv("POSTGRES_SCHEMA", "infrastructure"),
+                min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS", "5")),
+                max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS", "50")),
+                max_inactive_connection_lifetime=float(
+                    os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME", "300.0")
+                ),
+                command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT", "60.0")),
+                ssl_mode=os.getenv("POSTGRES_SSL_MODE", "prefer"),
+                ssl_cert_file=os.getenv("POSTGRES_SSL_CERT_FILE"),
+                ssl_key_file=os.getenv("POSTGRES_SSL_KEY_FILE"),
+                ssl_ca_file=os.getenv("POSTGRES_SSL_CA_FILE"),
+            )
 
 
 @dataclass

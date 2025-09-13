@@ -28,6 +28,7 @@ from omnibase_infra.models.postgres.model_postgres_query_request import ModelPos
 from omnibase_infra.models.postgres.model_postgres_query_response import ModelPostgresQueryResponse
 from omnibase_infra.models.postgres.model_postgres_query_result import ModelPostgresQueryResult, ModelPostgresQueryRow
 from omnibase_infra.models.postgres.model_postgres_error import ModelPostgresError
+from omnibase_infra.models.event_publishing.model_omninode_event_publisher import ModelOmniNodeEventPublisher
 from .models.model_postgres_adapter_input import ModelPostgresAdapterInput
 from .models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 from .models.model_postgres_adapter_config import ModelPostgresAdapterConfig
@@ -92,15 +93,48 @@ class PostgresStructuredLogger:
         extra = self._build_extra(correlation_id, operation, **kwargs)
         self.logger.debug(message, extra=extra)
     
+    def _sanitize_query_for_logging(self, query: str) -> str:
+        """
+        Sanitize query for safe logging by removing sensitive data.
+        
+        Args:
+            query: SQL query to sanitize
+            
+        Returns:
+            Sanitized query safe for logging
+        """
+        sanitized = query
+        
+        # Remove common sensitive patterns
+        sensitive_patterns = [
+            (r"password\s*=\s*'[^']*'", "password='***'"),
+            (r'password\s*=\s*"[^"]*"', 'password="***"'),
+            (r"token\s*=\s*'[^']*'", "token='***'"),
+            (r'token\s*=\s*"[^"]*"', 'token="***"'),
+            (r"secret\s*=\s*'[^']*'", "secret='***'"),
+            (r'secret\s*=\s*"[^"]*"', 'secret="***"'),
+            (r"api_key\s*=\s*'[^']*'", "api_key='***'"),
+            (r'api_key\s*=\s*"[^"]*"', 'api_key="***"'),
+            (r"'[A-Za-z0-9+/=]{32,}'", "'***REDACTED***'"),  # Long tokens
+            (r'"[A-Za-z0-9+/=]{32,}"', '"***REDACTED***"'),  # Long tokens
+        ]
+        
+        import re
+        for pattern, replacement in sensitive_patterns:
+            sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+        
+        return sanitized
+
     def log_query_start(self, correlation_id: UUID, query: str, params_count: int):
         """Log start of database query execution."""
+        sanitized_query = self._sanitize_query_for_logging(query)
         self.info(
             f"Starting database query execution (params: {params_count})",
             correlation_id=correlation_id,
             operation="query_start",
             query_length=len(query),
             parameters_count=params_count,
-            query_preview=query[:100] + "..." if len(query) > 100 else query
+            query_preview=sanitized_query[:100] + "..." if len(sanitized_query) > 100 else sanitized_query
         )
     
     def log_query_success(self, correlation_id: UUID, execution_time_ms: float, rows_affected: int):
@@ -301,60 +335,6 @@ class NodePostgresAdapterEffect(NodeEffectService):
     
     # Configuration will be loaded from environment or container
     config: ModelPostgresAdapterConfig
-    
-    # Pre-compiled regex patterns for performance
-    _SQL_INJECTION_PATTERNS = [
-        re.compile(r';.*drop\s+table', re.IGNORECASE),
-        re.compile(r';.*delete\s+from', re.IGNORECASE), 
-        re.compile(r';.*truncate\s+table', re.IGNORECASE),
-        re.compile(r'union.*select.*password', re.IGNORECASE),
-        re.compile(r'union.*select.*admin', re.IGNORECASE),
-    ]
-    
-    _COMPLEXITY_PATTERNS = {
-        'joins': re.compile(r'\bjoin\b', re.IGNORECASE),
-        'selects': re.compile(r'\bselect\b', re.IGNORECASE),
-        'unions': re.compile(r'\bunion\b', re.IGNORECASE),
-        'leading_wildcards': re.compile(r'like\s+[\'"]%', re.IGNORECASE),
-        'regex_ops': re.compile(r'~[*]?\s*[\'"]', re.IGNORECASE),
-    }
-    
-    _ERROR_SANITIZATION_PATTERNS = [
-        (re.compile(r'password=[^\s&]*', re.IGNORECASE), 'password=***'),
-        (re.compile(r'postgresql://[^\s]*@[^\s]*/', re.IGNORECASE), 'postgresql://***@***/'),
-        (re.compile(r'eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*'), '***JWT_TOKEN***'),
-        (re.compile(r'ghp_[A-Za-z0-9]{36}'), '***GITHUB_TOKEN***'),
-        (re.compile(r'gho_[A-Za-z0-9]{36}'), '***GITHUB_OAUTH_TOKEN***'),
-        (re.compile(r'ghu_[A-Za-z0-9]{36}'), '***GITHUB_USER_TOKEN***'),
-        (re.compile(r'AKIA[0-9A-Z]{16}'), '***AWS_ACCESS_KEY***'),
-        (re.compile(r'[A-Za-z0-9/+=]{40}'), '***AWS_SECRET_KEY***'),
-        (re.compile(r'api[_-]?key[_-]*[:=][^\s&]*', re.IGNORECASE), 'api_key=***'),
-        (re.compile(r'bearer[\s]+[A-Za-z0-9+/=]{20,}', re.IGNORECASE), 'bearer ***'),
-        (re.compile(r'auth[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'auth_token=***'),
-        (re.compile(r'access[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'access_token=***'),
-        (re.compile(r'/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*', re.IGNORECASE), '/***sensitive_path***'),
-        (re.compile(r'schema "[\w_-]+"'), 'schema "***"'),
-        (re.compile(r'table "[\w_-]+"'), 'table "***"'),
-        (re.compile(r'[A-Za-z0-9+/=]{32,}'), '***REDACTED_TOKEN***'),
-    ]
-    
-    # Pre-compiled regex patterns for PostgreSQL status parsing (performance optimization)
-    _ROWS_AFFECTED_PATTERNS = [
-        # INSERT operations: "INSERT 0 5" -> 5 rows
-        (re.compile(r'^INSERT\s+\d+\s+(\d+)$', re.IGNORECASE), 1),
-        
-        # UPDATE operations: "UPDATE 3" -> 3 rows
-        (re.compile(r'^UPDATE\s+(\d+)$', re.IGNORECASE), 1),
-        
-        # DELETE operations: "DELETE 2" -> 2 rows
-        (re.compile(r'^DELETE\s+(\d+)$', re.IGNORECASE), 1),
-        
-        # COPY operations: "COPY 100" -> 100 rows
-        (re.compile(r'^COPY\s+(\d+)$', re.IGNORECASE), 1),
-        
-        # Generic pattern for any command followed by a number
-        (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
-    ]
 
     def __init__(self, container: ModelONEXContainer):
         """Initialize PostgreSQL adapter tool with container injection."""
@@ -378,6 +358,77 @@ class NodePostgresAdapterEffect(NodeEffectService):
         # Initialize configuration from environment or container
         self.config = self._load_configuration(container)
         
+        # Initialize event bus for OmniNode event publishing (REQUIRED - NO FALLBACKS)
+        self._event_bus = self.container.get_service("ProtocolEventBus")
+        if self._event_bus is None:
+            raise OnexError(
+                code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                message="ProtocolEventBus service not available - event bus integration is REQUIRED for PostgreSQL adapter"
+            )
+        
+        self._event_publisher = ModelOmniNodeEventPublisher(node_id="postgres_adapter_node")
+        
+        self._logger.info(
+            "Event bus integration initialized successfully",
+            operation="event_bus_init",
+            node_type=self.node_type,
+            domain=self.domain
+        )
+        
+        # Initialize pre-compiled regex patterns for performance (moved from class level)
+        self._sql_injection_patterns = [
+            re.compile(r';.*drop\s+table', re.IGNORECASE),
+            re.compile(r';.*delete\s+from', re.IGNORECASE), 
+            re.compile(r';.*truncate\s+table', re.IGNORECASE),
+            re.compile(r'union.*select.*password', re.IGNORECASE),
+            re.compile(r'union.*select.*admin', re.IGNORECASE),
+        ]
+        
+        self._complexity_patterns = {
+            'joins': re.compile(r'\bjoin\b', re.IGNORECASE),
+            'selects': re.compile(r'\bselect\b', re.IGNORECASE),
+            'unions': re.compile(r'\bunion\b', re.IGNORECASE),
+            'leading_wildcards': re.compile(r'like\s+[\'"]%', re.IGNORECASE),
+            'regex_ops': re.compile(r'~[*]?\s*[\'"]', re.IGNORECASE),
+        }
+        
+        self._error_sanitization_patterns = [
+            (re.compile(r'password=[^\s&]*', re.IGNORECASE), 'password=***'),
+            (re.compile(r'postgresql://[^\s]*@[^\s]*/', re.IGNORECASE), 'postgresql://***@***/'),
+            (re.compile(r'eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*'), '***JWT_TOKEN***'),
+            (re.compile(r'ghp_[A-Za-z0-9]{36}'), '***GITHUB_TOKEN***'),
+            (re.compile(r'gho_[A-Za-z0-9]{36}'), '***GITHUB_OAUTH_TOKEN***'),
+            (re.compile(r'ghu_[A-Za-z0-9]{36}'), '***GITHUB_USER_TOKEN***'),
+            (re.compile(r'AKIA[0-9A-Z]{16}'), '***AWS_ACCESS_KEY***'),
+            (re.compile(r'[A-Za-z0-9/+=]{40}'), '***AWS_SECRET_KEY***'),
+            (re.compile(r'api[_-]?key[_-]*[:=][^\s&]*', re.IGNORECASE), 'api_key=***'),
+            (re.compile(r'bearer[\s]+[A-Za-z0-9+/=]{20,}', re.IGNORECASE), 'bearer ***'),
+            (re.compile(r'auth[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'auth_token=***'),
+            (re.compile(r'access[_-]?token[_-]*[:=][^\s&]*', re.IGNORECASE), 'access_token=***'),
+            (re.compile(r'/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*', re.IGNORECASE), '/***sensitive_path***'),
+            (re.compile(r'schema "[\w_-]+"'), 'schema "***"'),
+            (re.compile(r'table "[\w_-]+"'), 'table "***"'),
+            (re.compile(r'[A-Za-z0-9+/=]{32,}'), '***REDACTED_TOKEN***'),
+        ]
+        
+        # Pre-compiled regex patterns for PostgreSQL status parsing (performance optimization)
+        self._rows_affected_patterns = [
+            # INSERT operations: "INSERT 0 5" -> 5 rows
+            (re.compile(r'^INSERT\s+\d+\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # UPDATE operations: "UPDATE 3" -> 3 rows
+            (re.compile(r'^UPDATE\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # DELETE operations: "DELETE 2" -> 2 rows
+            (re.compile(r'^DELETE\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # COPY operations: "COPY 100" -> 100 rows
+            (re.compile(r'^COPY\s+(\d+)$', re.IGNORECASE), 1),
+            
+            # Generic pattern for any command followed by a number
+            (re.compile(r'^[A-Z]+\s+(\d+)$', re.IGNORECASE), 1),
+        ]
+
         # Log adapter initialization
         self._logger.info(
             "PostgreSQL adapter initialized successfully",
@@ -465,6 +516,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 # Use container injection per ONEX standards
                 self._connection_manager = self.container.get_service("postgres_connection_manager")
                 
+                # Null check for resolved service
+                if self._connection_manager is None:
+                    raise OnexError(
+                        code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                        message="PostgreSQL connection manager service not available in container"
+                    )
+                
                 # Validate the resolved service interface
                 self._validate_connection_manager_interface(self._connection_manager)
                 
@@ -488,10 +546,75 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 # Use container injection per ONEX standards
                 self._connection_manager = self.container.get_service("postgres_connection_manager")
                 
+                # Null check for resolved service
+                if self._connection_manager is None:
+                    raise OnexError(
+                        code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                        message="PostgreSQL connection manager service not available in container"
+                    )
+                
                 # Validate the resolved service interface
                 self._validate_connection_manager_interface(self._connection_manager)
                 
             return self._connection_manager
+
+    async def _publish_event_to_redpanda(self, envelope: "ModelEventEnvelope") -> None:
+        """
+        Publish event envelope to RedPanda via proper ProtocolEventBus interface.
+        
+        Args:
+            envelope: ModelEventEnvelope containing OnexEvent payload
+        """
+        # Event bus MUST be available - no fallbacks allowed
+        if not self._event_bus or not self._event_publisher:
+            raise OnexError(
+                code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                message="Event bus or event publisher not initialized - CRITICAL infrastructure failure"
+            )
+        
+        try:
+            # Extract the OnexEvent from the envelope payload
+            onex_event = envelope.payload
+            
+            if not hasattr(onex_event, 'event_type'):
+                raise OnexError(
+                    code=CoreErrorCode.VALIDATION_ERROR,
+                    message="Envelope payload is not a valid OnexEvent"
+                )
+            
+            # Publish OnexEvent via proper ProtocolEventBus interface
+            await self._event_bus.publish_async(onex_event)
+            
+            self._logger.info(
+                f"OnexEvent published via ProtocolEventBus",
+                correlation_id=envelope.correlation_id,
+                operation="event_publish_success",
+                event_type=onex_event.event_type,
+                envelope_id=envelope.envelope_id
+            )
+            
+        except Exception as e:
+            # Event publishing is CRITICAL infrastructure - failures MUST propagate as OnexError (FAIL-FAST principle)
+            sanitized_error = self._sanitize_error_message(str(e))
+            self._logger.error(
+                f"CRITICAL: Event publishing failed - propagating as OnexError per fail-fast principle",
+                correlation_id=envelope.correlation_id,
+                operation="event_publish_critical_failure",
+                event_type=getattr(envelope.payload, 'event_type', 'unknown'),
+                envelope_id=envelope.envelope_id,
+                error_details=sanitized_error
+            )
+            # ONEX fail-fast compliance: Event publishing failures must propagate as OnexError
+            raise OnexError(
+                code=CoreErrorCode.SERVICE_UNAVAILABLE_ERROR,
+                message=f"Critical infrastructure failure: Event publishing failed - {sanitized_error}",
+                details={
+                    "component": "event_bus_integration",
+                    "envelope_id": str(envelope.envelope_id),
+                    "event_type": getattr(envelope.payload, 'event_type', 'unknown'),
+                    "original_error": sanitized_error
+                }
+            ) from e
 
     def get_health_checks(self) -> List[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
         """
@@ -504,6 +627,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
             self._check_database_connectivity,
             self._check_connection_pool_health,
             self._check_circuit_breaker_health,
+            self._check_redpanda_connectivity,  # NEW: RedPanda event bus health
+            self._check_event_publishing_health,  # NEW: Event publishing capability
         ]
 
     def _check_database_connectivity(self) -> ModelHealthStatus:
@@ -674,6 +799,159 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 timestamp=datetime.utcnow().isoformat()
             )
 
+    def _check_redpanda_connectivity(self) -> ModelHealthStatus:
+        """Check RedPanda event bus connectivity (sync wrapper for health checks)."""
+        start_time = time.perf_counter()
+        try:
+            # Basic connectivity indicator based on event bus availability
+            if self._event_bus is None:
+                execution_time_ms = (time.perf_counter() - start_time) * 1000
+                self._logger.log_health_check(
+                    check_name="redpanda_connectivity",
+                    status="unhealthy",
+                    execution_time_ms=execution_time_ms,
+                    reason="event_bus_not_available"
+                )
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message="Event bus service not available",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="redpanda_connectivity",
+                status="healthy",
+                execution_time_ms=execution_time_ms,
+                reason="event_bus_available"
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="RedPanda event bus connection available",
+                timestamp=datetime.utcnow().isoformat()
+            )
+                    
+        except Exception as e:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="redpanda_connectivity",
+                status="unhealthy",
+                execution_time_ms=execution_time_ms,
+                error_type=type(e).__name__,
+                error_message=str(e)
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"RedPanda connectivity check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    async def _check_redpanda_connectivity_async(self) -> ModelHealthStatus:
+        """Check RedPanda event bus connectivity with actual message test (async version)."""
+        try:
+            if not self._event_bus or not self._event_publisher:
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message="Event bus or event publisher not available",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            # Create test event envelope for connectivity verification
+            test_correlation_id = uuid4()
+            test_data = {
+                "test_type": "health_check_connectivity",
+                "timestamp": time.time(),
+                "node_id": "postgres_adapter_node"
+            }
+            
+            # Test event publishing with timeout
+            test_envelope = self._event_publisher.create_postgres_health_response_envelope(
+                correlation_id=test_correlation_id,
+                health_status="testing_connectivity",
+                health_data=test_data
+            )
+            
+            # Use circuit breaker for health check publishing (with timeout)
+            await asyncio.wait_for(
+                self._event_bus.publish_async(test_envelope.payload),
+                timeout=5.0
+            )
+            
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="RedPanda connectivity verified - test event published successfully",
+                timestamp=datetime.utcnow().isoformat()
+            )
+            
+        except asyncio.TimeoutError:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.DEGRADED,
+                message="RedPanda connectivity timeout - slow response",
+                timestamp=datetime.utcnow().isoformat()
+            )
+        except Exception as e:
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"RedPanda connectivity test failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+    def _check_event_publishing_health(self) -> ModelHealthStatus:
+        """Check event publishing capability health (sync wrapper for health checks)."""
+        start_time = time.perf_counter()
+        try:
+            # Basic event publisher availability check
+            if not self._event_publisher:
+                execution_time_ms = (time.perf_counter() - start_time) * 1000
+                self._logger.log_health_check(
+                    check_name="event_publishing_health",
+                    status="unhealthy",
+                    execution_time_ms=execution_time_ms,
+                    reason="event_publisher_not_available"
+                )
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.UNHEALTHY,
+                    message="Event publisher not available",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            # Check event publisher configuration
+            if not hasattr(self._event_publisher, 'node_id'):
+                execution_time_ms = (time.perf_counter() - start_time) * 1000
+                return ModelHealthStatus(
+                    status=EnumHealthStatus.DEGRADED,
+                    message="Event publisher missing configuration",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="event_publishing_health",
+                status="healthy",
+                execution_time_ms=execution_time_ms,
+                reason="event_publisher_operational"
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.HEALTHY,
+                message="Event publishing capability available",
+                timestamp=datetime.utcnow().isoformat()
+            )
+                    
+        except Exception as e:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            self._logger.log_health_check(
+                check_name="event_publishing_health",
+                status="unhealthy",
+                execution_time_ms=execution_time_ms,
+                error_type=type(e).__name__,
+                error_message=str(e)
+            )
+            return ModelHealthStatus(
+                status=EnumHealthStatus.UNHEALTHY,
+                message=f"Event publishing health check failed: {str(e)}",
+                timestamp=datetime.utcnow().isoformat()
+            )
+
     async def process(self, input_data: ModelPostgresAdapterInput) -> ModelPostgresAdapterOutput:
         """
         Process PostgreSQL adapter request following infrastructure tool pattern.
@@ -806,6 +1084,30 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 rows_affected=rows_affected
             )
 
+            # Publish postgres-query-completed event to RedPanda (REQUIRED)
+            if not self._event_publisher:
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="Event publisher not available - CRITICAL failure in query completion event publishing"
+                )
+            query_data = {
+                "query_hash": str(hash(query_request.query)),
+                "operation_type": "query",
+                "query_length": len(query_request.query),
+                "parameter_count": len(query_request.parameters),
+                "status_message": status_message
+            }
+            
+            event_envelope = self._event_publisher.create_postgres_query_completed_envelope(
+                correlation_id=correlation_id,
+                query_data=query_data,
+                execution_time_ms=execution_time_ms,
+                row_count=rows_affected
+            )
+            
+            # Event publishing is REQUIRED - must not fail
+            await self._publish_event_to_redpanda(event_envelope)
+
             # Create query response (following shared model pattern)
             query_response = ModelPostgresQueryResponse(
                 success=True,
@@ -842,6 +1144,30 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 sanitized_error = self._sanitize_error_message(str(e))
             else:
                 sanitized_error = str(e)
+
+            # Publish postgres-query-failed event to RedPanda (REQUIRED)
+            if not self._event_publisher:
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="Event publisher not available - CRITICAL failure in query failure event publishing"
+                )
+            query_data = {
+                "query_hash": str(hash(query_request.query)),
+                "operation_type": "query", 
+                "query_length": len(query_request.query),
+                "parameter_count": len(query_request.parameters),
+                "error_type": type(e).__name__
+            }
+            
+            event_envelope = self._event_publisher.create_postgres_query_failed_envelope(
+                correlation_id=correlation_id,
+                error_message=sanitized_error,
+                query_data=query_data,
+                execution_time_ms=execution_time_ms
+            )
+            
+            # Event publishing is REQUIRED - must not fail
+            await self._publish_event_to_redpanda(event_envelope)
 
             # Create structured error model (ONEX compliance)
             postgres_error = ModelPostgresError(
@@ -887,6 +1213,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
         Performs comprehensive health checks including database connectivity,
         connection pool status, and adapter functionality.
         """
+        correlation_id = input_data.correlation_id
+        
         try:
             # Run health checks using async versions for consistent async operation
             health_results = []
@@ -922,6 +1250,23 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 "execution_time_ms": execution_time_ms
             }
             
+            # Publish postgres-health-response event to RedPanda (REQUIRED)
+            if not self._event_publisher:
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="Event publisher not available - CRITICAL failure in health response event publishing"
+                )
+            health_status = "healthy" if overall_healthy else "unhealthy"
+            
+            event_envelope = self._event_publisher.create_postgres_health_response_envelope(
+                correlation_id=correlation_id,
+                health_status=health_status,
+                health_data=health_data
+            )
+            
+            # Event publishing is REQUIRED - must not fail
+            await self._publish_event_to_redpanda(event_envelope)
+            
             return ModelPostgresAdapterOutput(
                 operation_type="health_check",
                 success=overall_healthy,
@@ -936,11 +1281,35 @@ class NodePostgresAdapterEffect(NodeEffectService):
             
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
+            correlation_id = input_data.correlation_id
+            
             # Sanitize error message (configurable)
             if self.config.enable_error_sanitization:
                 sanitized_error = self._sanitize_error_message(f"Health check operation failed: {str(e)}")
             else:
                 sanitized_error = f"Health check operation failed: {str(e)}"
+            
+            # Publish postgres-health-response event for failed health checks (REQUIRED)
+            if not self._event_publisher:
+                raise OnexError(
+                    code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
+                    message="Event publisher not available - CRITICAL failure in health check failure event publishing"
+                )
+            failed_health_data = {
+                "overall_status": "unhealthy",
+                "error_message": sanitized_error,
+                "error_type": type(e).__name__,
+                "execution_time_ms": execution_time_ms
+            }
+            
+            event_envelope = self._event_publisher.create_postgres_health_response_envelope(
+                correlation_id=correlation_id,
+                health_status="unhealthy",
+                health_data=failed_health_data
+            )
+            
+            # Event publishing is REQUIRED - must not fail
+            await self._publish_event_to_redpanda(event_envelope)
             
             return ModelPostgresAdapterOutput(
                 operation_type="health_check",
@@ -970,18 +1339,93 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
     async def cleanup(self) -> None:
         """
-        Cleanup resources when shutting down.
+        Enhanced cleanup with comprehensive resource management and thread safety.
         
-        Follows cleanup patterns defined in subcontracts with graceful resource disposal.
+        Implements proper resource lifecycle management with concurrent cleanup
+        and graceful error handling per ONEX infrastructure patterns.
         """
-        if self._connection_manager:
-            try:
+        cleanup_tasks = []
+        cleanup_errors = []
+        
+        # Thread-safe cleanup coordination
+        async with self._connection_manager_lock:
+            # Schedule connection manager cleanup
+            if self._connection_manager:
+                cleanup_tasks.append(self._cleanup_connection_manager())
+        
+        # Schedule event bus cleanup (if available)
+        if self._event_bus:
+            cleanup_tasks.append(self._cleanup_event_bus())
+        
+        # Schedule circuit breaker cleanup
+        if self._circuit_breaker:
+            cleanup_tasks.append(self._cleanup_circuit_breaker())
+        
+        # Execute all cleanup tasks concurrently with error isolation
+        if cleanup_tasks:
+            results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+            
+            # Collect any cleanup errors for observability (protocol-based exception detection)
+            for i, result in enumerate(results):
+                if hasattr(result, '__traceback__') and hasattr(result, 'args'):  # Exception-like protocol
+                    cleanup_errors.append(f"Cleanup task {i}: {str(result)}")
+        
+        # Clear all references in thread-safe manner
+        async with self._connection_manager_lock:
+            self._connection_manager = None
+            self._event_bus = None
+            self._circuit_breaker = None
+        
+        # Log cleanup summary for observability
+        if cleanup_errors:
+            self._logger.warning(
+                f"Cleanup completed with {len(cleanup_errors)} non-critical errors",
+                operation="cleanup_summary",
+                error_count=len(cleanup_errors),
+                errors=cleanup_errors
+            )
+        else:
+            self._logger.info(
+                "Resource cleanup completed successfully",
+                operation="cleanup_success",
+                tasks_completed=len(cleanup_tasks)
+            )
+    
+    async def _cleanup_connection_manager(self) -> None:
+        """Cleanup database connection manager resources."""
+        try:
+            if self._connection_manager and hasattr(self._connection_manager, 'close'):
                 await self._connection_manager.close()
-            except Exception as e:
-                # Log error but don't raise during cleanup (as per infrastructure patterns)
-                pass
-            finally:
-                self._connection_manager = None
+                self._logger.debug("Connection manager cleanup completed")
+        except Exception as e:
+            self._logger.warning(f"Connection manager cleanup error: {str(e)}")
+            # Don't raise during cleanup - log and continue
+    
+    async def _cleanup_event_bus(self) -> None:
+        """Cleanup event bus resources."""
+        try:
+            if self._event_bus and hasattr(self._event_bus, 'cleanup'):
+                await self._event_bus.cleanup()
+                self._logger.debug("Event bus cleanup completed")
+        except Exception as e:
+            self._logger.warning(f"Event bus cleanup error: {str(e)}")
+            # Don't raise during cleanup - log and continue
+    
+    async def _cleanup_circuit_breaker(self) -> None:
+        """Cleanup circuit breaker resources."""
+        try:
+            # Circuit breaker state reset for clean shutdown
+            if self._circuit_breaker:
+                # Log final circuit breaker state for observability
+                final_state = self._circuit_breaker.get_state()
+                self._logger.debug(
+                    "Circuit breaker final state",
+                    circuit_state=final_state["state"],
+                    failure_count=final_state["failure_count"]
+                )
+        except Exception as e:
+            self._logger.warning(f"Circuit breaker cleanup error: {str(e)}")
+            # Don't raise during cleanup - log and continue
 
     def _validate_query_input(self, query_request) -> None:
         """
@@ -1026,7 +1470,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         # Basic SQL injection pattern detection using pre-compiled patterns (configurable)
         if self.config.enable_sql_injection_detection:
             query_lower = query_request.query.lower()
-            for pattern in self._SQL_INJECTION_PATTERNS:
+            for pattern in self._sql_injection_patterns:
                 if pattern.search(query_lower):
                     raise OnexError(
                         code=CoreErrorCode.SECURITY_VIOLATION_ERROR,
@@ -1055,23 +1499,23 @@ class NodePostgresAdapterEffect(NodeEffectService):
         weights = self.config.get_complexity_weights()
         
         # Count JOINs using pre-compiled pattern (each JOIN adds complexity)
-        join_count = len(self._COMPLEXITY_PATTERNS['joins'].findall(query_lower))
+        join_count = len(self._complexity_patterns['joins'].findall(query_lower))
         complexity_score += join_count * weights["join"]
         
         # Count subqueries and nested selects using pre-compiled pattern
-        select_count = len(self._COMPLEXITY_PATTERNS['selects'].findall(query_lower)) - 1  # Subtract main SELECT
+        select_count = len(self._complexity_patterns['selects'].findall(query_lower)) - 1  # Subtract main SELECT
         complexity_score += select_count * weights["subquery"]
         
         # Count UNION operations using pre-compiled pattern (expensive)
-        union_count = len(self._COMPLEXITY_PATTERNS['unions'].findall(query_lower))
+        union_count = len(self._complexity_patterns['unions'].findall(query_lower))
         complexity_score += union_count * weights["union"]
         
         # Check for expensive LIKE operations with leading wildcards using pre-compiled pattern
-        leading_wildcard_count = len(self._COMPLEXITY_PATTERNS['leading_wildcards'].findall(query_lower))
+        leading_wildcard_count = len(self._complexity_patterns['leading_wildcards'].findall(query_lower))
         complexity_score += leading_wildcard_count * weights["leading_wildcard"]
         
         # Check for regex operations using pre-compiled pattern (very expensive)
-        regex_count = len(self._COMPLEXITY_PATTERNS['regex_ops'].findall(query_lower))
+        regex_count = len(self._complexity_patterns['regex_ops'].findall(query_lower))
         complexity_score += regex_count * weights["regex"]
         
         # Check for expensive functions
@@ -1157,7 +1601,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         """
         # Apply all sanitization patterns using pre-compiled regex for performance
         sanitized = error_message
-        for pattern, replacement in self._ERROR_SANITIZATION_PATTERNS:
+        for pattern, replacement in self._error_sanitization_patterns:
             sanitized = pattern.sub(replacement, sanitized)
         
         # If error is too generic, provide a more specific safe message
@@ -1193,7 +1637,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             return 0
         
         # Try each pre-compiled pattern to extract rows affected (performance optimized)
-        for pattern, group_index in self._ROWS_AFFECTED_PATTERNS:
+        for pattern, group_index in self._rows_affected_patterns:
             match = pattern.match(status_clean)
             if match:
                 try:

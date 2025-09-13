@@ -1,0 +1,300 @@
+# Kafka Event Processing Subcontract - Event Bus Integration Pattern
+# This subcontract defines event handling patterns for Kafka adapter integration with ONEX event bus
+
+contract_type: "kafka_event_processing_subcontract"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+metadata:
+  name: "KafkaEventProcessingSubcontract"
+  description: "Event bus integration pattern for Kafka adapter with ONEX message envelope handling"
+  author: "ONEX Framework Team"
+  created: "2025-09-12"
+  purpose: "Define event processing patterns for bi-directional Kafka-ONEX event communication"
+
+business_logic:
+  pattern: "event_bus_integration"
+  ai_agent:
+    capabilities: ["event_envelope_processing", "kafka_event_translation", "async_streaming_handling"]
+    coordination_patterns: ["event_bus_subscriber", "event_bus_publisher", "stream_processor"]
+    performance_targets:
+      event_processing_latency: "<5ms"
+      event_throughput: "10000 events/sec"
+      envelope_parsing_time: "<1ms"
+
+# Event Bus Integration Strategy
+event_bus_integration:
+  name: "KafkaEventBusIntegration"
+  description: "Bi-directional event processing between ONEX event bus and Kafka streaming operations"
+
+  # Event subscription patterns
+  subscription_patterns:
+    inbound_events:
+      - event_type: "kafka_message_produce_request"
+        handler: "handle_produce_event"
+        envelope_validation: true
+        async_processing: true
+
+      - event_type: "kafka_message_consume_request"
+        handler: "handle_consume_event"
+        envelope_validation: true
+        async_processing: true
+
+      - event_type: "kafka_topic_management_request"
+        handler: "handle_topic_event"
+        envelope_validation: true
+        async_processing: true
+
+      - event_type: "kafka_health_check_request"
+        handler: "handle_health_check_event"
+        envelope_validation: true
+        async_processing: false
+
+      - event_type: "kafka_stream_management_request"
+        handler: "handle_stream_event"
+        envelope_validation: true
+        async_processing: true
+
+  # Event publishing patterns
+  publishing_patterns:
+    outbound_events:
+      - event_type: "kafka_message_produced"
+        trigger: "message_produce_complete"
+        envelope_format: "standard_onex_envelope"
+        metadata_inclusion: ["topic", "partition", "offset", "timestamp", "message_key"]
+
+      - event_type: "kafka_message_consumed"
+        trigger: "message_consume_complete"
+        envelope_format: "standard_onex_envelope"
+        metadata_inclusion: ["topic", "partition", "offset", "consumer_group", "timestamp", "record_count"]
+
+      - event_type: "kafka_topic_created"
+        trigger: "topic_creation_success"
+        envelope_format: "standard_onex_envelope"
+        metadata_inclusion: ["topic_name", "partition_count", "replication_factor", "timestamp"]
+
+      - event_type: "kafka_health_status_changed"
+        trigger: "health_check_result"
+        envelope_format: "standard_onex_envelope"
+        metadata_inclusion: ["broker_status", "cluster_health", "partition_status", "timestamp"]
+
+      - event_type: "kafka_operation_failed"
+        trigger: "operation_error"
+        envelope_format: "error_onex_envelope"
+        metadata_inclusion: ["operation_type", "error_code", "error_message", "broker_info", "timestamp"]
+
+# Event Envelope Handling
+envelope_processing:
+  inbound_envelope_handling:
+    validation_steps:
+      - "validate_envelope_structure"
+      - "verify_message_signature"
+      - "check_correlation_id"
+      - "validate_payload_schema"
+      - "validate_kafka_topic_permissions"
+
+    parsing_steps:
+      - "extract_operation_type"
+      - "parse_kafka_parameters"
+      - "resolve_kafka_broker_config"
+      - "prepare_streaming_operation"
+
+    error_handling:
+      - "malformed_envelope": "reject_with_error_response"
+      - "invalid_signature": "reject_with_security_alert"
+      - "schema_validation_failed": "reject_with_validation_error"
+      - "missing_correlation_id": "assign_new_correlation_id"
+      - "broker_unavailable": "retry_with_circuit_breaker"
+
+  outbound_envelope_creation:
+    envelope_structure:
+      - "correlation_id": "preserve_from_inbound_or_generate"
+      - "source_service": "kafka_adapter"
+      - "target_service": "extracted_from_routing_info"
+      - "event_type": "determined_by_operation_result"
+      - "payload": "kafka_operation_result_or_error"
+      - "metadata": "operation_context_and_timing"
+      - "streaming_info": "partition_offset_and_broker_details"
+
+    signing_strategy:
+      - "sign_envelope_with_service_key"
+      - "include_timestamp_for_replay_protection"
+      - "add_service_identity_claims"
+
+# Async Processing Patterns
+async_processing:
+  async_handlers:
+    produce_operations:
+      pattern: "request_response_async_with_ack"
+      timeout_ms: 10000
+      retry_attempts: 3
+      error_strategy: "emit_failure_event_with_offset_info"
+
+    consume_operations:
+      pattern: "streaming_async_with_batching"
+      timeout_ms: 60000
+      retry_attempts: 5
+      error_strategy: "emit_failure_event_with_consumer_group_reset"
+      batch_size: 500
+      batch_timeout_ms: 1000
+
+    topic_management:
+      pattern: "async_with_admin_client"
+      timeout_ms: 15000
+      retry_attempts: 2
+      error_strategy: "emit_admin_operation_failure_event"
+
+    stream_processing:
+      pattern: "continuous_async_streaming"
+      timeout_ms: 0  # No timeout for continuous streams
+      retry_attempts: 10
+      error_strategy: "emit_stream_error_with_resume"
+
+  # Synchronous processing for health checks
+  sync_processing:
+    health_checks:
+      pattern: "immediate_response_with_broker_ping"
+      timeout_ms: 5000
+      retry_attempts: 1
+      error_strategy: "return_error_status_with_broker_details"
+
+# Event Routing and Filtering
+event_routing:
+  routing_strategy: "topic_based_routing_with_content_filtering"
+
+  routing_rules:
+    - condition: "event_type.startswith('kafka_message_produce')"
+      target_handler: "producer_management_handler"
+      priority: "high"
+
+    - condition: "event_type.startswith('kafka_message_consume')"
+      target_handler: "consumer_management_handler"
+      priority: "high"
+
+    - condition: "event_type.startswith('kafka_topic_')"
+      target_handler: "topic_management_handler"
+      priority: "medium"
+
+    - condition: "event_type.startswith('kafka_stream_')"
+      target_handler: "stream_management_handler"
+      priority: "critical"
+
+    - condition: "event_type.startswith('kafka_health_')"
+      target_handler: "health_management_handler"
+      priority: "medium"
+
+  filtering_rules:
+    - filter: "validate_topic_permissions"
+      action: "reject_if_unauthorized_topic_access"
+
+    - filter: "check_broker_availability"
+      action: "defer_if_broker_unreachable"
+
+    - filter: "validate_message_size"
+      action: "reject_if_exceeds_max_message_size"
+
+    - filter: "check_consumer_group_limits"
+      action: "defer_if_group_limit_exceeded"
+
+# Error Handling and Recovery
+error_handling:
+  error_categories:
+    - "envelope_processing_errors"
+    - "broker_connection_errors"
+    - "message_serialization_errors"
+    - "topic_permission_errors"
+    - "consumer_group_errors"
+    - "producer_acknowledgment_errors"
+
+  recovery_strategies:
+    envelope_processing_errors:
+      - "emit_validation_error_event"
+      - "log_malformed_envelope_details"
+      - "increment_error_metrics"
+
+    broker_connection_errors:
+      - "retry_with_exponential_backoff"
+      - "emit_broker_error_event"
+      - "trigger_broker_discovery_refresh"
+
+    message_serialization_errors:
+      - "emit_serialization_error_event"
+      - "attempt_alternate_serialization"
+      - "log_problematic_message_details"
+
+    consumer_group_errors:
+      - "reset_consumer_group_if_necessary"
+      - "emit_consumer_group_error_event"
+      - "trigger_partition_rebalancing"
+
+# Performance Optimization
+performance_optimization:
+  event_batching:
+    enabled: true
+    batch_size: 100
+    batch_timeout_ms: 25
+    applicable_operations: ["produce_operations", "consume_operations"]
+
+  connection_pooling:
+    kafka_producers: 5
+    kafka_consumers: 10
+    admin_clients: 2
+    connection_reuse: true
+    keepalive_interval: 30000
+
+  caching:
+    event_handler_cache: true
+    topic_metadata_cache: true
+    envelope_validation_cache: true
+    broker_config_cache: true
+
+  streaming_optimization:
+    enable_compression: true
+    compression_type: "lz4"
+    enable_idempotent_producer: true
+    optimize_consumer_fetch_size: true
+
+# Observability and Monitoring
+observability:
+  metrics:
+    - "kafka.events_processed"
+    - "kafka.events_published"
+    - "kafka.messages_produced"
+    - "kafka.messages_consumed"
+    - "kafka.envelope_validation_failures"
+    - "kafka.async_processing_latency"
+    - "kafka.broker_error_rate"
+    - "kafka.consumer_lag"
+    - "kafka.producer_ack_rate"
+
+  events_for_monitoring:
+    - "event_processing_started"
+    - "event_processing_completed"
+    - "envelope_validation_failed"
+    - "broker_error_occurred"
+    - "consumer_rebalance_triggered"
+    - "producer_ack_timeout"
+    - "topic_creation_failed"
+
+# Code Generation Targets
+generation_targets:
+  python_runtime:
+    event_handlers: true
+    envelope_processors: true
+    async_stream_managers: true
+    error_recovery_logic: true
+    kafka_client_wrappers: true
+
+  streaming_validation:
+    message_validation_rules: true
+    topic_permission_checks: true
+    envelope_validation_rules: true
+    consumer_group_validation: true
+
+# Integration with Main Contract
+integration:
+  main_contract_field: "event_processing_configuration"
+  mapping_strategy: "streaming_event_handler_embedding"
+  backward_compatibility: true

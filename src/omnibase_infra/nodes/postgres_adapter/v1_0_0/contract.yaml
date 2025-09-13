@@ -1,0 +1,211 @@
+contract_version: "1.0.0"
+node_version: "1.0.0"
+version: "1.0.0"
+
+name: "postgres_adapter"
+contract_name: "postgres_adapter"
+node_name: "postgres_adapter"
+
+description: "PostgreSQL Adapter Node - Message Bus Bridge for Database Operations"
+node_type: "EFFECT"
+
+input_model: "ModelPostgresAdapterInput"
+output_model: "ModelPostgresAdapterOutput"
+
+io_operations:
+  - name: "query_operation"
+    description: "Execute PostgreSQL queries with event publishing"
+    input_fields:
+      - "operation_type"
+      - "query_request" 
+      - "correlation_id"
+      - "context"
+    output_fields:
+      - "query_response"
+      - "success"
+      - "execution_time_ms"
+      - "correlation_id"
+      
+  - name: "health_check_operation"
+    description: "Check PostgreSQL adapter and database health"
+    input_fields:
+      - "operation_type"
+      - "correlation_id"
+    output_fields:
+      - "success"
+      - "health_data"
+      - "execution_time_ms"
+
+dependencies:
+  # Protocol dependencies (duck typing)
+  - name: "postgres_connection_manager"
+    type: "service"
+    description: "PostgreSQL connection pool manager"
+    interface: "PostgresConnectionManager"
+    
+  - name: "protocol_event_bus"
+    type: "protocol" 
+    class_name: "ProtocolEventBus"
+    module: "omnibase_core.protocol.protocol_event_bus"
+    description: "Event bus for RedPanda integration"
+    
+  # Shared model dependencies (DRY pattern)
+  - name: "model_postgres_query_request"
+    type: "model"
+    class_name: "ModelPostgresQueryRequest"  
+    module: "omnibase_infra.models.postgres.model_postgres_query_request"
+    description: "PostgreSQL query request model"
+    
+  - name: "model_postgres_query_response"
+    type: "model"
+    class_name: "ModelPostgresQueryResponse"
+    module: "omnibase_infra.models.postgres.model_postgres_query_response" 
+    description: "PostgreSQL query response model"
+    
+  - name: "model_postgres_query_result"
+    type: "model"
+    class_name: "ModelPostgresQueryResult"
+    module: "omnibase_infra.models.postgres.model_postgres_query_result"
+    description: "PostgreSQL query result data model"
+    
+  - name: "model_postgres_error"
+    type: "model" 
+    class_name: "ModelPostgresError"
+    module: "omnibase_infra.models.postgres.model_postgres_error"
+    description: "PostgreSQL error model"
+    
+  - name: "model_circuit_breaker_environment_config"
+    type: "model"
+    class_name: "ModelCircuitBreakerEnvironmentConfig"
+    module: "omnibase_infra.models.infrastructure.model_circuit_breaker_environment_config"
+    description: "Environment-specific circuit breaker configuration model"
+
+definitions:
+  # Node-specific adapter models (interface only)
+  ModelPostgresAdapterInput:
+    type: "object"
+    description: "PostgreSQL adapter input envelope"
+    properties:
+      operation_type:
+        type: "string"
+        enum: ["query", "health_check"]
+        description: "Type of database operation"
+      query_request:
+        $ref: "#/definitions/ModelPostgresQueryRequest"
+        description: "PostgreSQL query request (for query operations)"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Request correlation ID"
+      context:
+        type: "object"
+        description: "Additional request context"
+      timestamp:
+        type: "number"
+        description: "Request timestamp"
+    required: ["operation_type", "correlation_id"]
+    
+  ModelPostgresAdapterOutput:
+    type: "object" 
+    description: "PostgreSQL adapter output envelope"
+    properties:
+      operation_type:
+        type: "string"
+        enum: ["query", "health_check"]
+        description: "Type of database operation"
+      query_response:
+        $ref: "#/definitions/ModelPostgresQueryResponse"
+        description: "PostgreSQL query response (for query operations)"
+      success:
+        type: "boolean"
+        description: "Operation success status"
+      error_message:
+        type: "string"
+        description: "Error message (if unsuccessful)"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Request correlation ID"
+      timestamp:
+        type: "number"
+        description: "Response timestamp"
+      execution_time_ms:
+        type: "number"
+        description: "Operation execution time in milliseconds"
+      context:
+        type: "object"
+        description: "Additional response context"
+      health_data:
+        type: "object"
+        description: "Health check data (for health_check operations)"
+    required: ["operation_type", "success", "correlation_id", "timestamp", "execution_time_ms"]
+
+  # Reference shared models (defined as dependencies)
+  ModelPostgresQueryRequest:
+    $ref: "omnibase_infra.models.postgres.model_postgres_query_request#/ModelPostgresQueryRequest"
+    
+  ModelPostgresQueryResponse: 
+    $ref: "omnibase_infra.models.postgres.model_postgres_query_response#/ModelPostgresQueryResponse"
+    
+  ModelPostgresQueryResult:
+    $ref: "omnibase_infra.models.postgres.model_postgres_query_result#/ModelPostgresQueryResult"
+    
+  ModelPostgresError:
+    $ref: "omnibase_infra.models.postgres.model_postgres_error#/ModelPostgresError"
+    
+  ModelCircuitBreakerEnvironmentConfig:
+    $ref: "omnibase_infra.models.infrastructure.model_circuit_breaker_environment_config#/ModelCircuitBreakerEnvironmentConfig"
+
+metadata:
+  infrastructure_type: "database_adapter"
+  service_integration: "postgresql"
+  event_bus_integration: "redpanda" 
+  connection_pooling: true
+  circuit_breaker: true
+  health_checks: true
+  security_features: ["sql_injection_prevention", "query_sanitization", "input_validation"]
+  performance_features: ["connection_pooling", "query_metrics", "async_operations"]
+  
+tags: ["infrastructure", "database", "postgresql", "event-driven", "message-bus-bridge"]
+
+# Event publishing configuration
+event_bus_config:
+  required: true
+  fail_fast_disabled: true  # Graceful event publishing
+  topic_namespace: "omninode"
+  event_types:
+    - "core.database.postgres.query_completed"
+    - "core.database.postgres.query_failed" 
+    - "core.database.postgres.health_check"
+  retry_policy:
+    max_attempts: 3
+    exponential_backoff: true
+    base_delay_ms: 100
+
+# Environment-specific circuit breaker configuration
+environment_config:
+  circuit_breaker:
+    production:
+      failure_threshold: 5
+      recovery_timeout: 60
+      success_threshold: 3
+      timeout_seconds: 30
+      max_queue_size: 1000
+      dead_letter_enabled: true
+      graceful_degradation: true
+    staging:
+      failure_threshold: 3
+      recovery_timeout: 30
+      success_threshold: 2
+      timeout_seconds: 20
+      max_queue_size: 500
+      dead_letter_enabled: true
+      graceful_degradation: true
+    development:
+      failure_threshold: 2
+      recovery_timeout: 15
+      success_threshold: 1
+      timeout_seconds: 10
+      max_queue_size: 100
+      dead_letter_enabled: false
+      graceful_degradation: true

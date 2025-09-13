@@ -237,7 +237,8 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 self.consul_client = MockConsulClient(self.consul_config)
 
             # Test connection - skip for mock client
-            if not isinstance(self.consul_client, MockConsulClient):
+            # Protocol-based duck typing: Check if it's NOT a mock client (ONEX compliance)
+            if not (hasattr(self.consul_client, 'kv_store') and hasattr(self.consul_client, 'services') and hasattr(self.consul_client, 'config')):
                 await self.health_check_consul()
 
             # Register consul-specific handlers after client initialization
