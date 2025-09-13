@@ -469,25 +469,31 @@ class RedPandaEventBus(ProtocolEventBus):
                 self._logger.warning(f"RedPanda publish attempt {attempt + 1} failed, retrying in {delay:.2f}s: {str(e)}")
                 await asyncio.sleep(delay)
     
-    def subscribe(self, callback: Callable[[ModelOnexEvent], None], event_type=None) -> None:
+    def subscribe(self, callback: Callable[[ModelOnexEvent], None], event_type: Optional[str] = None) -> None:
         """
         Subscribe a callback to receive events (synchronous).
         
         Args:
             callback: Callable invoked with each OnexEvent
-            event_type: Optional event type filter (for compatibility with omnibase_core mixin)
+            event_type: Optional event type filter for specific event types
         """
+        if event_type is None:
+            raise OnexError(
+                code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
+                message="Event type is required for subscription - ONEX does not support None event types"
+            )
+        
         if callback not in self._subscribers:
             self._subscribers.append(callback)
             self._logger.debug(f"Subscribed callback to RedPanda event bus (event_type: {event_type})")
     
-    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None], event_type=None) -> None:
+    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None], event_type: Optional[str] = None) -> None:
         """
         Subscribe a callback to receive events (asynchronous).
         
         Args:
             callback: Callable invoked with each OnexEvent
-            event_type: Optional event type filter (for compatibility with omnibase_core mixin)
+            event_type: Optional event type filter for specific event types
         """
         self.subscribe(callback, event_type)
     
@@ -651,22 +657,19 @@ def _setup_infrastructure_dependencies(container: ONEXContainer):
         logger.warning(f"PostgreSQL connection manager unavailable: {e}")
         connection_manager = None
     
-    # Register services in the container's service registry
-    _register_service(container, "event_bus", event_bus)
+    # Register services in the container's service registry using protocol resolution only
     _register_service(container, "ProtocolEventBus", event_bus)
-    _register_service(container, "schema_loader", schema_loader)
     _register_service(container, "ProtocolSchemaLoader", schema_loader)
     if connection_manager:
-        _register_service(container, "postgres_connection_manager", connection_manager)
         _register_service(container, "PostgresConnectionManager", connection_manager)
     
-    # Verify registration
-    logger.info("Registered services verification:")
+    # Verify protocol-based registration
+    logger.info("Registered protocol services verification:")
     logger.info(f"  ProtocolEventBus: {type(container.get_service('ProtocolEventBus')).__name__ if container.get_service('ProtocolEventBus') else 'None'}")
-    logger.info(f"  event_bus: {type(container.get_service('event_bus')).__name__ if container.get_service('event_bus') else 'None'}")
+    logger.info(f"  ProtocolSchemaLoader: {type(container.get_service('ProtocolSchemaLoader')).__name__ if container.get_service('ProtocolSchemaLoader') else 'None'}")
     postgres_manager = None
     try:
-        postgres_manager = container.get_service('postgres_connection_manager')
+        postgres_manager = container.get_service('PostgresConnectionManager')
     except Exception:
         pass
     logger.info(f"  postgres_connection_manager: {type(postgres_manager).__name__ if postgres_manager else 'None'}")

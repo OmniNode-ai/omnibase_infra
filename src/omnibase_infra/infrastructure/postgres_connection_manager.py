@@ -96,23 +96,55 @@ class ConnectionConfig:
                         message=f"Failed to read PostgreSQL password from file {password_file}: {str(e)}",
                     ) from e
             else:
-                # Fallback to environment variable (less secure)
-                password = os.getenv("POSTGRES_PASSWORD", "")
+                # ONEX zero backwards compatibility - no fallbacks allowed
+                raise OnexError(
+                    code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
+                    message="POSTGRES_PASSWORD_FILE environment variable is required - no fallback to insecure environment variables"
+                )
+            
+            # Ensure required environment variables are present
+            port_env = os.getenv("POSTGRES_PORT")
+            if not port_env:
+                raise OnexError(
+                    code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
+                    message="POSTGRES_PORT environment variable is required - no default fallbacks"
+                )
+            
+            # Validate all required environment variables
+            database_env = os.getenv("POSTGRES_DATABASE")
+            user_env = os.getenv("POSTGRES_USER") 
+            schema_env = os.getenv("POSTGRES_SCHEMA")
+            
+            if not database_env:
+                raise OnexError(
+                    code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
+                    message="POSTGRES_DATABASE environment variable is required - no default fallbacks"
+                )
+            if not user_env:
+                raise OnexError(
+                    code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
+                    message="POSTGRES_USER environment variable is required - no default fallbacks"
+                )
+            if not schema_env:
+                raise OnexError(
+                    code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
+                    message="POSTGRES_SCHEMA environment variable is required - no default fallbacks"
+                )
             
             return cls(
                 host=host,
-                port=int(os.getenv("POSTGRES_PORT", "5432")),
-                database=os.getenv("POSTGRES_DATABASE", "omnibase_infrastructure"),
-                user=os.getenv("POSTGRES_USER", "postgres"),
+                port=int(port_env),
+                database=database_env,
+                user=user_env,
                 password=password,
-                schema=os.getenv("POSTGRES_SCHEMA", "infrastructure"),
-                min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS", "5")),
-                max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS", "50")),
+                schema=schema_env,
+                min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS") or "5"),
+                max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS") or "50"),
                 max_inactive_connection_lifetime=float(
-                    os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME", "300.0")
+                    os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME") or "300.0"
                 ),
-                command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT", "60.0")),
-                ssl_mode=os.getenv("POSTGRES_SSL_MODE", "prefer"),
+                command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT") or "60.0"),
+                ssl_mode=os.getenv("POSTGRES_SSL_MODE") or "prefer",
                 ssl_cert_file=os.getenv("POSTGRES_SSL_CERT_FILE"),
                 ssl_key_file=os.getenv("POSTGRES_SSL_KEY_FILE"),
                 ssl_ca_file=os.getenv("POSTGRES_SSL_CA_FILE"),

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
-from pydantic import BaseModel
-from typing import Optional, List, Literal
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from .model_consul_projection_type import ModelConsulProjectionType
 
 
 class ModelConsulProjectorInput(BaseModel):
@@ -10,7 +11,7 @@ class ModelConsulProjectorInput(BaseModel):
     Node-specific model for processing event envelope payloads into projection operations.
     """
     
-    projection_type: Literal["service_state", "health_state", "kv_state", "topology"]
-    target_services: Optional[List[str]] = None
-    include_metadata: bool = True
-    aggregation_window: int = 300  # seconds
+    projection_type: ModelConsulProjectionType = Field(..., description="Type of projection to perform")
+    target_services: Optional[List[str]] = Field(None, description="List of specific services to include in projection")
+    include_metadata: bool = Field(True, description="Whether to include metadata in projection results")
+    aggregation_window: int = Field(300, description="Aggregation window in seconds")

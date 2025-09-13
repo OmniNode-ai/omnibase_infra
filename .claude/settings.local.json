@@ -27,7 +27,9 @@
       "mcp__archon__establish_performance_baseline",
       "mcp__serena__read_file",
       "mcp__serena__replace_regex",
-      "mcp__archon__assess_code_quality"
+      "mcp__archon__assess_code_quality",
+      "Bash(agent-onex-coordinator)",
+      "mcp__archon__health_check"
     ],
     "deny": [],
     "ask": []

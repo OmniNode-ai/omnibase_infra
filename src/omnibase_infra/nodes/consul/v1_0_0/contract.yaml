@@ -1,8 +1,14 @@
 # ONEX Infrastructure Node Contract: Consul Adapter Effect
 # Provides event-driven Consul operations for service discovery and KV store management
 
-contract_version: "1.0.0"
-node_version: "1.0.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
 version:
   major: 1
   minor: 0
