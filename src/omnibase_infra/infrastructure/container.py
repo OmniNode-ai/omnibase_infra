@@ -469,31 +469,26 @@ class RedPandaEventBus(ProtocolEventBus):
                 self._logger.warning(f"RedPanda publish attempt {attempt + 1} failed, retrying in {delay:.2f}s: {str(e)}")
                 await asyncio.sleep(delay)
     
-    def subscribe(self, callback: Callable[[ModelOnexEvent], None], event_type: Optional[str] = None) -> None:
+    def subscribe(self, callback: Callable[[ModelOnexEvent], None], event_type: str) -> None:
         """
         Subscribe a callback to receive events (synchronous).
         
         Args:
             callback: Callable invoked with each OnexEvent
-            event_type: Optional event type filter for specific event types
+            event_type: Required event type filter for specific event types
         """
-        if event_type is None:
-            raise OnexError(
-                code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
-                message="Event type is required for subscription - ONEX does not support None event types"
-            )
         
         if callback not in self._subscribers:
             self._subscribers.append(callback)
             self._logger.debug(f"Subscribed callback to RedPanda event bus (event_type: {event_type})")
     
-    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None], event_type: Optional[str] = None) -> None:
+    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None], event_type: str) -> None:
         """
         Subscribe a callback to receive events (asynchronous).
         
         Args:
             callback: Callable invoked with each OnexEvent
-            event_type: Optional event type filter for specific event types
+            event_type: Required event type filter for specific event types
         """
         self.subscribe(callback, event_type)
     
