@@ -44,10 +44,12 @@ services:
     container_name: omnibase-infra-postgres
     networks:
       - omnibase-network
+    secrets:
+      - postgres_password
     environment:
       POSTGRES_DB: omnibase_infrastructure
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     ports:
       - "5435:5432"
     volumes:
@@ -189,6 +191,7 @@ services:
       context: .
       secrets:
         - github_token
+        - postgres_password
     container_name: omnibase-infra-postgres-adapter
     networks:
       - omnibase-network
@@ -197,7 +200,7 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_DATABASE: omnibase_infrastructure
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       REDPANDA_BOOTSTRAP_SERVERS: omnibase-infra-redpanda:9092
       KAFKA_BOOTSTRAP_SERVERS: omnibase-infra-redpanda:9092
       REDPANDA_HOST: omnibase-infra-redpanda
@@ -253,6 +256,8 @@ services:
 secrets:
   github_token:
     environment: "GITHUB_TOKEN"
+  postgres_password:
+    environment: "POSTGRES_PASSWORD"
 
 volumes:
   postgres_data:

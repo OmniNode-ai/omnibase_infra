@@ -84,6 +84,10 @@ The exact integration patterns will follow the same protocol-driven architecture
 - **Ansible**: YAML formatting with proper variable naming
 - **Security**: No secrets in code, all credentials through secure storage
 
+## Security Documentation
+
+- [Docker Secrets Rotation Strategy](docs/DOCKER_SECRETS_ROTATION.md): Comprehensive guide for automated credential rotation, security best practices, and compliance procedures.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.

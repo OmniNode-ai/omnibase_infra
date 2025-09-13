@@ -64,8 +64,10 @@ class KafkaProducerPool:
     
     def _start_background_cleanup(self):
         """Start background cleanup task."""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._background_cleanup_loop())
+        # Cancel existing task before creating new one to prevent resource leaks
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+        self._cleanup_task = asyncio.create_task(self._background_cleanup_loop())
     
     async def _background_cleanup_loop(self):
         """Background loop for periodic cleanup."""

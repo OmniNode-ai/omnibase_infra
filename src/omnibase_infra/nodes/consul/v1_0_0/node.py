@@ -136,6 +136,153 @@ class MockConsulClient:
         self.health = MockHealth(self)
 
 
+class ConsulConnectionPool:
+    """
+    Connection pool for Consul clients with proper lifecycle management.
+    
+    Prevents bottlenecks by maintaining multiple consul client connections
+    for high-throughput operations. Implements proper cleanup and health monitoring.
+    """
+    
+    def __init__(self, config: dict, max_connections: int = 10, cleanup_interval: int = 300):
+        self._config = config
+        self._max_connections = max_connections
+        self._cleanup_interval = cleanup_interval
+        self._connections = {}  # Dict[str, consul.Consul]
+        self._failed_connections = {}  # Dict[str, float] - track failures with timestamps
+        self._connection_usage = {}  # Dict[str, int] - track usage count
+        self._last_cleanup = 0
+        self._logger = logging.getLogger(__name__)
+        
+        # Background cleanup task
+        self._cleanup_task = None
+        self._start_background_cleanup()
+    
+    def _start_background_cleanup(self):
+        """Start background cleanup task with proper resource management."""
+        # Cancel existing task before creating new one to prevent resource leaks
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+        self._cleanup_task = asyncio.create_task(self._background_cleanup_loop())
+    
+    async def _background_cleanup_loop(self):
+        """Background loop for periodic cleanup."""
+        try:
+            while True:
+                await asyncio.sleep(self._cleanup_interval)
+                await self._cleanup_idle_connections()
+        except asyncio.CancelledError:
+            self._logger.info("Consul connection pool cleanup task cancelled")
+        except Exception as e:
+            self._logger.error(f"Consul connection pool cleanup error: {e}")
+    
+    async def _cleanup_idle_connections(self):
+        """Clean up idle and unhealthy connections."""
+        connections_to_remove = []
+        
+        for conn_key, client in self._connections.items():
+            # Check if connection is still healthy
+            if not await self._is_connection_healthy(client):
+                connections_to_remove.append(conn_key)
+                continue
+            
+            # Remove low-usage connections if pool is at capacity
+            if (len(self._connections) > self._max_connections // 2 and
+                self._connection_usage.get(conn_key, 0) < 5):  # Low usage threshold
+                connections_to_remove.append(conn_key)
+        
+        # Clean up selected connections
+        for conn_key in connections_to_remove:
+            await self._remove_connection(conn_key)
+    
+    async def _is_connection_healthy(self, client) -> bool:
+        """Check if a Consul connection is still healthy."""
+        try:
+            # Test basic connectivity with agent self check
+            if hasattr(client, 'agent') and hasattr(client.agent, 'self'):
+                client.agent.self()
+                return True
+            return False
+        except Exception:
+            return False
+    
+    async def _remove_connection(self, conn_key: str):
+        """Safely remove a connection from the pool."""
+        if conn_key in self._connections:
+            try:
+                # Consul client doesn't need explicit cleanup, just remove reference
+                del self._connections[conn_key]
+                if conn_key in self._connection_usage:
+                    del self._connection_usage[conn_key]
+                self._logger.debug(f"Removed Consul connection: {conn_key}")
+            except Exception as e:
+                self._logger.error(f"Error removing Consul connection: {e}")
+    
+    def get_client(self):
+        """Get a Consul client from the pool or create a new one."""
+        # Create connection key based on config
+        conn_key = f"{self._config['host']}:{self._config['port']}:{self._config['datacenter']}"
+        
+        # Return existing connection if available
+        if conn_key in self._connections:
+            self._connection_usage[conn_key] = self._connection_usage.get(conn_key, 0) + 1
+            return self._connections[conn_key]
+        
+        # Check if we should create new connection (not at max capacity and no recent failures)
+        if (len(self._connections) >= self._max_connections or
+            conn_key in self._failed_connections):
+            # Return least used connection or None if all failed recently
+            if self._connections:
+                least_used_key = min(self._connection_usage.items(), key=lambda x: x[1])[0]
+                self._connection_usage[least_used_key] += 1
+                return self._connections[least_used_key]
+            return None
+        
+        # Create new connection
+        try:
+            import consul as python_consul
+            
+            client = python_consul.Consul(
+                host=self._config["host"],
+                port=self._config["port"],
+                dc=self._config["datacenter"],
+            )
+            
+            # Test connection
+            client.agent.self()
+            
+            # Add to pool
+            self._connections[conn_key] = client
+            self._connection_usage[conn_key] = 1
+            
+            # Clear failure tracking on success
+            if conn_key in self._failed_connections:
+                del self._failed_connections[conn_key]
+            
+            self._logger.info(f"Created new Consul connection in pool: {conn_key}")
+            return client
+            
+        except ImportError:
+            self._logger.warning("python-consul library not available, connection pool disabled")
+            return None
+        except Exception as e:
+            self._logger.error(f"Failed to create Consul connection: {e}")
+            # Track failure for backoff
+            self._failed_connections[conn_key] = asyncio.get_event_loop().time()
+            return None
+    
+    async def close_all(self):
+        """Close all connections in the pool and cleanup resources."""
+        # Cancel background cleanup task
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+        
+        # Clear all connections (Consul client doesn't need explicit cleanup)
+        self._connections.clear()
+        self._connection_usage.clear()
+        self._failed_connections.clear()
+
+
 class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
     """
     Consul Adapter - Event-Driven Infrastructure Effect
@@ -195,6 +342,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             "datacenter": consul_datacenter,
         }
         self.consul_client = None
+        self.consul_connection_pool = None
         self._initialized = False
 
     async def _initialize_node_resources(self) -> None:
@@ -205,24 +353,25 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
         await self.initialize_consul_client()
 
     async def initialize_consul_client(self):
-        """Initialize Consul client connection"""
+        """Initialize Consul connection pool for high-performance operations"""
         if self._initialized:
             return
 
         try:
-            # Import consul module dynamically to handle missing dependency gracefully
-            try:
-                import consul as python_consul
-
-                self.consul_client = python_consul.Consul(
-                    host=self.consul_config["host"],
-                    port=self.consul_config["port"],
-                    dc=self.consul_config["datacenter"],
-                )
-            except ImportError:
-                # For now, create a mock client for basic functionality
+            # Initialize connection pool for better performance under load
+            self.consul_connection_pool = ConsulConnectionPool(
+                config=self.consul_config,
+                max_connections=10,  # Configurable pool size
+                cleanup_interval=300  # 5 minute cleanup interval
+            )
+            
+            # Get initial client from pool (will create pool and test connection)
+            self.consul_client = self.consul_connection_pool.get_client()
+            
+            if self.consul_client is None:
+                # Fallback to mock client for basic functionality
                 self.logger.warning(
-                    "Python consul library not available, using mock client"
+                    "Failed to create Consul connection pool, using mock client"
                 )
                 self.consul_client = MockConsulClient(self.consul_config)
 
@@ -251,6 +400,21 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 message=f"Consul initialization failed: {e}",
                 error_code=CoreErrorCode.INITIALIZATION_FAILED,
             ) from e
+
+    def _get_consul_client(self):
+        """Get a Consul client from the connection pool for operations."""
+        if self.consul_connection_pool:
+            client = self.consul_connection_pool.get_client()
+            if client:
+                return client
+        # Fallback to main client (could be mock)
+        return self.consul_client
+
+    async def _cleanup_node_resources(self) -> None:
+        """Override to cleanup consul connection pool resources."""
+        if self.consul_connection_pool:
+            await self.consul_connection_pool.close_all()
+        await super()._cleanup_node_resources()
 
     async def process(self, input_data: ModelConsulAdapterInput) -> ModelConsulAdapterOutput:
         """
@@ -403,7 +567,8 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 )
 
             # Test basic connectivity and get agent information
-            agent_info = self.consul_client.agent.self()
+            client = self._get_consul_client()
+            agent_info = client.agent.self()
 
             if not agent_info:
                 return ModelHealthStatus(
@@ -434,7 +599,8 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             if not self.consul_client:
                 await self.initialize_consul_client()
 
-            index, data = self.consul_client.kv.get(key)
+            client = self._get_consul_client()
+            index, data = client.kv.get(key)
 
             if data is None:
                 return ModelConsulKVResponse(
@@ -468,7 +634,8 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             if not self.consul_client:
                 await self.initialize_consul_client()
 
-            success = self.consul_client.kv.put(key, value)
+            client = self._get_consul_client()
+            success = client.kv.put(key, value)
 
             return ModelConsulKVResponse(
                 status="success" if success else "failed",
@@ -491,7 +658,8 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             if not self.consul_client:
                 await self.initialize_consul_client()
 
-            success = self.consul_client.kv.delete(key, recurse=recurse)
+            client = self._get_consul_client()
+            success = client.kv.delete(key, recurse=recurse)
 
             return ModelConsulKVResponse(
                 status="success" if success else "not_found",

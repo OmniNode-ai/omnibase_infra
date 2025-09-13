@@ -83,12 +83,28 @@ class ConnectionConfig:
                     message="POSTGRES_HOST environment variable is required when credential manager is unavailable",
                 )
             
+            # Read password from Docker secrets file or environment variable
+            password = ""
+            password_file = os.getenv("POSTGRES_PASSWORD_FILE")
+            if password_file and os.path.exists(password_file):
+                try:
+                    with open(password_file, 'r') as f:
+                        password = f.read().strip()
+                except Exception as e:
+                    raise OnexError(
+                        code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
+                        message=f"Failed to read PostgreSQL password from file {password_file}: {str(e)}",
+                    ) from e
+            else:
+                # Fallback to environment variable (less secure)
+                password = os.getenv("POSTGRES_PASSWORD", "")
+            
             return cls(
                 host=host,
                 port=int(os.getenv("POSTGRES_PORT", "5432")),
                 database=os.getenv("POSTGRES_DATABASE", "omnibase_infrastructure"),
                 user=os.getenv("POSTGRES_USER", "postgres"),
-                password=os.getenv("POSTGRES_PASSWORD", ""),
+                password=password,
                 schema=os.getenv("POSTGRES_SCHEMA", "infrastructure"),
                 min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS", "5")),
                 max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS", "50")),
