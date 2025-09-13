@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
 
 # Import ModelEventEnvelope from omnibase_core

@@ -19,7 +19,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 
 @dataclass

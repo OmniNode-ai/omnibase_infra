@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict, deque
 
 from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 
 @dataclass

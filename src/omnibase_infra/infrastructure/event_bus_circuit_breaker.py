@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Callable, Any, Union
 from uuid import UUID, uuid4
 
 from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 
 # Import new environment configuration model

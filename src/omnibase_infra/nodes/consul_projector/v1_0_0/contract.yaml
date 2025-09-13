@@ -1,9 +1,9 @@
 # ONEX Infrastructure Node Contract: Consul Projector Effect
 # Provides state projection and aggregation of Consul service discovery data
 
-contract_version: "1.0.0"
-node_version: "1.0.0"
-version: "1.0.0"
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+version: {major: 1, minor: 0, patch: 0}
 
 # Node identity and classification
 node_name: "node_infrastructure_consul_projector_effect"

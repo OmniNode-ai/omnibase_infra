@@ -452,7 +452,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 if consul_input.key_path and consul_input.value_data:
                     result = await self.effect_kv_put(
                         consul_input.key_path,
-                        str(consul_input.value_data.get("value", "")),
+                        consul_input.value_data.value,
                     )
                 else:
                     raise OnexError(
@@ -472,7 +472,11 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             elif consul_input.action == "consul_service_register":
                 if consul_input.service_config:
                     service_data = ModelConsulServiceRegistration(
-                        **consul_input.service_config
+                        service_id=consul_input.service_config.service_id,
+                        name=consul_input.service_config.service_name,
+                        port=consul_input.service_config.port,
+                        address=consul_input.service_config.address,
+                        health_check=None  # Will be handled separately if needed
                     )
                     result = await self.effect_service_register(service_data)
                 else:
@@ -481,11 +485,9 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                         error_code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
                     )
             elif consul_input.action == "consul_service_deregister":
-                if consul_input.service_config and consul_input.service_config.get(
-                    "service_id"
-                ):
+                if consul_input.service_config and consul_input.service_config.service_id:
                     result = await self.effect_service_deregister(
-                        consul_input.service_config["service_id"]
+                        consul_input.service_config.service_id
                     )
                 else:
                     raise OnexError(
@@ -494,7 +496,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                     )
             elif consul_input.action == "health_check":
                 result = await self.effect_health_check(
-                    consul_input.service_config.get("service_name")
+                    consul_input.service_config.service_name
                     if consul_input.service_config
                     else None
                 )
@@ -888,7 +890,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                     if consul_input.key_path and consul_input.value_data:
                         result = await self.effect_kv_put(
                             consul_input.key_path,
-                            str(consul_input.value_data.get("value", "")),
+                            consul_input.value_data.value,
                         )
                     else:
                         raise OnexError(
@@ -908,7 +910,11 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 elif consul_input.action == "consul_service_register":
                     if consul_input.service_config:
                         service_data = ModelConsulServiceRegistration(
-                            **consul_input.service_config
+                            service_id=consul_input.service_config.service_id,
+                            name=consul_input.service_config.service_name,
+                            port=consul_input.service_config.port,
+                            address=consul_input.service_config.address,
+                            health_check=None  # Will be handled separately if needed
                         )
                         result = await self.effect_service_register(service_data)
                     else:
@@ -917,11 +923,9 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                             error_code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
                         )
                 elif consul_input.action == "consul_service_deregister":
-                    if consul_input.service_config and consul_input.service_config.get(
-                        "service_id"
-                    ):
+                    if consul_input.service_config and consul_input.service_config.service_id:
                         result = await self.effect_service_deregister(
-                            consul_input.service_config["service_id"]
+                            consul_input.service_config.service_id
                         )
                     else:
                         raise OnexError(
@@ -930,7 +934,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                         )
                 elif consul_input.action == "health_check":
                     result = await self.effect_health_check(
-                        consul_input.service_config.get("service_name")
+                        consul_input.service_config.service_name
                         if consul_input.service_config
                         else None
                     )

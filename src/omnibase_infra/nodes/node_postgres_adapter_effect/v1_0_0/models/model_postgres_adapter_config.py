@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 from pydantic import BaseModel, Field, validator
 
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
 
 

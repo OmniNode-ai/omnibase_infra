@@ -13,7 +13,7 @@ from unittest.mock import Mock, AsyncMock, patch
 from typing import Dict, Any
 
 from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
-from omnibase_core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.node import NodePostgresAdapterEffect
 from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput

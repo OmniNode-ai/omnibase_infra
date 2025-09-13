@@ -1,109 +1,86 @@
 # Missing omnibase_core Components
 
-Based on analysis of imports in omnibase_infra, the following components are expected to exist in omnibase_core but are currently missing:
+Based on analysis of omnibase_infra imports and dependencies, the following components are referenced but not found in omnibase_core. These should be created in the core repository:
 
-## Core Error Handling
-- `omnibase_core.core.errors.onex_error.OnexError` - Base exception class for ONEX errors
-- `omnibase_core.core.core_error_codes.CoreErrorCode` - Error code enumeration
-- `omnibase_core.onex_error.OnexError` - Alternative import path for OnexError
-- `omnibase_core.core_error_codes.CoreErrorCode` - Alternative import path for CoreErrorCode
+## Missing Utility Components
 
-## Container and Dependency Injection  
-- `omnibase_core.core.onex_container.ModelONEXContainer` - ONEX dependency injection container
-- `omnibase_core.onex_container.ModelONEXContainer` - Alternative import path
-- `omnibase_core.onex_container.ONEXContainer` - Alternative import name
+### 1. Error Sanitizer Utility
+**Expected Location**: `omnibase_core/utils/error_sanitizer.py`
+**Referenced in**: REDUCER_NODE_TEMPLATE.md
+**Import**: `from omnibase_core.utils.error_sanitizer import ErrorSanitizer`
+**Purpose**: Sanitize error messages to prevent sensitive information leakage
 
-## Node Architecture
-- `omnibase_core.core.node_effect_service.NodeEffectService` - Base class for EFFECT nodes
-- `omnibase_core.node_effect_service.NodeEffectService` - Alternative import path
-- `omnibase_core.node_effect.NodeEffect` - Base node effect functionality
-- `omnibase_core.node_effect.TransactionState` - Transaction state management
+### 2. Circuit Breaker Mixin
+**Expected Location**: `omnibase_core/utils/circuit_breaker.py` 
+**Referenced in**: REDUCER_NODE_TEMPLATE.md
+**Import**: `from omnibase_core.utils.circuit_breaker import CircuitBreakerMixin`
+**Purpose**: Mixin class for adding circuit breaker functionality to nodes
+**Note**: Circuit breaker exists in `omnibase_core/core/resilience/circuit_breaker.py` but not as a mixin utility
 
-## Protocol Layer
-- `omnibase_core.protocol.protocol_event_bus.ProtocolEventBus` - Event bus protocol interface
-- `omnibase_core.protocol.protocol_schema_loader.ProtocolSchemaLoader` - Schema loader protocol interface
+### 3. Base Node Configuration
+**Expected Location**: `omnibase_core/config/base_node_config.py`
+**Referenced in**: REDUCER_NODE_TEMPLATE.md
+**Import**: `from omnibase_core.config.base_node_config import BaseNodeConfig`
+**Purpose**: Base configuration class for all ONEX nodes
 
-## Core Models
-- `omnibase_core.model.core.model_onex_event.ModelOnexEvent` - Base event model
-- `omnibase_core.model.core.model_event_envelope.ModelEventEnvelope` - Event envelope model  
-- `omnibase_core.model.core.model_health_status.ModelHealthStatus` - Health status model
-- `omnibase_core.model.core.model_route_spec.ModelRouteSpec` - Route specification model
+## Missing Model Components
 
-## Enumerations
-- `omnibase_core.enums.enum_health_status.EnumHealthStatus` - Health status enumeration
-- `omnibase_core.enums.enum_core_error_code.CoreErrorCode` - Alternative error code enum path
+### 4. ONEX Error Model
+**Expected Location**: `omnibase_core/models/model_onex_error.py`
+**Referenced in**: REDUCER_NODE_TEMPLATE.md
+**Import**: `from omnibase_core.models.model_onex_error import ModelONEXError`
+**Purpose**: Standardized error model for ONEX system errors
 
-## Utilities
-- `omnibase_core.utils.generation.utility_schema_loader.UtilitySchemaLoader` - Schema loading utility
+### 5. ONEX Warning Model
+**Expected Location**: `omnibase_core/models/model_onex_warning.py`
+**Referenced in**: REDUCER_NODE_TEMPLATE.md
+**Import**: `from omnibase_core.models.model_onex_warning import ModelONEXWarning`
+**Purpose**: Standardized warning model for ONEX system warnings
 
-## Exception Handling (Alternative Paths)
-- `omnibase_core.exceptions.base_onex_error.OnexError` - Alternative exception path
+## Missing Subcontract Models
 
-## Analysis Notes
+### 6. Configuration Subcontract
+**Expected Location**: `omnibase_core/core/subcontracts/model_configuration_subcontract.py`
+**Referenced in**: CONFIGURATION_SUBCONTRACT_PLACEMENT.md, multiple files
+**Import**: `from omnibase_core.core.subcontracts.model_configuration_subcontract import ModelConfigurationSubcontract`
+**Purpose**: Configuration management subcontract for infrastructure nodes
 
-### Import Path Inconsistencies
-The codebase shows multiple import paths for the same components, suggesting the core library structure is not yet standardized:
+## Import Path Corrections Needed
 
-1. **OnexError**: Referenced from at least 3 different paths:
-   - `omnibase_core.core.errors.onex_error.OnexError`
-   - `omnibase_core.onex_error.OnexError` 
-   - `omnibase_core.exceptions.base_onex_error.OnexError`
+### 7. Core Error Codes Import Path
+**Current Issue**: Some files import `from omnibase_core.core.core_error_codes import CoreErrorCode`
+**Correct Path**: `from omnibase_core.core.errors.onex_error import CoreErrorCode`
+**Files Affected**: 
+- `src/omnibase_infra/.serena/memories/configuration_consolidation_specs.md`
+- `tests/test_postgres_adapter.py`
 
-2. **CoreErrorCode**: Referenced from at least 2 different paths:
-   - `omnibase_core.core.core_error_codes.CoreErrorCode`
-   - `omnibase_core.core_error_codes.CoreErrorCode`
+### 8. Model Path Corrections
+**Current Issue**: Some imports reference model paths that may not exist
+**Files to verify**:
+- `ModelEffectInput, ModelEffectOutput` from `omnibase_core.core.node_effect`
+- Health status enums location consistency
 
-3. **Container**: Multiple names and paths:
-   - `omnibase_core.core.onex_container.ModelONEXContainer`
-   - `omnibase_core.onex_container.ModelONEXContainer`
-   - `omnibase_core.onex_container.ONEXContainer`
+## Already Available Components
 
-### Recommendations for omnibase_core Structure
+The following components are correctly available in omnibase_core and properly imported:
 
-```
-omnibase_core/
-├── core/
-│   ├── errors/
-│   │   └── onex_error.py              # OnexError class
-│   ├── onex_container.py              # ModelONEXContainer class
-│   ├── node_effect_service.py         # NodeEffectService base class
-│   └── core_error_codes.py           # CoreErrorCode enum
-├── protocol/
-│   ├── protocol_event_bus.py          # ProtocolEventBus interface
-│   └── protocol_schema_loader.py      # ProtocolSchemaLoader interface
-├── model/
-│   └── core/
-│       ├── model_onex_event.py        # ModelOnexEvent
-│       ├── model_event_envelope.py    # ModelEventEnvelope
-│       ├── model_health_status.py     # ModelHealthStatus
-│       └── model_route_spec.py        # ModelRouteSpec
-├── enums/
-│   ├── enum_health_status.py          # EnumHealthStatus
-│   └── enum_core_error_code.py        # Alternative CoreErrorCode location
-├── utils/
-│   └── generation/
-│       └── utility_schema_loader.py   # UtilitySchemaLoader
-└── node_effect.py                     # NodeEffect base functionality
-```
+✅ `omnibase_core.core.errors.onex_error.OnexError`
+✅ `omnibase_core.core.errors.onex_error.CoreErrorCode`
+✅ `omnibase_core.core.onex_container.ModelONEXContainer`
+✅ `omnibase_core.protocol.protocol_event_bus.ProtocolEventBus`
+✅ `omnibase_core.model.core.model_onex_event.ModelOnexEvent`
+✅ `omnibase_core.core.node_effect_service.NodeEffectService`
+✅ `omnibase_core.core.node_reducer_service.NodeReducerService`
+✅ `omnibase_core.utils.generation.utility_schema_loader.UtilitySchemaLoader`
+✅ Circuit breaker functionality (exists in `omnibase_core.core.resilience.circuit_breaker`)
 
-### Priority for Implementation
+## Recommendations
 
-**Critical (Required for basic functionality):**
-1. OnexError and CoreErrorCode - Error handling foundation
-2. ModelONEXContainer - Dependency injection core  
-3. NodeEffectService - Node architecture base
-4. ProtocolEventBus - Event communication
+1. **Create missing utility components** in omnibase_core to support infrastructure templates
+2. **Standardize error and warning models** for consistent ONEX system messaging
+3. **Implement configuration subcontract** for infrastructure node configuration management
+4. **Fix import path inconsistencies** in existing files
+5. **Create circuit breaker mixin utility** that wraps the existing circuit breaker implementation
+6. **Establish base node configuration** pattern for consistent node setup
 
-**High (Required for infrastructure nodes):**
-5. ModelOnexEvent and ModelEventEnvelope - Event models
-6. ModelHealthStatus and EnumHealthStatus - Health monitoring
-7. ProtocolSchemaLoader - Schema validation
-
-**Medium (Enhanced functionality):**
-8. UtilitySchemaLoader - Utility implementations
-9. ModelRouteSpec - Routing specifications
-10. NodeEffect and TransactionState - Advanced node features
-
-### Zero Backwards Compatibility Note
-
-When implementing these components in omnibase_core, follow ONEX zero backwards compatibility policy - choose one canonical import path for each component and stick to it rather than supporting multiple import paths.
+This analysis ensures omnibase_infra can properly import all required components from omnibase_core without breaking ONEX architectural patterns.

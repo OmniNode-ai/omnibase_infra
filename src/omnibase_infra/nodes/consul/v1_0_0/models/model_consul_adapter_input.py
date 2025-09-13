@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 from pydantic import BaseModel
-from typing import Optional, Dict, Any, Literal
+from typing import Optional, Literal
+from .model_consul_value_data import ModelConsulValueData
+from .model_consul_service_config import ModelConsulServiceConfig
 
 
 class ModelConsulAdapterInput(BaseModel):
@@ -20,6 +22,6 @@ class ModelConsulAdapterInput(BaseModel):
         "consul_health_check"
     ]
     key_path: Optional[str] = None
-    value_data: Optional[Dict[str, Any]] = None
-    service_config: Optional[Dict[str, Any]] = None
+    value_data: Optional[ModelConsulValueData] = None
+    service_config: Optional[ModelConsulServiceConfig] = None
     recurse: bool = False

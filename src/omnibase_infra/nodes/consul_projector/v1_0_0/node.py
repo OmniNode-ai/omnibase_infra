@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 
 from omnibase_core.exceptions.base_onex_error import OnexError
 from omnibase_core.enums.enum_core_error_code import CoreErrorCode
@@ -32,6 +32,9 @@ from .models import (
     ModelConsulHealthProjection,
     ModelConsulKVProjection,
     ModelConsulTopologyProjection,
+    ModelConsulServiceCacheEntry,
+    ModelConsulHealthCacheEntry,
+    ModelConsulKVCacheEntry,
 )
 
 
@@ -59,10 +62,10 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
         except (AttributeError, Exception):
             self.logger = logging.getLogger(__name__)
 
-        # State cache for projection optimization
-        self._service_cache: Dict[str, Any] = {}
-        self._health_cache: Dict[str, Any] = {}
-        self._kv_cache: Dict[str, Any] = {}
+        # State cache for projection optimization with strong typing
+        self._service_cache: Dict[str, ModelConsulServiceCacheEntry] = {}
+        self._health_cache: Dict[str, ModelConsulHealthCacheEntry] = {}
+        self._kv_cache: Dict[str, ModelConsulKVCacheEntry] = {}
         self._cache_ttl: int = 300  # 5 minutes
 
         self._initialized = False
@@ -375,7 +378,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
         async def projection_handler(
             operation_data: Dict[str, object],
             transaction: Optional[object] = None,
-        ) -> Dict[str, Any]:
+        ) -> Dict[str, object]:
             """Handle projection operations through events."""
             try:
                 # Process projection operation from event envelope

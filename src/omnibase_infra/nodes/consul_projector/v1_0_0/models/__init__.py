@@ -7,6 +7,11 @@ from .model_consul_service_projection import ModelConsulServiceProjection
 from .model_consul_health_projection import ModelConsulHealthProjection
 from .model_consul_kv_projection import ModelConsulKVProjection
 from .model_consul_topology_projection import ModelConsulTopologyProjection
+from .model_consul_cache_entry import (
+    ModelConsulServiceCacheEntry,
+    ModelConsulHealthCacheEntry,
+    ModelConsulKVCacheEntry,
+)
 
 # Import shared Consul models for convenience
 from omnibase_infra.models.consul import (
@@ -23,6 +28,11 @@ __all__ = [
     "ModelConsulHealthProjection",
     "ModelConsulKVProjection",
     "ModelConsulTopologyProjection",
+    
+    # Cache models
+    "ModelConsulServiceCacheEntry",
+    "ModelConsulHealthCacheEntry",
+    "ModelConsulKVCacheEntry",
     
     # Shared models (re-exported for convenience)
     "ModelConsulKVResponse",

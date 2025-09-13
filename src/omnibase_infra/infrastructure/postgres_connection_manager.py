@@ -17,7 +17,7 @@ from asyncpg import Connection, Pool, Record
 
 # Updated import to use omnibase_core consistently
 from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 
 @dataclass

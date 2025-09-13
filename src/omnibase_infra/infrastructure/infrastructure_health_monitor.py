@@ -16,7 +16,7 @@ from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass
 
 from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 from .postgres_connection_manager import PostgresConnectionManager, get_connection_manager
 from .kafka_producer_pool import KafkaProducerPool, get_producer_pool

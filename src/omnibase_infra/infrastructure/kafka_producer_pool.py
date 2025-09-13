@@ -21,7 +21,7 @@ from aiokafka import AIOKafkaProducer
 from aiokafka.errors import KafkaError, KafkaConnectionError
 
 from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 from ..models.kafka.model_kafka_producer_config import ModelKafkaProducerConfig
 from ..models.kafka.model_kafka_producer_pool_stats import (

@@ -17,12 +17,19 @@ import json
 import logging
 import os
 import time
-from typing import Callable, Optional, Type, TypeVar, Union, Dict, Any, List
+from typing import Callable, Optional, Type, TypeVar, Union, Dict, List
 
 from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
 from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLoader
+
+# Typed models for replacing Any usage
+from omnibase_infra.models.kafka.model_kafka_producer_pool_stats import ModelKafkaProducerPoolStats
+from omnibase_infra.models.kafka.model_kafka_producer_entry import (
+    ModelKafkaProducerEntry,
+    ModelKafkaFailureRecord
+)
 
 # ONEX Security modules
 from omnibase_infra.security.credential_manager import get_credential_manager
@@ -52,8 +59,8 @@ class KafkaProducerPool:
     def __init__(self, max_producers: int = 10, cleanup_interval: int = 300):
         self._max_producers = max_producers
         self._cleanup_interval = cleanup_interval
-        self._producers: Dict[str, Any] = {}
-        self._failed_producers: Dict[str, float] = {}
+        self._producers: Dict[str, object] = {}  # Stores AIOKafkaProducer instances
+        self._failed_producers: Dict[str, ModelKafkaFailureRecord] = {}
         self._producer_usage: Dict[str, int] = {}  # Track usage count
         self._last_cleanup = time.time()
         self._logger = logging.getLogger(__name__)
@@ -102,8 +109,8 @@ class KafkaProducerPool:
         
         # Clean up old failure records
         failed_to_remove = []
-        for servers_key, fail_time in self._failed_producers.items():
-            if current_time - fail_time > 3600:  # 1 hour cleanup
+        for servers_key, failure_record in self._failed_producers.items():
+            if current_time - failure_record.failure_timestamp > 3600:  # 1 hour cleanup
                 failed_to_remove.append(servers_key)
         
         for servers_key in failed_to_remove:
@@ -143,8 +150,8 @@ class KafkaProducerPool:
         
         # Skip creation if this producer has failed recently
         if servers_key in self._failed_producers:
-            fail_time = self._failed_producers[servers_key]
-            if (time.time() - fail_time) < 60:  # 60 second backoff
+            failure_record = self._failed_producers[servers_key]
+            if (time.time() - failure_record.failure_timestamp) < 60:  # 60 second backoff
                 self._logger.debug(f"Skipping producer creation for {servers_key} - recent failure")
                 return None
         
@@ -214,7 +221,11 @@ class KafkaProducerPool:
         except Exception as e:
             self._logger.error(f"Failed to create Kafka producer: {e}")
             # Track failure for backoff
-            self._failed_producers[servers_key] = time.time()
+            self._failed_producers[servers_key] = ModelKafkaFailureRecord(
+                servers_key=servers_key,
+                failure_timestamp=time.time(),
+                failure_reason=str(e)
+            )
             return None
     
     async def _is_producer_healthy(self, producer) -> bool:
@@ -267,15 +278,17 @@ class KafkaProducerPool:
         
         self._logger.info("Kafka producer pool closed")
     
-    def get_pool_stats(self) -> Dict[str, Any]:
-        """Get producer pool statistics."""
-        return {
+    def get_pool_stats(self) -> ModelKafkaProducerPoolStats:
+        """Get producer pool statistics as strongly typed model."""
+        return ModelKafkaProducerPoolStats.create_empty_stats("kafka_producer_pool").model_copy(update={
+            "total_producers": len(self._producers),
             "active_producers": len(self._producers),
-            "max_producers": self._max_producers,
+            "idle_producers": 0,
             "failed_producers": len(self._failed_producers),
-            "total_usage": sum(self._producer_usage.values()),
-            "cleanup_task_running": self._cleanup_task is not None and not self._cleanup_task.done()
-        }
+            "max_pool_size": self._max_producers,
+            "total_messages_sent": sum(self._producer_usage.values()),  # Using usage as proxy for messages
+            "uptime_seconds": int(time.time() - self._last_cleanup)
+        })
 
 
 class RedPandaEventBus(ProtocolEventBus):
