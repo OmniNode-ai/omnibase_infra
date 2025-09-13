@@ -29,7 +29,7 @@ except ImportError:
     PROMETHEUS_AVAILABLE = False
     Counter = Histogram = Gauge = Info = CollectorRegistry = None
 
-from omnibase_core.core.onex_error import OnexError, CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
 
 
 class MetricType(Enum):

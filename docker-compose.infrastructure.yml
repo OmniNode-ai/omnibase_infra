@@ -5,6 +5,39 @@ networks:
     driver: bridge
 
 services:
+  # Consul Service Discovery
+  consul:
+    image: hashicorp/consul:1.17
+    container_name: omnibase-infra-consul
+    networks:
+      - omnibase-network
+    ports:
+      - "${CONSUL_PORT}:8500"
+      - "${CONSUL_DNS_PORT}:8600/udp"
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+      CONSUL_CLIENT_INTERFACE: eth0
+    command: >
+      consul agent
+      -server
+      -bootstrap-expect=1
+      -datacenter=omnibase-infra
+      -data-dir=/consul/data
+      -config-dir=/consul/config
+      -ui
+      -client=0.0.0.0
+      -bind=0.0.0.0
+      -log-level=${CONSUL_LOG_LEVEL}
+    volumes:
+      - consul_data:/consul/data
+      - consul_config:/consul/config
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   # PostgreSQL Database
   postgres:
     image: postgres:15
@@ -19,7 +52,6 @@ services:
       - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d omnibase_infrastructure"]
       interval: 10s
@@ -33,10 +65,10 @@ services:
     networks:
       - omnibase-network
     ports:
-      - "${REDPANDA_PORT:-9092}:9092"           # Kafka API
-      - "${REDPANDA_EXTERNAL_PORT:-29102}:29092" # External Kafka API
-      - "${REDPANDA_ADMIN_PORT:-9654}:9644"     # Admin API
-      - "${REDPANDA_PROXY_PORT:-8092}:8082"     # HTTP Proxy API
+      - "${REDPANDA_PORT}:9092"           # Kafka API
+      - "${REDPANDA_EXTERNAL_PORT}:29092" # External Kafka API
+      - "${REDPANDA_ADMIN_PORT}:9644"     # Admin API
+      - "${REDPANDA_PROXY_PORT}:8082"     # HTTP Proxy API
     command:
       - redpanda
       - start
@@ -49,14 +81,14 @@ services:
       - --advertise-rpc-addr=omnibase-infra-redpanda:33145
       - --mode=dev-container
       - --smp=1
-      - --default-log-level=${REDPANDA_LOG_LEVEL:-info}
+      - --default-log-level=${REDPANDA_LOG_LEVEL}
     environment:
       REDPANDA_AUTO_CREATE_TOPICS_ENABLED: true
-      REDPANDA_DEFAULT_TOPIC_PARTITIONS: ${REDPANDA_DEFAULT_PARTITIONS:-3}
-      REDPANDA_DEFAULT_TOPIC_REPLICATIONS: ${REDPANDA_DEFAULT_REPLICATION_FACTOR:-1}
+      REDPANDA_DEFAULT_TOPIC_PARTITIONS: ${REDPANDA_DEFAULT_PARTITIONS}
+      REDPANDA_DEFAULT_TOPIC_REPLICATIONS: ${REDPANDA_DEFAULT_REPLICATION_FACTOR}
       REDPANDA_TOPIC_CLEANUP_POLICY: delete
-      REDPANDA_LOG_RETENTION_MS: ${REDPANDA_LOG_RETENTION_MS:-604800000} # 7 days
-      REDPANDA_SEGMENT_MS: ${REDPANDA_SEGMENT_MS:-86400000} # 1 day
+      REDPANDA_LOG_RETENTION_MS: ${REDPANDA_LOG_RETENTION_MS}
+      REDPANDA_SEGMENT_MS: ${REDPANDA_SEGMENT_MS}
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     healthcheck:
@@ -76,46 +108,55 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
-    command: >
-      sh -c "
-        echo 'Waiting for RedPanda to be ready...' &&
-        rpk cluster info --brokers omnibase-infra-redpanda:9092 &&
-        echo 'Creating OmniNode infrastructure topics (dev.omnibase.onex)...' &&
+    entrypoint: ["/bin/sh"]
+    command: 
+      - -c
+      - |
+        echo 'Waiting for RedPanda to be ready...'
+        rpk cluster info --brokers omnibase-infra-redpanda:9092
+        echo 'Creating OmniNode infrastructure topics (dev.omnibase.onex)...'
         
-        echo 'PostgreSQL Command Topics...' &&
-        rpk topic create dev.omnibase.onex.cmd.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
-        rpk topic create dev.omnibase.onex.cmd.postgres-health-check.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
+        echo 'PostgreSQL Command Topics...'
+        rpk topic create dev.omnibase.onex.cmd.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omnibase.onex.cmd.postgres-health-check.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         
-        echo 'PostgreSQL Event Topics...' &&
-        rpk topic create dev.omnibase.onex.evt.postgres-query-completed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
-        rpk topic create dev.omnibase.onex.evt.postgres-query-failed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
-        rpk topic create dev.omnibase.onex.evt.postgres-connection-established.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
-        rpk topic create dev.omnibase.onex.evt.postgres-connection-failed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
+        echo 'PostgreSQL Event Topics...'
+        rpk topic create dev.omnibase.onex.evt.postgres-query-completed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omnibase.onex.evt.postgres-query-failed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omnibase.onex.evt.postgres-connection-established.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omnibase.onex.evt.postgres-connection-failed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         
-        echo 'PostgreSQL Query-Response Topics...' &&
-        rpk topic create dev.omnibase.onex.qrs.postgres-health-requests.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
-        rpk topic create dev.omnibase.onex.qrs.postgres-health-replies.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
-        rpk topic create dev.omnibase.onex.qrs.postgres-health-response.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
+        echo 'PostgreSQL Query-Response Topics...'
+        rpk topic create dev.omnibase.onex.qrs.postgres-health-requests.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omnibase.onex.qrs.postgres-health-replies.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omnibase.onex.qrs.postgres-health-response.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         
-        echo 'PostgreSQL CDC Topics...' &&
-        rpk topic create dev.omnibase.onex.cdc.postgres-schema-changes.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
+        echo 'PostgreSQL CDC Topics...'
+        rpk topic create dev.omnibase.onex.cdc.postgres-schema-changes.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         
-        echo 'PostgreSQL Retry/DLT Topics...' &&
-        rpk topic create dev.omnibase.onex.rty.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
-        rpk topic create dev.omnibase.onex.dlt.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
+        echo 'PostgreSQL Retry/DLT Topics...'
+        rpk topic create dev.omnibase.onex.rty.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omnibase.onex.dlt.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         
-        echo 'Infrastructure Audit/Metrics Topics...' &&
-        rpk topic create dev.omnibase.onex.aud.postgres-operations.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
-        rpk topic create dev.omnibase.onex.met.postgres-performance.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true &&
+        echo 'Infrastructure Audit/Metrics Topics...'
+        rpk topic create dev.omnibase.onex.aud.postgres-operations.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omnibase.onex.met.postgres-performance.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         
         echo 'OmniNode infrastructure topic creation completed'
-      "
+        echo 'Starting persistent topic monitoring service...'
+        
+        # Keep container running with topic monitoring
+        while true; do
+          sleep 30
+          echo "Topic status check at $(date):"
+          rpk topic list --brokers omnibase-infra-redpanda:9092 | grep -E "(postgres|omnibase)" || echo "No infrastructure topics found"
+        done
     healthcheck:
       test: ["CMD", "rpk", "topic", "list", "--brokers", "omnibase-infra-redpanda:9092"]
       interval: 30s
       timeout: 10s
       retries: 3
-    restart: "no"
+    restart: unless-stopped
 
   # RedPanda UI (Development) - Web interface for topic management
   redpanda-ui:
@@ -127,7 +168,7 @@ services:
       redpanda:
         condition: service_healthy
     ports:
-      - "${REDPANDA_UI_PORT:-8109}:8080"
+      - "${REDPANDA_UI_PORT}:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: omnibase-infra-redpanda
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: omnibase-infra-redpanda:9092
@@ -152,24 +193,62 @@ services:
     networks:
       - omnibase-network
     environment:
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: omnibase-infra-postgres
       POSTGRES_PORT: 5432
       POSTGRES_DATABASE: omnibase_infrastructure
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDPANDA_BOOTSTRAP_SERVERS: omnibase-infra-redpanda:9092
       KAFKA_BOOTSTRAP_SERVERS: omnibase-infra-redpanda:9092
+      REDPANDA_HOST: omnibase-infra-redpanda
+      REDPANDA_PORT: 9092
+      NODE_ENV: development
     ports:
-      - "${POSTGRES_ADAPTER_PORT:-8085}:8080"
+      - "${POSTGRES_ADAPTER_PORT}:8080"
     depends_on:
       postgres:
         condition: service_healthy
       redpanda:
         condition: service_healthy
+      redpanda-topic-manager:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Consul Adapter Node
+  consul-adapter:
+    build: 
+      context: .
+      secrets:
+        - github_token
+    container_name: omnibase-infra-consul-adapter
+    networks:
+      - omnibase-network
+    environment:
+      CONSUL_HOST: omnibase-infra-consul
+      CONSUL_PORT: 8500
+      CONSUL_DATACENTER: omnibase-infra
+      REDPANDA_BOOTSTRAP_SERVERS: omnibase-infra-redpanda:9092
+      KAFKA_BOOTSTRAP_SERVERS: omnibase-infra-redpanda:9092
+      NODE_ENV: development
+    ports:
+      - "${CONSUL_ADAPTER_PORT}:8080"
+    depends_on:
+      consul:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      redpanda-topic-manager:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: ["python", "-m", "omnibase_infra.nodes.consul.v1_0_0.node"]
 
 secrets:
   github_token:
@@ -178,3 +257,5 @@ secrets:
 volumes:
   postgres_data:
   redpanda_data:
+  consul_data:
+  consul_config:

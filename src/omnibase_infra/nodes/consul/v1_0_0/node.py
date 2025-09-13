@@ -7,20 +7,14 @@ import os
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from omnibase_core.exceptions.base_onex_error import OnexError
-from omnibase_core.enums.enum_core_error_code import CoreErrorCode
-from omnibase_core.core.node_effect import (
-    EffectType,
-    ModelEffectInput,
-    ModelEffectOutput,
-)
+from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
 from omnibase_core.core.node_effect_service import NodeEffectService
-from omnibase_core.core.onex_container import ONEXContainer
+from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
 from omnibase_core.model.core.model_health_status import ModelHealthStatus
 from omnibase_infra.nodes.consul.v1_0_0.models import (
-    ModelConsulAdapterHealth,
     ModelConsulAdapterInput,
+    ModelConsulAdapterOutput,
     ModelConsulHealthCheckNode,
     ModelConsulHealthResponse,
     ModelConsulKVResponse,
@@ -28,10 +22,6 @@ from omnibase_infra.nodes.consul.v1_0_0.models import (
     ModelConsulServiceListResponse,
     ModelConsulServiceRegistration,
     ModelConsulServiceResponse,
-)
-from omnibase_infra.nodes.consul.v1_0_0.models.model_consul_adapter_response import (
-    ModelConsulHealthStatus,
-    ModelConsulOperationResponse,
 )
 
 
@@ -155,7 +145,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
     Provides only health check HTTP endpoint for monitoring.
     """
 
-    def __init__(self, container: ONEXContainer):
+    def __init__(self, container: ModelONEXContainer):
         # Use proper base class - no more boilerplate!
         super().__init__(container)
 
@@ -239,7 +229,13 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             # Test connection - skip for mock client
             # Protocol-based duck typing: Check if it's NOT a mock client (ONEX compliance)
             if not (hasattr(self.consul_client, 'kv_store') and hasattr(self.consul_client, 'services') and hasattr(self.consul_client, 'config')):
-                await self.health_check_consul()
+                # Test connection with health check
+                health_status = self.health_check()
+                if health_status.status == EnumHealthStatus.UNREACHABLE:
+                    raise OnexError(
+                        message=f"Consul connection test failed: {health_status.message}",
+                        error_code=CoreErrorCode.INITIALIZATION_FAILED,
+                    )
 
             # Register consul-specific handlers after client initialization
             await self._register_consul_effect_handlers()
@@ -256,7 +252,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 error_code=CoreErrorCode.INITIALIZATION_FAILED,
             ) from e
 
-    async def process(self, input_data: ModelEffectInput) -> ModelEffectOutput:
+    async def process(self, input_data: ModelConsulAdapterInput) -> ModelConsulAdapterOutput:
         """
         Process ModelEventEnvelope operations for Consul management.
 
@@ -353,15 +349,11 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 "operation_type": consul_input.action,
             }
 
-            # Return the result directly since we override process completely
-            from omnibase_core.core.node_effect import ModelEffectOutput, TransactionState
-
-            return ModelEffectOutput(
-                result=result_data,
-                operation_id=input_data.operation_id,
-                effect_type=input_data.effect_type,
-                transaction_state=TransactionState.COMMITTED,
-                processing_time_ms=0,  # Will be calculated by parent
+            # Return result using the consul-specific output model
+            return ModelConsulAdapterOutput(
+                consul_operation_result=result.model_dump() if hasattr(result, "model_dump") else result,
+                success=True,
+                operation_type=consul_input.action,
             )
 
         except Exception as e:
@@ -375,7 +367,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 error_code=CoreErrorCode.OPERATION_FAILED,
             ) from e
 
-    async def get_health_status(self) -> ModelConsulHealthStatus:
+    async def get_health_status(self) -> dict:
         """
         Health check endpoint for monitoring (only HTTP endpoint allowed).
 
@@ -383,7 +375,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             Health status information for monitoring systems
         """
         try:
-            consul_health = await self.health_check_consul()
+            consul_health = self.health_check()
             return {
                 "adapter": "consul",
                 "status": (
@@ -714,7 +706,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
         async def consul_operation_handler(
             operation_data: Dict[str, object],
             transaction: Optional[object] = None,
-        ) -> ModelConsulOperationResponse:
+        ) -> dict:
             """Handle consul operations through events."""
             try:
                 # Process consul operation from event envelope
@@ -795,14 +787,9 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                     error_code=CoreErrorCode.OPERATION_FAILED,
                 ) from e
 
-        # Register the consul operation handler for API calls
-        self.effect_handlers[EffectType.API_CALL] = consul_operation_handler
-
-        # Also register for database operations (consul KV is a form of database)
-        self.effect_handlers[EffectType.DATABASE_OPERATION] = consul_operation_handler
-
+        # Effect handlers registration removed - using direct process method override
         self.logger.info(
-            "Consul effect handlers registered for event-driven processing"
+            "Consul effect handlers ready for event-driven processing"
         )
 
 

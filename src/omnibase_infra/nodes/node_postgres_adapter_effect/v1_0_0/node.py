@@ -1333,7 +1333,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             await connection_manager.initialize()
         except Exception as e:
             raise OnexError(
-                code=CoreErrorCode.INITIALIZATION_ERROR,
+                code=CoreErrorCode.INITIALIZATION_FAILED,
                 message=f"Failed to initialize PostgreSQL adapter tool: {str(e)}",
             ) from e
 

@@ -79,7 +79,7 @@ class ConnectionConfig:
             host = os.getenv("POSTGRES_HOST")
             if not host:
                 raise OnexError(
-                    code=CoreErrorCode.CONFIGURATION_ERROR,
+                    code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
                     message="POSTGRES_HOST environment variable is required when credential manager is unavailable",
                 )
             
@@ -202,7 +202,7 @@ class PostgresConnectionManager:
                 result = await conn.fetchval("SELECT current_schema()")
                 if result != self.config.schema:
                     raise OnexError(
-                        code=CoreErrorCode.DATABASE_CONNECTION_ERROR,
+                        code=CoreErrorCode.DATABASE_CONNECTION_FAILED,
                         message=f"Failed to set schema to {self.config.schema}, got {result}",
                     )
 
@@ -211,7 +211,7 @@ class PostgresConnectionManager:
         except Exception as e:
             self.connection_stats.failed_connections += 1
             raise OnexError(
-                code=CoreErrorCode.DATABASE_CONNECTION_ERROR,
+                code=CoreErrorCode.DATABASE_CONNECTION_FAILED,
                 message=f"Failed to initialize PostgreSQL connection pool: {str(e)}",
             ) from e
 

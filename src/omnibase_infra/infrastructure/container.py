@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import time
-from typing import Callable, Optional, Type, TypeVar, Union, Dict, Any
+from typing import Callable, Optional, Type, TypeVar, Union, Dict, Any, List
 
 from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
 from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
@@ -371,7 +371,7 @@ class RedPandaEventBus(ProtocolEventBus):
             self._observability.record_metric(
                 "event_publishing_success_total",
                 1,
-                labels={"event_type": event.event_type},
+                labels={"event_type": str(event.payload.event_type)},
                 metric_type=MetricType.COUNTER
             )
             
@@ -386,7 +386,7 @@ class RedPandaEventBus(ProtocolEventBus):
             self._observability.record_metric(
                 "event_publishing_error_total",
                 1,
-                labels={"event_type": event.event_type, "error": type(e).__name__},
+                labels={"event_type": str(event.payload.event_type), "error": type(e).__name__},
                 metric_type=MetricType.COUNTER
             )
             
@@ -467,25 +467,27 @@ class RedPandaEventBus(ProtocolEventBus):
                 self._logger.warning(f"RedPanda publish attempt {attempt + 1} failed, retrying in {delay:.2f}s: {str(e)}")
                 await asyncio.sleep(delay)
     
-    def subscribe(self, callback: Callable[[ModelOnexEvent], None]) -> None:
+    def subscribe(self, callback: Callable[[ModelOnexEvent], None], event_type=None) -> None:
         """
         Subscribe a callback to receive events (synchronous).
         
         Args:
             callback: Callable invoked with each OnexEvent
+            event_type: Optional event type filter (for compatibility with omnibase_core mixin)
         """
         if callback not in self._subscribers:
             self._subscribers.append(callback)
-            self._logger.debug(f"Subscribed callback to RedPanda event bus")
+            self._logger.debug(f"Subscribed callback to RedPanda event bus (event_type: {event_type})")
     
-    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None]) -> None:
+    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None], event_type=None) -> None:
         """
         Subscribe a callback to receive events (asynchronous).
         
         Args:
             callback: Callable invoked with each OnexEvent
+            event_type: Optional event type filter (for compatibility with omnibase_core mixin)
         """
-        self.subscribe(callback)
+        self.subscribe(callback, event_type)
     
     def unsubscribe(self, callback: Callable[[ModelOnexEvent], None]) -> None:
         """
@@ -638,24 +640,38 @@ def _setup_infrastructure_dependencies(container: ONEXContainer):
     schema_loader = UtilitySchemaLoader()
     logger.info(f"Created schema loader: {type(schema_loader).__name__}")
 
-    # PostgreSQL Connection Manager - required by infrastructure services
-    from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
-    connection_manager = PostgresConnectionManager()
-    logger.info(f"Created connection manager: {type(connection_manager).__name__}")
+    # PostgreSQL Connection Manager - required by some infrastructure services
+    try:
+        from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
+        connection_manager = PostgresConnectionManager()
+        logger.info(f"Created connection manager: {type(connection_manager).__name__}")
+    except Exception as e:
+        logger.warning(f"PostgreSQL connection manager unavailable: {e}")
+        connection_manager = None
     
     # Register services in the container's service registry
     _register_service(container, "event_bus", event_bus)
     _register_service(container, "ProtocolEventBus", event_bus)
     _register_service(container, "schema_loader", schema_loader)
     _register_service(container, "ProtocolSchemaLoader", schema_loader)
-    _register_service(container, "postgres_connection_manager", connection_manager)
-    _register_service(container, "PostgresConnectionManager", connection_manager)
+    if connection_manager:
+        _register_service(container, "postgres_connection_manager", connection_manager)
+        _register_service(container, "PostgresConnectionManager", connection_manager)
     
     # Verify registration
     logger.info("Registered services verification:")
     logger.info(f"  ProtocolEventBus: {type(container.get_service('ProtocolEventBus')).__name__ if container.get_service('ProtocolEventBus') else 'None'}")
     logger.info(f"  event_bus: {type(container.get_service('event_bus')).__name__ if container.get_service('event_bus') else 'None'}")
-    logger.info(f"  postgres_connection_manager: {type(container.get_service('postgres_connection_manager')).__name__ if container.get_service('postgres_connection_manager') else 'None'}")
+    postgres_manager = None
+    try:
+        postgres_manager = container.get_service('postgres_connection_manager')
+    except Exception:
+        pass
+    logger.info(f"  postgres_connection_manager: {type(postgres_manager).__name__ if postgres_manager else 'None'}")
+    if connection_manager:
+        logger.info("  PostgreSQL connection manager successfully initialized")
+    else:
+        logger.info("  PostgreSQL connection manager skipped (environment not configured)")
 
 
 def _register_service(container: ONEXContainer, service_name: str, service_instance):

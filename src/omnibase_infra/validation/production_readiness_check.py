@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 
-from omnibase_core.core.onex_error import OnexError, CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
 
 
 class ValidationResult(Enum):

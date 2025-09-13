@@ -16,7 +16,8 @@ import logging
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
-from omnibase_core.core.onex_error import OnexError, CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError
+from omnibase_core.core.core_error_codes import CoreErrorCode
 
 
 @dataclass
@@ -99,7 +100,7 @@ class ONEXCredentialManager:
         except Exception as e:
             raise OnexError(
                 "Failed to retrieve database credentials",
-                CoreErrorCode.AUTHENTICATION_FAILED
+                CoreErrorCode.OPERATION_FAILED
             ) from e
     
     def get_event_bus_credentials(self) -> EventBusCredentials:
@@ -123,7 +124,7 @@ class ONEXCredentialManager:
         except Exception as e:
             raise OnexError(
                 "Failed to retrieve event bus credentials",
-                CoreErrorCode.AUTHENTICATION_FAILED
+                CoreErrorCode.OPERATION_FAILED
             ) from e
     
     def _get_database_credentials_from_env(self) -> DatabaseCredentials:
@@ -143,7 +144,7 @@ class ONEXCredentialManager:
             if not value:
                 raise OnexError(
                     f"Missing required environment variable: {env_var}",
-                    CoreErrorCode.CONFIGURATION_ERROR
+                    CoreErrorCode.MISSING_REQUIRED_PARAMETER
                 )
             
             # Type conversion for port
@@ -153,7 +154,7 @@ class ONEXCredentialManager:
                 except ValueError:
                     raise OnexError(
                         f"Invalid port value: {value}",
-                        CoreErrorCode.CONFIGURATION_ERROR
+                        CoreErrorCode.PARAMETER_TYPE_MISMATCH
                     )
             
             credentials[cred_key] = value
@@ -171,9 +172,9 @@ class ONEXCredentialManager:
         # Get bootstrap servers
         servers_str = os.getenv('REDPANDA_BOOTSTRAP_SERVERS')
         if not servers_str:
-            # Fallback to host/port pattern (no hardcoded localhost)
-            host = os.getenv('REDPANDA_HOST', 'redpanda')
-            port = os.getenv('REDPANDA_EXTERNAL_PORT', '29102')
+            # Fallback to host/port pattern - use internal Docker service name and internal port
+            host = os.getenv('REDPANDA_HOST', 'omnibase-infra-redpanda')
+            port = os.getenv('REDPANDA_PORT', '9092')  # Use internal Kafka API port
             servers_str = f"{host}:{port}"
         
         bootstrap_servers = [server.strip() for server in servers_str.split(',')]
