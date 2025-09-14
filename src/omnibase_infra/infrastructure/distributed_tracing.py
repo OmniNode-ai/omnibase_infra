@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional, Union, AsyncIterator
+from typing import Optional, Union, AsyncIterator
 from uuid import UUID, uuid4
 from datetime import datetime
 
@@ -26,7 +26,7 @@ try:
     from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
     from opentelemetry.instrumentation.kafka import KafkaInstrumentor
     from opentelemetry.trace.status import Status, StatusCode
-    from opentelemetry.trace import Span, SpanKind
+    from opentelemetry.trace import Span, SpanKind, Tracer
     from opentelemetry.context import Context
     
     OPENTELEMETRY_AVAILABLE = True
@@ -39,6 +39,7 @@ except ImportError:
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.errors.onex_error import CoreErrorCode
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_infra.models.tracing.model_span_attributes import ModelSpanAttributes
 
 from ..security.audit_logger import AuditLogger, AuditEvent, AuditEventType, AuditSeverity
 
@@ -122,7 +123,7 @@ class DistributedTracingManager:
         
         # Tracing components
         self.tracer_provider: Optional[TracerProvider] = None
-        self.tracer: Optional[Any] = None  # OpenTelemetry tracer
+        self.tracer: Optional[Tracer] = None  # OpenTelemetry tracer
         self.is_initialized = False
         
         # Integration with audit logging
@@ -208,7 +209,7 @@ class DistributedTracingManager:
         correlation_id: Optional[Union[str, UUID]] = None,
         parent_context: Optional[Context] = None,
         span_kind: Optional[SpanKind] = SpanKind.INTERNAL,
-        attributes: Optional[Dict[str, Any]] = None
+        attributes: Optional[ModelSpanAttributes] = None
     ) -> AsyncIterator[Span]:
         """
         Create a trace span for an operation with automatic error handling.
@@ -239,15 +240,21 @@ class DistributedTracingManager:
         
         try:
             # Create span
+            base_attributes = {
+                "correlation_id": correlation_str,
+                "environment": self.config.environment,
+                "service.name": self.config.service_name,
+            }
+
+            # Add provided attributes if available
+            if attributes:
+                attribute_dict = attributes.dict(exclude_none=True)
+                base_attributes.update(attribute_dict)
+
             span = self.tracer.start_span(
                 name=operation_name,
                 kind=span_kind,
-                attributes={
-                    "correlation_id": correlation_str,
-                    "environment": self.config.environment,
-                    "service.name": self.config.service_name,
-                    **(attributes or {})
-                }
+                attributes=base_attributes
             )
             
             # Set correlation ID in baggage for propagation

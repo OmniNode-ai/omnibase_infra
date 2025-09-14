@@ -5,10 +5,13 @@ Used for tracing operations and span management.
 """
 
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional
+from typing import Optional
 from uuid import UUID
 from datetime import datetime
 from .model_trace_context import ModelTraceContext
+from .model_span_attributes import ModelSpanAttributes
+from .model_parent_context import ModelParentContext
+from .model_event_envelope import ModelEventEnvelope
 
 
 class ModelTracingRequest(BaseModel):
@@ -42,17 +45,17 @@ class ModelTracingRequest(BaseModel):
         description="Trace context for context operations"
     )
     
-    span_attributes: Optional[Dict[str, Any]] = Field(
+    span_attributes: Optional[ModelSpanAttributes] = Field(
         default=None,
         description="Attributes to add to span"
     )
-    
-    parent_context: Optional[Dict[str, Any]] = Field(
+
+    parent_context: Optional[ModelParentContext] = Field(
         default=None,
         description="Parent context for span creation"
     )
-    
-    event_envelope: Optional[Dict[str, Any]] = Field(
+
+    event_envelope: Optional[ModelEventEnvelope] = Field(
         default=None,
         description="Event envelope for context injection/extraction"
     )

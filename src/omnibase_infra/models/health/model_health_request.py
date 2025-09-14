@@ -5,9 +5,10 @@ Used for health checks and monitoring control operations.
 """
 
 from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
+from .model_request_context import ModelHealthRequestContext
 
 
 class ModelHealthRequest(BaseModel):
@@ -58,7 +59,7 @@ class ModelHealthRequest(BaseModel):
         description="Target environment for health checks"
     )
     
-    context: Optional[Dict[str, Any]] = Field(
+    context: Optional[ModelHealthRequestContext] = Field(
         default=None,
         description="Additional request context"
     )

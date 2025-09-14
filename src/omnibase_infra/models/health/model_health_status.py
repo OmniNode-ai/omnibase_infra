@@ -6,8 +6,9 @@ Used across health monitoring nodes and status reporting.
 
 from enum import Enum
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional
+from typing import Optional
 from datetime import datetime
+from .model_health_details import ModelHealthDetails
 
 
 class HealthStatusEnum(str, Enum):
@@ -82,7 +83,7 @@ class ModelHealthStatus(BaseModel):
         description="Service uptime in seconds"
     )
     
-    details: Optional[Dict[str, Any]] = Field(
+    details: Optional[ModelHealthDetails] = Field(
         default=None,
         description="Additional health status details"
     )

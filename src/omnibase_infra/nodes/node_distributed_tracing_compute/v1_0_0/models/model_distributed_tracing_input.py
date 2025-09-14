@@ -5,10 +5,11 @@ Node-specific input model for the distributed tracing compute node.
 
 from enum import Enum
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional
 from uuid import UUID
 
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_infra.models.tracing.model_span_attributes import ModelSpanAttributes
 
 
 class TracingOperation(str, Enum):
@@ -57,7 +58,7 @@ class ModelDistributedTracingInput(BaseModel):
         description="OpenTelemetry span kind"
     )
     
-    attributes: Optional[Dict[str, Any]] = Field(
+    attributes: Optional[ModelSpanAttributes] = Field(
         default=None,
         description="Additional span attributes"
     )

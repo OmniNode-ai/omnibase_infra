@@ -5,8 +5,13 @@ Used across health monitoring nodes for aggregated metrics.
 """
 
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional
+from typing import Optional
 from datetime import datetime
+from .model_postgres_metrics import ModelPostgresMetrics
+from .model_kafka_metrics import ModelKafkaMetrics
+from .model_consul_metrics import ModelConsulMetrics
+from .model_vault_metrics import ModelVaultMetrics
+from omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics import ModelCircuitBreakerMetrics
 
 
 class ModelHealthMetrics(BaseModel):
@@ -21,24 +26,24 @@ class ModelHealthMetrics(BaseModel):
     )
     
     # Component-specific metrics
-    postgres_metrics: Dict[str, Any] = Field(
+    postgres_metrics: ModelPostgresMetrics = Field(
         description="PostgreSQL component metrics"
     )
-    
-    kafka_metrics: Dict[str, Any] = Field(
+
+    kafka_metrics: ModelKafkaMetrics = Field(
         description="Kafka component metrics"
     )
-    
-    circuit_breaker_metrics: Dict[str, Any] = Field(
+
+    circuit_breaker_metrics: ModelCircuitBreakerMetrics = Field(
         description="Circuit breaker component metrics"
     )
-    
-    consul_metrics: Optional[Dict[str, Any]] = Field(
+
+    consul_metrics: Optional[ModelConsulMetrics] = Field(
         default=None,
         description="Consul service discovery metrics"
     )
-    
-    vault_metrics: Optional[Dict[str, Any]] = Field(
+
+    vault_metrics: Optional[ModelVaultMetrics] = Field(
         default=None,
         description="Vault secret management metrics"
     )

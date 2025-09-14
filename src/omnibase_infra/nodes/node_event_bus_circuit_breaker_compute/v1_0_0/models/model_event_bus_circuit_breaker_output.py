@@ -4,12 +4,18 @@ Node-specific output model for the circuit breaker compute node.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Union
 from datetime import datetime
 from uuid import UUID
 
 from omnibase_core.enums.intelligence.enum_circuit_breaker_state import EnumCircuitBreakerState
 from omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics import ModelCircuitBreakerMetrics
+from omnibase_infra.models.circuit_breaker.model_circuit_breaker_result import (
+    ModelPublishEventResult,
+    ModelStateResult,
+    ModelResetResult,
+    ModelHealthStatusResult
+)
 
 
 class ModelEventBusCircuitBreakerOutput(BaseModel):
@@ -27,7 +33,12 @@ class ModelEventBusCircuitBreakerOutput(BaseModel):
         description="Correlation ID from the request"
     )
     
-    result: Optional[Dict[str, Any]] = Field(
+    result: Optional[Union[
+        ModelPublishEventResult,
+        ModelStateResult,
+        ModelResetResult,
+        ModelHealthStatusResult
+    ]] = Field(
         default=None,
         description="Operation-specific result data"
     )

@@ -5,10 +5,11 @@ Used for returning results from tracing operations.
 """
 
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional
+from typing import Optional
 from uuid import UUID
 from datetime import datetime
 from .model_trace_context import ModelTraceContext
+from .model_span_data import ModelSpanData
 
 
 class ModelTracingResponse(BaseModel):
@@ -55,7 +56,7 @@ class ModelTracingResponse(BaseModel):
         description="Whether context was successfully injected (for inject_context operations)"
     )
     
-    span_data: Optional[Dict[str, Any]] = Field(
+    span_data: Optional[ModelSpanData] = Field(
         default=None,
         description="Span data and attributes (for get_current_span operations)"
     )

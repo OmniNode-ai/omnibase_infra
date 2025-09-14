@@ -6,8 +6,9 @@ Used across observability infrastructure for alert management.
 
 from enum import Enum
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional
+from typing import Optional
 from datetime import datetime
+from .model_alert_details import ModelAlertDetails
 
 
 class AlertSeverityEnum(str, Enum):
@@ -55,8 +56,8 @@ class ModelAlert(BaseModel):
         description="Alert resolution timestamp"
     )
     
-    details: Dict[str, Any] = Field(
-        default_factory=dict,
+    details: Optional[ModelAlertDetails] = Field(
+        default=None,
         description="Additional alert details and context"
     )
     

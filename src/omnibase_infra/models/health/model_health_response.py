@@ -5,11 +5,14 @@ Used for returning results from health monitoring operations.
 """
 
 from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 from datetime import datetime
 from .model_health_status import ModelHealthStatus
 from .model_health_metrics import ModelHealthMetrics
+from .model_trend_analysis import ModelTrendAnalysis
+from .model_component_status import ModelComponentHealthStatus
+from .model_health_alert import ModelHealthAlert
 
 
 class ModelHealthResponse(BaseModel):
@@ -46,27 +49,27 @@ class ModelHealthResponse(BaseModel):
         description="Detailed health metrics (for get_metrics operations)"
     )
     
-    trend_analysis: Optional[Dict[str, Any]] = Field(
+    trend_analysis: Optional[ModelTrendAnalysis] = Field(
         default=None,
         description="Health trend analysis (for get_trends operations)"
     )
-    
+
     monitoring_started: Optional[bool] = Field(
         default=None,
         description="Whether monitoring was started (for start_monitoring operations)"
     )
-    
+
     monitoring_stopped: Optional[bool] = Field(
         default=None,
         description="Whether monitoring was stopped (for stop_monitoring operations)"
     )
-    
-    component_statuses: Optional[Dict[str, Dict[str, Any]]] = Field(
+
+    component_statuses: Optional[Dict[str, ModelComponentHealthStatus]] = Field(
         default=None,
-        description="Individual component health statuses"
+        description="Individual component health statuses mapped by component name"
     )
-    
-    alerts: Optional[List[Dict[str, Any]]] = Field(
+
+    alerts: Optional[List[ModelHealthAlert]] = Field(
         default=None,
         description="Active health alerts"
     )
