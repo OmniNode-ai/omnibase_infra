@@ -1,0 +1,72 @@
+"""Tracing Response Model.
+
+Shared model for distributed tracing operation responses.
+Used for returning results from tracing operations.
+"""
+
+from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional
+from uuid import UUID
+from datetime import datetime
+from .model_trace_context import ModelTraceContext
+
+
+class ModelTracingResponse(BaseModel):
+    """Model for distributed tracing operation responses."""
+    
+    operation_type: str = Field(
+        description="Type of operation that was executed"
+    )
+    
+    success: bool = Field(
+        description="Whether the operation was successful"
+    )
+    
+    correlation_id: UUID = Field(
+        description="Request correlation ID for tracking"
+    )
+    
+    timestamp: datetime = Field(
+        description="Response timestamp"
+    )
+    
+    execution_time_ms: float = Field(
+        ge=0.0,
+        description="Operation execution time in milliseconds"
+    )
+    
+    span_id: Optional[str] = Field(
+        default=None,
+        description="Span ID (for start_span operations)"
+    )
+    
+    trace_id: Optional[str] = Field(
+        default=None,
+        description="Trace ID (for span operations)"
+    )
+    
+    trace_context: Optional[ModelTraceContext] = Field(
+        default=None,
+        description="Extracted trace context (for extract_context operations)"
+    )
+    
+    context_injected: Optional[bool] = Field(
+        default=None,
+        description="Whether context was successfully injected (for inject_context operations)"
+    )
+    
+    span_data: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Span data and attributes (for get_current_span operations)"
+    )
+    
+    error_message: Optional[str] = Field(
+        default=None,
+        description="Error message if operation failed"
+    )
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat(),
+            UUID: lambda v: str(v)
+        }

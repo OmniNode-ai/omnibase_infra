@@ -1,0 +1,115 @@
+contract_version: "1.0.0"
+node_version: "1.0.0" 
+version: "1.0.0"
+node_name: "node_event_bus_circuit_breaker_compute"
+contract_name: "NodeEventBusCircuitBreakerComputeContract" 
+name: "node_event_bus_circuit_breaker_compute"
+node_type: "COMPUTE"
+description: "Event Bus Circuit Breaker for RedPanda reliability with fail-fast behavior and graceful degradation"
+
+input_model: "ModelEventBusCircuitBreakerInput"
+output_model: "ModelEventBusCircuitBreakerOutput"
+
+dependencies:
+  # ONEX Container dependency injection
+  - name: "model_onex_container"
+    type: "model"
+    class_name: "ModelONEXContainer"
+    module: "omnibase_core.model.model_onex_container"
+  
+  # Core ONEX event model
+  - name: "model_onex_event"
+    type: "model"
+    class_name: "ModelOnexEvent"
+    module: "omnibase_core.model.core.model_onex_event"
+  
+  # Shared circuit breaker models
+  - name: "model_circuit_breaker_state"
+    type: "model"
+    class_name: "ModelCircuitBreakerState"
+    module: "omnibase_infra.models.circuit_breaker.model_circuit_breaker_state"
+  
+  - name: "model_circuit_breaker_config"
+    type: "model"
+    class_name: "ModelCircuitBreakerConfig"
+    module: "omnibase_infra.models.circuit_breaker.model_circuit_breaker_config"
+  
+  - name: "model_circuit_breaker_metrics"
+    type: "model"
+    class_name: "ModelCircuitBreakerMetrics"
+    module: "omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics"
+
+definitions:
+  ModelEventBusCircuitBreakerInput:
+    type: "object"
+    properties:
+      operation_type:
+        type: "string"
+        enum: ["publish_event", "get_state", "get_metrics", "reset_circuit", "get_health_status"]
+        description: "Type of circuit breaker operation to perform"
+      event:
+        $ref: "#/definitions/ModelOnexEvent"
+        description: "Event to publish (required for publish_event operation)"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Correlation ID for the operation"
+      publisher_function:
+        type: "string"
+        description: "Name of publisher function to use for event publishing"
+      environment:
+        type: "string"
+        description: "Environment configuration (development, staging, production)"
+        default: "development"
+    required:
+      - operation_type
+      - correlation_id
+
+  ModelEventBusCircuitBreakerOutput:
+    type: "object"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether the operation succeeded"
+      operation_type:
+        type: "string"
+        description: "Type of operation that was performed"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Correlation ID from the request"
+      result:
+        type: "object"
+        description: "Operation-specific result data"
+      error_message:
+        type: "string"
+        description: "Error message if operation failed"
+      circuit_breaker_state:
+        $ref: "#/definitions/CircuitBreakerStateEnum"
+        description: "Current circuit breaker state"
+      metrics:
+        $ref: "#/definitions/ModelCircuitBreakerMetrics"
+        description: "Current circuit breaker metrics"
+      timestamp:
+        type: "string"
+        format: "date-time"
+        description: "Response timestamp"
+    required:
+      - success
+      - operation_type
+      - correlation_id
+      - circuit_breaker_state
+      - timestamp
+
+  ModelOnexEvent:
+    type: "object"
+    description: "ONEX event model (external dependency)"
+
+  CircuitBreakerStateEnum:
+    type: "string"
+    enum: ["closed", "open", "half_open"]
+    description: "Circuit breaker state enumeration"
+
+  ModelCircuitBreakerMetrics:
+    type: "object" 
+    description: "Circuit breaker metrics model (external dependency)"
