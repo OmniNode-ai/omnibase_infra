@@ -1,0 +1,179 @@
+contract_version: "1.0.0"
+node_version: "1.0.0"
+version: "1.0.0"
+node_name: "node_kafka_producer_pool_effect"
+contract_name: "node_kafka_producer_pool_effect"
+name: "node_kafka_producer_pool_effect"
+node_type: "EFFECT"
+description: "Kafka producer pool EFFECT node providing enterprise-grade producer connection pooling, message publishing, and monitoring for RedPanda event bus integration"
+
+input_model: "ModelKafkaProducerPoolInput"
+output_model: "ModelKafkaProducerPoolOutput"
+
+# Shared model dependencies following DRY pattern
+dependencies:
+  # Protocol dependencies (existing ONEX pattern)
+  - name: "protocol_event_bus"
+    type: "protocol"
+    class_name: "ProtocolEventBus"
+    module: "omnibase_core.protocol.protocol_event_bus"
+  
+  # Shared Kafka model dependencies (new DRY pattern)
+  - name: "model_kafka_producer_config"
+    type: "model"
+    class_name: "ModelKafkaProducerConfig"
+    module: "omnibase_infra.models.kafka.model_kafka_producer_config"
+  
+  - name: "model_kafka_message_payload"
+    type: "model"
+    class_name: "ModelKafkaMessagePayload"
+    module: "omnibase_infra.models.kafka.model_kafka_message_payload"
+  
+  - name: "model_kafka_producer_pool_stats"
+    type: "model"
+    class_name: "ModelKafkaProducerPoolStats"
+    module: "omnibase_infra.models.kafka.model_kafka_producer_pool_stats"
+  
+  - name: "model_kafka_health_response"
+    type: "model"
+    class_name: "ModelKafkaHealthResponse"
+    module: "omnibase_infra.models.kafka.model_kafka_health_response"
+
+# External service interaction operations (EFFECT node pattern)
+io_operations:
+  - name: "send_message"
+    description: "Send a message to a Kafka/RedPanda topic with producer pool management"
+    input_model: "ModelSendMessageInput"
+    output_model: "ModelSendMessageOutput"
+    operation_type: "message_publishing"
+    
+  - name: "get_pool_stats"
+    description: "Get comprehensive statistics for the Kafka producer pool"
+    input_model: "ModelGetPoolStatsInput"
+    output_model: "ModelGetPoolStatsOutput"
+    operation_type: "metrics_collection"
+    
+  - name: "get_health"
+    description: "Get comprehensive health status of the Kafka producer pool"
+    input_model: "ModelGetHealthInput"
+    output_model: "ModelGetHealthOutput"
+    operation_type: "health_check"
+
+# All model definitions for contract completeness
+definitions:
+  # Node-specific adapter models (input/output only)
+  ModelKafkaProducerPoolInput:
+    type: "object"
+    description: "Input model for Kafka producer pool operations"
+    properties:
+      operation_type:
+        type: "string"
+        description: "Type of producer pool operation to perform"
+        enum: ["send_message", "get_pool_stats", "get_health"]
+      correlation_id:
+        type: "string"
+        description: "Unique identifier for request tracing"
+        format: "uuid"
+      
+  ModelKafkaProducerPoolOutput:
+    type: "object" 
+    description: "Output model for Kafka producer pool operations"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether the operation completed successfully"
+      correlation_id:
+        type: "string"
+        description: "Unique identifier for request tracing"
+        format: "uuid"
+      timestamp:
+        type: "string"
+        description: "Timestamp of operation completion"
+        format: "date-time"
+        
+  # io_operation specific models
+  ModelSendMessageInput:
+    type: "object"
+    description: "Input for send_message operation"
+    properties:
+      topic:
+        type: "string"
+        description: "Kafka topic to send message to"
+      value:
+        type: "string"
+        description: "Message value/payload"
+      key:
+        type: "string"
+        description: "Optional message key for partitioning"
+      headers:
+        type: "object"
+        description: "Optional message headers"
+      partition:
+        type: "integer"
+        description: "Optional specific partition"
+      timestamp:
+        type: "string"
+        description: "Optional message timestamp"
+        format: "date-time"
+        
+  ModelSendMessageOutput:
+    type: "object"
+    description: "Output for send_message operation"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether message was sent successfully"
+      topic:
+        type: "string"
+        description: "Topic message was sent to"
+      partition:
+        type: "integer"
+        description: "Partition message was sent to"
+      offset:
+        type: "integer"
+        description: "Offset of the message in the partition"
+      timestamp:
+        type: "string"
+        description: "Message timestamp"
+        format: "date-time"
+      latency_ms:
+        type: "number"
+        description: "Message send latency in milliseconds"
+        
+  ModelGetPoolStatsInput:
+    type: "object"
+    description: "Input for get_pool_stats operation (empty)"
+    properties: {}
+    
+  ModelGetPoolStatsOutput:
+    type: "object"
+    description: "Output for get_pool_stats operation"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether stats retrieval completed successfully"
+      stats:
+        $ref: "#/definitions/ModelKafkaProducerPoolStats"
+      timestamp:
+        type: "string"
+        description: "Stats collection timestamp"
+        format: "date-time"
+        
+  ModelGetHealthInput:
+    type: "object"
+    description: "Input for get_health operation (empty)"
+    properties: {}
+    
+  ModelGetHealthOutput:
+    type: "object"
+    description: "Output for get_health operation"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether health check completed successfully"
+      health_data:
+        $ref: "#/definitions/ModelKafkaHealthResponse"
+      timestamp:
+        type: "string"
+        description: "Health check timestamp"
+        format: "date-time"

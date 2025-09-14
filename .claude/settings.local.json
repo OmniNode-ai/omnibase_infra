@@ -18,7 +18,12 @@
       "mcp__archon__create_project",
       "mcp__archon__create_task",
       "Bash(claude-agent:*)",
-      "WebSearch"
+      "WebSearch",
+      "mcp__serena__list_dir",
+      "mcp__serena__read_file",
+      "mcp__serena__create_text_file",
+      "mcp__serena__search_for_pattern",
+      "mcp__serena__replace_regex"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,214 @@
+contract_version: "1.0.0"
+node_version: "1.0.0"
+version: "1.0.0"
+node_name: "node_postgres_connection_manager_effect"
+contract_name: "node_postgres_connection_manager_effect"
+name: "node_postgres_connection_manager_effect"
+node_type: "EFFECT"
+description: "PostgreSQL connection manager EFFECT node providing enterprise-grade connection pooling, transaction management, and database operations for ONEX infrastructure"
+
+input_model: "ModelPostgresConnectionManagerInput"
+output_model: "ModelPostgresConnectionManagerOutput"
+
+# Shared model dependencies following DRY pattern
+dependencies:
+  # Protocol dependencies (existing ONEX pattern)
+  - name: "protocol_event_bus"
+    type: "protocol"
+    class_name: "ProtocolEventBus"
+    module: "omnibase_core.protocol.protocol_event_bus"
+  
+  # Shared PostgreSQL model dependencies (new DRY pattern)
+  - name: "model_postgres_connection_config"
+    type: "model"
+    class_name: "ModelPostgresConnectionConfig"
+    module: "omnibase_infra.models.postgres.model_postgres_connection_config"
+  
+  - name: "model_postgres_query_request"
+    type: "model"
+    class_name: "ModelPostgresQueryRequest"
+    module: "omnibase_infra.models.postgres.model_postgres_query_request"
+  
+  - name: "model_postgres_query_response"
+    type: "model"
+    class_name: "ModelPostgresQueryResponse"
+    module: "omnibase_infra.models.postgres.model_postgres_query_response"
+  
+  - name: "model_postgres_health_data"
+    type: "model"
+    class_name: "ModelPostgresHealthData"
+    module: "omnibase_infra.models.postgres.model_postgres_health_data"
+  
+  - name: "model_postgres_query_data"
+    type: "model"
+    class_name: "ModelPostgresQueryData"
+    module: "omnibase_infra.models.postgres.model_postgres_query_data"
+
+# External service interaction operations (EFFECT node pattern)
+io_operations:
+  - name: "execute_query"
+    description: "Execute a PostgreSQL query that may or may not return records (SELECT, UPDATE, INSERT, DELETE)"
+    input_model: "ModelExecuteQueryInput"
+    output_model: "ModelExecuteQueryOutput"
+    operation_type: "database_query"
+    
+  - name: "fetch_one"
+    description: "Fetch a single record from a PostgreSQL query"
+    input_model: "ModelFetchOneInput"
+    output_model: "ModelFetchOneOutput"
+    operation_type: "database_query"
+    
+  - name: "fetch_value"
+    description: "Fetch a single scalar value from a PostgreSQL query"
+    input_model: "ModelFetchValueInput"
+    output_model: "ModelFetchValueOutput"
+    operation_type: "database_query"
+    
+  - name: "get_health"
+    description: "Get comprehensive health status of the PostgreSQL connection pool"
+    input_model: "ModelGetHealthInput"
+    output_model: "ModelGetHealthOutput"
+    operation_type: "health_check"
+
+# All model definitions for contract completeness
+definitions:
+  # Node-specific adapter models (input/output only)
+  ModelPostgresConnectionManagerInput:
+    type: "object"
+    description: "Input model for PostgreSQL connection manager operations"
+    properties:
+      operation_type:
+        type: "string"
+        description: "Type of database operation to perform"
+        enum: ["execute_query", "fetch_one", "fetch_value", "get_health"]
+      correlation_id:
+        type: "string"
+        description: "Unique identifier for request tracing"
+        format: "uuid"
+      
+  ModelPostgresConnectionManagerOutput:
+    type: "object" 
+    description: "Output model for PostgreSQL connection manager operations"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether the operation completed successfully"
+      correlation_id:
+        type: "string"
+        description: "Unique identifier for request tracing"
+        format: "uuid"
+      timestamp:
+        type: "string"
+        description: "Timestamp of operation completion"
+        format: "date-time"
+        
+  # io_operation specific models
+  ModelExecuteQueryInput:
+    type: "object"
+    description: "Input for execute_query operation"
+    properties:
+      query:
+        type: "string"
+        description: "SQL query to execute"
+      parameters:
+        type: "object"
+        description: "Query parameters"
+      timeout:
+        type: "number"
+        description: "Query timeout in seconds"
+        default: 60.0
+        
+  ModelExecuteQueryOutput:
+    type: "object"
+    description: "Output for execute_query operation"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether query executed successfully"
+      records:
+        type: "array"
+        description: "Query result records"
+        items:
+          type: "object"
+      affected_rows:
+        type: "integer"
+        description: "Number of affected rows"
+      execution_time_ms:
+        type: "number"
+        description: "Query execution time in milliseconds"
+        
+  ModelFetchOneInput:
+    type: "object"
+    description: "Input for fetch_one operation"
+    properties:
+      query:
+        type: "string"
+        description: "SQL query to execute"
+      parameters:
+        type: "object"
+        description: "Query parameters"
+      timeout:
+        type: "number"
+        description: "Query timeout in seconds"
+        default: 60.0
+        
+  ModelFetchOneOutput:
+    type: "object"
+    description: "Output for fetch_one operation"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether query executed successfully"
+      record:
+        type: "object"
+        description: "Single query result record"
+      execution_time_ms:
+        type: "number"
+        description: "Query execution time in milliseconds"
+        
+  ModelFetchValueInput:
+    type: "object"
+    description: "Input for fetch_value operation"
+    properties:
+      query:
+        type: "string"
+        description: "SQL query to execute"
+      parameters:
+        type: "object"
+        description: "Query parameters"
+      timeout:
+        type: "number"
+        description: "Query timeout in seconds"
+        default: 60.0
+        
+  ModelFetchValueOutput:
+    type: "object"
+    description: "Output for fetch_value operation"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether query executed successfully"
+      value:
+        description: "Single scalar value from query result"
+      execution_time_ms:
+        type: "number"
+        description: "Query execution time in milliseconds"
+        
+  ModelGetHealthInput:
+    type: "object"
+    description: "Input for get_health operation (empty)"
+    properties: {}
+    
+  ModelGetHealthOutput:
+    type: "object"
+    description: "Output for get_health operation"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether health check completed successfully"
+      health_data:
+        $ref: "#/definitions/ModelPostgresHealthData"
+      timestamp:
+        type: "string"
+        description: "Health check timestamp"
+        format: "date-time"

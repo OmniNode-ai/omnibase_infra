@@ -87,6 +87,12 @@ class KafkaProducerPool:
         self._lock = asyncio.Lock()
         self.is_initialized = False
         
+        # Backpressure and retry configuration
+        self.max_wait_time = 30.0  # Maximum time to wait for available producer
+        self.retry_delay = 0.1  # Initial delay between retries
+        self.max_retry_delay = 2.0  # Maximum delay between retries
+        self.pending_requests: asyncio.Queue = asyncio.Queue(maxsize=100)  # Request queue for backpressure
+        
         # Logging
         self.logger = logging.getLogger(f"{__name__}.KafkaProducerPool")
         
@@ -185,11 +191,13 @@ class KafkaProducerPool:
                     producer_instance = await self._create_producer(producer_id)
                     self.active_producers.append(producer_id)
                 else:
-                    # Pool is at capacity - wait for available producer
-                    raise OnexError(
-                        code=CoreErrorCode.RESOURCE_EXHAUSTED,
-                        message=f"Kafka producer pool '{self.pool_name}' is at capacity ({self.max_pool_size})"
-                    )
+                    # Pool is at capacity - implement backpressure with retry
+                    producer_instance = await self._wait_for_available_producer()
+                    if producer_instance is None:
+                        raise OnexError(
+                            code=CoreErrorCode.RESOURCE_EXHAUSTED,
+                            message=f"Kafka producer pool '{self.pool_name}' timeout waiting for available producer after {self.max_wait_time}s"
+                        )
             
             # Update activity timestamp
             producer_instance.last_activity = datetime.now()
