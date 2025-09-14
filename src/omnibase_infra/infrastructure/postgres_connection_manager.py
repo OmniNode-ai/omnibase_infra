@@ -6,6 +6,7 @@ and high-availability database operations for the ONEX infrastructure system.
 """
 
 import os
+import stat
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -74,16 +75,32 @@ class ConnectionConfig:
                 ssl_key_file=os.getenv("POSTGRES_SSL_KEY_FILE"),
                 ssl_ca_file=os.getenv("POSTGRES_SSL_CA_FILE"),
             )
-        except Exception:
+        except Exception as e:
             # Fallback to environment variables (no hardcoded defaults)
+            # Create a temporary instance to track the fallback event
+            temp_instance = cls.__new__(cls)
+            temp_instance.security_events = {
+                "ssl_file_validations": 0,
+                "ssl_permission_violations": 0,
+                "credential_manager_fallbacks": 1,  # Track fallback event
+                "configuration_errors": 0,
+            }
+            
             host = os.getenv("POSTGRES_HOST")
             if not host:
+                temp_instance.security_events["configuration_errors"] += 1
                 raise OnexError(
                     code=CoreErrorCode.CONFIGURATION_ERROR,
                     message="POSTGRES_HOST environment variable is required when credential manager is unavailable",
-                )
+                ) from e
             
-            return cls(
+            # Get SSL file paths and validate them if provided
+            ssl_cert_file = os.getenv("POSTGRES_SSL_CERT_FILE")
+            ssl_key_file = os.getenv("POSTGRES_SSL_KEY_FILE") 
+            ssl_ca_file = os.getenv("POSTGRES_SSL_CA_FILE")
+            
+            # Create a temporary instance to access validation method
+            temp_instance = cls(
                 host=host,
                 port=int(os.getenv("POSTGRES_PORT", "5432")),
                 database=os.getenv("POSTGRES_DATABASE", "omnibase_infrastructure"),
@@ -97,10 +114,26 @@ class ConnectionConfig:
                 ),
                 command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT", "60.0")),
                 ssl_mode=os.getenv("POSTGRES_SSL_MODE", "prefer"),
-                ssl_cert_file=os.getenv("POSTGRES_SSL_CERT_FILE"),
-                ssl_key_file=os.getenv("POSTGRES_SSL_KEY_FILE"),
-                ssl_ca_file=os.getenv("POSTGRES_SSL_CA_FILE"),
+                ssl_cert_file=ssl_cert_file,
+                ssl_key_file=ssl_key_file,
+                ssl_ca_file=ssl_ca_file,
             )
+            
+            # Inherit fallback event tracking from previous temp_instance if it exists
+            if 'temp_instance' in locals() and hasattr(temp_instance, 'security_events'):
+                pass  # Keep existing events
+            else:
+                temp_instance.security_events["credential_manager_fallbacks"] = 1
+            
+            # Validate SSL file permissions if files are provided
+            if ssl_cert_file:
+                temp_instance._validate_ssl_file_permissions(ssl_cert_file)
+            if ssl_key_file:
+                temp_instance._validate_ssl_file_permissions(ssl_key_file, is_private_key=True)
+            if ssl_ca_file:
+                temp_instance._validate_ssl_file_permissions(ssl_ca_file)
+                
+            return temp_instance
 
 
 @dataclass
@@ -161,6 +194,61 @@ class PostgresConnectionManager:
             query_count=0,
             average_response_time_ms=0.0,
         )
+        
+        # Security event tracking for monitoring and alerting
+        self.security_events = {
+            "ssl_file_validations": 0,
+            "ssl_permission_violations": 0,
+            "credential_manager_fallbacks": 0,
+            "configuration_errors": 0,
+        }
+
+    def _validate_ssl_file_permissions(self, file_path: str, is_private_key: bool = False) -> None:
+        """
+        Validate existence, readability, and permissions of an SSL file.
+        
+        Args:
+            file_path: Path to the SSL file to validate
+            is_private_key: Whether this is a private key requiring stricter permissions
+            
+        Raises:
+            OnexError: If file is missing, unreadable, or has insecure permissions
+        """
+        try:
+            self.security_events["ssl_file_validations"] += 1
+            
+            if not os.path.exists(file_path):
+                self.security_events["configuration_errors"] += 1
+                raise OnexError(
+                    code=CoreErrorCode.CONFIGURATION_ERROR,
+                    message=f"SSL file not found: {file_path}"
+                )
+            if not os.access(file_path, os.R_OK):
+                self.security_events["configuration_errors"] += 1
+                raise OnexError(
+                    code=CoreErrorCode.CONFIGURATION_ERROR,
+                    message=f"SSL file not readable: {file_path}"
+                )
+
+            if is_private_key:
+                file_stat = os.stat(file_path)
+                if file_stat.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+                    self.security_events["ssl_permission_violations"] += 1
+                    permissions = oct(file_stat.st_mode)[-3:]
+                    raise OnexError(
+                        code=CoreErrorCode.SECURITY_ERROR,
+                        message=f"Insecure permissions for SSL private key: {file_path}. "
+                               f"Permissions are {permissions}, but must be owner-readable/writable only (600)."
+                    )
+        except OnexError:
+            # Re-raise OnexError without modification
+            raise
+        except Exception as e:
+            self.security_events["configuration_errors"] += 1
+            raise OnexError(
+                code=CoreErrorCode.CONFIGURATION_ERROR,
+                message=f"Failed to validate SSL file permissions for {file_path}: {str(e)}"
+            ) from e
 
     async def initialize(self) -> None:
         """Initialize the connection pool."""
@@ -482,6 +570,12 @@ class PostgresConnectionManager:
                         "failed_connections": self.connection_stats.failed_connections,
                         "average_response_time_ms": self.connection_stats.average_response_time_ms,
                     },
+                    "security": {
+                        "ssl_file_validations": self.security_events["ssl_file_validations"],
+                        "ssl_permission_violations": self.security_events["ssl_permission_violations"],
+                        "credential_manager_fallbacks": self.security_events["credential_manager_fallbacks"],
+                        "configuration_errors": self.security_events["configuration_errors"],
+                    },
                 }
             )
 
@@ -509,8 +603,17 @@ class PostgresConnectionManager:
         """Get recent query metrics."""
         return self.query_metrics[-limit:]
 
+    def get_security_metrics(self) -> Dict[str, int]:
+        """
+        Get security event metrics for monitoring and alerting.
+        
+        Returns:
+            Dictionary containing counts of security-related events
+        """
+        return self.security_events.copy()
+
     def clear_metrics(self) -> None:
-        """Clear collected metrics."""
+        """Clear collected metrics including security events."""
         self.query_metrics.clear()
         self.connection_stats = ConnectionStats(
             size=0,
@@ -523,6 +626,14 @@ class PostgresConnectionManager:
             query_count=0,
             average_response_time_ms=0.0,
         )
+        
+        # Reset security event tracking
+        self.security_events = {
+            "ssl_file_validations": 0,
+            "ssl_permission_violations": 0,
+            "credential_manager_fallbacks": 0,
+            "configuration_errors": 0,
+        }
 
     def _record_query_metrics(
         self,

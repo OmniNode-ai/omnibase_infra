@@ -17,7 +17,8 @@
       "Bash(agent-security-audit:*)",
       "mcp__archon__create_project",
       "mcp__archon__create_task",
-      "Bash(claude-agent:*)"
+      "Bash(claude-agent:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []
