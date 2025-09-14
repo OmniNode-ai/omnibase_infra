@@ -365,24 +365,35 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
         asyncio.create_task(self._process_queue_background())
     
     async def _process_queue_background(self):
-        """Background task to process queued events."""
+        """Background task to process queued events with proper thread safety."""
         processed = 0
         failed = 0
-        
-        while self._event_queue and self._state == EnumCircuitBreakerState.CLOSED:
+
+        while True:
+            # Check state and queue with proper locking
+            async with self._lock:
+                if not self._event_queue or self._state != EnumCircuitBreakerState.CLOSED:
+                    break
+
+                try:
+                    event = self._event_queue.pop(0)
+                except IndexError:
+                    # Queue was emptied between check and pop
+                    break
+
+            # Process event outside the lock to avoid blocking other operations
             try:
-                event = self._event_queue.pop(0)
                 # NOTE: Event re-publishing requires publisher function context
                 # For now, events are processed but not re-published to avoid state inconsistency
                 processed += 1
-                
+
             except Exception as e:
                 failed += 1
                 self.logger.error(f"Failed to process queued event: {e}")
-                
+
                 if failed >= 3:  # Prevent infinite retry loops
                     break
-        
+
         self.logger.info(f"Queued event processing complete: {processed} processed, {failed} failed")
     
     async def _handle_get_state(self, input_data: ModelEventBusCircuitBreakerInput) -> ModelStateResult:
@@ -482,13 +493,22 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
         if function_name and function_name in self._publisher_functions:
             return self._publisher_functions[function_name]
         
-        # Default mock publisher for testing
+        # Default mock publisher for testing - with production safety check
         async def mock_publisher(event: ModelOnexEvent) -> None:
-            """Mock publisher function for testing."""
-            self.logger.debug(f"Mock publishing event: {event.correlation_id}")
+            """Mock publisher function for testing - NOT for production use."""
+            # Production safety check
+            environment = os.getenv('ENVIRONMENT', '').lower()
+            if environment in ('production', 'prod'):
+                self.logger.error("CRITICAL: Mock publisher used in production environment!")
+                raise OnexError(
+                    message="Mock publisher cannot be used in production environment",
+                    error_code=CoreErrorCode.CONFIGURATION_ERROR
+                )
+
+            self.logger.warning(f"Using mock publisher for event: {event.correlation_id} (environment: {environment or 'unknown'})")
             # Simulate some processing time
             await asyncio.sleep(0.01)
-        
+
         return mock_publisher
     
     def register_publisher_function(self, name: str, function: Callable) -> None:
