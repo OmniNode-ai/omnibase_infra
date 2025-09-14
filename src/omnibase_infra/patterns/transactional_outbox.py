@@ -33,7 +33,7 @@ from enum import Enum
 import asyncpg
 from asyncpg import Connection
 
-from omnibase_core.core.onex_error import OnexError, CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
 from ..observability.prometheus_metrics import get_metrics_collector
 from ..infrastructure.postgres_connection_manager import get_connection_manager
 

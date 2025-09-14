@@ -37,8 +37,8 @@ from kafka.errors import KafkaError
 logger = logging.getLogger(__name__)
 
 # Import ONEX infrastructure components
-from omnibase_core.core.core_error_codes import CoreErrorCode
-from omnibase_core.core.errors.onex_error import OnexError
+from omnibase_core.core_error_codes import CoreErrorCode
+from omnibase_core.onex_error import OnexError
 from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.model.core.model_event_envelope import ModelEventEnvelope
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent

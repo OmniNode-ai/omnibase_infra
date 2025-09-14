@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, validator
 from enum import Enum
 
 from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 
 class EnvironmentType(str, Enum):

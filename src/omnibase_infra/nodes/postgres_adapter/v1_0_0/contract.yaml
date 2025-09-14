@@ -1,6 +1,6 @@
-contract_version: "1.0.0"
-node_version: "1.0.0"
-version: "1.0.0"
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+version: {major: 1, minor: 0, patch: 0}
 
 name: "postgres_adapter"
 contract_name: "postgres_adapter"

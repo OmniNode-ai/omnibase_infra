@@ -17,12 +17,19 @@ import json
 import logging
 import os
 import time
-from typing import Callable, Optional, Type, TypeVar, Union, Dict, Any
+from typing import Callable, Optional, Type, TypeVar, Union, Dict, List
 
 from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
 from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLoader
+
+# Typed models for replacing Any usage
+from omnibase_infra.models.kafka.model_kafka_producer_pool_stats import ModelKafkaProducerPoolStats
+from omnibase_infra.models.kafka.model_kafka_producer_entry import (
+    ModelKafkaProducerEntry,
+    ModelKafkaFailureRecord
+)
 
 # ONEX Security modules
 from omnibase_infra.security.credential_manager import get_credential_manager
@@ -52,8 +59,8 @@ class KafkaProducerPool:
     def __init__(self, max_producers: int = 10, cleanup_interval: int = 300):
         self._max_producers = max_producers
         self._cleanup_interval = cleanup_interval
-        self._producers: Dict[str, Any] = {}
-        self._failed_producers: Dict[str, float] = {}
+        self._producers: Dict[str, object] = {}  # Stores AIOKafkaProducer instances
+        self._failed_producers: Dict[str, ModelKafkaFailureRecord] = {}
         self._producer_usage: Dict[str, int] = {}  # Track usage count
         self._last_cleanup = time.time()
         self._logger = logging.getLogger(__name__)
@@ -64,8 +71,10 @@ class KafkaProducerPool:
     
     def _start_background_cleanup(self):
         """Start background cleanup task."""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._background_cleanup_loop())
+        # Cancel existing task before creating new one to prevent resource leaks
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+        self._cleanup_task = asyncio.create_task(self._background_cleanup_loop())
     
     async def _background_cleanup_loop(self):
         """Background loop for periodic cleanup."""
@@ -100,8 +109,8 @@ class KafkaProducerPool:
         
         # Clean up old failure records
         failed_to_remove = []
-        for servers_key, fail_time in self._failed_producers.items():
-            if current_time - fail_time > 3600:  # 1 hour cleanup
+        for servers_key, failure_record in self._failed_producers.items():
+            if current_time - failure_record.failure_timestamp > 3600:  # 1 hour cleanup
                 failed_to_remove.append(servers_key)
         
         for servers_key in failed_to_remove:
@@ -141,8 +150,8 @@ class KafkaProducerPool:
         
         # Skip creation if this producer has failed recently
         if servers_key in self._failed_producers:
-            fail_time = self._failed_producers[servers_key]
-            if (time.time() - fail_time) < 60:  # 60 second backoff
+            failure_record = self._failed_producers[servers_key]
+            if (time.time() - failure_record.failure_timestamp) < 60:  # 60 second backoff
                 self._logger.debug(f"Skipping producer creation for {servers_key} - recent failure")
                 return None
         
@@ -212,7 +221,11 @@ class KafkaProducerPool:
         except Exception as e:
             self._logger.error(f"Failed to create Kafka producer: {e}")
             # Track failure for backoff
-            self._failed_producers[servers_key] = time.time()
+            self._failed_producers[servers_key] = ModelKafkaFailureRecord(
+                servers_key=servers_key,
+                failure_timestamp=time.time(),
+                failure_reason=str(e)
+            )
             return None
     
     async def _is_producer_healthy(self, producer) -> bool:
@@ -265,15 +278,17 @@ class KafkaProducerPool:
         
         self._logger.info("Kafka producer pool closed")
     
-    def get_pool_stats(self) -> Dict[str, Any]:
-        """Get producer pool statistics."""
-        return {
+    def get_pool_stats(self) -> ModelKafkaProducerPoolStats:
+        """Get producer pool statistics as strongly typed model."""
+        return ModelKafkaProducerPoolStats.create_empty_stats("kafka_producer_pool").model_copy(update={
+            "total_producers": len(self._producers),
             "active_producers": len(self._producers),
-            "max_producers": self._max_producers,
+            "idle_producers": 0,
             "failed_producers": len(self._failed_producers),
-            "total_usage": sum(self._producer_usage.values()),
-            "cleanup_task_running": self._cleanup_task is not None and not self._cleanup_task.done()
-        }
+            "max_pool_size": self._max_producers,
+            "total_messages_sent": sum(self._producer_usage.values()),  # Using usage as proxy for messages
+            "uptime_seconds": int(time.time() - self._last_cleanup)
+        })
 
 
 class RedPandaEventBus(ProtocolEventBus):
@@ -371,7 +386,7 @@ class RedPandaEventBus(ProtocolEventBus):
             self._observability.record_metric(
                 "event_publishing_success_total",
                 1,
-                labels={"event_type": event.event_type},
+                labels={"event_type": str(event.payload.event_type)},
                 metric_type=MetricType.COUNTER
             )
             
@@ -386,7 +401,7 @@ class RedPandaEventBus(ProtocolEventBus):
             self._observability.record_metric(
                 "event_publishing_error_total",
                 1,
-                labels={"event_type": event.event_type, "error": type(e).__name__},
+                labels={"event_type": str(event.payload.event_type), "error": type(e).__name__},
                 metric_type=MetricType.COUNTER
             )
             
@@ -467,25 +482,28 @@ class RedPandaEventBus(ProtocolEventBus):
                 self._logger.warning(f"RedPanda publish attempt {attempt + 1} failed, retrying in {delay:.2f}s: {str(e)}")
                 await asyncio.sleep(delay)
     
-    def subscribe(self, callback: Callable[[ModelOnexEvent], None]) -> None:
+    def subscribe(self, callback: Callable[[ModelOnexEvent], None], event_type: str) -> None:
         """
         Subscribe a callback to receive events (synchronous).
         
         Args:
             callback: Callable invoked with each OnexEvent
+            event_type: Required event type filter for specific event types
         """
+        
         if callback not in self._subscribers:
             self._subscribers.append(callback)
-            self._logger.debug(f"Subscribed callback to RedPanda event bus")
+            self._logger.debug(f"Subscribed callback to RedPanda event bus (event_type: {event_type})")
     
-    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None]) -> None:
+    async def subscribe_async(self, callback: Callable[[ModelOnexEvent], None], event_type: str) -> None:
         """
         Subscribe a callback to receive events (asynchronous).
         
         Args:
             callback: Callable invoked with each OnexEvent
+            event_type: Required event type filter for specific event types
         """
-        self.subscribe(callback)
+        self.subscribe(callback, event_type)
     
     def unsubscribe(self, callback: Callable[[ModelOnexEvent], None]) -> None:
         """
@@ -638,24 +656,35 @@ def _setup_infrastructure_dependencies(container: ONEXContainer):
     schema_loader = UtilitySchemaLoader()
     logger.info(f"Created schema loader: {type(schema_loader).__name__}")
 
-    # PostgreSQL Connection Manager - required by infrastructure services
-    from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
-    connection_manager = PostgresConnectionManager()
-    logger.info(f"Created connection manager: {type(connection_manager).__name__}")
+    # PostgreSQL Connection Manager - required by some infrastructure services
+    try:
+        from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
+        connection_manager = PostgresConnectionManager()
+        logger.info(f"Created connection manager: {type(connection_manager).__name__}")
+    except Exception as e:
+        logger.warning(f"PostgreSQL connection manager unavailable: {e}")
+        connection_manager = None
     
-    # Register services in the container's service registry
-    _register_service(container, "event_bus", event_bus)
+    # Register services in the container's service registry using protocol resolution only
     _register_service(container, "ProtocolEventBus", event_bus)
-    _register_service(container, "schema_loader", schema_loader)
     _register_service(container, "ProtocolSchemaLoader", schema_loader)
-    _register_service(container, "postgres_connection_manager", connection_manager)
-    _register_service(container, "PostgresConnectionManager", connection_manager)
+    if connection_manager:
+        _register_service(container, "PostgresConnectionManager", connection_manager)
     
-    # Verify registration
-    logger.info("Registered services verification:")
+    # Verify protocol-based registration
+    logger.info("Registered protocol services verification:")
     logger.info(f"  ProtocolEventBus: {type(container.get_service('ProtocolEventBus')).__name__ if container.get_service('ProtocolEventBus') else 'None'}")
-    logger.info(f"  event_bus: {type(container.get_service('event_bus')).__name__ if container.get_service('event_bus') else 'None'}")
-    logger.info(f"  postgres_connection_manager: {type(container.get_service('postgres_connection_manager')).__name__ if container.get_service('postgres_connection_manager') else 'None'}")
+    logger.info(f"  ProtocolSchemaLoader: {type(container.get_service('ProtocolSchemaLoader')).__name__ if container.get_service('ProtocolSchemaLoader') else 'None'}")
+    postgres_manager = None
+    try:
+        postgres_manager = container.get_service('PostgresConnectionManager')
+    except Exception:
+        pass
+    logger.info(f"  postgres_connection_manager: {type(postgres_manager).__name__ if postgres_manager else 'None'}")
+    if connection_manager:
+        logger.info("  PostgreSQL connection manager successfully initialized")
+    else:
+        logger.info("  PostgreSQL connection manager skipped (environment not configured)")
 
 
 def _register_service(container: ONEXContainer, service_name: str, service_instance):

@@ -10,11 +10,6 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure git with GitHub token for private repos (using mount to avoid layer exposure)
-RUN --mount=type=secret,id=github_token \
-    GITHUB_TOKEN=$(cat /run/secrets/github_token) && \
-    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
-
 # Install Poetry
 RUN pip install poetry
 
@@ -24,9 +19,12 @@ COPY pyproject.toml poetry.lock README.md ./
 # Copy source code first
 COPY src/ ./src/
 
-# Configure poetry and install dependencies
-RUN poetry config virtualenvs.create false \
-    && poetry install --only main
+# Configure git with GitHub token and install dependencies in one step (using mount to avoid layer exposure)
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN=$(cat /run/secrets/github_token) && \
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/" && \
+    poetry config virtualenvs.create false && \
+    poetry install --only main
 
 # Set Python path
 ENV PYTHONPATH=/app/src

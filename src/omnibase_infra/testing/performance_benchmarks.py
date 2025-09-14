@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 
-from omnibase_core.core.onex_error import OnexError, CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
 
 
 @dataclass

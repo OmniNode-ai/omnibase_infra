@@ -16,7 +16,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Callable, Union, Pattern
 from uuid import UUID, uuid4
 
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
 from omnibase_core.core.onex_container import ModelONEXContainer
@@ -1333,7 +1333,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
             await connection_manager.initialize()
         except Exception as e:
             raise OnexError(
-                code=CoreErrorCode.INITIALIZATION_ERROR,
+                code=CoreErrorCode.INITIALIZATION_FAILED,
                 message=f"Failed to initialize PostgreSQL adapter tool: {str(e)}",
             ) from e
 

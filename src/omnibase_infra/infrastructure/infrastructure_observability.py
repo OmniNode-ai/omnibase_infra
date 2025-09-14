@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Any, Callable, Deque
 from uuid import UUID
 
 from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.core_error_codes import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 from omnibase_infra.infrastructure.event_bus_circuit_breaker import (
     EventBusCircuitBreaker,
     CircuitBreakerState

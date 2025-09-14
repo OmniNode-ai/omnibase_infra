@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from contextlib import asynccontextmanager
 
-from omnibase_core.core.onex_error import OnexError, CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
 
 
 class CircuitBreakerTestResult(Enum):

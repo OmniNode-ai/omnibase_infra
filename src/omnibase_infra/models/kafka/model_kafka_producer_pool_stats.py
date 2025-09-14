@@ -6,7 +6,7 @@ Used for exposing producer pool metrics through health endpoints and Prometheus 
 Following ONEX shared model architecture for infrastructure monitoring.
 """
 
-from typing import Optional, Dict, List
+from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -95,11 +95,8 @@ class ModelKafkaProducerPoolStats(BaseModel):
         description="Per-topic statistics"  
     )
     
-    # Configuration snapshot
-    configuration: Optional[Dict[str, any]] = Field(
-        default=None,
-        description="Current pool configuration snapshot"
-    )
+    # Configuration snapshot - removed to eliminate Any type usage per ONEX standards
+    # Use specific typed models for configuration instead of generic dictionaries
     
     def calculate_derived_metrics(self) -> None:
         """Calculate derived metrics from base statistics."""

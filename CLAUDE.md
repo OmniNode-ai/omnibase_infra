@@ -33,6 +33,17 @@ Claude Code operates in agent-driven mode for ONEX infrastructure development. F
 > Use agent-ticket-manager for project planning and dependency management
 ```
 
+## 🚫 CRITICAL POLICY: NO BACKWARDS COMPATIBILITY
+
+**NEVER KEEP BACKWARDS COMPATIBILITY EVER EVER EVER**
+
+This project follows a **ZERO BACKWARDS COMPATIBILITY** policy:
+- **Breaking changes are always acceptable**
+- **No deprecated code maintenance**
+- **All models MUST conform to current protocols**
+- **Clean, modern architecture only**
+- **Remove old patterns immediately**
+
 ## 🎯 HIGHEST Priority ONEX Core Principles
 
 ### Strong Typing & Models
@@ -139,6 +150,84 @@ Infrastructure tools follow ONEX 4-node architecture:
 - Direct coding without agent delegation is prohibited
 - Hand-written Pydantic models (must be contract-generated)
 - Hardcoded service configurations (must be contract-driven)
+
+## 🔧 MANDATORY DevOps Container Troubleshooting Workflow
+
+**CRITICAL WORKFLOW UPDATE - MANDATORY LOG INSPECTION FIRST**
+
+All DevOps infrastructure operations involving container troubleshooting MUST follow this mandatory workflow:
+
+### 🚨 STEP 1: LOG INSPECTION (MANDATORY FIRST STEP)
+```bash
+# ALWAYS run container logs inspection first - NO EXCEPTIONS
+docker logs <container-name>
+docker logs <container-name> --tail 50  # For recent entries
+docker logs <container-name> --follow   # For real-time monitoring
+```
+
+### 📊 STEP 2: LOG ANALYSIS FRAMEWORK
+**Analyze logs to determine actual container behavior:**
+
+**Expected Behaviors (NOT failures):**
+- Exit code 0 after successful task completion
+- "TOPIC_ALREADY_EXISTS" messages (topic creation idempotency)
+- "Setup completed successfully" followed by container exit
+- One-time initialization containers that exit after completion
+
+**Actual Failure Indicators:**
+- Non-zero exit codes with error messages
+- Connection refused errors
+- Authentication failures
+- Resource unavailable errors
+- Exception stack traces
+
+### 🎯 STEP 3: STATUS VERIFICATION
+```bash
+# Check container exit codes and timing
+docker ps -a --filter "name=<container-name>"
+docker inspect <container-name> --format='{{.State.ExitCode}}'
+docker inspect <container-name> --format='{{.State.FinishedAt}}'
+```
+
+### 🔍 STEP 4: ROOT CAUSE DETERMINATION
+**Only proceed with fixes after confirming actual problems exist:**
+- ✅ Exit code 0 + success logs = Expected behavior (no action needed)
+- ❌ Exit code != 0 + error logs = Actual failure (requires investigation)
+- ⚠️ Continuous restarts = Configuration or dependency issue
+
+### 📝 STEP 5: EVIDENCE-BASED DOCUMENTATION
+**Document findings with log evidence:**
+```bash
+# Capture evidence for analysis
+docker logs <container-name> > container_analysis.log 2>&1
+echo "Container Status: $(docker inspect <container-name> --format='{{.State.Status}}')"
+echo "Exit Code: $(docker inspect <container-name> --format='{{.State.ExitCode}}')"
+```
+
+### 🛑 ZERO TOLERANCE POLICY
+**NEVER assume container status without log evidence:**
+- ❌ No assumptions based on container status alone
+- ❌ No fixes without log-confirmed issues
+- ❌ No troubleshooting without understanding actual behavior
+- ✅ Always inspect logs first
+- ✅ Always distinguish expected vs actual failures
+- ✅ Always document evidence-based findings
+
+### 📋 Container Behavior Classification
+**One-time Setup Containers (Expected Exit 0):**
+- RedPanda topics creation
+- Database migrations
+- SSL certificate generation
+- Configuration initialization
+
+**Long-running Service Containers (Should Stay Running):**
+- Web services
+- Message brokers
+- Databases
+- Load balancers
+
+### 🎯 DevOps Agent Integration
+All DevOps infrastructure agents (`agent-devops-infrastructure`, `agent-production-monitor`, `agent-performance`) MUST implement this workflow as their first diagnostic step.
 
 ## ⚙️ Infrastructure Agent Usage Patterns
 

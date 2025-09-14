@@ -20,7 +20,8 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from omnibase_core.core.onex_error import OnexError, CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 
 class AuditEventType(Enum):

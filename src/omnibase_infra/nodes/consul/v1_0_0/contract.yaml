@@ -1,0 +1,296 @@
+# ONEX Infrastructure Node Contract: Consul Adapter Effect
+# Provides event-driven Consul operations for service discovery and KV store management
+
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+version: {major: 1, minor: 0, patch: 0}
+
+# Node identity and classification
+node_name: "node_infrastructure_consul_adapter_effect"
+contract_name: "consul_adapter_effect_contract"
+name: "consul_adapter"
+
+# ONEX 4-node architecture classification
+node_type: "EFFECT"
+description: "Event-driven Consul adapter for service discovery and KV store operations"
+
+# Strongly typed I/O models
+input_model: "ModelConsulAdapterInput"
+output_model: "ModelConsulAdapterOutput"
+
+# External effect operations for Consul integration
+io_operations:
+  - operation_name: "consul_kv_get"
+    operation_type: "read"
+    description: "Retrieve value from Consul KV store"
+    input_type: "ModelConsulKVRequest"
+    output_type: "ModelConsulKVResponse"
+  - operation_name: "consul_kv_put"
+    operation_type: "write"
+    description: "Store value in Consul KV store"
+    input_type: "ModelConsulKVRequest"
+    output_type: "ModelConsulKVResponse"
+  - operation_name: "consul_kv_delete"
+    operation_type: "delete"
+    description: "Delete key from Consul KV store"
+    input_type: "ModelConsulKVRequest" 
+    output_type: "ModelConsulKVResponse"
+  - operation_name: "consul_service_register"
+    operation_type: "write"
+    description: "Register service with Consul"
+    input_type: "ModelConsulServiceRegistration"
+    output_type: "ModelConsulServiceResponse"
+  - operation_name: "consul_service_deregister"
+    operation_type: "delete"
+    description: "Deregister service from Consul"
+    input_type: "ModelConsulServiceRequest"
+    output_type: "ModelConsulServiceResponse"
+  - operation_name: "consul_service_list"
+    operation_type: "read"
+    description: "List registered services"
+    input_type: "ModelConsulServiceRequest"
+    output_type: "ModelConsulServiceListResponse"
+  - operation_name: "consul_health_check"
+    operation_type: "read"
+    description: "Get health status from Consul"
+    input_type: "ModelConsulHealthRequest"
+    output_type: "ModelConsulHealthResponse"
+
+# Protocol dependencies
+dependencies:
+  # Protocol dependencies (existing pattern)
+  - name: "protocol_event_bus"
+    type: "protocol"
+    class_name: "ProtocolEventBus"
+    module: "omnibase_core.protocol.protocol_event_bus"
+
+# Model definitions following ONEX shared model pattern
+definitions:
+  # Node-specific adapter models (node-local only)
+  ModelConsulAdapterInput:
+    type: "object"
+    description: "Input model for Consul adapter operations from event envelopes"
+    properties:
+      action:
+        type: "string"
+        description: "Consul operation to perform"
+        enum: ["consul_kv_get", "consul_kv_put", "consul_kv_delete", "consul_service_register", "consul_service_deregister", "consul_service_list", "consul_health_check"]
+      key_path:
+        type: "string"
+        description: "Key path for KV operations"
+        required: false
+      value_data:
+        type: "object"
+        description: "Value data for KV put operations"
+        required: false
+      service_config:
+        type: "object"
+        description: "Service configuration for service operations"
+        required: false
+      recurse:
+        type: "boolean"
+        description: "Recursive flag for delete operations"
+        required: false
+        default: false
+    required: ["action"]
+
+  ModelConsulAdapterOutput:
+    type: "object"
+    description: "Output model for Consul adapter operation results"
+    properties:
+      consul_operation_result:
+        type: "object"
+        description: "Result of the Consul operation"
+      success:
+        type: "boolean"
+        description: "Operation success status"
+      operation_type:
+        type: "string"
+        description: "Type of operation performed"
+    required: ["consul_operation_result", "success", "operation_type"]
+
+  # Shared models (will be extracted to omnibase_infra/models/consul/)
+  ModelConsulKVRequest:
+    type: "object"
+    description: "Request model for Consul KV operations"
+    properties:
+      key:
+        type: "string"
+        description: "Key for KV operation"
+      value:
+        type: "string"
+        description: "Value for put operations"
+        required: false
+      recurse:
+        type: "boolean"
+        description: "Recursive flag for delete operations"
+        required: false
+        default: false
+    required: ["key"]
+
+  ModelConsulKVResponse:
+    type: "object"
+    description: "Response model for Consul KV operations"
+    properties:
+      status:
+        type: "string"
+        description: "Operation status"
+        enum: ["success", "not_found", "failed"]
+      key:
+        type: "string"
+        description: "Key that was operated on"
+      value:
+        type: "string"
+        description: "Retrieved value"
+        required: false
+      modify_index:
+        type: "integer"
+        description: "Consul modify index"
+        required: false
+    required: ["status", "key"]
+
+  ModelConsulServiceRegistration:
+    type: "object"
+    description: "Service registration data for Consul"
+    properties:
+      service_id:
+        type: "string"
+        description: "Unique service ID"
+      name:
+        type: "string"
+        description: "Service name"
+      port:
+        type: "integer"
+        description: "Service port"
+      address:
+        type: "string"
+        description: "Service address"
+      health_check:
+        type: "object"
+        description: "Health check configuration"
+        required: false
+        properties:
+          url:
+            type: "string"
+            description: "Health check URL"
+          interval:
+            type: "string"
+            description: "Check interval"
+          timeout:
+            type: "string"
+            description: "Check timeout"
+        required: ["url", "interval", "timeout"]
+    required: ["service_id", "name", "port", "address"]
+
+  ModelConsulServiceResponse:
+    type: "object"
+    description: "Response for service operations"
+    properties:
+      status:
+        type: "string"
+        description: "Operation status"
+        enum: ["success", "failed", "not_found"]
+      service_id:
+        type: "string"
+        description: "Service ID"
+      service_name:
+        type: "string"
+        description: "Service name"
+    required: ["status", "service_id", "service_name"]
+
+  ModelConsulServiceListResponse:
+    type: "object"
+    description: "Response for service list operations"
+    properties:
+      status:
+        type: "string"
+        description: "Operation status"
+      services:
+        type: "array"
+        description: "List of services"
+        items:
+          type: "object"
+          properties:
+            id:
+              type: "string"
+              description: "Service ID"
+            name:
+              type: "string"
+              description: "Service name"
+            port:
+              type: "integer"
+              description: "Service port"
+            address:
+              type: "string"
+              description: "Service address"
+            tags:
+              type: "array"
+              description: "Service tags"
+              items:
+                type: "string"
+          required: ["id", "name", "port", "address", "tags"]
+      count:
+        type: "integer"
+        description: "Number of services"
+    required: ["status", "services", "count"]
+
+  ModelConsulHealthRequest:
+    type: "object"
+    description: "Request for health check operations"
+    properties:
+      service_name:
+        type: "string"
+        description: "Service name to check health for"
+        required: false
+    required: []
+
+  ModelConsulHealthResponse:
+    type: "object"
+    description: "Response for health check operations"
+    properties:
+      status:
+        type: "string"
+        description: "Operation status"
+      service_name:
+        type: "string"
+        description: "Service name"
+        required: false
+      health_checks:
+        type: "array"
+        description: "Health check results"
+        required: false
+        items:
+          type: "object"
+          properties:
+            node:
+              type: "string"
+              description: "Node name"
+            service_id:
+              type: "string"
+              description: "Service ID"
+            service_name:
+              type: "string"
+              description: "Service name"
+            status:
+              type: "string"
+              description: "Health status"
+          required: ["node", "service_id", "service_name", "status"]
+      health_summary:
+        type: "object"
+        description: "Health summary for all services"
+        required: false
+    required: ["status"]
+
+  ModelConsulServiceRequest:
+    type: "object"
+    description: "Generic request for service operations"
+    properties:
+      service_id:
+        type: "string"
+        description: "Service ID"
+        required: false
+      service_name:
+        type: "string"
+        description: "Service name"
+        required: false
+    required: []
