@@ -13,7 +13,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, AsyncIterator, Any
+from typing import Dict, List, Optional, AsyncIterator
 from uuid import UUID, uuid4
 
 import aiokafka
@@ -201,7 +201,8 @@ class KafkaProducerPool:
                 producer_instance.last_error = str(e)
                 
                 # Move to failed producers if critical error
-                if isinstance(e, KafkaConnectionError):
+                # ONEX protocol-based duck typing: Check for Kafka connection error attributes instead of isinstance
+                if hasattr(e, 'errno') and hasattr(e, 'strerror') and 'connection' in str(e).lower():
                     async with self._lock:
                         if producer_id in self.active_producers:
                             self.active_producers.remove(producer_id)

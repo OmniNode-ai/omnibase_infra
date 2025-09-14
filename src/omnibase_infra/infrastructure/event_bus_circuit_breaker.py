@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Callable, Any, Union
+from typing import Dict, List, Optional, Callable, Union
 from uuid import UUID, uuid4
 
 from omnibase_core.core.errors.onex_error import OnexError
@@ -102,7 +102,8 @@ class EventBusCircuitBreaker:
             config: Circuit breaker configuration (legacy dataclass or new Pydantic model)
         """
         # Convert Pydantic model to dataclass for internal use (backward compatibility)
-        if isinstance(config, ModelCircuitBreakerConfig):
+        # ONEX protocol-based duck typing: Check for Pydantic model attributes instead of isinstance
+        if hasattr(config, 'failure_threshold') and hasattr(config, 'recovery_timeout') and hasattr(config, 'model_dump'):
             self.config = CircuitBreakerConfig.from_environment_config(config)
         else:
             self.config = config

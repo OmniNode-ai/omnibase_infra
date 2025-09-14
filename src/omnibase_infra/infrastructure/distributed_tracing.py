@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional, Union, AsyncIterator
+from typing import Dict, Optional, Union, AsyncIterator
 from uuid import UUID, uuid4
 from datetime import datetime
 
@@ -285,12 +285,12 @@ class DistributedTracingManager:
             if token:
                 context.detach(token)
     
-    def _create_noop_span(self) -> Any:
+    def _create_noop_span(self) -> 'NoOpSpan':
         """Create a no-op span when tracing is disabled."""
         class NoOpSpan:
-            def set_attribute(self, key: str, value: Any) -> None:
+            def set_attribute(self, key: str, value: Union[str, int, float, bool]) -> None:
                 pass
-            def set_status(self, status: Any) -> None:
+            def set_status(self, status: Union[str, int]) -> None:
                 pass
             def record_exception(self, exception: Exception) -> None:
                 pass

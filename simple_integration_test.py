@@ -18,10 +18,11 @@ import asyncio
 import asyncpg
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict
 
 # Configure logging
 logging.basicConfig(
@@ -56,12 +57,17 @@ class SimpleInfrastructureTest:
         
         # Test PostgreSQL connection
         try:
+            # ONEX Security: Use environment variables instead of hardcoded credentials
+            password = os.getenv('POSTGRES_PASSWORD')
+            if not password:
+                raise ValueError("POSTGRES_PASSWORD environment variable is required")
+            
             self.postgres_connection = await asyncpg.connect(
                 host="localhost",
                 port=5435,  # External PostgreSQL port
                 database="omnibase_infrastructure",
                 user="postgres",
-                password="9mK2vP8xL3nQ7wR5zE6uY4tA1bN3cF7gH9jK2mP5sT8vX1"
+                password=password
             )
             logger.info("✅ PostgreSQL connection established")
         except Exception as e:

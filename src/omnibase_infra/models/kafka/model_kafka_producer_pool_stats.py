@@ -6,7 +6,7 @@ Used for exposing producer pool metrics through health endpoints and Prometheus 
 Following ONEX shared model architecture for infrastructure monitoring.
 """
 
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -96,7 +96,7 @@ class ModelKafkaProducerPoolStats(BaseModel):
     )
     
     # Configuration snapshot
-    configuration: Optional[Dict[str, any]] = Field(
+    configuration: Optional[Dict[str, Union[str, int, float, bool]]] = Field(
         default=None,
         description="Current pool configuration snapshot"
     )
