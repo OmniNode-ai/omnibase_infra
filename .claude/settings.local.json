@@ -29,7 +29,13 @@
       "mcp__serena__replace_regex",
       "mcp__archon__assess_code_quality",
       "Bash(agent-onex-coordinator)",
-      "mcp__archon__health_check"
+      "mcp__archon__health_check",
+      "mcp__serena__list_dir",
+      "mcp__serena__create_text_file",
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/enums/intelligence/**)",
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/metrics/**)",
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/core/**)",
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/**)"
     ],
     "deny": [],
     "ask": []

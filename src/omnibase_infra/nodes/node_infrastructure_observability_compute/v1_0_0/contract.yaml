@@ -1,0 +1,117 @@
+contract_version: "1.0.0"
+node_version: "1.0.0" 
+version: "1.0.0"
+node_name: "node_infrastructure_observability_compute"
+contract_name: "NodeInfrastructureObservabilityComputeContract" 
+name: "node_infrastructure_observability_compute"
+node_type: "COMPUTE"
+description: "Infrastructure Observability Compute Node for metrics collection, alerting, and performance tracking"
+
+input_model: "ModelInfrastructureObservabilityInput"
+output_model: "ModelInfrastructureObservabilityOutput"
+
+dependencies:
+  # ONEX Container dependency injection
+  - name: "model_onex_container"
+    type: "model"
+    class_name: "ModelONEXContainer"
+    module: "omnibase_core.model.model_onex_container"
+  
+  # Shared observability models
+  - name: "model_metric_point"
+    type: "model"
+    class_name: "ModelMetricPoint"
+    module: "omnibase_infra.models.observability.model_metric_point"
+  
+  - name: "model_alert"
+    type: "model"
+    class_name: "ModelAlert"
+    module: "omnibase_infra.models.observability.model_alert"
+  
+  # Circuit breaker integration
+  - name: "model_circuit_breaker_metrics"
+    type: "model"
+    class_name: "ModelCircuitBreakerMetrics"
+    module: "omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics"
+
+definitions:
+  ModelInfrastructureObservabilityInput:
+    type: "object"
+    properties:
+      operation_type:
+        type: "string"
+        enum: ["record_metric", "get_current_metrics", "get_health_summary", "get_performance_trends", "export_prometheus", "get_alerts", "resolve_alert"]
+        description: "Type of observability operation to perform"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Correlation ID for the operation"
+      metric_name:
+        type: "string"
+        description: "Name of metric to record (required for record_metric)"
+      metric_value:
+        type: "number"
+        description: "Value of metric to record (required for record_metric)"
+      metric_type:
+        type: "string"
+        enum: ["counter", "gauge", "histogram", "summary"]
+        description: "Type of metric"
+        default: "gauge"
+      metric_labels:
+        type: "object"
+        additionalProperties: true
+        description: "Labels/tags for the metric"
+      alert_id:
+        type: "string"
+        description: "Alert ID (required for resolve_alert)"
+      alert_severity:
+        type: "string"
+        enum: ["critical", "high", "medium", "low"]
+        description: "Alert severity filter"
+      time_period_hours:
+        type: "integer"
+        description: "Time period in hours for trend analysis"
+        minimum: 1
+        default: 1
+      active_only:
+        type: "boolean"
+        description: "Return only active alerts"
+        default: true
+    required:
+      - operation_type
+      - correlation_id
+
+  ModelInfrastructureObservabilityOutput:
+    type: "object"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether the operation succeeded"
+      operation_type:
+        type: "string"
+        description: "Type of operation that was performed"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Correlation ID from the request"
+      result:
+        type: "object"
+        description: "Operation-specific result data"
+      error_message:
+        type: "string"
+        description: "Error message if operation failed"
+      metrics_count:
+        type: "integer"
+        description: "Number of metrics currently tracked"
+      alerts_count:
+        type: "integer"
+        description: "Number of active alerts"
+      timestamp:
+        type: "string"
+        format: "date-time"
+        description: "Response timestamp"
+    required:
+      - success
+      - operation_type
+      - correlation_id
+      - timestamp
