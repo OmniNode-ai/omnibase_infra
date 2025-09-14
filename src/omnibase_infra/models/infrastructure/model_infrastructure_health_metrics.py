@@ -5,7 +5,9 @@ infrastructure_health_monitor.py for shared usage across ONEX nodes.
 """
 
 from pydantic import BaseModel, Field
-from typing import Dict, Any
+from omnibase_infra.models.postgres.model_postgres_performance_metrics import ModelPostgresPerformanceMetrics
+from omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics import ModelCircuitBreakerMetrics
+from omnibase_infra.models.kafka.model_kafka_producer_pool_stats import ModelKafkaProducerPoolStats
 from datetime import datetime
 
 
@@ -38,16 +40,16 @@ class ModelInfrastructureHealthMetrics(BaseModel):
         description="Circuit breaker health status"
     )
     
-    # Detailed metrics
-    postgres_metrics: Dict[str, Any] = Field(
-        description="Detailed PostgreSQL metrics"
+    # Detailed metrics - using strongly typed models per ONEX standards
+    postgres_metrics: ModelPostgresPerformanceMetrics = Field(
+        description="Detailed PostgreSQL performance metrics"
     )
     
-    kafka_metrics: Dict[str, Any] = Field(
-        description="Detailed Kafka metrics"
+    kafka_metrics: ModelKafkaProducerPoolStats = Field(
+        description="Detailed Kafka producer pool statistics"
     )
     
-    circuit_breaker_metrics: Dict[str, Any] = Field(
+    circuit_breaker_metrics: ModelCircuitBreakerMetrics = Field(
         description="Detailed circuit breaker metrics"
     )
     

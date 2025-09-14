@@ -16,7 +16,7 @@ import logging
 import hashlib
 import time
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass, asdict
 from enum import Enum
 
@@ -169,7 +169,7 @@ class ONEXAuditLogger:
         # Prevent audit logs from going to parent loggers
         self._logger.propagate = False
     
-    def _get_audit_config(self, key: str, default: Any) -> Any:
+    def _get_audit_config(self, key: str, default: Union[str, int, bool]) -> Union[str, int, bool]:
         """Get audit configuration value."""
         import os
         env_key = f"ONEX_AUDIT_{key.upper()}"

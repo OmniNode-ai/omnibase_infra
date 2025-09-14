@@ -4,7 +4,7 @@ Node-specific output model for the distributed tracing compute node.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Union, List
 from datetime import datetime
 from uuid import UUID
 
@@ -24,9 +24,9 @@ class ModelDistributedTracingOutput(BaseModel):
         description="Correlation ID from the request"
     )
     
-    result: Optional[Dict[str, Any]] = Field(
+    result: Optional[Dict[str, Union[str, bool, float, List[str]]]] = Field(
         default=None,
-        description="Operation-specific result data"
+        description="Operation-specific result data with strongly typed values"
     )
     
     error_message: Optional[str] = Field(

@@ -9,7 +9,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Dict, Any, Optional, AsyncIterator
+from typing import Dict, Optional, AsyncIterator, Union
 from uuid import UUID
 
 from omnibase_core.base.node_compute_service import NodeComputeService
@@ -63,9 +63,9 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
         super().__init__(container)
         self.logger = logging.getLogger(f"{__name__}.NodeDistributedTracingCompute")
         
-        # Tracing components
-        self.tracer_provider: Optional[Any] = None  # TracerProvider when available
-        self.tracer: Optional[Any] = None  # OpenTelemetry tracer
+        # Tracing components - using Union for proper typing with graceful degradation
+        self.tracer_provider: Optional[Union["TracerProvider", object]] = None  # TracerProvider when available
+        self.tracer: Optional[Union["trace.Tracer", object]] = None  # OpenTelemetry tracer
         self.is_initialized = False
         
         # Configuration
@@ -151,7 +151,7 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
                 message=f"Distributed tracing operation failed: {str(e)}"
             ) from e
     
-    async def _handle_initialize_tracing(self, input_data: ModelDistributedTracingInput) -> Dict[str, Any]:
+    async def _handle_initialize_tracing(self, input_data: ModelDistributedTracingInput) -> Dict[str, Union[str, bool, float]]:
         """Handle tracing initialization."""
         if not OPENTELEMETRY_AVAILABLE:
             return {
@@ -171,7 +171,7 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
             "sample_rate": self.trace_sample_rate
         }
     
-    async def _handle_trace_operation(self, input_data: ModelDistributedTracingInput) -> Dict[str, Any]:
+    async def _handle_trace_operation(self, input_data: ModelDistributedTracingInput) -> Dict[str, Union[str, bool, Optional[str], Dict[str, str]]]:
         """Handle generic operation tracing."""
         if not self.is_initialized or not input_data.operation_name:
             return {
@@ -217,7 +217,7 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
         finally:
             span.end()
     
-    async def _handle_inject_context(self, input_data: ModelDistributedTracingInput) -> Dict[str, Any]:
+    async def _handle_inject_context(self, input_data: ModelDistributedTracingInput) -> Dict[str, Union[str, bool, List[str]]]:
         """Handle trace context injection into event."""
         if not input_data.event or not self.is_initialized:
             return {
@@ -254,7 +254,7 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
                 "reason": str(e)
             }
     
-    async def _handle_extract_context(self, input_data: ModelDistributedTracingInput) -> Dict[str, Any]:
+    async def _handle_extract_context(self, input_data: ModelDistributedTracingInput) -> Dict[str, Union[str, bool, Optional[str]]]:
         """Handle trace context extraction from event."""
         if not input_data.event or not self.is_initialized:
             return {
@@ -294,7 +294,7 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
                 "reason": str(e)
             }
     
-    async def _handle_trace_database(self, input_data: ModelDistributedTracingInput) -> Dict[str, Any]:
+    async def _handle_trace_database(self, input_data: ModelDistributedTracingInput) -> Dict[str, Union[str, bool, Optional[str]]]:
         """Handle database operation tracing."""
         if not self.is_initialized or not input_data.operation_name:
             return {
@@ -340,7 +340,7 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
         finally:
             span.end()
     
-    async def _handle_trace_kafka(self, input_data: ModelDistributedTracingInput) -> Dict[str, Any]:
+    async def _handle_trace_kafka(self, input_data: ModelDistributedTracingInput) -> Dict[str, Union[str, bool, Optional[str]]]:
         """Handle Kafka operation tracing."""
         if not self.is_initialized or not input_data.operation_name:
             return {
@@ -389,7 +389,7 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
         finally:
             span.end()
     
-    async def _handle_shutdown_tracing(self, input_data: ModelDistributedTracingInput) -> Dict[str, Any]:
+    async def _handle_shutdown_tracing(self, input_data: ModelDistributedTracingInput) -> Dict[str, Union[str, bool]]:
         """Handle tracing shutdown."""
         if not self.is_initialized:
             return {
@@ -469,7 +469,7 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
                 return value.lower()
         return "development"
     
-    def _convert_span_kind(self, input_span_kind: InputSpanKind) -> Any:
+    def _convert_span_kind(self, input_span_kind: InputSpanKind) -> Optional[Union["SpanKind", object]]:
         """Convert input span kind to OpenTelemetry span kind."""
         if not OPENTELEMETRY_AVAILABLE:
             return None

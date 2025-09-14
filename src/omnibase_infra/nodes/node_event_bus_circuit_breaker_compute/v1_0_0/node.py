@@ -6,6 +6,7 @@ Provides resilient event publishing with automatic failure detection and gracefu
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, Callable
@@ -20,6 +21,10 @@ from omnibase_core.enums.intelligence.enum_circuit_breaker_state import EnumCirc
 from omnibase_core.models.resilience.model_circuit_breaker_state import ModelCircuitBreakerState
 from omnibase_core.models.configuration.model_circuit_breaker import ModelCircuitBreaker
 from omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics import ModelCircuitBreakerMetrics
+from omnibase_infra.models.infrastructure.model_circuit_breaker_environment_config import (
+    ModelCircuitBreakerConfig,
+    ModelCircuitBreakerEnvironmentConfig
+)
 
 from .models.model_event_bus_circuit_breaker_input import (
     ModelEventBusCircuitBreakerInput,
@@ -428,12 +433,43 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
     async def _load_configuration(self) -> ModelCircuitBreakerConfig:
         """Load circuit breaker configuration from container or defaults."""
         try:
-            # TODO: Load from container configuration
-            # For now, return default configuration
-            return ModelCircuitBreakerConfig()
+            # Try to load from container configuration first
+            # In production, this would come from container.get_configuration()
+            # For now, detect environment and use appropriate defaults
+            
+            # Environment detection (similar to distributed tracing)
+            env_vars = ["ENVIRONMENT", "ENV", "DEPLOYMENT_ENV", "NODE_ENV", "OMNIBASE_ENV"]
+            environment = "development"  # default
+            for var in env_vars:
+                value = os.getenv(var)
+                if value:
+                    environment = value.lower()
+                    break
+            
+            # Create environment configuration with defaults
+            env_config = ModelCircuitBreakerEnvironmentConfig.create_default_config()
+            
+            # Get configuration for detected environment
+            config = env_config.get_config_for_environment(
+                environment=environment,
+                default_environment="development"
+            )
+            
+            self.logger.info(f"Loaded circuit breaker configuration for environment: {environment}")
+            return config
+            
         except Exception as e:
-            self.logger.warning(f"Failed to load configuration from container, using defaults: {e}")
-            return ModelCircuitBreakerConfig()
+            self.logger.warning(f"Failed to load configuration from container, using development defaults: {e}")
+            # Fallback to development defaults
+            return ModelCircuitBreakerConfig(
+                failure_threshold=2,
+                recovery_timeout=15,
+                success_threshold=1,
+                timeout_seconds=10,
+                max_queue_size=100,
+                dead_letter_enabled=False,
+                graceful_degradation=True
+            )
     
     async def _get_publisher_function(self, function_name: Optional[str]) -> Callable:
         """Get publisher function for event publishing."""
