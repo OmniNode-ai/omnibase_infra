@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import Mock, AsyncMock, patch
 from typing import Dict, Any
 
-from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
+from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.core_error_codes import CoreErrorCode
 from omnibase_core.onex_error import OnexError
 
@@ -28,8 +28,8 @@ class TestPostgresAdapterSecurityEdgeCases:
 
     @pytest.fixture
     def container(self):
-        """Create a basic ONEXContainer for testing."""
-        return ONEXContainer()
+        """Create a basic ModelONEXContainer for testing."""
+        return ModelONEXContainer()
 
     @pytest.fixture
     def mock_connection_manager(self):
@@ -74,7 +74,7 @@ class TestPostgresAdapterSecurityEdgeCases:
     @pytest.fixture
     def adapter_with_secure_config(self, container, mock_connection_manager, secure_config):
         """Create adapter with secure production configuration."""
-        mock_container = Mock(spec=ONEXContainer)
+        mock_container = Mock(spec=ModelONEXContainer)
         mock_container.get_service.return_value = mock_connection_manager
         
         with patch('omnibase_infra.infrastructure.postgres_connection_manager.PostgresConnectionManager') as mock_manager_class:

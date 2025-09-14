@@ -12,7 +12,7 @@ import uuid
 from unittest.mock import Mock, AsyncMock, patch
 from typing import Dict, Any
 
-from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
+from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.node import NodePostgresAdapterEffect
@@ -26,8 +26,8 @@ class TestPostgresAdapter:
 
     @pytest.fixture
     def container(self):
-        """Create a basic ONEXContainer for testing."""
-        return ONEXContainer()
+        """Create a basic ModelONEXContainer for testing."""
+        return ModelONEXContainer()
 
     @pytest.fixture
     def mock_connection_manager(self):
@@ -58,7 +58,7 @@ class TestPostgresAdapter:
     def adapter_with_mock(self, container, mock_connection_manager):
         """Create adapter with mocked connection manager."""
         # For testing purposes, we'll mock the container to avoid service resolution issues
-        mock_container = Mock(spec=ONEXContainer)
+        mock_container = Mock(spec=ModelONEXContainer)
         
         with patch('omnibase_infra.infrastructure.postgres_connection_manager.PostgresConnectionManager') as mock_manager_class:
             mock_manager_class.return_value = mock_connection_manager

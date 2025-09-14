@@ -47,6 +47,9 @@ rich = "^13.7.0"
 cryptography = "^41.0.0"
 jinja2 = "^3.1.0"
 
+# Tracing and observability dependencies
+sqlparse = "^0.4.4"  # For secure SQL query sanitization in tracing
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.0"
 pytest-asyncio = "^0.25.0"

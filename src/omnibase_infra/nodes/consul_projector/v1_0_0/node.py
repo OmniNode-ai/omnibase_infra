@@ -13,7 +13,7 @@ from omnibase_core.node_effect import (
     ModelEffectOutput,
 )
 from omnibase_core.node_effect_service import NodeEffectService
-from omnibase_core.onex_container import ONEXContainer
+from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
 from omnibase_core.model.core.model_health_status import ModelHealthStatus
 
@@ -47,7 +47,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
     Provides comprehensive state views for service discovery, health monitoring, and topology analysis.
     """
 
-    def __init__(self, container: ONEXContainer):
+    def __init__(self, container: ModelONEXContainer):
         # Use proper base class - no more boilerplate!
         super().__init__(container)
 

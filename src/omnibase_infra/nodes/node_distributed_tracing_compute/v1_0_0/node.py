@@ -14,7 +14,7 @@ from uuid import UUID
 
 from omnibase_core.base.node_compute_service import NodeComputeService
 from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
-from omnibase_core.model.model_onex_container import ModelONEXContainer
+from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 
 # OpenTelemetry imports with availability check
@@ -40,6 +40,8 @@ from .models.model_distributed_tracing_input import (
     SpanKind as InputSpanKind
 )
 from .models.model_distributed_tracing_output import ModelDistributedTracingOutput
+from .config import TracingConfig
+from .utils.sql_sanitizer import SqlSanitizer
 
 
 class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingInput, ModelDistributedTracingOutput]):
@@ -54,29 +56,24 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
     - Graceful degradation when OpenTelemetry unavailable
     """
     
-    def __init__(self, container: ModelONEXContainer):
+    def __init__(self, container: ModelONEXContainer, tracing_config: TracingConfig):
         """Initialize the distributed tracing compute node.
-        
+
         Args:
             container: ONEX container for dependency injection
+            tracing_config: Validated tracing configuration with endpoint validation
         """
         super().__init__(container)
         self.logger = logging.getLogger(f"{__name__}.NodeDistributedTracingCompute")
-        
+
+        # Inject validated configuration following ONEX patterns
+        self.tracing_config = tracing_config
+
         # Tracing components - using Union for proper typing with graceful degradation
         self.tracer_provider: Optional[Union["TracerProvider", object]] = None  # TracerProvider when available
         self.tracer: Optional[Union["trace.Tracer", object]] = None  # OpenTelemetry tracer
         self.is_initialized = False
-        
-        # Configuration
-        self.service_name = "omnibase_infrastructure"
-        self.service_version = "1.0.0"
-        self.environment = "development"
-        
-        # OpenTelemetry configuration
-        self.otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-        self.trace_sample_rate = float(os.getenv("OTEL_TRACE_SAMPLE_RATE", "1.0"))
-        
+
         # Check OpenTelemetry availability
         if not OPENTELEMETRY_AVAILABLE:
             self.logger.warning("OpenTelemetry not available - tracing will be disabled")
@@ -84,15 +81,16 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
     async def initialize(self) -> None:
         """Initialize the distributed tracing node."""
         try:
-            # Detect environment
-            self.environment = self._detect_environment()
-            
             # Initialize OpenTelemetry if available
             if OPENTELEMETRY_AVAILABLE:
                 await self._initialize_opentelemetry()
-            
-            self.logger.info("Distributed tracing compute node initialized successfully")
-            
+
+            self.logger.info(
+                f"Distributed tracing compute node initialized successfully "
+                f"(environment: {self.tracing_config.environment}, "
+                f"endpoint: {self.tracing_config.otel_exporter_otlp_endpoint})"
+            )
+
         except Exception as e:
             raise OnexError(
                 code=CoreErrorCode.INITIALIZATION_ERROR,
@@ -165,10 +163,10 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
         
         return {
             "initialized": self.is_initialized,
-            "service_name": self.service_name,
-            "environment": self.environment,
-            "otlp_endpoint": self.otlp_endpoint,
-            "sample_rate": self.trace_sample_rate
+            "service_name": self.tracing_config.service_name,
+            "environment": self.tracing_config.environment,
+            "otlp_endpoint": str(self.tracing_config.otel_exporter_otlp_endpoint),
+            "sample_rate": self.tracing_config.trace_sample_rate
         }
     
     async def _handle_trace_operation(self, input_data: ModelDistributedTracingInput) -> Dict[str, Union[str, bool, Optional[str], Dict[str, str]]]:
@@ -185,8 +183,8 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
         # Create span attributes
         attributes = {
             "correlation_id": str(input_data.correlation_id),
-            "environment": self.environment,
-            "service.name": self.service_name,
+            "environment": self.tracing_config.environment,
+            "service.name": self.tracing_config.service_name,
             **(input_data.attributes or {})
         }
         
@@ -237,8 +235,8 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
             input_data.event.metadata.update({
                 "trace_context": carrier,
                 "trace_timestamp": datetime.now().isoformat(),
-                "trace_service": self.service_name,
-                "trace_environment": self.environment
+                "trace_service": self.tracing_config.service_name,
+                "trace_environment": self.tracing_config.environment
             })
             
             return {
@@ -309,9 +307,9 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
             "correlation_id": str(input_data.correlation_id)
         }
         
-        # Add sanitized query if provided
+        # Add sanitized query if provided (ONEX-compliant sanitization)
         if input_data.database_query:
-            sanitized_query = self._sanitize_query(input_data.database_query)
+            sanitized_query = SqlSanitizer.sanitize_for_observability(input_data.database_query)
             attributes["db.statement"] = sanitized_query
         
         # Create database span
@@ -423,36 +421,39 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
             return
         
         try:
-            # Create resource with service information
+            # Create resource with service information from validated config
             resource = Resource.create({
-                SERVICE_NAME: self.service_name,
-                SERVICE_VERSION: self.service_version,
-                "deployment.environment": self.environment,
+                SERVICE_NAME: self.tracing_config.service_name,
+                SERVICE_VERSION: self.tracing_config.service_version,
+                "deployment.environment": self.tracing_config.environment,
                 "service.namespace": "omnibase_infrastructure"
             })
-            
+
             # Create tracer provider
             self.tracer_provider = TracerProvider(resource=resource)
-            
-            # Configure OTLP exporter
-            otlp_exporter = OTLPSpanExporter(endpoint=self.otlp_endpoint)
-            
+
+            # Configure OTLP exporter with validated endpoint
+            otlp_exporter = OTLPSpanExporter(endpoint=str(self.tracing_config.otel_exporter_otlp_endpoint))
+
             # Add batch span processor
             span_processor = BatchSpanProcessor(otlp_exporter)
             self.tracer_provider.add_span_processor(span_processor)
-            
+
             # Set global tracer provider
             trace.set_tracer_provider(self.tracer_provider)
-            
+
             # Get tracer
             self.tracer = trace.get_tracer(
                 instrumenting_module_name=__name__,
-                instrumenting_library_version=self.service_version
+                instrumenting_library_version=self.tracing_config.service_version
             )
-            
+
             self.is_initialized = True
-            self.logger.info(f"OpenTelemetry tracing initialized for environment: {self.environment}")
-            
+            self.logger.info(
+                f"OpenTelemetry tracing initialized for environment: {self.tracing_config.environment} "
+                f"with endpoint: {self.tracing_config.otel_exporter_otlp_endpoint}"
+            )
+
         except Exception as e:
             self.logger.error(f"Failed to initialize OpenTelemetry: {e}")
             raise OnexError(
@@ -460,14 +461,6 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
                 message=f"OpenTelemetry initialization failed: {str(e)}"
             ) from e
     
-    def _detect_environment(self) -> str:
-        """Detect current deployment environment."""
-        env_vars = ["ENVIRONMENT", "ENV", "DEPLOYMENT_ENV", "NODE_ENV", "OMNIBASE_ENV"]
-        for var in env_vars:
-            value = os.getenv(var)
-            if value:
-                return value.lower()
-        return "development"
     
     def _convert_span_kind(self, input_span_kind: InputSpanKind) -> Optional[Union["SpanKind", object]]:
         """Convert input span kind to OpenTelemetry span kind."""
@@ -484,16 +477,3 @@ class NodeDistributedTracingCompute(NodeComputeService[ModelDistributedTracingIn
         
         return span_kind_mapping.get(input_span_kind, SpanKind.INTERNAL)
     
-    def _sanitize_query(self, query: str) -> str:
-        """Sanitize SQL query to remove sensitive data."""
-        import re
-        
-        # Basic sanitization - remove potential passwords, keys, etc.
-        sanitized = re.sub(r"'[^']*'", "'***'", query)
-        sanitized = re.sub(r'"[^"]*"', '"***"', sanitized)
-        
-        # Truncate very long queries
-        if len(sanitized) > 200:
-            sanitized = sanitized[:197] + "..."
-        
-        return sanitized

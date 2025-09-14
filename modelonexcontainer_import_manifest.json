@@ -1,0 +1,135 @@
+[
+  {
+    "file_path": "src/omnibase_infra/infrastructure/container.py",
+    "line_number": 22,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer",
+    "compliance_status": "NON_COMPLIANT",
+    "transformation": {
+      "type": "REPLACE_IMPORT_AND_RENAME_ALIAS",
+      "canonical_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+      "alias_details": {
+        "old_name": "ONEXContainer",
+        "new_name": "ModelONEXContainer"
+      }
+    }
+  },
+  {
+    "file_path": "tests/test_postgres_adapter.py",
+    "line_number": 15,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer",
+    "compliance_status": "NON_COMPLIANT",
+    "transformation": {
+      "type": "REPLACE_IMPORT_AND_RENAME_ALIAS",
+      "canonical_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+      "alias_details": {
+        "old_name": "ONEXContainer",
+        "new_name": "ModelONEXContainer"
+      }
+    }
+  },
+  {
+    "file_path": "tests/test_postgres_adapter_security.py",
+    "line_number": 16,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer",
+    "compliance_status": "NON_COMPLIANT",
+    "transformation": {
+      "type": "REPLACE_IMPORT_AND_RENAME_ALIAS",
+      "canonical_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+      "alias_details": {
+        "old_name": "ONEXContainer",
+        "new_name": "ModelONEXContainer"
+      }
+    }
+  },
+  {
+    "file_path": "src/omnibase_infra/nodes/kafka_adapter/v1_0_0/node.py",
+    "line_number": 29,
+    "current_import": "from omnibase_core.onex_container import ModelONEXContainer",
+    "compliance_status": "NON_COMPLIANT",
+    "transformation": {
+      "type": "REPLACE_IMPORT_PATH",
+      "canonical_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+      "alias_details": null
+    }
+  },
+  {
+    "file_path": "src/omnibase_infra/nodes/node_distributed_tracing_compute/v1_0_0/node.py",
+    "line_number": 17,
+    "current_import": "from omnibase_core.model.model_onex_container import ModelONEXContainer",
+    "compliance_status": "NON_COMPLIANT",
+    "transformation": {
+      "type": "REPLACE_IMPORT_PATH",
+      "canonical_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+      "alias_details": null
+    }
+  },
+  {
+    "file_path": "src/omnibase_infra/nodes/node_event_bus_circuit_breaker_compute/v1_0_0/node.py",
+    "line_number": 17,
+    "current_import": "from omnibase_core.model.model_onex_container import ModelONEXContainer",
+    "compliance_status": "NON_COMPLIANT",
+    "transformation": {
+      "type": "REPLACE_IMPORT_PATH",
+      "canonical_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+      "alias_details": null
+    }
+  },
+  {
+    "file_path": "src/omnibase_infra/nodes/consul/v1_0_0/node.py",
+    "line_number": 12,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+    "compliance_status": "COMPLIANT",
+    "transformation": null
+  },
+  {
+    "file_path": "src/omnibase_infra/nodes/node_postgres_adapter_effect/v1_0_0/node.py",
+    "line_number": 22,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+    "compliance_status": "COMPLIANT",
+    "transformation": null
+  },
+  {
+    "file_path": "tests/test_postgres_adapter_redpanda_integration.py",
+    "line_number": 42,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+    "compliance_status": "COMPLIANT",
+    "transformation": null
+  },
+  {
+    "file_path": "EFFECT_NODE_TEMPLATE.md",
+    "line_number": 80,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer",
+    "compliance_status": "NON_COMPLIANT_MANUAL_REVIEW_REQUIRED",
+    "transformation": {
+      "type": "FLAG_FOR_MANUAL_REVIEW",
+      "reason": "Non-Python file (.md). AST transformation is not applicable and requires manual update.",
+      "canonical_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+      "alias_details": {
+        "old_name": "ONEXContainer",
+        "new_name": "ModelONEXContainer"
+      }
+    }
+  },
+  {
+    "file_path": "PR_REVIEW_MISTAKES_ANALYSIS.md",
+    "line_number": 22,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer",
+    "compliance_status": "NON_COMPLIANT_MANUAL_REVIEW_REQUIRED",
+    "transformation": {
+      "type": "FLAG_FOR_MANUAL_REVIEW",
+      "reason": "Non-Python file (.md). AST transformation is not applicable and requires manual update.",
+      "canonical_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+      "alias_details": {
+        "old_name": "ONEXContainer",
+        "new_name": "ModelONEXContainer"
+      }
+    }
+  },
+  {
+    "file_path": "PR_REVIEW_RESPONSE_SUMMARY.md",
+    "line_number": 24,
+    "current_import": "from omnibase_core.core.onex_container import ModelONEXContainer",
+    "compliance_status": "COMPLIANT",
+    "transformation": null
+  }
+]
