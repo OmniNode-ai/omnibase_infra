@@ -34,7 +34,8 @@
       "mcp__serena__create_text_file",
       "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/enums/intelligence/**)",
       "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/metrics/**)",
-      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/core/**)"
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/core/**)",
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/**)"
     ],
     "deny": [],
     "ask": []
