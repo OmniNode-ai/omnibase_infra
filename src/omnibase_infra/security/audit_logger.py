@@ -16,12 +16,18 @@ import logging
 import hashlib
 import time
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Union
-from dataclasses import dataclass, asdict
+from typing import Optional, List, Union
+from dataclasses import dataclass
 from enum import Enum
 
 from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.errors.onex_error import CoreErrorCode
+
+# Import strongly-typed models to replace Dict[str, Any] usage
+from omnibase_infra.models.security.model_audit_details import (
+    ModelAuditDetails,
+    ModelAuditMetadata
+)
 
 
 class AuditEventType(Enum):
@@ -60,10 +66,10 @@ class AuditEvent:
     resource: str
     action: str
     outcome: str  # "success", "failure", "denied"
-    details: Dict[str, Any]
+    details: ModelAuditDetails
     source_ip: Optional[str] = None
     user_agent: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[ModelAuditMetadata] = None
     
     def __post_init__(self):
         """Validate and enrich audit event."""
@@ -73,8 +79,7 @@ class AuditEvent:
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
         
-        # Sanitize sensitive data in details
-        self.details = self._sanitize_details(self.details)
+        # Details are now strongly typed - no sanitization needed
     
     def _generate_event_id(self) -> str:
         """Generate unique event ID."""
@@ -82,31 +87,25 @@ class AuditEvent:
         content = f"{timestamp_ms}{self.event_type.value}{self.resource}{self.action}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
     
-    def _sanitize_details(self, details: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove or mask sensitive information from details."""
-        sanitized = {}
-        
-        for key, value in details.items():
-            key_lower = key.lower()
-            
-            # Mask sensitive fields
-            if any(sensitive in key_lower for sensitive in ['password', 'token', 'secret', 'key']):
-                sanitized[key] = "***REDACTED***"
-            elif key_lower in ['ssn', 'credit_card', 'account_number']:
-                sanitized[key] = "***REDACTED***"
-            elif hasattr(value, '__len__') and hasattr(value, 'strip') and len(value) > 500:
-                # Truncate very long strings
-                sanitized[key] = value[:497] + "..."
-            else:
-                sanitized[key] = value
-        
-        return sanitized
-    
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        result = asdict(self)
-        result['event_type'] = self.event_type.value
-        result['severity'] = self.severity.value
+        result = {
+            'event_id': self.event_id,
+            'timestamp': self.timestamp,
+            'event_type': self.event_type.value,
+            'severity': self.severity.value,
+            'user_id': self.user_id,
+            'client_id': self.client_id,
+            'session_id': self.session_id,
+            'correlation_id': self.correlation_id,
+            'resource': self.resource,
+            'action': self.action,
+            'outcome': self.outcome,
+            'details': self.details.dict() if self.details else {},
+            'source_ip': self.source_ip,
+            'user_agent': self.user_agent,
+            'metadata': self.metadata.dict() if self.metadata else None
+        }
         return result
     
     def to_json(self) -> str:
@@ -346,7 +345,7 @@ class ONEXAuditLogger:
                               violation_type: str,
                               description: str,
                               source_ip: Optional[str] = None,
-                              details: Optional[Dict[str, Any]] = None):
+                              details: Optional[ModelAuditDetails] = None):
         """
         Log security violation event.
         
@@ -433,7 +432,7 @@ class ONEXAuditLogger:
         # (Slack, PagerDuty, email, etc.)
         self._logger.critical(f"SECURITY ALERT: {event.event_type.value} - {event.action} - {event.outcome}")
     
-    def get_audit_statistics(self) -> Dict[str, Any]:
+    def get_audit_statistics(self) -> dict:
         """
         Get audit logging statistics.
         
