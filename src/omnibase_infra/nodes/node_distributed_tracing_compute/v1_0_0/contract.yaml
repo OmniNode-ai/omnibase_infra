@@ -15,7 +15,7 @@ dependencies:
   - name: "model_onex_container"
     type: "model"
     class_name: "ModelONEXContainer"
-    module: "omnibase_core.model.model_onex_container"
+    module: "omnibase_core.core.onex_container"
   
   # Core ONEX event model
   - name: "model_onex_event"
