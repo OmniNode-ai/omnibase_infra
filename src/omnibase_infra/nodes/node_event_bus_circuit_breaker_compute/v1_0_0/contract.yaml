@@ -23,16 +23,16 @@ dependencies:
     class_name: "ModelOnexEvent"
     module: "omnibase_core.model.core.model_onex_event"
   
-  # Shared circuit breaker models
+  # Core circuit breaker models
   - name: "model_circuit_breaker_state"
     type: "model"
     class_name: "ModelCircuitBreakerState"
-    module: "omnibase_infra.models.circuit_breaker.model_circuit_breaker_state"
+    module: "omnibase_core.models.resilience.model_circuit_breaker_state"
   
-  - name: "model_circuit_breaker_config"
+  - name: "model_circuit_breaker"
     type: "model"
-    class_name: "ModelCircuitBreakerConfig"
-    module: "omnibase_infra.models.circuit_breaker.model_circuit_breaker_config"
+    class_name: "ModelCircuitBreaker"
+    module: "omnibase_core.models.configuration.model_circuit_breaker"
   
   - name: "model_circuit_breaker_metrics"
     type: "model"

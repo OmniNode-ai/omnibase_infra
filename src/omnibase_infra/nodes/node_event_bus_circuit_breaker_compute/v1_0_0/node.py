@@ -16,11 +16,9 @@ from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
 from omnibase_core.model.model_onex_container import ModelONEXContainer
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 
-from omnibase_infra.models.circuit_breaker.model_circuit_breaker_state import (
-    CircuitBreakerStateEnum, 
-    ModelCircuitBreakerState
-)
-from omnibase_infra.models.circuit_breaker.model_circuit_breaker_config import ModelCircuitBreakerConfig
+from omnibase_core.enums.intelligence.enum_circuit_breaker_state import EnumCircuitBreakerState
+from omnibase_core.models.resilience.model_circuit_breaker_state import ModelCircuitBreakerState
+from omnibase_core.models.configuration.model_circuit_breaker import ModelCircuitBreaker
 from omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics import ModelCircuitBreakerMetrics
 
 from .models.model_event_bus_circuit_breaker_input import (
@@ -53,7 +51,7 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
         self.logger = logging.getLogger(f"{__name__}.NodeEventBusCircuitBreakerCompute")
         
         # Circuit breaker state
-        self._state = CircuitBreakerStateEnum.CLOSED
+        self._state = EnumCircuitBreakerState.CLOSED
         self._failure_count = 0
         self._success_count = 0
         self._last_failure_time: Optional[float] = None
@@ -158,9 +156,9 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             self._metrics.total_events += 1
             
             # Check circuit state and handle accordingly
-            if self._state == CircuitBreakerStateEnum.OPEN:
+            if self._state == EnumCircuitBreakerState.OPEN:
                 return await self._handle_open_circuit(input_data.event)
-            elif self._state == CircuitBreakerStateEnum.HALF_OPEN:
+            elif self._state == EnumCircuitBreakerState.HALF_OPEN:
                 return await self._handle_half_open_circuit(input_data.event, input_data.publisher_function)
             else:  # CLOSED
                 return await self._handle_closed_circuit(input_data.event, input_data.publisher_function)
@@ -261,14 +259,14 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
     
     async def _open_circuit(self, reason: str):
         """Open the circuit breaker."""
-        if self._state != CircuitBreakerStateEnum.OPEN:
-            self._state = CircuitBreakerStateEnum.OPEN
+        if self._state != EnumCircuitBreakerState.OPEN:
+            self._state = EnumCircuitBreakerState.OPEN
             self._metrics.circuit_opens += 1
             self.logger.error(f"Circuit breaker OPENED: {reason}")
     
     async def _close_circuit(self):
         """Close the circuit breaker (recovery complete)."""
-        self._state = CircuitBreakerStateEnum.CLOSED
+        self._state = EnumCircuitBreakerState.CLOSED
         self._failure_count = 0
         self._success_count = 0
         self._metrics.circuit_closes += 1
@@ -279,7 +277,7 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
     
     async def _transition_to_half_open(self):
         """Transition circuit to half-open state for recovery testing."""
-        self._state = CircuitBreakerStateEnum.HALF_OPEN
+        self._state = EnumCircuitBreakerState.HALF_OPEN
         self._success_count = 0
         self.logger.info("Circuit breaker transitioned to HALF-OPEN - testing recovery")
     
@@ -359,7 +357,7 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
         processed = 0
         failed = 0
         
-        while self._event_queue and self._state == CircuitBreakerStateEnum.CLOSED:
+        while self._event_queue and self._state == EnumCircuitBreakerState.CLOSED:
             try:
                 event = self._event_queue.pop(0)
                 # TODO: Re-publish event through normal publisher
@@ -400,7 +398,7 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
     async def _handle_reset_circuit(self, input_data: ModelEventBusCircuitBreakerInput) -> Dict[str, Any]:
         """Handle manual circuit reset operation."""
         async with self._lock:
-            self._state = CircuitBreakerStateEnum.CLOSED
+            self._state = EnumCircuitBreakerState.CLOSED
             self._failure_count = 0
             self._success_count = 0
             self._last_failure_time = None
@@ -425,7 +423,7 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
     
     def _is_healthy(self) -> bool:
         """Check if circuit breaker is healthy for event publishing."""
-        return self._state == CircuitBreakerStateEnum.CLOSED or self._state == CircuitBreakerStateEnum.HALF_OPEN
+        return self._state == EnumCircuitBreakerState.CLOSED or self._state == EnumCircuitBreakerState.HALF_OPEN
     
     async def _load_configuration(self) -> ModelCircuitBreakerConfig:
         """Load circuit breaker configuration from container or defaults."""

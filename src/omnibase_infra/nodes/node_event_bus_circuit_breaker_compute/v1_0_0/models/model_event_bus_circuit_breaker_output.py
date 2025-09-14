@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID
 
-from omnibase_infra.models.circuit_breaker.model_circuit_breaker_state import CircuitBreakerStateEnum
+from omnibase_core.enums.intelligence.enum_circuit_breaker_state import EnumCircuitBreakerState
 from omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics import ModelCircuitBreakerMetrics
 
 
@@ -37,7 +37,7 @@ class ModelEventBusCircuitBreakerOutput(BaseModel):
         description="Error message if operation failed"
     )
     
-    circuit_breaker_state: CircuitBreakerStateEnum = Field(
+    circuit_breaker_state: EnumCircuitBreakerState = Field(
         description="Current circuit breaker state"
     )
     
