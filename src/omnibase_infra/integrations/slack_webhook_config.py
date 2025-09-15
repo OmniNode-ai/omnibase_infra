@@ -2,61 +2,63 @@
 Production Slack Webhook Configuration for ONEX Infrastructure.
 
 This module provides production-ready Slack webhook configurations for various
-infrastructure alerts and notifications in the ONEX system.
+infrastructure alerts and notifications in the ONEX system using injectable
+configuration models and proper Pydantic data structures.
 """
 
-from typing import Dict, Any, List
+from typing import List, Optional
 from datetime import datetime
-from enum import Enum
 
 from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
-from omnibase_core.enums.enum_auth_type import EnumAuthType
-from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
-from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
-from omnibase_infra.models.notification.model_notification_retry_policy import ModelNotificationRetryPolicy
 from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
-
-
-class SlackChannel(str, Enum):
-    """Production Slack channels for different notification types."""
-    ALERTS = "#infrastructure-alerts"
-    GENERAL = "#dev-general"
-    CRITICAL = "#critical-alerts"
-    MONITORING = "#infrastructure-monitoring"
-    DEPLOYMENTS = "#deployments"
-    SECURITY = "#security-alerts"
-
-
-class SlackPriority(str, Enum):
-    """Alert priority levels with corresponding Slack formatting."""
-    CRITICAL = "danger"  # Red
-    HIGH = "warning"     # Yellow
-    MEDIUM = "good"      # Green
-    INFO = "#36a64f"     # Custom green
+from omnibase_core.core.onex_container import ONEXContainer
+from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
+from omnibase_infra.models.notification.model_notification_retry_policy import ModelNotificationRetryPolicy
+from omnibase_infra.models.slack.model_slack_webhook_config import ModelSlackWebhookConfig
+from omnibase_infra.models.slack.model_slack_payload import ModelSlackPayload
+from omnibase_infra.models.slack.model_slack_attachment import ModelSlackAttachment
+from omnibase_infra.models.slack.model_slack_field import ModelSlackField
+from omnibase_infra.enums.enum_slack_channel import EnumSlackChannel
+from omnibase_infra.enums.enum_slack_priority import EnumSlackPriority
 
 
 class ProductionSlackWebhook:
-    """Production-ready Slack webhook configuration and message formatting."""
+    """
+    Production-ready Slack webhook service with injectable configuration.
 
-    def __init__(self, webhook_url: str, default_channel: SlackChannel = SlackChannel.ALERTS):
+    This service uses contract-driven configuration and proper Pydantic models
+    to ensure type safety and ONEX compliance.
+    """
+
+    def __init__(self, container: ONEXContainer):
         """
-        Initialize production Slack webhook.
+        Initialize production Slack webhook with dependency injection.
 
         Args:
-            webhook_url: Your production Slack webhook URL
-            default_channel: Default channel for notifications
+            container: ONEX container with injected dependencies
         """
-        self.webhook_url = webhook_url
-        self.default_channel = default_channel
+        self.container = container
+        # Configuration will be injected via container in actual implementation
+        # For now, we maintain backward compatibility while showing the pattern
+        self._config: Optional[ModelSlackWebhookConfig] = None
+
+    def configure(self, config: ModelSlackWebhookConfig) -> None:
+        """
+        Configure the webhook with injectable configuration model.
+
+        Args:
+            config: Validated Slack webhook configuration
+        """
+        self._config = config
 
     def create_infrastructure_alert(
         self,
         title: str,
         message: str,
         service: str,
-        severity: SlackPriority = SlackPriority.MEDIUM,
-        channel: SlackChannel = None,
-        additional_fields: List[Dict[str, str]] = None
+        severity: EnumSlackPriority = EnumSlackPriority.MEDIUM,
+        channel: Optional[EnumSlackChannel] = None,
+        additional_fields: Optional[List[ModelSlackField]] = None
     ) -> ModelNotificationRequest:
         """
         Create infrastructure alert notification for Slack.
@@ -72,49 +74,62 @@ class ProductionSlackWebhook:
         Returns:
             ModelNotificationRequest configured for Slack
         """
+        if not self._config:
+            raise ValueError("Slack webhook not configured. Call configure() first.")
+
+        # Create structured fields using proper Pydantic models
         fields = [
-            {
-                "title": "Service",
-                "value": service,
-                "short": True
-            },
-            {
-                "title": "Timestamp",
-                "value": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-                "short": True
-            },
-            {
-                "title": "Severity",
-                "value": severity.name,
-                "short": True
-            }
+            ModelSlackField(
+                title="Service",
+                value=service,
+                short=True
+            ),
+            ModelSlackField(
+                title="Timestamp",
+                value=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+                short=True
+            ),
+            ModelSlackField(
+                title="Severity",
+                value=severity.name,
+                short=True
+            )
         ]
 
         if additional_fields:
             fields.extend(additional_fields)
 
-        payload = {
-            "text": f"🚨 {title}",
-            "channel": channel.value if channel else self.default_channel.value,
-            "username": "ONEX Infrastructure",
-            "icon_emoji": ":warning:" if severity in [SlackPriority.CRITICAL, SlackPriority.HIGH] else ":information_source:",
-            "attachments": [
-                {
-                    "color": severity.value,
-                    "title": title,
-                    "text": message,
-                    "fields": fields,
-                    "footer": "ONEX Infrastructure Monitoring",
-                    "footer_icon": "https://github.com/favicon.ico",
-                    "ts": int(datetime.utcnow().timestamp())
-                }
-            ]
-        }
+        # Create attachment using proper Pydantic model
+        attachment = ModelSlackAttachment(
+            color=severity.value,
+            title=title,
+            text=message,
+            fields=fields,
+            footer=self._config.footer_text,
+            footer_icon=self._config.footer_icon_url,
+            ts=int(datetime.utcnow().timestamp())
+        )
+
+        # Determine icon based on severity
+        icon_emoji = (
+            self._config.critical_icon_emoji
+            if severity in [EnumSlackPriority.CRITICAL, EnumSlackPriority.HIGH]
+            else self._config.info_icon_emoji
+        )
+
+        # Create complete payload using proper Pydantic model
+        payload = ModelSlackPayload(
+            text=f"🚨 {title}",
+            channel=channel.value if channel else self._config.default_channel.value,
+            username=self._config.username,
+            icon_emoji=icon_emoji,
+            attachments=[attachment]
+        )
 
         return ModelNotificationRequest(
-            url=self.webhook_url,
+            url=str(self._config.webhook_url),
             method=EnumNotificationMethod.POST,
-            payload=payload,
+            payload=payload.dict(),  # Convert to dict for request
             retry_policy=self._get_retry_policy(severity)
         )
 
@@ -123,45 +138,40 @@ class ProductionSlackWebhook:
         service: str,
         state: str,
         destination: str,
-        failure_count: int = None,
-        last_error: str = None
+        failure_count: Optional[int] = None,
+        last_error: Optional[str] = None
     ) -> ModelNotificationRequest:
         """Create circuit breaker state change alert."""
 
-        severity = SlackPriority.CRITICAL if state == "OPEN" else SlackPriority.MEDIUM
+        severity = EnumSlackPriority.CRITICAL if state == "OPEN" else EnumSlackPriority.MEDIUM
         emoji = "🔴" if state == "OPEN" else "🟢" if state == "CLOSED" else "🟡"
 
         fields = [
-            {
-                "title": "Service",
-                "value": service,
-                "short": True
-            },
-            {
-                "title": "New State",
-                "value": f"{emoji} {state}",
-                "short": True
-            },
-            {
-                "title": "Destination",
-                "value": destination,
-                "short": False
-            }
+            ModelSlackField(
+                title="New State",
+                value=f"{emoji} {state}",
+                short=True
+            ),
+            ModelSlackField(
+                title="Destination",
+                value=destination,
+                short=False
+            )
         ]
 
         if failure_count is not None:
-            fields.append({
-                "title": "Failure Count",
-                "value": str(failure_count),
-                "short": True
-            })
+            fields.append(ModelSlackField(
+                title="Failure Count",
+                value=str(failure_count),
+                short=True
+            ))
 
         if last_error:
-            fields.append({
-                "title": "Last Error",
-                "value": last_error[:200] + ("..." if len(last_error) > 200 else ""),
-                "short": False
-            })
+            fields.append(ModelSlackField(
+                title="Last Error",
+                value=last_error[:200] + ("..." if len(last_error) > 200 else ""),
+                short=False
+            ))
 
         message = f"Circuit breaker for {service} → {destination} changed to {state}"
 
@@ -170,8 +180,8 @@ class ProductionSlackWebhook:
             message=message,
             service=service,
             severity=severity,
-            channel=SlackChannel.CRITICAL if state == "OPEN" else SlackChannel.MONITORING,
-            additional_fields=fields[2:]  # Skip service and state since they're in base fields
+            channel=EnumSlackChannel.CRITICAL if state == "OPEN" else EnumSlackChannel.MONITORING,
+            additional_fields=fields
         )
 
     def create_deployment_notification(
@@ -180,44 +190,44 @@ class ProductionSlackWebhook:
         version: str,
         environment: str,
         status: str,
-        deployer: str = None
+        deployer: Optional[str] = None
     ) -> ModelNotificationRequest:
         """Create deployment status notification."""
 
-        severity = SlackPriority.CRITICAL if status == "FAILED" else SlackPriority.INFO
+        severity = EnumSlackPriority.CRITICAL if status == "FAILED" else EnumSlackPriority.INFO
         emoji = "✅" if status == "SUCCESS" else "❌" if status == "FAILED" else "🚀"
 
         fields = [
-            {
-                "title": "Environment",
-                "value": environment,
-                "short": True
-            },
-            {
-                "title": "Version",
-                "value": version,
-                "short": True
-            },
-            {
-                "title": "Status",
-                "value": f"{emoji} {status}",
-                "short": True
-            }
+            ModelSlackField(
+                title="Environment",
+                value=environment,
+                short=True
+            ),
+            ModelSlackField(
+                title="Version",
+                value=version,
+                short=True
+            ),
+            ModelSlackField(
+                title="Status",
+                value=f"{emoji} {status}",
+                short=True
+            )
         ]
 
         if deployer:
-            fields.append({
-                "title": "Deployed By",
-                "value": deployer,
-                "short": True
-            })
+            fields.append(ModelSlackField(
+                title="Deployed By",
+                value=deployer,
+                short=True
+            ))
 
         return self.create_infrastructure_alert(
             title=f"Deployment: {service}",
             message=f"{service} deployment to {environment} has {status.lower()}",
             service=service,
             severity=severity,
-            channel=SlackChannel.DEPLOYMENTS,
+            channel=EnumSlackChannel.DEPLOYMENTS,
             additional_fields=fields
         )
 
@@ -227,41 +237,41 @@ class ProductionSlackWebhook:
         metric: str,
         current_value: str,
         threshold: str,
-        duration: str = None
+        duration: Optional[str] = None
     ) -> ModelNotificationRequest:
         """Create performance threshold alert."""
 
         fields = [
-            {
-                "title": "Metric",
-                "value": metric,
-                "short": True
-            },
-            {
-                "title": "Current Value",
-                "value": current_value,
-                "short": True
-            },
-            {
-                "title": "Threshold",
-                "value": threshold,
-                "short": True
-            }
+            ModelSlackField(
+                title="Metric",
+                value=metric,
+                short=True
+            ),
+            ModelSlackField(
+                title="Current Value",
+                value=current_value,
+                short=True
+            ),
+            ModelSlackField(
+                title="Threshold",
+                value=threshold,
+                short=True
+            )
         ]
 
         if duration:
-            fields.append({
-                "title": "Duration",
-                "value": duration,
-                "short": True
-            })
+            fields.append(ModelSlackField(
+                title="Duration",
+                value=duration,
+                short=True
+            ))
 
         return self.create_infrastructure_alert(
             title=f"Performance Alert: {service}",
             message=f"{metric} has exceeded threshold: {current_value} > {threshold}",
             service=service,
-            severity=SlackPriority.HIGH,
-            channel=SlackChannel.MONITORING,
+            severity=EnumSlackPriority.HIGH,
+            channel=EnumSlackChannel.MONITORING,
             additional_fields=fields
         )
 
@@ -270,53 +280,53 @@ class ProductionSlackWebhook:
         service: str,
         alert_type: str,
         details: str,
-        source_ip: str = None,
-        user: str = None
+        source_ip: Optional[str] = None,
+        user: Optional[str] = None
     ) -> ModelNotificationRequest:
         """Create security alert notification."""
 
         fields = [
-            {
-                "title": "Alert Type",
-                "value": alert_type,
-                "short": True
-            }
+            ModelSlackField(
+                title="Alert Type",
+                value=alert_type,
+                short=True
+            )
         ]
 
         if source_ip:
-            fields.append({
-                "title": "Source IP",
-                "value": source_ip,
-                "short": True
-            })
+            fields.append(ModelSlackField(
+                title="Source IP",
+                value=source_ip,
+                short=True
+            ))
 
         if user:
-            fields.append({
-                "title": "User",
-                "value": user,
-                "short": True
-            })
+            fields.append(ModelSlackField(
+                title="User",
+                value=user,
+                short=True
+            ))
 
         return self.create_infrastructure_alert(
             title=f"🔒 Security Alert: {alert_type}",
             message=details,
             service=service,
-            severity=SlackPriority.CRITICAL,
-            channel=SlackChannel.SECURITY,
+            severity=EnumSlackPriority.CRITICAL,
+            channel=EnumSlackChannel.SECURITY,
             additional_fields=fields
         )
 
-    def _get_retry_policy(self, severity: SlackPriority) -> ModelNotificationRetryPolicy:
+    def _get_retry_policy(self, severity: EnumSlackPriority) -> ModelNotificationRetryPolicy:
         """Get retry policy based on alert severity."""
 
-        if severity == SlackPriority.CRITICAL:
+        if severity == EnumSlackPriority.CRITICAL:
             # Critical alerts: More aggressive retry
             return ModelNotificationRetryPolicy(
                 max_attempts=5,
                 backoff_strategy=EnumBackoffStrategy.EXPONENTIAL,
                 delay_seconds=2.0
             )
-        elif severity == SlackPriority.HIGH:
+        elif severity == EnumSlackPriority.HIGH:
             # High priority: Standard retry
             return ModelNotificationRetryPolicy(
                 max_attempts=3,
@@ -332,10 +342,13 @@ class ProductionSlackWebhook:
             )
 
 
-# Production webhook factory
+# Factory function for backward compatibility
 def create_production_slack_webhook(webhook_url: str) -> ProductionSlackWebhook:
     """
     Factory function to create production Slack webhook integration.
+
+    NOTE: This function provides backward compatibility but should be replaced
+    with proper dependency injection via ONEXContainer in production.
 
     Args:
         webhook_url: Your Slack webhook URL from https://api.slack.com/apps
@@ -346,6 +359,10 @@ def create_production_slack_webhook(webhook_url: str) -> ProductionSlackWebhook:
     Example:
         webhook = create_production_slack_webhook("https://hooks.slack.com/services/...")
 
+        # Configure with proper model
+        config = ModelSlackWebhookConfig(webhook_url=webhook_url)
+        webhook.configure(config)
+
         # Create circuit breaker alert
         alert = webhook.create_circuit_breaker_alert(
             service="postgresql_adapter",
@@ -355,4 +372,14 @@ def create_production_slack_webhook(webhook_url: str) -> ProductionSlackWebhook:
             last_error="Connection timeout after 30s"
         )
     """
-    return ProductionSlackWebhook(webhook_url)
+    from omnibase_core.core.onex_container import ONEXContainer
+
+    # Create minimal container for backward compatibility
+    container = ONEXContainer()
+    webhook = ProductionSlackWebhook(container)
+
+    # Configure with provided webhook URL
+    config = ModelSlackWebhookConfig(webhook_url=webhook_url)
+    webhook.configure(config)
+
+    return webhook
