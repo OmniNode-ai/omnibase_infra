@@ -30,7 +30,7 @@ import logging
 import time
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Union
 from uuid import UUID, uuid4
 
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError

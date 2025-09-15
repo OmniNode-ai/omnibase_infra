@@ -8,7 +8,8 @@ Security Note: URL validation must be performed by the consuming service
 to prevent SSRF attacks.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Optional, Union, List
+from pydantic import Json
 from pydantic import BaseModel, Field, HttpUrl
 from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
@@ -46,9 +47,9 @@ class ModelNotificationRequest(BaseModel):
         description="Optional HTTP headers to include with the request"
     )
 
-    payload: Dict[str, Any] = Field(
+    payload: Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]], Dict[str, Union[str, int, float, bool]]]] = Field(
         ...,
-        description="JSON payload to send in the notification body"
+        description="JSON payload to send in the notification body - supports nested JSON structures with strongly typed values"
     )
 
     auth: Optional[ModelNotificationAuth] = Field(
@@ -70,7 +71,7 @@ class ModelNotificationRequest(BaseModel):
             HttpUrl: str
         }
 
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, __context: Optional[Dict[str, Union[str, int, bool]]]) -> None:
         """Post-initialization validation."""
         # Validate that headers don't contain sensitive data in keys
         if self.headers:

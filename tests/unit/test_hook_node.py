@@ -24,7 +24,7 @@ from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
 from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_core.enums.enum_auth_type import EnumAuthType
-from omnibase_core.enums.enum_retry_strategy import EnumRetryStrategy
+from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
 from omnibase_spi.protocols.core import ProtocolHttpResponse
 
 # Hook Node implementation
@@ -127,14 +127,14 @@ class TestNotificationModels:
         """Test retry policy configuration."""
         retry_policy = ModelNotificationRetryPolicy(
             max_attempts=5,
-            strategy=EnumRetryStrategy.EXPONENTIAL,
+            strategy=EnumBackoffStrategy.EXPONENTIAL,
             base_delay_ms=1000,
             max_delay_ms=30000,
             backoff_multiplier=2.0
         )
 
         assert retry_policy.max_attempts == 5
-        assert retry_policy.strategy == EnumRetryStrategy.EXPONENTIAL
+        assert retry_policy.strategy == EnumBackoffStrategy.EXPONENTIAL
         assert retry_policy.is_exponential_backoff is True
         assert retry_policy.is_linear_backoff is False
         assert retry_policy.is_fixed_delay is False
@@ -369,7 +369,7 @@ class TestNodeHookEffect:
         """Test retry policy with exponential backoff strategy."""
         retry_policy = ModelNotificationRetryPolicy(
             max_attempts=3,
-            strategy=EnumRetryStrategy.EXPONENTIAL,
+            strategy=EnumBackoffStrategy.EXPONENTIAL,
             base_delay_ms=100,
             max_delay_ms=1000,
             backoff_multiplier=2.0
@@ -605,7 +605,7 @@ class TestNodeHookEffect:
         # Test exponential backoff
         exponential_policy = ModelNotificationRetryPolicy(
             max_attempts=5,
-            strategy=EnumRetryStrategy.EXPONENTIAL,
+            strategy=EnumBackoffStrategy.EXPONENTIAL,
             base_delay_ms=100,
             max_delay_ms=10000,
             backoff_multiplier=2.0
@@ -622,7 +622,7 @@ class TestNodeHookEffect:
         # Test linear backoff
         linear_policy = ModelNotificationRetryPolicy(
             max_attempts=5,
-            strategy=EnumRetryStrategy.LINEAR,
+            strategy=EnumBackoffStrategy.LINEAR,
             base_delay_ms=500,
             max_delay_ms=5000,
             backoff_multiplier=1.5
@@ -637,7 +637,7 @@ class TestNodeHookEffect:
         # Test fixed delay
         fixed_policy = ModelNotificationRetryPolicy(
             max_attempts=3,
-            strategy=EnumRetryStrategy.FIXED,
+            strategy=EnumBackoffStrategy.FIXED,
             base_delay_ms=1000,
             max_delay_ms=1000,
             backoff_multiplier=1.0

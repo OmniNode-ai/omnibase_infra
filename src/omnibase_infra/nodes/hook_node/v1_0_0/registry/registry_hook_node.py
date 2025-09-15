@@ -14,7 +14,7 @@ Registration Pattern:
 - Lazy loading of dependencies for optimal performance
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Optional, Union, List
 
 from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_spi.protocols.core import ProtocolHttpClient
@@ -63,7 +63,7 @@ class HookNodeRegistry:
         container.register_singleton("NodeHookEffect", lambda c: NodeHookEffect(c))
 
     @staticmethod
-    def get_service_metadata() -> Dict[str, Any]:
+    def get_service_metadata() -> Dict[str, Union[str, List[Dict[str, Union[str, bool]]], List[str]]]:
         """
         Get metadata about Hook Node service and its dependencies.
 
@@ -108,6 +108,7 @@ class HookNodeRegistry:
     def validate_configuration(container: ModelONEXContainer) -> bool:
         """
         Validate that Hook Node is properly configured in the container.
+        Uses protocol duck typing following ONEX patterns - no isinstance usage.
 
         Args:
             container: ONEX container to validate
@@ -116,14 +117,24 @@ class HookNodeRegistry:
             bool: True if configuration is valid, False otherwise
         """
         try:
-            # Check HTTP client protocol
+            # Check HTTP client protocol using duck typing
             http_client = container.get_service("ProtocolHttpClient")
-            if not isinstance(http_client, ProtocolHttpClient):
+            if http_client is None:
                 return False
 
-            # Check event bus protocol
+            # Validate HTTP client has required protocol methods
+            if not (hasattr(http_client, 'post') and callable(getattr(http_client, 'post'))):
+                return False
+            if not (hasattr(http_client, 'put') and callable(getattr(http_client, 'put'))):
+                return False
+
+            # Check event bus protocol using duck typing
             event_bus = container.get_service("ProtocolEventBus")
-            if not isinstance(event_bus, ProtocolEventBus):
+            if event_bus is None:
+                return False
+
+            # Validate event bus has required protocol methods
+            if not (hasattr(event_bus, 'publish') and callable(getattr(event_bus, 'publish'))):
                 return False
 
             # Attempt to create Hook Node instance
@@ -147,7 +158,7 @@ def register_hook_node(container: ModelONEXContainer) -> None:
     HookNodeRegistry.register_dependencies(container)
 
 
-def get_hook_node_metadata() -> Dict[str, Any]:
+def get_hook_node_metadata() -> Dict[str, Union[str, List[Dict[str, Union[str, bool]]], List[str]]]:
     """
     Convenience function to get Hook Node metadata.
 

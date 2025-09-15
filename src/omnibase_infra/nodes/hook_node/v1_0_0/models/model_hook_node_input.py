@@ -5,7 +5,7 @@ Node-specific input model for the Hook Node EFFECT adapter.
 Wraps notification requests for message bus integration.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Optional, Union, List
 from pydantic import BaseModel, Field
 from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
 
@@ -39,9 +39,9 @@ class ModelHookNodeInput(BaseModel):
         description="Unix timestamp when the request was created"
     )
 
-    context: Optional[Dict[str, Any]] = Field(
+    context: Optional[Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]], Dict[str, Union[str, int, float, bool]]]]] = Field(
         default=None,
-        description="Additional request context and metadata"
+        description="Additional request context and metadata with strongly typed values"
     )
 
     class Config:

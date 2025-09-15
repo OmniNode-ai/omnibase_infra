@@ -5,7 +5,7 @@ Node-specific output model for the Hook Node EFFECT adapter.
 Returns notification delivery results in message bus envelope format.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Optional, Union, List
 from pydantic import BaseModel, Field
 from omnibase_infra.models.notification.model_notification_result import ModelNotificationResult
 
@@ -58,9 +58,9 @@ class ModelHookNodeOutput(BaseModel):
         description="Total operation execution time in milliseconds"
     )
 
-    context: Optional[Dict[str, Any]] = Field(
+    context: Optional[Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]], Dict[str, Union[str, int, float, bool]]]]] = Field(
         default=None,
-        description="Additional response context and metadata"
+        description="Additional response context and metadata with strongly typed values"
     )
 
     class Config:
@@ -76,7 +76,7 @@ class ModelHookNodeOutput(BaseModel):
         timestamp: float,
         total_execution_time_ms: float,
         error_message: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]], Dict[str, Union[str, int, float, bool]]]]] = None
     ) -> "ModelHookNodeOutput":
         """
         Create output from a notification result.

@@ -23,7 +23,7 @@ from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_core.enums.enum_auth_type import EnumAuthType
-from omnibase_core.enums.enum_retry_strategy import EnumRetryStrategy
+from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
 from omnibase_spi.protocols.core import ProtocolHttpResponse
 
 # Hook Node implementation
@@ -745,7 +745,7 @@ class TestErrorRecoveryScenarios:
         """Test recovery from partial failures with retry policies."""
         retry_policy = ModelNotificationRetryPolicy(
             max_attempts=4,
-            strategy=EnumRetryStrategy.EXPONENTIAL,
+            strategy=EnumBackoffStrategy.EXPONENTIAL,
             base_delay_ms=50,
             max_delay_ms=1000,
             backoff_multiplier=2.0

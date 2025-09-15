@@ -6,7 +6,7 @@ Defines how failed notification attempts should be retried.
 """
 
 from typing import List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
 
 
@@ -53,7 +53,8 @@ class ModelNotificationRetryPolicy(BaseModel):
         extra = "forbid"
         use_enum_values = True
 
-    @validator("retryable_status_codes")
+    @field_validator("retryable_status_codes")
+    @classmethod
     def validate_status_codes(cls, v):
         """Validate that status codes are in valid HTTP range."""
         if not v:
