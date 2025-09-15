@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Callable, Union, Pattern, Protocol
+from typing import Dict, List, Optional, Callable, Union, Pattern
 from uuid import UUID, uuid4
 
 from omnibase_core.core.errors.onex_error import CoreErrorCode
@@ -29,6 +29,7 @@ from omnibase_core.node_effect_service import NodeEffectService
 from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
 from omnibase_core.model.core.model_health_status import ModelHealthStatus
+from omnibase_spi.protocols.core import ProtocolKafkaClient
 
 from ....models.kafka.model_kafka_message import ModelKafkaMessage
 from ....models.kafka.model_kafka_topic_config import ModelKafkaTopicConfig
@@ -39,26 +40,6 @@ from ....models.common.model_kafka_configuration import ModelKafkaConfiguration
 from ....enums.enum_kafka_operation_type import EnumKafkaOperationType
 from .models.model_kafka_adapter_input import ModelKafkaAdapterInput
 from .models.model_kafka_adapter_output import ModelKafkaAdapterOutput
-
-
-class ProtocolKafkaClient(Protocol):
-    """Protocol interface for Kafka client implementations."""
-    
-    async def start(self) -> None:
-        """Start the Kafka client connection."""
-        ...
-    
-    async def stop(self) -> None:
-        """Stop the Kafka client connection."""
-        ...
-    
-    async def send_and_wait(self, topic: str, value: bytes, key: Optional[bytes] = None) -> None:
-        """Send message to Kafka topic and wait for acknowledgment."""
-        ...
-    
-    def bootstrap_servers(self) -> List[str]:
-        """Get list of bootstrap servers."""
-        ...
 
 
 class KafkaStructuredLogger:

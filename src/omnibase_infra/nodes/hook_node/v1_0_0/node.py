@@ -34,11 +34,14 @@ from uuid import UUID, uuid4
 
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
-from omnibase_core.core.onex_container import ONEXContainer
-from omnibase_core.enums.enum_health_status import EnumHealthStatus
-from omnibase_core.model.core.model_health_status import ModelHealthStatus
-from omnibase_core.protocol.protocol_http_client import ProtocolHttpClient, ModelHttpResponse
-from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
+from omnibase_core.core.onex_container import ModelONEXContainer
+from omnibase_core.enums.node import EnumHealthStatus
+from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
+from omnibase_core.enums.enum_auth_type import EnumAuthType
+from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
+from omnibase_core.models.core.model_health_status import ModelHealthStatus
+from omnibase_spi.protocols.core import ProtocolHttpClient, ProtocolHttpResponse
+from omnibase_spi.protocols.event_bus import ProtocolEventBus
 
 # Shared notification models
 from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
@@ -231,7 +234,7 @@ class NodeHookEffect(NodeEffectService):
     - Shared notification models: Request/response models for notifications
     """
 
-    def __init__(self, container: ONEXContainer):
+    def __init__(self, container: ModelONEXContainer):
         """Initialize Hook Node with container injection."""
         super().__init__(container)
         self.node_type = "effect"
@@ -288,14 +291,14 @@ class NodeHookEffect(NodeEffectService):
 
         # Add authentication headers
         if auth:
-            if auth.auth_type == "bearer" and auth.credentials.get("token"):
+            if auth.auth_type == EnumAuthType.BEARER and auth.credentials.get("token"):
                 headers["Authorization"] = f"Bearer {auth.credentials['token']}"
-            elif auth.auth_type == "basic" and auth.credentials.get("username") and auth.credentials.get("password"):
+            elif auth.auth_type == EnumAuthType.BASIC and auth.credentials.get("username") and auth.credentials.get("password"):
                 import base64
                 credentials = f"{auth.credentials['username']}:{auth.credentials['password']}"
                 encoded_credentials = base64.b64encode(credentials.encode()).decode()
                 headers["Authorization"] = f"Basic {encoded_credentials}"
-            elif auth.auth_type == "api_key_header" and auth.credentials.get("header_name") and auth.credentials.get("api_key"):
+            elif auth.auth_type == EnumAuthType.API_KEY_HEADER and auth.credentials.get("header_name") and auth.credentials.get("api_key"):
                 headers[auth.credentials["header_name"]] = auth.credentials["api_key"]
 
         return headers
@@ -307,11 +310,11 @@ class NodeHookEffect(NodeEffectService):
         if attempt <= 1:
             return base_delay
 
-        if retry_policy.backoff_strategy == "exponential":
+        if retry_policy.backoff_strategy == EnumBackoffStrategy.EXPONENTIAL:
             return base_delay * (2 ** (attempt - 1))
-        elif retry_policy.backoff_strategy == "linear":
+        elif retry_policy.backoff_strategy == EnumBackoffStrategy.LINEAR:
             return base_delay * attempt
-        else:  # fixed
+        else:  # fixed or unknown - default to fixed
             return base_delay
 
     def _is_retryable_status(self, status_code: int, retry_policy: ModelNotificationRetryPolicy) -> bool:
@@ -373,7 +376,7 @@ class NodeHookEffect(NodeEffectService):
 
             try:
                 # Make HTTP request
-                response: ModelHttpResponse = await self._http_client.request(
+                response: ProtocolHttpResponse = await self._http_client.request(
                     method=request.method,
                     url=request.url,
                     json=request.payload,

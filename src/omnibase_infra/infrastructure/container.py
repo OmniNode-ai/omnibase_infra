@@ -20,7 +20,7 @@ import time
 from typing import Callable, Optional, Type, TypeVar, Union, Dict, List
 
 from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
+from omnibase_spi.protocols.event_bus import ProtocolEventBus
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLoader
 

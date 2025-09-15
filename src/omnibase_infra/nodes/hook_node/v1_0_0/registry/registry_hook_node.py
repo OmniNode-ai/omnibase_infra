@@ -16,9 +16,9 @@ Registration Pattern:
 
 from typing import Dict, Any, Optional
 
-from omnibase_core.core.onex_container import ONEXContainer
-from omnibase_core.protocol.protocol_http_client import ProtocolHttpClient
-from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
+from omnibase_core.core.onex_container import ModelONEXContainer
+from omnibase_spi.protocols.core import ProtocolHttpClient
+from omnibase_spi.protocols.event_bus import ProtocolEventBus
 
 from ..node import NodeHookEffect
 
@@ -33,7 +33,7 @@ class HookNodeRegistry:
     """
 
     @staticmethod
-    def register_dependencies(container: ONEXContainer) -> None:
+    def register_dependencies(container: ModelONEXContainer) -> None:
         """
         Register Hook Node dependencies in the ONEX container.
 
@@ -105,7 +105,7 @@ class HookNodeRegistry:
         }
 
     @staticmethod
-    def validate_configuration(container: ONEXContainer) -> bool:
+    def validate_configuration(container: ModelONEXContainer) -> bool:
         """
         Validate that Hook Node is properly configured in the container.
 
@@ -137,7 +137,7 @@ class HookNodeRegistry:
             return False
 
 
-def register_hook_node(container: ONEXContainer) -> None:
+def register_hook_node(container: ModelONEXContainer) -> None:
     """
     Convenience function to register Hook Node with all dependencies.
 
