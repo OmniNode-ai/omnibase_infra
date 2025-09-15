@@ -29,6 +29,7 @@ import json
 import logging
 import time
 from datetime import datetime
+from enum import Enum
 from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 
@@ -40,6 +41,7 @@ from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_core.enums.enum_auth_type import EnumAuthType
 from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
 from omnibase_core.models.core.model_health_status import ModelHealthStatus
+from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 from omnibase_spi.protocols.core import ProtocolHttpClient, ProtocolHttpResponse
 from omnibase_spi.protocols.event_bus import ProtocolEventBus
 
@@ -53,6 +55,13 @@ from omnibase_infra.models.notification.model_notification_retry_policy import M
 # Node-specific adapter models
 from .models.model_hook_node_input import ModelHookNodeInput
 from .models.model_hook_node_output import ModelHookNodeOutput
+
+
+class CircuitBreakerState(Enum):
+    """Circuit breaker states for notification destinations."""
+    CLOSED = "closed"       # Normal operation - notifications sent directly
+    OPEN = "open"          # Failure state - notifications blocked
+    HALF_OPEN = "half_open"  # Testing state - limited notifications to test recovery
 
 
 class HookStructuredLogger:
@@ -71,25 +80,25 @@ class HookStructuredLogger:
         self.logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.INFO)
 
-    def _build_extra(self, correlation_id: Optional[UUID], operation: str, **kwargs) -> dict:
+    def _build_extra(self, correlation_id: Optional[str], operation: str, **kwargs) -> dict:
         """Build extra context for structured logging."""
         extra = {
-            "correlation_id": str(correlation_id) if correlation_id else None,
+            "correlation_id": correlation_id,
             "operation": operation,
             "component": "hook_node"
         }
         extra.update(kwargs)
         return extra
 
-    def info(self, message: str, correlation_id: Optional[UUID] = None, operation: str = "notification", **kwargs):
+    def info(self, message: str, correlation_id: Optional[str] = None, operation: str = "notification", **kwargs):
         """Log info level message with structured context."""
         self.logger.info(message, extra=self._build_extra(correlation_id, operation, **kwargs))
 
-    def warning(self, message: str, correlation_id: Optional[UUID] = None, operation: str = "notification", **kwargs):
+    def warning(self, message: str, correlation_id: Optional[str] = None, operation: str = "notification", **kwargs):
         """Log warning level message with structured context."""
         self.logger.warning(message, extra=self._build_extra(correlation_id, operation, **kwargs))
 
-    def error(self, message: str, correlation_id: Optional[UUID] = None, operation: str = "notification",
+    def error(self, message: str, correlation_id: Optional[str] = None, operation: str = "notification",
               exception: Optional[Exception] = None, **kwargs):
         """Log error level message with structured context and exception details."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
@@ -98,7 +107,7 @@ class HookStructuredLogger:
             extra["exception_message"] = str(exception)
         self.logger.error(message, extra=extra)
 
-    def debug(self, message: str, correlation_id: Optional[UUID] = None, operation: str = "notification", **kwargs):
+    def debug(self, message: str, correlation_id: Optional[str] = None, operation: str = "notification", **kwargs):
         """Log debug level message with structured context."""
         self.logger.debug(message, extra=self._build_extra(correlation_id, operation, **kwargs))
 
@@ -114,7 +123,7 @@ class HookStructuredLogger:
         except Exception:
             return url[:50] + "..." if len(url) > 50 else url
 
-    def log_notification_start(self, correlation_id: UUID, url: str, method: str, retry_attempt: int = 1):
+    def log_notification_start(self, correlation_id: str, url: str, method: str, retry_attempt: int = 1):
         """Log start of notification attempt with sanitized URL."""
         sanitized_url = self._sanitize_url_for_logging(url)
         self.info(
@@ -126,7 +135,7 @@ class HookStructuredLogger:
             retry_attempt=retry_attempt
         )
 
-    def log_notification_success(self, correlation_id: UUID, execution_time_ms: float,
+    def log_notification_success(self, correlation_id: str, execution_time_ms: float,
                                status_code: int, retry_attempt: int = 1):
         """Log successful notification delivery."""
         self.info(
@@ -138,7 +147,7 @@ class HookStructuredLogger:
             retry_attempt=retry_attempt
         )
 
-    def log_notification_error(self, correlation_id: UUID, execution_time_ms: float,
+    def log_notification_error(self, correlation_id: str, execution_time_ms: float,
                              exception: Exception, retry_attempt: int = 1):
         """Log failed notification attempt."""
         self.error(
@@ -157,6 +166,8 @@ class NotificationCircuitBreaker:
 
     Prevents cascade failures by opening circuit when destination consistently fails.
     Supports different states: CLOSED (normal), OPEN (failing), HALF_OPEN (testing).
+
+    Thread-safe with async locking to prevent race conditions in concurrent environments.
     """
 
     def __init__(self, failure_threshold: int = 5, timeout_seconds: int = 60,
@@ -168,52 +179,70 @@ class NotificationCircuitBreaker:
 
         self._failure_count = 0
         self._last_failure_time = 0
-        self._state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+        self._state = CircuitBreakerState.CLOSED
         self._half_open_calls = 0
+        self._lock = asyncio.Lock()  # Async lock for thread safety
 
-    def can_execute(self) -> bool:
+    async def can_execute(self) -> bool:
         """Check if notification can be attempted based on circuit state."""
-        current_time = time.time()
+        async with self._lock:
+            current_time = time.time()
 
-        if self._state == "CLOSED":
-            return True
-        elif self._state == "OPEN":
-            if current_time - self._last_failure_time >= self.timeout_seconds:
-                self._state = "HALF_OPEN"
-                self._half_open_calls = 0
+            if self._state == CircuitBreakerState.CLOSED:
                 return True
+            elif self._state == CircuitBreakerState.OPEN:
+                if current_time - self._last_failure_time >= self.timeout_seconds:
+                    self._state = CircuitBreakerState.HALF_OPEN
+                    self._half_open_calls = 0
+                    return True
+                return False
+            elif self._state == CircuitBreakerState.HALF_OPEN:
+                return self._half_open_calls < self.half_open_max_calls
+
             return False
-        elif self._state == "HALF_OPEN":
-            return self._half_open_calls < self.half_open_max_calls
 
-        return False
-
-    def record_success(self):
+    async def record_success(self):
         """Record successful notification delivery."""
-        self._failure_count = 0
-        self._state = "CLOSED"
-        self._half_open_calls = 0
+        async with self._lock:
+            old_state = self._state
+            self._failure_count = 0
+            self._state = CircuitBreakerState.CLOSED
+            self._half_open_calls = 0
+            return old_state != self._state  # Return True if state changed
 
-    def record_failure(self):
+    async def record_failure(self):
         """Record failed notification delivery."""
-        self._failure_count += 1
-        self._last_failure_time = time.time()
+        async with self._lock:
+            old_state = self._state
+            self._failure_count += 1
+            self._last_failure_time = time.time()
 
-        if self._state == "HALF_OPEN":
-            self._state = "OPEN"
-        elif self._state == "CLOSED" and self._failure_count >= self.failure_threshold:
-            self._state = "OPEN"
+            if self._state == CircuitBreakerState.HALF_OPEN:
+                self._state = CircuitBreakerState.OPEN
+            elif self._state == CircuitBreakerState.CLOSED and self._failure_count >= self.failure_threshold:
+                self._state = CircuitBreakerState.OPEN
 
-        self._half_open_calls += 1 if self._state == "HALF_OPEN" else 0
+            self._half_open_calls += 1 if self._state == CircuitBreakerState.HALF_OPEN else 0
+            return old_state != self._state  # Return True if state changed
+
+    async def get_state(self) -> CircuitBreakerState:
+        """Get current circuit breaker state."""
+        async with self._lock:
+            return self._state
+
+    async def get_failure_count(self) -> int:
+        """Get current failure count."""
+        async with self._lock:
+            return self._failure_count
 
     @property
-    def state(self) -> str:
-        """Get current circuit breaker state."""
+    def state(self) -> CircuitBreakerState:
+        """Get current circuit breaker state (non-async for backward compatibility)."""
         return self._state
 
     @property
     def failure_count(self) -> int:
-        """Get current failure count."""
+        """Get current failure count (non-async for backward compatibility)."""
         return self._failure_count
 
 
@@ -259,9 +288,11 @@ class NodeHookEffect(NodeEffectService):
         # Initialize structured logger with correlation ID support
         self._logger = HookStructuredLogger("hook_node")
 
-        # Initialize circuit breakers for notification destinations (per-URL tracking)
+        # Initialize bounded circuit breakers for notification destinations (per-URL tracking)
         self._circuit_breakers: Dict[str, NotificationCircuitBreaker] = {}
-        self._circuit_breaker_lock = asyncio.Lock()
+        self._circuit_breaker_access_order: List[str] = []  # LRU tracking for bounded storage
+        self._max_circuit_breakers = 1000  # Maximum number of circuit breakers to store
+        self._circuit_breaker_lock = asyncio.Lock()  # Global lock for circuit breaker dict management
 
         # Performance metrics tracking
         self._total_notifications = 0
@@ -270,15 +301,40 @@ class NodeHookEffect(NodeEffectService):
 
         self._logger.info("Hook Node initialized successfully", operation="initialization")
 
-    def _get_circuit_breaker(self, url: str) -> NotificationCircuitBreaker:
-        """Get or create circuit breaker for notification destination URL."""
-        if url not in self._circuit_breakers:
+    async def _get_circuit_breaker(self, url: str) -> NotificationCircuitBreaker:
+        """
+        Get or create circuit breaker for notification destination URL.
+
+        Implements LRU (Least Recently Used) bounded storage to prevent memory leaks.
+        When the maximum number of circuit breakers is reached, the least recently
+        used circuit breaker is removed.
+        """
+        async with self._circuit_breaker_lock:
+            # If circuit breaker exists, move to end of access order (most recently used)
+            if url in self._circuit_breakers:
+                self._circuit_breaker_access_order.remove(url)
+                self._circuit_breaker_access_order.append(url)
+                return self._circuit_breakers[url]
+
+            # If we're at capacity, remove the least recently used circuit breaker
+            if len(self._circuit_breakers) >= self._max_circuit_breakers:
+                oldest_url = self._circuit_breaker_access_order.pop(0)
+                del self._circuit_breakers[oldest_url]
+                self._logger.debug(
+                    f"Removed LRU circuit breaker for {oldest_url} (capacity limit: {self._max_circuit_breakers})",
+                    operation="circuit_breaker_lru_eviction",
+                    evicted_url=oldest_url,
+                    total_circuit_breakers=len(self._circuit_breakers)
+                )
+
+            # Create new circuit breaker
             self._circuit_breakers[url] = NotificationCircuitBreaker(
                 failure_threshold=5,  # Open circuit after 5 failures
                 timeout_seconds=60,   # Wait 60 seconds before retry
                 half_open_max_calls=3 # Allow 3 test calls in half-open state
             )
-        return self._circuit_breakers[url]
+            self._circuit_breaker_access_order.append(url)
+            return self._circuit_breakers[url]
 
     def _build_http_headers(self, base_headers: Optional[Dict[str, str]],
                           auth: Optional[ModelNotificationAuth]) -> Dict[str, str]:
@@ -321,17 +377,106 @@ class NodeHookEffect(NodeEffectService):
         """Check if HTTP status code should trigger a retry."""
         return status_code in retry_policy.retryable_status_codes
 
+    async def _publish_circuit_breaker_success_event(
+        self,
+        correlation_id: str,
+        destination_url: str,
+        status_code: int,
+        execution_time_ms: float
+    ) -> None:
+        """Publish circuit breaker success event to event bus."""
+        try:
+            event = ModelOnexEvent(
+                event_type="circuit_breaker.success",
+                source="hook_node",
+                correlation_id=correlation_id,
+                timestamp=datetime.utcnow().isoformat(),
+                payload={
+                    "destination_url": destination_url,
+                    "status_code": status_code,
+                    "execution_time_ms": execution_time_ms,
+                    "circuit_breaker_state": "success_recorded"
+                }
+            )
+            await self._event_bus.publish_event(event)
+        except Exception as e:
+            self._logger.warning(
+                f"Failed to publish circuit breaker success event: {e}",
+                correlation_id=correlation_id,
+                operation="event_publishing"
+            )
+
+    async def _publish_circuit_breaker_failure_event(
+        self,
+        correlation_id: str,
+        destination_url: str,
+        error_message: str,
+        execution_time_ms: float
+    ) -> None:
+        """Publish circuit breaker failure event to event bus."""
+        try:
+            event = ModelOnexEvent(
+                event_type="circuit_breaker.failure",
+                source="hook_node",
+                correlation_id=correlation_id,
+                timestamp=datetime.utcnow().isoformat(),
+                payload={
+                    "destination_url": destination_url,
+                    "error_message": error_message,
+                    "execution_time_ms": execution_time_ms,
+                    "circuit_breaker_state": "failure_recorded"
+                }
+            )
+            await self._event_bus.publish_event(event)
+        except Exception as e:
+            self._logger.warning(
+                f"Failed to publish circuit breaker failure event: {e}",
+                correlation_id=correlation_id,
+                operation="event_publishing"
+            )
+
+    async def _publish_circuit_breaker_state_change_event(
+        self,
+        correlation_id: str,
+        destination_url: str,
+        old_state: CircuitBreakerState,
+        new_state: CircuitBreakerState,
+        failure_count: int
+    ) -> None:
+        """Publish circuit breaker state change event to event bus."""
+        try:
+            event = ModelOnexEvent(
+                event_type="circuit_breaker.state_change",
+                source="hook_node",
+                correlation_id=correlation_id,
+                timestamp=datetime.utcnow().isoformat(),
+                payload={
+                    "destination_url": destination_url,
+                    "old_state": old_state.value,
+                    "new_state": new_state.value,
+                    "failure_count": failure_count,
+                    "state_change_reason": f"transition from {old_state.value} to {new_state.value}"
+                }
+            )
+            await self._event_bus.publish_event(event)
+        except Exception as e:
+            self._logger.warning(
+                f"Failed to publish circuit breaker state change event: {e}",
+                correlation_id=correlation_id,
+                operation="event_publishing"
+            )
+
     async def _send_notification_with_retries(
         self,
         request: ModelNotificationRequest,
-        correlation_id: UUID
+        correlation_id: str
     ) -> ModelNotificationResult:
         """Send notification with retry policy and circuit breaker protection."""
         attempts: List[ModelNotificationAttempt] = []
-        circuit_breaker = self._get_circuit_breaker(request.url)
+        circuit_breaker = await self._get_circuit_breaker(request.url)
 
         # Check circuit breaker state
-        if not circuit_breaker.can_execute():
+        if not await circuit_breaker.can_execute():
             self._logger.warning(
                 f"Circuit breaker OPEN for destination: {request.url}",
                 correlation_id=correlation_id,
@@ -407,7 +552,25 @@ class NodeHookEffect(NodeEffectService):
                         retry_attempt=attempt_num
                     )
 
-                    circuit_breaker.record_success()
+                    state_changed = await circuit_breaker.record_success()
+
+                    # Publish circuit breaker success event
+                    await self._publish_circuit_breaker_success_event(
+                        correlation_id=correlation_id,
+                        destination_url=str(request.url),
+                        status_code=response.status_code,
+                        execution_time_ms=execution_time_ms
+                    )
+
+                    # Publish state change event if state changed
+                    if state_changed:
+                        await self._publish_circuit_breaker_state_change_event(
+                            correlation_id=correlation_id,
+                            destination_url=str(request.url),
+                            old_state=CircuitBreakerState.HALF_OPEN,  # Previous state before success
+                            new_state=circuit_breaker.state,
+                            failure_count=circuit_breaker.failure_count
+                        )
 
                     return ModelNotificationResult(
                         final_status_code=response.status_code,
@@ -463,7 +626,27 @@ class NodeHookEffect(NodeEffectService):
                     await asyncio.sleep(retry_delay)
 
         # All attempts failed
-        circuit_breaker.record_failure()
+        old_state = circuit_breaker.state
+        state_changed = await circuit_breaker.record_failure()
+
+        # Publish circuit breaker failure event
+        error_message = attempts[-1].error if attempts and attempts[-1].error else "All attempts failed"
+        await self._publish_circuit_breaker_failure_event(
+            correlation_id=correlation_id,
+            destination_url=str(request.url),
+            error_message=error_message,
+            execution_time_ms=sum(attempt.execution_time_ms for attempt in attempts)
+        )
+
+        # Publish state change event if state changed
+        if state_changed:
+            await self._publish_circuit_breaker_state_change_event(
+                correlation_id=correlation_id,
+                destination_url=str(request.url),
+                old_state=old_state,
+                new_state=circuit_breaker.state,
+                failure_count=circuit_breaker.failure_count
+            )
 
         return ModelNotificationResult(
             final_status_code=attempts[-1].status_code if attempts else None,
@@ -582,6 +765,13 @@ class NodeHookEffect(NodeEffectService):
             ModelHealthStatus: Detailed health status with component-level checks
         """
         try:
+            # Safely capture circuit breaker states with locking
+            async with self._circuit_breaker_lock:
+                circuit_breaker_info = {
+                    url: {"state": cb.state, "failure_count": cb.failure_count}
+                    for url, cb in self._circuit_breakers.items()
+                }
+
             health_details = {
                 "component": "hook_node",
                 "timestamp": datetime.utcnow().isoformat(),
@@ -593,9 +783,11 @@ class NodeHookEffect(NodeEffectService):
                         self._successful_notifications / self._total_notifications
                         if self._total_notifications > 0 else 1.0
                     ),
-                    "circuit_breakers": {
-                        url: {"state": cb.state, "failure_count": cb.failure_count}
-                        for url, cb in self._circuit_breakers.items()
+                    "circuit_breakers": circuit_breaker_info,
+                    "circuit_breaker_storage": {
+                        "current_count": len(circuit_breaker_info),
+                        "max_capacity": self._max_circuit_breakers,
+                        "utilization_percentage": round(len(circuit_breaker_info) / self._max_circuit_breakers * 100, 2)
                     }
                 }
             }
