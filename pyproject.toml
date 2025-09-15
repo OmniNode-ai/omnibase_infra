@@ -54,12 +54,22 @@ sqlparse = "^0.4.4"  # For secure SQL query sanitization in tracing
 pytest = "^8.4.0"
 pytest-asyncio = "^0.25.0"
 pytest-mock = "^3.11.0"
+pytest-cov = "^6.0.0"
 mypy = "^1.13.0"
 black = "^24.10.0"
 isort = "^5.13.0"
 ruff = "^0.8.0"
 types-pyyaml = "^6.0.12.20250822"
 pre-commit = "^3.6.0"
+
+# Test infrastructure dependencies
+locust = "^2.31.8"  # Load testing framework for postgres adapter tests
+testcontainers = "^4.9.0"  # Integration testing with real database containers
+kafka-python = "^2.0.2"  # Kafka client for integration testing
+
+# Additional type stubs for better mypy coverage
+types-aiofiles = "^23.2.0.20240403"
+types-requests = "^2.32.0.20250914"
 
 [tool.ruff]
 target-version = "py312"

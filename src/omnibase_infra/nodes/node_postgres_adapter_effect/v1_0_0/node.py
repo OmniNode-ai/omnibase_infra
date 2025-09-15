@@ -21,7 +21,7 @@ from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
 from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
-from omnibase_core.model.core.model_health_status import ModelHealthStatus
+from omnibase_core.models.core.model_health_status import ModelHealthStatus
 
 from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
 from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest

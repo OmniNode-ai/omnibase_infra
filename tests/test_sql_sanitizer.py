@@ -8,8 +8,8 @@ for OpenTelemetry trace attributes to prevent sensitive data leakage.
 import pytest
 from unittest.mock import patch, Mock
 
-from src.omnibase_infra.nodes.node_distributed_tracing_compute.v1_0_0.utils.sql_sanitizer import SqlSanitizer
-from omnibase_core.exceptions.base_onex_error import OnexError
+from omnibase_infra.nodes.node_distributed_tracing_compute.v1_0_0.utils.sql_sanitizer import SqlSanitizer
+from omnibase_core.core.errors.onex_error import OnexError
 
 
 class TestSqlSanitizer:

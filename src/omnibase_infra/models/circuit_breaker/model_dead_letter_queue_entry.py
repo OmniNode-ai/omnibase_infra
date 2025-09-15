@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 
 
 class ModelDeadLetterQueueEntry(BaseModel):

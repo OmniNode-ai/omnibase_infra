@@ -15,9 +15,9 @@ from typing import List, Dict, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
-from omnibase_core.onex_error import OnexError
-from omnibase_core.core_error_codes import CoreErrorCode
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
+from omnibase_core.core.errors.onex_error import OnexError
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 from omnibase_infra.infrastructure.event_bus_circuit_breaker import (
     EventBusCircuitBreaker,

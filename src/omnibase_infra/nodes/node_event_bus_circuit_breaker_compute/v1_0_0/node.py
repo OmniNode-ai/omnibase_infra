@@ -15,7 +15,7 @@ from uuid import UUID
 from omnibase_core.base.node_compute_service import NodeComputeService
 from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
 from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 
 from omnibase_core.enums.intelligence.enum_circuit_breaker_state import EnumCircuitBreakerState
 from omnibase_core.models.resilience.model_circuit_breaker_state import ModelCircuitBreakerState

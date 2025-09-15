@@ -17,8 +17,8 @@ from sqlparse.tokens import (
 )
 from sqlparse.sql import Token, Statement
 
-from omnibase_core.exceptions.base_onex_error import OnexError
-from omnibase_core.enums.enum_core_error_code import CoreErrorCode
+from omnibase_core.core.errors.onex_error import OnexError
+from omnibase_core.core.errors.onex_error import CoreErrorCode
 
 
 class SqlSanitizer:
