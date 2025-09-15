@@ -27,15 +27,15 @@ dependencies:
   - name: "protocol_kafka_client"
     type: "protocol"
     class_name: "ProtocolKafkaClient"
-    module: "omnibase_core.protocol.protocol_kafka_client"
+    module: "omnibase_spi.protocols.core"
   - name: "protocol_event_bus"
     type: "protocol"
     class_name: "ProtocolEventBus"
-    module: "omnibase_core.protocol.protocol_event_bus"
+    module: "omnibase_spi.protocols.event_bus"
   - name: "protocol_message_broker"
     type: "protocol"
     class_name: "ProtocolMessageBroker"
-    module: "omnibase_core.protocol.protocol_message_broker"
+    module: "omnibase_spi.protocols.core"
 
 # === SHARED MODEL DEPENDENCIES ===
 shared_model_dependencies:

@@ -62,7 +62,7 @@ dependencies:
   - name: "protocol_event_bus"
     type: "protocol"
     class_name: "ProtocolEventBus"
-    module: "omnibase_core.protocol.protocol_event_bus"
+    module: "omnibase_spi.protocols.event_bus"
 
 # Model definitions following ONEX shared model pattern
 definitions:

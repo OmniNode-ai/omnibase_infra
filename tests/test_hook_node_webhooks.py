@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from unittest.mock import Mock, AsyncMock, patch
 from uuid import UUID, uuid4
-from typing import Dict, Any, List
+from typing import List, Optional
 
 from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
@@ -35,26 +35,31 @@ from omnibase_infra.models.notification.model_notification_request import ModelN
 from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
 from omnibase_infra.models.notification.model_notification_retry_policy import ModelNotificationRetryPolicy
 
+# Test-specific strongly typed models
+from tests.models.test_webhook_models import (
+    MockWebhookRequestModel,
+    MockWebhookResponseConfigModel,
+    MockWebhookFailureConfigModel,
+    SlackWebhookPayloadModel,
+    DiscordWebhookPayloadModel,
+    GenericWebhookPayloadModel,
+)
+
 
 class MockWebhookServer:
     """Mock webhook server for testing various webhook endpoints."""
 
     def __init__(self):
-        self.received_requests: List[Dict[str, Any]] = []
-        self.response_config: Dict[str, Any] = {
-            "status_code": 200,
-            "body": '{"status": "ok"}',
-            "headers": {"Content-Type": "application/json"},
-            "delay_ms": 100
-        }
-        self.failure_config: Dict[str, Any] = None
+        self.received_requests: List[MockWebhookRequestModel] = []
+        self.response_config: MockWebhookResponseConfigModel = MockWebhookResponseConfigModel()
+        self.failure_config: Optional[MockWebhookFailureConfigModel] = None
         self.failure_count: int = 0
         self.request_count: int = 0
 
-    def configure_responses(self, success_config: Dict[str, Any] = None, failure_config: Dict[str, Any] = None):
+    def configure_responses(self, success_config: Optional[MockWebhookResponseConfigModel] = None, failure_config: Optional[MockWebhookFailureConfigModel] = None):
         """Configure mock server responses."""
         if success_config:
-            self.response_config.update(success_config)
+            self.response_config = success_config
         self.failure_config = failure_config
 
     def reset(self):
@@ -68,47 +73,46 @@ class MockWebhookServer:
         self.request_count += 1
 
         # Record the request
-        request_data = {
-            "method": method,
-            "url": url,
-            "headers": headers,
-            "body": body,
-            "timestamp": time.time(),
-            "request_number": self.request_count
-        }
+        request_data = MockWebhookRequestModel(
+            url=url,
+            method=method,
+            headers=headers,
+            body=body,
+            timestamp=time.time()
+        )
         self.received_requests.append(request_data)
 
         # Simulate processing delay
-        if self.response_config["delay_ms"] > 0:
-            await asyncio.sleep(self.response_config["delay_ms"] / 1000)
+        if self.response_config.delay_ms > 0:
+            await asyncio.sleep(self.response_config.delay_ms / 1000)
 
         # Check if we should fail this request
-        if self.failure_config and self.failure_count < self.failure_config.get("fail_count", 0):
+        if self.failure_config and self.failure_count < self.failure_config.fail_count:
             self.failure_count += 1
             return ProtocolHttpResponse(
-                status_code=self.failure_config["status_code"],
-                headers=self.failure_config.get("headers", {}),
-                body=self.failure_config.get("body", "Error"),
-                execution_time_ms=self.response_config["delay_ms"],
+                status_code=self.failure_config.status_code,
+                headers=self.failure_config.headers,
+                body=self.failure_config.body,
+                execution_time_ms=self.response_config.delay_ms,
                 is_success=False
             )
 
         # Return success response
         return ProtocolHttpResponse(
-            status_code=self.response_config["status_code"],
-            headers=self.response_config["headers"],
-            body=self.response_config["body"],
-            execution_time_ms=self.response_config["delay_ms"],
+            status_code=self.response_config.status_code,
+            headers=self.response_config.headers,
+            body=self.response_config.body,
+            execution_time_ms=self.response_config.delay_ms,
             is_success=True
         )
 
-    def get_last_request(self) -> Dict[str, Any]:
+    def get_last_request(self) -> Optional[MockWebhookRequestModel]:
         """Get the most recent request received."""
         return self.received_requests[-1] if self.received_requests else None
 
-    def get_requests_for_url(self, url_pattern: str) -> List[Dict[str, Any]]:
+    def get_requests_for_url(self, url_pattern: str) -> List[MockWebhookRequestModel]:
         """Get all requests matching a URL pattern."""
-        return [req for req in self.received_requests if url_pattern in req["url"]]
+        return [req for req in self.received_requests if url_pattern in req.url]
 
 
 class TestSlackWebhookDelivery:
@@ -155,12 +159,14 @@ class TestSlackWebhookDelivery:
         )
 
         # Configure Slack-like response
-        webhook_server.configure_responses({
-            "status_code": 200,
-            "body": "ok",
-            "headers": {"Content-Type": "text/plain"},
-            "delay_ms": 150
-        })
+        webhook_server.configure_responses(
+            success_config=MockWebhookResponseConfigModel(
+                status_code=200,
+                body="ok",
+                headers={"Content-Type": "text/plain"},
+                delay_ms=150
+            )
+        )
 
         input_data = ModelHookNodeInput(notification_request=request)
         result = await hook_node.process(input_data)
@@ -172,7 +178,7 @@ class TestSlackWebhookDelivery:
         last_request = webhook_server.get_last_request()
         assert last_request is not None
 
-        received_payload = json.loads(last_request["body"])
+        received_payload = json.loads(last_request.body)
         assert received_payload["text"] == "🚨 System Alert: Database connection lost"
         assert received_payload["channel"] == "#infrastructure-alerts"
         assert received_payload["username"] == "ONEX Monitor"
@@ -205,7 +211,9 @@ class TestSlackWebhookDelivery:
             payload=slack_payload
         )
 
-        webhook_server.configure_responses({"delay_ms": 200})
+        webhook_server.configure_responses(
+            success_config=MockWebhookResponseConfigModel(delay_ms=200)
+        )
 
         input_data = ModelHookNodeInput(notification_request=request)
         result = await hook_node.process(input_data)
@@ -214,7 +222,7 @@ class TestSlackWebhookDelivery:
 
         # Verify rich attachment structure is preserved
         last_request = webhook_server.get_last_request()
-        received_payload = json.loads(last_request["body"])
+        received_payload = json.loads(last_request.body)
 
         assert "attachments" in received_payload
         attachment = received_payload["attachments"][0]
@@ -273,12 +281,12 @@ class TestSlackWebhookDelivery:
 
         # Configure server to fail first 2 attempts, then succeed
         webhook_server.configure_responses(
-            success_config={"delay_ms": 50},
-            failure_config={
-                "fail_count": 2,
-                "status_code": 500,
-                "body": "Internal Server Error"
-            }
+            success_config=MockWebhookResponseConfigModel(delay_ms=50),
+            failure_config=MockWebhookFailureConfigModel(
+                fail_count=2,
+                status_code=500,
+                body="Internal Server Error"
+            )
         )
 
         with patch('asyncio.sleep'):  # Speed up test
@@ -334,12 +342,14 @@ class TestDiscordWebhookDelivery:
         )
 
         # Configure Discord-like response
-        webhook_server.configure_responses({
-            "status_code": 204,  # Discord returns 204 for successful webhooks
-            "body": "",
-            "headers": {},
-            "delay_ms": 120
-        })
+        webhook_server.configure_responses(
+            success_config=MockWebhookResponseConfigModel(
+                status_code=204,  # Discord returns 204 for successful webhooks
+                body="",
+                headers={},
+                delay_ms=120
+            )
+        )
 
         input_data = ModelHookNodeInput(notification_request=request)
         result = await hook_node.process(input_data)
@@ -349,7 +359,7 @@ class TestDiscordWebhookDelivery:
 
         # Verify Discord payload format
         last_request = webhook_server.get_last_request()
-        received_payload = json.loads(last_request["body"])
+        received_payload = json.loads(last_request.body)
 
         assert received_payload["content"] == "🔥 **CRITICAL ALERT**\nDatabase connection has been lost!"
         assert received_payload["username"] == "ONEX Infrastructure Bot"
@@ -382,7 +392,9 @@ class TestDiscordWebhookDelivery:
             payload=discord_payload
         )
 
-        webhook_server.configure_responses({"status_code": 204, "body": ""})
+        webhook_server.configure_responses(
+            success_config=MockWebhookResponseConfigModel(status_code=204, body="")
+        )
 
         input_data = ModelHookNodeInput(notification_request=request)
         result = await hook_node.process(input_data)
@@ -391,7 +403,7 @@ class TestDiscordWebhookDelivery:
 
         # Verify embed structure
         last_request = webhook_server.get_last_request()
-        received_payload = json.loads(last_request["body"])
+        received_payload = json.loads(last_request.body)
 
         assert "embeds" in received_payload
         embed = received_payload["embeds"][0]
@@ -412,12 +424,12 @@ class TestDiscordWebhookDelivery:
 
         # Configure rate limit response
         webhook_server.configure_responses(
-            failure_config={
-                "fail_count": 1,
-                "status_code": 429,  # Rate limited
-                "body": '{"retry_after": 1000}',
-                "headers": {"Retry-After": "1"}
-            }
+            failure_config=MockWebhookFailureConfigModel(
+                fail_count=1,
+                status_code=429,  # Rate limited
+                body='{"retry_after": 1000}',
+                headers={"Retry-After": "1"}
+            )
         )
 
         with patch('asyncio.sleep'):  # Speed up test
@@ -494,7 +506,7 @@ class TestGenericWebhookDelivery:
 
         # Verify custom payload structure is preserved
         last_request = webhook_server.get_last_request()
-        received_payload = json.loads(last_request["body"])
+        received_payload = json.loads(last_request.body)
 
         assert received_payload["event_type"] == "infrastructure.alert"
         assert received_payload["severity"] == "critical"
@@ -705,11 +717,11 @@ class TestWebhookCircuitBreakerBehavior:
 
         # Configure server to fail initially
         webhook_server.configure_responses(
-            failure_config={
-                "fail_count": 10,  # Many failures
-                "status_code": 503,
-                "body": "Service Unavailable"
-            }
+            failure_config=MockWebhookFailureConfigModel(
+                fail_count=10,  # Many failures
+                status_code=503,
+                body="Service Unavailable"
+            )
         )
 
         # Trigger circuit breaker opening
@@ -729,7 +741,9 @@ class TestWebhookCircuitBreakerBehavior:
         circuit_breaker.last_failure_time = time.time() - 70  # 70 seconds ago (past recovery timeout)
 
         # Configure server to now succeed
-        webhook_server.configure_responses(success_config={"status_code": 200})
+        webhook_server.configure_responses(
+            success_config=MockWebhookResponseConfigModel(status_code=200)
+        )
 
         # Next request should attempt recovery
         input_data = ModelHookNodeInput(notification_request=request)

@@ -16,7 +16,7 @@ import time
 from datetime import datetime
 from unittest.mock import Mock, AsyncMock, patch
 from uuid import UUID, uuid4
-from typing import Dict, Any, List
+from typing import List
 
 from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
@@ -35,12 +35,15 @@ from omnibase_infra.nodes.hook_node.v1_0_0.registry.registry_hook_node import Re
 from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
 from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
 
+# Test-specific strongly typed models
+from tests.models.test_webhook_models import IntegrationTestRequestModel
+
 
 class MockHttpClient:
     """Mock HTTP client that implements ProtocolHttpClient interface."""
 
     def __init__(self):
-        self.requests_made: List[Dict[str, Any]] = []
+        self.requests_made: List[IntegrationTestRequestModel] = []
         self.response_sequence: List[ProtocolHttpResponse] = []
         self.current_response_index = 0
 
@@ -52,14 +55,14 @@ class MockHttpClient:
     async def post(self, url: str, headers: Dict[str, str] = None, body: str = None, timeout: float = 30.0) -> ProtocolHttpResponse:
         """Mock POST request implementation."""
         # Record the request
-        self.requests_made.append({
-            "method": "POST",
-            "url": url,
-            "headers": headers or {},
-            "body": body,
-            "timeout": timeout,
-            "timestamp": time.time()
-        })
+        self.requests_made.append(IntegrationTestRequestModel(
+            url=url,
+            method="POST",
+            headers=headers or {},
+            payload={"body": body or "", "timeout": timeout},
+            timestamp=time.time(),
+            correlation_id=str(uuid4())
+        ))
 
         # Return next response in sequence
         if self.current_response_index < len(self.response_sequence):
@@ -78,13 +81,14 @@ class MockHttpClient:
 
     async def get(self, url: str, headers: Dict[str, str] = None, timeout: float = 30.0) -> ProtocolHttpResponse:
         """Mock GET request implementation."""
-        self.requests_made.append({
-            "method": "GET",
-            "url": url,
-            "headers": headers or {},
-            "timeout": timeout,
-            "timestamp": time.time()
-        })
+        self.requests_made.append(IntegrationTestRequestModel(
+            url=url,
+            method="GET",
+            headers=headers or {},
+            payload={"timeout": timeout},
+            timestamp=time.time(),
+            correlation_id=str(uuid4())
+        ))
         return ProtocolHttpResponse(
             status_code=200,
             headers={},
@@ -298,7 +302,7 @@ class TestHookNodeIntegration:
         requests_made = hook_node_integration._http_client.requests_made
         assert len(requests_made) == 1
 
-        auth_header = requests_made[0]["headers"].get("Authorization")
+        auth_header = requests_made[0].headers.get("Authorization")
         assert auth_header == "Bearer integration-test-token"
 
     @pytest.mark.asyncio
@@ -377,7 +381,7 @@ class TestHookNodeIntegration:
         requests_made = hook_node_integration._http_client.requests_made
         assert len(requests_made) == 1
 
-        request_body = json.loads(requests_made[0]["body"])
+        request_body = json.loads(requests_made[0].payload["body"])
         assert request_body["text"] == "🚨 Integration Test Alert"
         assert request_body["channel"] == "#dev-alerts"
         assert "attachments" in request_body

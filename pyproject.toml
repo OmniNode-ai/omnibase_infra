@@ -20,7 +20,7 @@ python = "^3.12"
 # ONEX dependencies - HTTPS format for improved CI/CD compatibility
 # Authentication via git config with Personal Access Token
 omnibase_spi = {git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main"}
-omnibase_core = {git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "main"}
+omnibase_core = {path = "/Volumes/PRO-G40/Code/omnibase_core", develop = true}
 
 # Core dependencies
 pydantic = "^2.11.7"

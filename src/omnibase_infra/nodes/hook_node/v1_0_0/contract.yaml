@@ -36,11 +36,11 @@ dependencies:
   - name: "protocol_http_client"
     type: "protocol"
     class_name: "ProtocolHttpClient"
-    module: "omnibase_core.protocol.protocol_http_client"
+    module: "omnibase_spi.protocols.core"
   - name: "protocol_event_bus"
     type: "protocol"
     class_name: "ProtocolEventBus"
-    module: "omnibase_core.protocol.protocol_event_bus"
+    module: "omnibase_spi.protocols.event_bus"
 
 # === SHARED MODEL DEPENDENCIES ===
 shared_model_dependencies:
