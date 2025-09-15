@@ -693,7 +693,34 @@ class NodeHookEffect(NodeEffectService):
                     "circuit_breaker_state": "success_recorded"
                 }
             )
-            await self._event_bus.publish_event(event)
+            # Convert ModelOnexEvent to protocol format for event bus publishing
+            event_data = {
+                "event_type": str(event.event_type),
+                "node_id": event.node_id,
+                "timestamp": event.timestamp.isoformat(),
+                "correlation_id": correlation_id,
+                "payload": {
+                    "destination_url": destination_url,
+                    "status_code": status_code,
+                    "execution_time_ms": execution_time_ms,
+                    "circuit_breaker_state": "success_recorded"
+                }
+            }
+
+            await self._event_bus.publish(
+                topic="hook-node-events",
+                key=correlation_id.encode() if correlation_id else None,
+                value=json.dumps(event_data).encode(),
+                headers={
+                    "content_type": "application/json",
+                    "correlation_id": UUID(correlation_id) if correlation_id else uuid4(),
+                    "message_id": uuid4(),
+                    "timestamp": event.timestamp,
+                    "source": "hook_node",
+                    "event_type": "circuit_breaker.success",
+                    "schema_version": "1.0.0"
+                }
+            )
         except Exception as e:
             self._logger.warning(
                 f"Failed to publish circuit breaker success event: {e}",
@@ -722,7 +749,34 @@ class NodeHookEffect(NodeEffectService):
                     "circuit_breaker_state": "failure_recorded"
                 }
             )
-            await self._event_bus.publish_event(event)
+            # Convert ModelOnexEvent to protocol format for event bus publishing
+            event_data = {
+                "event_type": str(event.event_type),
+                "node_id": event.node_id,
+                "timestamp": event.timestamp.isoformat(),
+                "correlation_id": correlation_id,
+                "payload": {
+                    "destination_url": destination_url,
+                    "error_message": error_message,
+                    "execution_time_ms": execution_time_ms,
+                    "circuit_breaker_state": "failure_recorded"
+                }
+            }
+
+            await self._event_bus.publish(
+                topic="hook-node-events",
+                key=correlation_id.encode() if correlation_id else None,
+                value=json.dumps(event_data).encode(),
+                headers={
+                    "content_type": "application/json",
+                    "correlation_id": UUID(correlation_id) if correlation_id else uuid4(),
+                    "message_id": uuid4(),
+                    "timestamp": event.timestamp,
+                    "source": "hook_node",
+                    "event_type": "circuit_breaker.failure",
+                    "schema_version": "1.0.0"
+                }
+            )
         except Exception as e:
             self._logger.warning(
                 f"Failed to publish circuit breaker failure event: {e}",
@@ -753,7 +807,34 @@ class NodeHookEffect(NodeEffectService):
                     "state_change_reason": f"transition from {old_state.value} to {new_state.value}"
                 }
             )
-            await self._event_bus.publish_event(event)
+            # Convert ModelOnexEvent to protocol format for event bus publishing
+            event_data = {
+                "event_type": str(event.event_type),
+                "node_id": event.node_id,
+                "timestamp": event.timestamp.isoformat(),
+                "correlation_id": correlation_id,
+                "payload": {
+                    "destination_url": destination_url,
+                    "old_state": old_state,
+                    "new_state": new_state,
+                    "reason": "state_transition"
+                }
+            }
+
+            await self._event_bus.publish(
+                topic="hook-node-events",
+                key=correlation_id.encode() if correlation_id else None,
+                value=json.dumps(event_data).encode(),
+                headers={
+                    "content_type": "application/json",
+                    "correlation_id": UUID(correlation_id) if correlation_id else uuid4(),
+                    "message_id": uuid4(),
+                    "timestamp": event.timestamp,
+                    "source": "hook_node",
+                    "event_type": "circuit_breaker.state_change",
+                    "schema_version": "1.0.0"
+                }
+            )
         except Exception as e:
             self._logger.warning(
                 f"Failed to publish circuit breaker state change event: {e}",

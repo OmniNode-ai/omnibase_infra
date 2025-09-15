@@ -122,7 +122,10 @@ class HookNodeRegistry:
             if http_client is None:
                 return False
 
-            # Validate HTTP client has required protocol methods
+            # Validate HTTP client has required protocol methods (ONEX-compliant duck typing)
+            if not (hasattr(http_client, 'request') and callable(getattr(http_client, 'request'))):
+                return False
+            # Also verify optional specific HTTP methods are available
             if not (hasattr(http_client, 'post') and callable(getattr(http_client, 'post'))):
                 return False
             if not (hasattr(http_client, 'put') and callable(getattr(http_client, 'put'))):
@@ -133,7 +136,7 @@ class HookNodeRegistry:
             if event_bus is None:
                 return False
 
-            # Validate event bus has required protocol methods
+            # Validate event bus has required protocol methods (ONEX-compliant duck typing)
             if not (hasattr(event_bus, 'publish') and callable(getattr(event_bus, 'publish'))):
                 return False
 

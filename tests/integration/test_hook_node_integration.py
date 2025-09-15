@@ -29,7 +29,7 @@ from omnibase_spi.protocols.event_bus import ProtocolEventBus
 # Hook Node implementation
 from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect, CircuitBreakerState
 from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
-from omnibase_infra.nodes.hook_node.v1_0_0.registry.registry_hook_node import RegistryHookNode
+from omnibase_infra.nodes.hook_node.v1_0_0.registry.registry_hook_node import HookNodeRegistry
 
 # Shared notification models
 from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
@@ -449,7 +449,7 @@ class TestHookNodeIntegration:
     async def test_registry_integration(self, container_with_mocks):
         """Test Hook Node registry integration and dependency resolution."""
         # Test registry can create Hook Node with proper dependencies
-        registry = RegistryHookNode()
+        registry = HookNodeRegistry()
 
         # Registry should be able to resolve dependencies from container
         hook_node = registry.create_node(container_with_mocks)
