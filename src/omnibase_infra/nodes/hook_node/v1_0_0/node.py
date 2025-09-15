@@ -22,15 +22,26 @@ Features:
 - Circuit breaker pattern for failing destinations
 - Structured logging with correlation ID tracking
 - Performance metrics and observability
+
+SECURITY ENHANCEMENTS (PR #6 Critical Fixes):
+✅ SSRF Prevention: Comprehensive URL validation blocking private networks, localhost, cloud metadata services
+✅ Payload Size Limits: 1MB configurable limit with security violation detection
+✅ Rate Limiting: Per-destination DoS protection (60 req/min default)
+✅ Protocol Compliance: Using request() method per ProtocolHttpClient interface
+✅ Race Condition Fix: Atomic circuit breaker state reporting with async locking
+✅ Security Logging: Comprehensive security event logging and monitoring
 """
 
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime
 from enum import Enum
+from ipaddress import AddressValueError, IPv4Address, IPv6Address, ip_address
 from typing import Dict, List, Optional, Union
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
@@ -62,6 +73,223 @@ class CircuitBreakerState(Enum):
     CLOSED = "closed"       # Normal operation - notifications sent directly
     OPEN = "open"          # Failure state - notifications blocked
     HALF_OPEN = "half_open"  # Testing state - limited notifications to test recovery
+
+
+class SecurityConfig:
+    """Security configuration for Hook Node operations."""
+
+    def __init__(self):
+        # SSRF Protection - RFC 1918 private networks and special addresses
+        self.blocked_ip_ranges = [
+            # RFC 1918 private networks
+            "10.0.0.0/8",      # Class A private network
+            "172.16.0.0/12",   # Class B private network
+            "192.168.0.0/16",  # Class C private network
+            # Localhost and loopback
+            "127.0.0.0/8",     # IPv4 loopback
+            "::1/128",         # IPv6 loopback
+            # Link-local addresses
+            "169.254.0.0/16",  # IPv4 link-local (including cloud metadata)
+            "fe80::/10",       # IPv6 link-local
+            # Multicast
+            "224.0.0.0/4",     # IPv4 multicast
+            "ff00::/8",        # IPv6 multicast
+        ]
+
+        # Cloud metadata service addresses (critical for SSRF prevention)
+        self.blocked_metadata_addresses = [
+            "169.254.169.254",  # AWS/GCP/Azure metadata service
+            "fd00:ec2::254",    # AWS IPv6 metadata service
+        ]
+
+        # Payload size limits (1MB default, configurable)
+        self.max_payload_size_bytes = 1024 * 1024  # 1MB
+
+        # Rate limiting configuration
+        self.rate_limit_requests_per_minute = 60
+        self.rate_limit_window_seconds = 60
+
+
+class UrlSecurityValidator:
+    """URL security validator for SSRF prevention."""
+
+    def __init__(self, security_config: SecurityConfig):
+        self.config = security_config
+        self._compiled_ip_ranges = []
+        self._compile_ip_ranges()
+
+    def _compile_ip_ranges(self):
+        """Pre-compile IP ranges for efficient validation."""
+        from ipaddress import ip_network
+        for range_str in self.config.blocked_ip_ranges:
+            try:
+                self._compiled_ip_ranges.append(ip_network(range_str, strict=False))
+            except Exception as e:
+                # Log but don't fail initialization for invalid ranges
+                logging.warning(f"Invalid IP range in security config: {range_str}: {e}")
+
+    def validate_url(self, url: str) -> None:
+        """
+        Validate URL for SSRF prevention.
+
+        Args:
+            url: URL to validate
+
+        Raises:
+            OnexError: If URL is blocked for security reasons
+        """
+        if not url or not url.strip():
+            raise OnexError(
+                code=CoreErrorCode.INVALID_INPUT,
+                message="URL cannot be empty"
+            )
+
+        try:
+            parsed = urlparse(url.strip())
+
+            # Validate scheme
+            if parsed.scheme not in ['http', 'https']:
+                raise OnexError(
+                    code=CoreErrorCode.SECURITY_VIOLATION,
+                    message=f"Blocked URL scheme: {parsed.scheme}. Only http/https allowed."
+                )
+
+            # Validate hostname exists
+            if not parsed.hostname:
+                raise OnexError(
+                    code=CoreErrorCode.SECURITY_VIOLATION,
+                    message="URL must contain a valid hostname"
+                )
+
+            # Check for blocked metadata addresses first (exact match)
+            if parsed.hostname in self.config.blocked_metadata_addresses:
+                raise OnexError(
+                    code=CoreErrorCode.SECURITY_VIOLATION,
+                    message=f"Blocked metadata service address: {parsed.hostname}"
+                )
+
+            # Resolve hostname to IP and check against blocked ranges
+            try:
+                ip_addr = ip_address(parsed.hostname)
+                self._validate_ip_address(ip_addr, parsed.hostname)
+            except AddressValueError:
+                # Hostname is not an IP address, resolve it
+                import socket
+                try:
+                    # Get all IP addresses for the hostname
+                    addr_info = socket.getaddrinfo(parsed.hostname, parsed.port, family=socket.AF_UNSPEC)
+                    for family, type_, proto, canonname, sockaddr in addr_info:
+                        ip_str = sockaddr[0]
+                        try:
+                            ip_addr = ip_address(ip_str)
+                            self._validate_ip_address(ip_addr, f"{parsed.hostname} -> {ip_str}")
+                        except AddressValueError:
+                            continue  # Skip invalid IP addresses
+                except socket.gaierror as e:
+                    raise OnexError(
+                        code=CoreErrorCode.SECURITY_VIOLATION,
+                        message=f"Cannot resolve hostname {parsed.hostname}: {e}"
+                    )
+
+            # Additional hostname validation
+            self._validate_hostname(parsed.hostname)
+
+        except OnexError:
+            raise  # Re-raise OnexError as-is
+        except Exception as e:
+            raise OnexError(
+                code=CoreErrorCode.SECURITY_VIOLATION,
+                message=f"URL validation failed: {e}"
+            ) from e
+
+    def _validate_ip_address(self, ip_addr: Union[IPv4Address, IPv6Address], display_name: str) -> None:
+        """Validate IP address against blocked ranges."""
+        for blocked_range in self._compiled_ip_ranges:
+            if ip_addr in blocked_range:
+                raise OnexError(
+                    code=CoreErrorCode.SECURITY_VIOLATION,
+                    message=f"Blocked IP address {display_name} in range {blocked_range}"
+                )
+
+    def _validate_hostname(self, hostname: str) -> None:
+        """Additional hostname validation."""
+        # Check for localhost variants
+        localhost_patterns = [
+            'localhost', '0.0.0.0', '0', 'local', 'localdomain'
+        ]
+        if hostname.lower() in localhost_patterns:
+            raise OnexError(
+                code=CoreErrorCode.SECURITY_VIOLATION,
+                message=f"Blocked localhost hostname: {hostname}"
+            )
+
+
+class RateLimiter:
+    """Rate limiter for notification destinations."""
+
+    def __init__(self, requests_per_minute: int = 60, window_seconds: int = 60):
+        self.requests_per_minute = requests_per_minute
+        self.window_seconds = window_seconds
+        self._requests: Dict[str, List[float]] = {}
+        self._lock = asyncio.Lock()
+
+    async def check_rate_limit(self, destination_url: str) -> bool:
+        """
+        Check if request is within rate limit for destination URL.
+
+        Args:
+            destination_url: Destination URL for rate limiting
+
+        Returns:
+            bool: True if within rate limit, False if rate limited
+        """
+        current_time = time.time()
+
+        async with self._lock:
+            # Clean up old requests outside the window
+            if destination_url in self._requests:
+                cutoff_time = current_time - self.window_seconds
+                self._requests[destination_url] = [
+                    req_time for req_time in self._requests[destination_url]
+                    if req_time > cutoff_time
+                ]
+            else:
+                self._requests[destination_url] = []
+
+            # Check if adding this request would exceed the limit
+            if len(self._requests[destination_url]) >= self.requests_per_minute:
+                return False
+
+            # Add the current request
+            self._requests[destination_url].append(current_time)
+            return True
+
+    async def get_rate_limit_status(self, destination_url: str) -> Dict[str, Union[int, float]]:
+        """Get current rate limit status for a destination."""
+        current_time = time.time()
+
+        async with self._lock:
+            if destination_url not in self._requests:
+                return {
+                    "current_requests": 0,
+                    "limit": self.requests_per_minute,
+                    "window_seconds": self.window_seconds,
+                    "remaining": self.requests_per_minute
+                }
+
+            # Clean up old requests
+            cutoff_time = current_time - self.window_seconds
+            active_requests = [
+                req_time for req_time in self._requests[destination_url]
+                if req_time > cutoff_time
+            ]
+
+            return {
+                "current_requests": len(active_requests),
+                "limit": self.requests_per_minute,
+                "window_seconds": self.window_seconds,
+                "remaining": max(0, self.requests_per_minute - len(active_requests))
+            }
 
 
 class HookStructuredLogger:
@@ -201,17 +429,28 @@ class NotificationCircuitBreaker:
 
             return False
 
-    async def record_success(self):
-        """Record successful notification delivery."""
+    async def record_success(self) -> tuple[bool, CircuitBreakerState, CircuitBreakerState, int]:
+        """
+        Record successful notification delivery.
+
+        Returns:
+            tuple: (state_changed, old_state, new_state, failure_count)
+        """
         async with self._lock:
             old_state = self._state
             self._failure_count = 0
             self._state = CircuitBreakerState.CLOSED
             self._half_open_calls = 0
-            return old_state != self._state  # Return True if state changed
+            new_state = self._state
+            return (old_state != new_state, old_state, new_state, self._failure_count)
 
-    async def record_failure(self):
-        """Record failed notification delivery."""
+    async def record_failure(self) -> tuple[bool, CircuitBreakerState, CircuitBreakerState, int]:
+        """
+        Record failed notification delivery.
+
+        Returns:
+            tuple: (state_changed, old_state, new_state, failure_count)
+        """
         async with self._lock:
             old_state = self._state
             self._failure_count += 1
@@ -223,7 +462,8 @@ class NotificationCircuitBreaker:
                 self._state = CircuitBreakerState.OPEN
 
             self._half_open_calls += 1 if self._state == CircuitBreakerState.HALF_OPEN else 0
-            return old_state != self._state  # Return True if state changed
+            new_state = self._state
+            return (old_state != new_state, old_state, new_state, self._failure_count)
 
     async def get_state(self) -> CircuitBreakerState:
         """Get current circuit breaker state."""
@@ -288,6 +528,14 @@ class NodeHookEffect(NodeEffectService):
         # Initialize structured logger with correlation ID support
         self._logger = HookStructuredLogger("hook_node")
 
+        # Initialize security components (CRITICAL - BLOCKING SECURITY VULNERABILITIES)
+        self._security_config = SecurityConfig()
+        self._url_validator = UrlSecurityValidator(self._security_config)
+        self._rate_limiter = RateLimiter(
+            requests_per_minute=self._security_config.rate_limit_requests_per_minute,
+            window_seconds=self._security_config.rate_limit_window_seconds
+        )
+
         # Initialize bounded circuit breakers for notification destinations (per-URL tracking)
         self._circuit_breakers: Dict[str, NotificationCircuitBreaker] = {}
         self._circuit_breaker_access_order: List[str] = []  # LRU tracking for bounded storage
@@ -299,7 +547,16 @@ class NodeHookEffect(NodeEffectService):
         self._successful_notifications = 0
         self._failed_notifications = 0
 
-        self._logger.info("Hook Node initialized successfully", operation="initialization")
+        self._logger.info(
+            "Hook Node initialized successfully with security protections",
+            operation="initialization",
+            security_config={
+                "max_payload_size_mb": self._security_config.max_payload_size_bytes / (1024 * 1024),
+                "rate_limit_per_minute": self._security_config.rate_limit_requests_per_minute,
+                "blocked_ip_ranges_count": len(self._security_config.blocked_ip_ranges),
+                "ssrf_protection_enabled": True
+            }
+        )
 
     async def _get_circuit_breaker(self, url: str) -> NotificationCircuitBreaker:
         """
@@ -358,6 +615,44 @@ class NodeHookEffect(NodeEffectService):
                 headers[auth.credentials["header_name"]] = auth.credentials["api_key"]
 
         return headers
+
+    def _validate_payload_size(self, payload: Dict) -> None:
+        """
+        Validate payload size against security limits.
+
+        Args:
+            payload: JSON payload to validate
+
+        Raises:
+            OnexError: If payload exceeds size limits
+        """
+        try:
+            # Calculate payload size by serializing to JSON
+            payload_json = json.dumps(payload, separators=(',', ':'))  # Compact JSON
+            payload_size = len(payload_json.encode('utf-8'))
+
+            if payload_size > self._security_config.max_payload_size_bytes:
+                raise OnexError(
+                    code=CoreErrorCode.SECURITY_VIOLATION,
+                    message=f"Payload size {payload_size} bytes exceeds maximum allowed "
+                           f"{self._security_config.max_payload_size_bytes} bytes "
+                           f"({self._security_config.max_payload_size_bytes / (1024*1024):.1f}MB)"
+                )
+
+            self._logger.debug(
+                f"Payload size validation passed: {payload_size} bytes",
+                operation="payload_validation",
+                payload_size_bytes=payload_size,
+                max_allowed_bytes=self._security_config.max_payload_size_bytes
+            )
+
+        except OnexError:
+            raise  # Re-raise OnexError as-is
+        except Exception as e:
+            raise OnexError(
+                code=CoreErrorCode.SECURITY_VIOLATION,
+                message=f"Payload size validation failed: {e}"
+            ) from e
 
     def _calculate_retry_delay(self, attempt: int, retry_policy: ModelNotificationRetryPolicy) -> float:
         """Calculate delay before retry attempt based on backoff strategy."""
@@ -471,8 +766,85 @@ class NodeHookEffect(NodeEffectService):
         request: ModelNotificationRequest,
         correlation_id: str
     ) -> ModelNotificationResult:
-        """Send notification with retry policy and circuit breaker protection."""
+        """Send notification with retry policy, circuit breaker, and security protections."""
         attempts: List[ModelNotificationAttempt] = []
+
+        # CRITICAL SECURITY VALIDATION - SSRF Prevention
+        try:
+            self._url_validator.validate_url(request.url)
+        except OnexError as e:
+            self._logger.error(
+                f"URL validation failed for security reasons: {e.message}",
+                correlation_id=correlation_id,
+                operation="url_security_validation",
+                url=request.url
+            )
+            # Return failure result for security violation
+            attempt = ModelNotificationAttempt(
+                attempt_number=1,
+                timestamp=time.time(),
+                status_code=None,
+                error=f"Security violation: {e.message}",
+                execution_time_ms=0.0
+            )
+            attempts.append(attempt)
+            return ModelNotificationResult(
+                final_status_code=None,
+                is_success=False,
+                attempts=attempts,
+                total_attempts=1
+            )
+
+        # CRITICAL SECURITY VALIDATION - Payload Size Limits
+        try:
+            self._validate_payload_size(request.payload)
+        except OnexError as e:
+            self._logger.error(
+                f"Payload size validation failed: {e.message}",
+                correlation_id=correlation_id,
+                operation="payload_size_validation"
+            )
+            # Return failure result for payload size violation
+            attempt = ModelNotificationAttempt(
+                attempt_number=1,
+                timestamp=time.time(),
+                status_code=None,
+                error=f"Payload size violation: {e.message}",
+                execution_time_ms=0.0
+            )
+            attempts.append(attempt)
+            return ModelNotificationResult(
+                final_status_code=None,
+                is_success=False,
+                attempts=attempts,
+                total_attempts=1
+            )
+
+        # CRITICAL SECURITY VALIDATION - Rate Limiting
+        if not await self._rate_limiter.check_rate_limit(request.url):
+            rate_limit_status = await self._rate_limiter.get_rate_limit_status(request.url)
+            self._logger.warning(
+                f"Rate limit exceeded for destination: {request.url}",
+                correlation_id=correlation_id,
+                operation="rate_limit_check",
+                rate_limit_status=rate_limit_status
+            )
+            # Return failure result for rate limit violation
+            attempt = ModelNotificationAttempt(
+                attempt_number=1,
+                timestamp=time.time(),
+                status_code=None,
+                error=f"Rate limit exceeded: {rate_limit_status['current_requests']}/{rate_limit_status['limit']} requests per {rate_limit_status['window_seconds']}s",
+                execution_time_ms=0.0
+            )
+            attempts.append(attempt)
+            return ModelNotificationResult(
+                final_status_code=None,
+                is_success=False,
+                attempts=attempts,
+                total_attempts=1
+            )
+
         circuit_breaker = await self._get_circuit_breaker(request.url)
 
         # Check circuit breaker state
@@ -552,7 +924,8 @@ class NodeHookEffect(NodeEffectService):
                         retry_attempt=attempt_num
                     )
 
-                    state_changed = await circuit_breaker.record_success()
+                    # FIXED RACE CONDITION - Atomic circuit breaker state reporting
+                    state_changed, old_state, new_state, failure_count = await circuit_breaker.record_success()
 
                     # Publish circuit breaker success event
                     await self._publish_circuit_breaker_success_event(
@@ -567,9 +940,9 @@ class NodeHookEffect(NodeEffectService):
                         await self._publish_circuit_breaker_state_change_event(
                             correlation_id=correlation_id,
                             destination_url=str(request.url),
-                            old_state=CircuitBreakerState.HALF_OPEN,  # Previous state before success
-                            new_state=circuit_breaker.state,
-                            failure_count=circuit_breaker.failure_count
+                            old_state=old_state,
+                            new_state=new_state,
+                            failure_count=failure_count
                         )
 
                     return ModelNotificationResult(
@@ -625,9 +998,8 @@ class NodeHookEffect(NodeEffectService):
                     retry_delay = self._calculate_retry_delay(attempt_num, retry_policy)
                     await asyncio.sleep(retry_delay)
 
-        # All attempts failed
-        old_state = circuit_breaker.state
-        state_changed = await circuit_breaker.record_failure()
+        # All attempts failed - FIXED RACE CONDITION - Atomic circuit breaker state reporting
+        state_changed, old_state, new_state, failure_count = await circuit_breaker.record_failure()
 
         # Publish circuit breaker failure event
         error_message = attempts[-1].error if attempts and attempts[-1].error else "All attempts failed"
@@ -644,8 +1016,8 @@ class NodeHookEffect(NodeEffectService):
                 correlation_id=correlation_id,
                 destination_url=str(request.url),
                 old_state=old_state,
-                new_state=circuit_breaker.state,
-                failure_count=circuit_breaker.failure_count
+                new_state=new_state,
+                failure_count=failure_count
             )
 
         return ModelNotificationResult(
@@ -697,6 +1069,18 @@ class NodeHookEffect(NodeEffectService):
                     code=CoreErrorCode.INVALID_INPUT,
                     message="Notification URL is required"
                 )
+
+            # Early security validation for immediate feedback
+            try:
+                self._url_validator.validate_url(input_data.notification_request.url)
+            except OnexError as e:
+                self._logger.error(
+                    f"Input validation failed - URL security violation: {e.message}",
+                    correlation_id=correlation_id,
+                    operation="input_validation",
+                    url=input_data.notification_request.url
+                )
+                raise  # Re-raise security violations immediately
 
             # Send notification with retries and circuit breaker protection
             notification_result = await self._send_notification_with_retries(
@@ -765,12 +1149,17 @@ class NodeHookEffect(NodeEffectService):
             ModelHealthStatus: Detailed health status with component-level checks
         """
         try:
-            # Safely capture circuit breaker states with locking
+            # Safely capture circuit breaker states with locking for thread-safe reporting
             async with self._circuit_breaker_lock:
-                circuit_breaker_info = {
-                    url: {"state": cb.state, "failure_count": cb.failure_count}
-                    for url, cb in self._circuit_breakers.items()
-                }
+                circuit_breaker_info = {}
+                for url, cb in self._circuit_breakers.items():
+                    # Get atomic state and failure count to prevent race conditions
+                    state = await cb.get_state()
+                    failure_count = await cb.get_failure_count()
+                    circuit_breaker_info[url] = {
+                        "state": state.value,  # Convert enum to string
+                        "failure_count": failure_count
+                    }
 
             health_details = {
                 "component": "hook_node",
@@ -789,6 +1178,14 @@ class NodeHookEffect(NodeEffectService):
                         "max_capacity": self._max_circuit_breakers,
                         "utilization_percentage": round(len(circuit_breaker_info) / self._max_circuit_breakers * 100, 2)
                     }
+                },
+                "security": {
+                    "ssrf_protection_enabled": True,
+                    "max_payload_size_mb": self._security_config.max_payload_size_bytes / (1024 * 1024),
+                    "rate_limit_requests_per_minute": self._security_config.rate_limit_requests_per_minute,
+                    "blocked_ip_ranges_count": len(self._security_config.blocked_ip_ranges),
+                    "blocked_metadata_addresses_count": len(self._security_config.blocked_metadata_addresses),
+                    "url_validation_enabled": True
                 }
             }
 
