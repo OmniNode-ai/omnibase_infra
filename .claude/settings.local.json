@@ -35,7 +35,16 @@
       "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/enums/intelligence/**)",
       "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/metrics/**)",
       "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/core/**)",
-      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/**)"
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/**)",
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/protocol/**)",
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/**)",
+      "mcp__archon__get_project",
+      "mcp__serena__activate_project",
+      "mcp__serena__switch_modes",
+      "Read(//Volumes/PRO-G40/Code/omnibase_spi/src/omnibase_spi/protocols/**)",
+      "Read(//Volumes/PRO-G40/Code/omnibase_spi/src/**)",
+      "mcp__serena__onboarding",
+      "Read(//Volumes/PRO-G40/Code/omnibase_spi/**)"
     ],
     "deny": [],
     "ask": []

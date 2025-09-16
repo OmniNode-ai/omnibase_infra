@@ -8,17 +8,17 @@ import logging
 
 # Required dependency - fail fast if unavailable (ONEX principle)
 import sqlparse
-from sqlparse.tokens import (
-    Literal,
-    Number,
-    String as StringToken,
-    Keyword,
-    Name,
-)
-from sqlparse.sql import Token, Statement
-
-from omnibase_core.exceptions.base_onex_error import OnexError
 from omnibase_core.enums.enum_core_error_code import CoreErrorCode
+from omnibase_core.exceptions.base_onex_error import OnexError
+from sqlparse.tokens import (
+    Keyword,
+    Literal,
+    Name,
+    Number,
+)
+from sqlparse.tokens import (
+    String as StringToken,
+)
 
 
 class SqlSanitizer:
@@ -91,7 +91,7 @@ class SqlSanitizer:
             for token in statement.flatten():
                 if SqlSanitizer._is_sensitive_literal(token):
                     # Replace sensitive literals with placeholder
-                    sanitized_tokens.append('?')
+                    sanitized_tokens.append("?")
                 elif token.ttype in (Keyword, Name) or token.value.upper() in SqlSanitizer._get_sql_keywords():
                     # Preserve keywords and identifiers (case insensitive)
                     sanitized_tokens.append(token.value)
@@ -100,7 +100,7 @@ class SqlSanitizer:
                     sanitized_tokens.append(token.value)
 
             # Reconstruct and clean up the query
-            sanitized = ' '.join(sanitized_tokens)
+            sanitized = " ".join(sanitized_tokens)
             sanitized = SqlSanitizer._clean_whitespace(sanitized)
 
             # Truncate if necessary
@@ -112,8 +112,8 @@ class SqlSanitizer:
         except Exception as e:
             SqlSanitizer._logger.error(f"sqlparse sanitization failed: {e}")
             raise OnexError(
-                message=f"SQL query sanitization failed: {str(e)}",
-                error_code=CoreErrorCode.PROCESSING_ERROR
+                message=f"SQL query sanitization failed: {e!s}",
+                error_code=CoreErrorCode.PROCESSING_ERROR,
             ) from e
 
 
@@ -153,15 +153,15 @@ class SqlSanitizer:
             Set of SQL keywords to preserve in sanitized queries
         """
         return {
-            'SELECT', 'FROM', 'WHERE', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP',
-            'ALTER', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'ON', 'GROUP', 'ORDER',
-            'BY', 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'INTERSECT', 'EXCEPT', 'AS',
-            'DISTINCT', 'ALL', 'AND', 'OR', 'NOT', 'IN', 'EXISTS', 'BETWEEN', 'LIKE',
-            'IS', 'NULL', 'TRUE', 'FALSE', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
-            'IF', 'COALESCE', 'NULLIF', 'CAST', 'CONVERT', 'COUNT', 'SUM', 'AVG',
-            'MIN', 'MAX', 'FIRST', 'LAST', 'TOP', 'INTO', 'VALUES', 'SET', 'TABLE',
-            'INDEX', 'VIEW', 'PROCEDURE', 'FUNCTION', 'TRIGGER', 'DATABASE', 'SCHEMA',
-            'GRANT', 'REVOKE', 'COMMIT', 'ROLLBACK', 'BEGIN', 'TRANSACTION'
+            "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP",
+            "ALTER", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "ON", "GROUP", "ORDER",
+            "BY", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "AS",
+            "DISTINCT", "ALL", "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE",
+            "IS", "NULL", "TRUE", "FALSE", "CASE", "WHEN", "THEN", "ELSE", "END",
+            "IF", "COALESCE", "NULLIF", "CAST", "CONVERT", "COUNT", "SUM", "AVG",
+            "MIN", "MAX", "FIRST", "LAST", "TOP", "INTO", "VALUES", "SET", "TABLE",
+            "INDEX", "VIEW", "PROCEDURE", "FUNCTION", "TRIGGER", "DATABASE", "SCHEMA",
+            "GRANT", "REVOKE", "COMMIT", "ROLLBACK", "BEGIN", "TRANSACTION",
         }
 
     @staticmethod
@@ -177,6 +177,6 @@ class SqlSanitizer:
         """
         import re
         # Replace multiple whitespace with single space
-        cleaned = re.sub(r'\s+', ' ', query.strip())
+        cleaned = re.sub(r"\s+", " ", query.strip())
         return cleaned
 

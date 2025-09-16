@@ -2,7 +2,7 @@
 
 # This file has been refactored - all models moved to separate files following ONEX standards:
 # - model_consul_service_projection.py
-# - model_consul_health_projection.py  
+# - model_consul_health_projection.py
 # - model_consul_kv_projection.py
 # - model_consul_topology_projection.py
 #

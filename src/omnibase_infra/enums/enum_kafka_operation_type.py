@@ -5,7 +5,7 @@ from enum import Enum
 
 class EnumKafkaOperationType(str, Enum):
     """Kafka operation type enumeration."""
-    
+
     PRODUCE = "produce"
     CONSUME = "consume"
     TOPIC_CREATE = "topic_create"

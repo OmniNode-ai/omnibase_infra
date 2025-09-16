@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 
+
 from pydantic import BaseModel
-from typing import List
 
 
 class ModelConsulServiceInfo(BaseModel):
     """Information about a Consul service."""
-    
+
     id: str
     name: str
     port: int
     address: str
-    tags: List[str]
+    tags: list[str]
 
 
 class ModelConsulServiceListResponse(BaseModel):
@@ -19,7 +19,7 @@ class ModelConsulServiceListResponse(BaseModel):
     
     Shared model used across Consul infrastructure nodes for service listing responses.
     """
-    
+
     status: str
-    services: List[ModelConsulServiceInfo]
+    services: list[ModelConsulServiceInfo]
     count: int

@@ -4,11 +4,11 @@ Strongly-typed model for circuit breaker dead letter queue entries.
 Replaces Dict[str, Any] usage to maintain ONEX compliance.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
 from uuid import UUID
+
 from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from pydantic import BaseModel, Field
 
 
 class ModelDeadLetterQueueEntry(BaseModel):
@@ -16,34 +16,34 @@ class ModelDeadLetterQueueEntry(BaseModel):
 
     # Entry identification
     entry_id: UUID = Field(
-        description="Unique identifier for this dead letter queue entry"
+        description="Unique identifier for this dead letter queue entry",
     )
 
     # Original event
     original_event: ModelOnexEvent = Field(
-        description="The original event that failed processing"
+        description="The original event that failed processing",
     )
 
     # Failure information
     failure_timestamp: datetime = Field(
-        description="When the event failed and was queued"
+        description="When the event failed and was queued",
     )
 
     failure_reason: str = Field(
         max_length=500,
-        description="Reason why the event failed"
+        description="Reason why the event failed",
     )
 
-    error_type: Optional[str] = Field(
+    error_type: str | None = Field(
         default=None,
         max_length=100,
-        description="Type/class of error that occurred"
+        description="Type/class of error that occurred",
     )
 
-    error_message: Optional[str] = Field(
+    error_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="Detailed error message"
+        description="Detailed error message",
     )
 
     # Retry information
@@ -51,100 +51,100 @@ class ModelDeadLetterQueueEntry(BaseModel):
         default=0,
         ge=0,
         le=10,
-        description="Number of times processing has been retried"
+        description="Number of times processing has been retried",
     )
 
     max_retries: int = Field(
         default=3,
         ge=0,
         le=10,
-        description="Maximum number of retries allowed"
+        description="Maximum number of retries allowed",
     )
 
-    next_retry_at: Optional[datetime] = Field(
+    next_retry_at: datetime | None = Field(
         default=None,
-        description="When the next retry should be attempted"
+        description="When the next retry should be attempted",
     )
 
-    last_retry_at: Optional[datetime] = Field(
+    last_retry_at: datetime | None = Field(
         default=None,
-        description="When the last retry was attempted"
+        description="When the last retry was attempted",
     )
 
     # Circuit breaker context
     circuit_breaker_state_when_failed: str = Field(
         pattern="^(CLOSED|HALF_OPEN|OPEN)$",
-        description="Circuit breaker state when the event failed"
+        description="Circuit breaker state when the event failed",
     )
 
     failure_count_when_failed: int = Field(
         ge=0,
-        description="Circuit breaker failure count when this event failed"
+        description="Circuit breaker failure count when this event failed",
     )
 
     # Processing context
-    original_publisher_function: Optional[str] = Field(
+    original_publisher_function: str | None = Field(
         default=None,
         max_length=200,
-        description="Name of the publisher function that originally failed"
+        description="Name of the publisher function that originally failed",
     )
 
-    processing_timeout_ms: Optional[float] = Field(
+    processing_timeout_ms: float | None = Field(
         default=None,
         ge=0.0,
-        description="Timeout that was applied when processing failed (milliseconds)"
+        description="Timeout that was applied when processing failed (milliseconds)",
     )
 
     # Queue management
-    queue_position: Optional[int] = Field(
+    queue_position: int | None = Field(
         default=None,
         ge=0,
-        description="Position in the dead letter queue (for ordering)"
+        description="Position in the dead letter queue (for ordering)",
     )
 
-    expires_at: Optional[datetime] = Field(
+    expires_at: datetime | None = Field(
         default=None,
-        description="When this entry expires and should be removed from queue"
+        description="When this entry expires and should be removed from queue",
     )
 
     # Resolution tracking
     resolved: bool = Field(
         default=False,
-        description="Whether this entry has been successfully processed"
+        description="Whether this entry has been successfully processed",
     )
 
-    resolved_at: Optional[datetime] = Field(
+    resolved_at: datetime | None = Field(
         default=None,
-        description="When this entry was successfully processed"
+        description="When this entry was successfully processed",
     )
 
-    resolved_by: Optional[str] = Field(
+    resolved_by: str | None = Field(
         default=None,
         max_length=100,
-        description="How this entry was resolved (retry_success, manual_intervention, etc.)"
+        description="How this entry was resolved (retry_success, manual_intervention, etc.)",
     )
 
     # Metadata
-    environment: Optional[str] = Field(
+    environment: str | None = Field(
         default=None,
         max_length=50,
-        description="Environment where the failure occurred"
+        description="Environment where the failure occurred",
     )
 
-    service_version: Optional[str] = Field(
+    service_version: str | None = Field(
         default=None,
         max_length=50,
-        description="Version of the service when failure occurred"
+        description="Version of the service when failure occurred",
     )
 
-    additional_context: Optional[str] = Field(
+    additional_context: str | None = Field(
         default=None,
         max_length=1000,
-        description="Additional context about the failure"
+        description="Additional context about the failure",
     )
 
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v)
+            UUID: lambda v: str(v),
         }

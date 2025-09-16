@@ -5,11 +5,14 @@ Tests the security-critical SQL query sanitization functionality used
 for OpenTelemetry trace attributes to prevent sensitive data leakage.
 """
 
-import pytest
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 
-from src.omnibase_infra.nodes.node_distributed_tracing_compute.v1_0_0.utils.sql_sanitizer import SqlSanitizer
+import pytest
 from omnibase_core.exceptions.base_onex_error import OnexError
+
+from src.omnibase_infra.nodes.node_distributed_tracing_compute.v1_0_0.utils.sql_sanitizer import (
+    SqlSanitizer,
+)
 
 
 class TestSqlSanitizer:
@@ -137,7 +140,7 @@ class TestSqlSanitizer:
         assert "SELECT" in result
         # The UPDATE might not be included if sqlparse only processes first statement
 
-    @patch('src.omnibase_infra.nodes.node_distributed_tracing_compute.v1_0_0.utils.sql_sanitizer.sqlparse.parse')
+    @patch("src.omnibase_infra.nodes.node_distributed_tracing_compute.v1_0_0.utils.sql_sanitizer.sqlparse.parse")
     def test_sqlparse_failure_handling(self, mock_parse):
         """Test handling when sqlparse fails to parse query."""
         mock_parse.side_effect = Exception("Parse error")
@@ -163,7 +166,7 @@ class TestSqlSanitizer:
         """Test the _is_sensitive_literal helper method."""
         # This is a white-box test to ensure the token detection works
         # In practice, this would require mocking sqlparse tokens
-        pass  # Implementation would need sqlparse token mocks
+        # Implementation would need sqlparse token mocks
 
     def test_sql_keywords_set_completeness(self):
         """Test that the SQL keywords set contains expected keywords."""
@@ -171,8 +174,8 @@ class TestSqlSanitizer:
 
         # Test a few critical keywords
         expected_keywords = {
-            'SELECT', 'FROM', 'WHERE', 'INSERT', 'UPDATE', 'DELETE',
-            'JOIN', 'GROUP', 'ORDER', 'HAVING', 'LIMIT'
+            "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
+            "JOIN", "GROUP", "ORDER", "HAVING", "LIMIT",
         }
 
         assert expected_keywords.issubset(keywords)

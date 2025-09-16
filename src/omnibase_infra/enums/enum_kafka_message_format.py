@@ -5,7 +5,7 @@ from enum import Enum
 
 class EnumKafkaMessageFormat(str, Enum):
     """Kafka message format enumeration."""
-    
+
     JSON = "json"
     AVRO = "avro"
     PROTOBUF = "protobuf"

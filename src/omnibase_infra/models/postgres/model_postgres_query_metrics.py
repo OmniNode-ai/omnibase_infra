@@ -1,6 +1,5 @@
 """PostgreSQL query execution metrics model."""
 
-from typing import Optional
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -18,4 +17,4 @@ class ModelPostgresQueryMetrics(BaseModel):
     connection_info: ModelPostgresConnectionId = Field(description="Connection information")
     timestamp: datetime = Field(description="Timestamp of query execution")
     was_successful: bool = Field(description="Whether query executed successfully")
-    error: Optional[ModelPostgresError] = Field(default=None, description="Error details if query failed")
+    error: ModelPostgresError | None = Field(default=None, description="Error details if query failed")
