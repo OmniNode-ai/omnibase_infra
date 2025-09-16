@@ -10,10 +10,11 @@ to prevent SSRF attacks.
 
 from typing import Dict, Optional, Union, List
 from pydantic import Json
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
 from omnibase_infra.models.notification.model_notification_retry_policy import ModelNotificationRetryPolicy
+from omnibase_infra.models.webhook.model_webhook_payload import ModelWebhookPayloadUnion
 
 
 class ModelNotificationRequest(BaseModel):
@@ -47,9 +48,9 @@ class ModelNotificationRequest(BaseModel):
         description="Optional HTTP headers to include with the request"
     )
 
-    payload: Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]], Dict[str, Union[str, int, float, bool]]]] = Field(
+    payload: ModelWebhookPayloadUnion = Field(
         ...,
-        description="JSON payload to send in the notification body - supports nested JSON structures with strongly typed values"
+        description="Strongly-typed webhook payload with agent-safe validation"
     )
 
     auth: Optional[ModelNotificationAuth] = Field(
@@ -62,14 +63,11 @@ class ModelNotificationRequest(BaseModel):
         description="Optional retry policy for failed deliveries"
     )
 
-    class Config:
-        """Pydantic configuration."""
-        frozen = True
-        extra = "forbid"
-        use_enum_values = True
-        json_encoders = {
-            HttpUrl: str
-        }
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        use_enum_values=True
+    )
 
     def model_post_init(self, __context: Optional[Dict[str, Union[str, int, bool]]]) -> None:
         """Post-initialization validation."""

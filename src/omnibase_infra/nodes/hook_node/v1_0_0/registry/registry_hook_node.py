@@ -60,7 +60,7 @@ class HookNodeRegistry:
             )
 
         # Register Hook Node service itself
-        container.register_singleton("NodeHookEffect", lambda c: NodeHookEffect(c))
+        container.register_service("NodeHookEffect", lambda c: NodeHookEffect(c))
 
     @staticmethod
     def get_service_metadata() -> Dict[str, Union[str, List[Dict[str, Union[str, bool]]], List[str]]]:

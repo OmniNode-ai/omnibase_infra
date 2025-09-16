@@ -225,8 +225,8 @@ definitions:
             type: "string"
           description: "HTTP headers to include with the request"
         payload:
-          type: "object"
-          description: "Arbitrary JSON payload. Acknowledged exception to 'no-Any' rule for generic webhooks."
+          $ref: "#/definitions/models/ModelWebhookPayloadUnion"
+          description: "Strongly-typed webhook payload with agent-safe validation"
         auth:
           $ref: "#/definitions/models/ModelNotificationAuth"
           nullable: true
@@ -334,6 +334,118 @@ definitions:
           type: "integer"
           description: "Total number of attempts made"
       required: ["is_success", "attempts", "total_attempts"]
+
+    # --- Webhook Payload Models (Agent-Safe) ---
+    ModelWebhookPayloadUnion:
+      oneOf:
+        - $ref: "#/definitions/models/ModelSlackWebhookPayload"
+        - $ref: "#/definitions/models/ModelDiscordWebhookPayload"
+        - $ref: "#/definitions/models/ModelTeamsWebhookPayload"
+        - $ref: "#/definitions/models/ModelInfrastructureAlertPayload"
+      description: "Union of strongly-typed webhook payloads for agent-safe execution"
+
+    ModelSlackWebhookPayload:
+      type: "object"
+      description: "Slack-specific webhook payload with strict typing"
+      properties:
+        webhook_type:
+          type: "string"
+          enum: ["slack"]
+          default: "slack"
+        text:
+          type: "string"
+          description: "Primary message text"
+        channel:
+          type: "string"
+          nullable: true
+          description: "Target Slack channel"
+        username:
+          type: "string"
+          nullable: true
+          description: "Bot username override"
+        icon_emoji:
+          type: "string"
+          nullable: true
+          description: "Bot emoji icon"
+      required: ["text"]
+
+    ModelDiscordWebhookPayload:
+      type: "object"
+      description: "Discord-specific webhook payload with strict typing"
+      properties:
+        webhook_type:
+          type: "string"
+          enum: ["discord"]
+          default: "discord"
+        content:
+          type: "string"
+          description: "Primary message content"
+        username:
+          type: "string"
+          nullable: true
+          description: "Bot username override"
+        avatar_url:
+          type: "string"
+          nullable: true
+          description: "Bot avatar URL"
+      required: ["content"]
+
+    ModelTeamsWebhookPayload:
+      type: "object"
+      description: "Microsoft Teams webhook payload with strict typing"
+      properties:
+        webhook_type:
+          type: "string"
+          enum: ["teams"]
+          default: "teams"
+        summary:
+          type: "string"
+          description: "Message summary"
+        text:
+          type: "string"
+          description: "Message content"
+        title:
+          type: "string"
+          nullable: true
+          description: "Message title"
+        theme_color:
+          type: "string"
+          nullable: true
+          description: "Theme color (hex)"
+      required: ["summary", "text"]
+
+    ModelInfrastructureAlertPayload:
+      type: "object"
+      description: "Infrastructure alert payload for ONEX systems"
+      properties:
+        webhook_type:
+          type: "string"
+          enum: ["infrastructure_alert"]
+          default: "infrastructure_alert"
+        alert_level:
+          type: "string"
+          enum: ["info", "warning", "critical"]
+          description: "Alert severity level"
+        service_name:
+          type: "string"
+          description: "Service generating the alert"
+        alert_message:
+          type: "string"
+          description: "Primary alert message"
+        node_id:
+          type: "string"
+          nullable: true
+          description: "ONEX node identifier"
+        correlation_id:
+          type: "string"
+          nullable: true
+          description: "Request correlation ID"
+        timestamp:
+          type: "string"
+          format: "date-time"
+          nullable: true
+          description: "Alert timestamp"
+      required: ["alert_level", "service_name", "alert_message"]
 
   enums:
     EnumNotificationMethod:
