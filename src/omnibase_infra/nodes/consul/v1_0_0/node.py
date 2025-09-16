@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 
 import asyncio
-import json
 import logging
 import os
-from pathlib import Path
-from typing import Callable, Dict, List, Optional
 
-from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
 from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
 from omnibase_core.models.core.model_health_status import ModelHealthStatus
+
 from omnibase_infra.nodes.consul.v1_0_0.models import (
     ModelConsulAdapterInput,
     ModelConsulAdapterOutput,
@@ -45,7 +43,7 @@ class MockConsulClient:
                     "Config": {
                         "NodeName": "mock-consul-node",
                         "Datacenter": self.client.config.get("datacenter", "dc1"),
-                    }
+                    },
                 }
 
             def services(self):
@@ -98,12 +96,11 @@ class MockConsulClient:
                     for k in keys_to_delete:
                         del self.client.kv_store[k]
                     return True
-                else:
-                    # Delete single key
-                    if key in self.client.kv_store:
-                        del self.client.kv_store[key]
-                        return True
-                    return False
+                # Delete single key
+                if key in self.client.kv_store:
+                    del self.client.kv_store[key]
+                    return True
+                return False
 
         class MockHealth:
             def __init__(self, client):
@@ -116,9 +113,9 @@ class MockConsulClient:
                         "Node": {"Node": "mock-node"},
                         "Service": {"ID": service_name, "Service": service_name},
                         "Checks": [
-                            {"Status": "passing", "CheckID": "service:" + service_name}
+                            {"Status": "passing", "CheckID": "service:" + service_name},
                         ],
-                    }
+                    },
                 ]
 
             def state(self, state):
@@ -128,7 +125,7 @@ class MockConsulClient:
                         "ServiceName": "consul",
                         "Status": "passing",
                         "CheckID": "serfHealth",
-                    }
+                    },
                 ]
 
         self.agent = MockAgent(self)
@@ -143,7 +140,7 @@ class ConsulConnectionPool:
     Prevents bottlenecks by maintaining multiple consul client connections
     for high-throughput operations. Implements proper cleanup and health monitoring.
     """
-    
+
     def __init__(self, config: dict, max_connections: int = 10, cleanup_interval: int = 300):
         self._config = config
         self._max_connections = max_connections
@@ -153,18 +150,18 @@ class ConsulConnectionPool:
         self._connection_usage = {}  # Dict[str, int] - track usage count
         self._last_cleanup = 0
         self._logger = logging.getLogger(__name__)
-        
+
         # Background cleanup task
         self._cleanup_task = None
         self._start_background_cleanup()
-    
+
     def _start_background_cleanup(self):
         """Start background cleanup task with proper resource management."""
         # Cancel existing task before creating new one to prevent resource leaks
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
         self._cleanup_task = asyncio.create_task(self._background_cleanup_loop())
-    
+
     async def _background_cleanup_loop(self):
         """Background loop for periodic cleanup."""
         try:
@@ -175,37 +172,37 @@ class ConsulConnectionPool:
             self._logger.info("Consul connection pool cleanup task cancelled")
         except Exception as e:
             self._logger.error(f"Consul connection pool cleanup error: {e}")
-    
+
     async def _cleanup_idle_connections(self):
         """Clean up idle and unhealthy connections."""
         connections_to_remove = []
-        
+
         for conn_key, client in self._connections.items():
             # Check if connection is still healthy
             if not await self._is_connection_healthy(client):
                 connections_to_remove.append(conn_key)
                 continue
-            
+
             # Remove low-usage connections if pool is at capacity
             if (len(self._connections) > self._max_connections // 2 and
                 self._connection_usage.get(conn_key, 0) < 5):  # Low usage threshold
                 connections_to_remove.append(conn_key)
-        
+
         # Clean up selected connections
         for conn_key in connections_to_remove:
             await self._remove_connection(conn_key)
-    
+
     async def _is_connection_healthy(self, client) -> bool:
         """Check if a Consul connection is still healthy."""
         try:
             # Test basic connectivity with agent self check
-            if hasattr(client, 'agent') and hasattr(client.agent, 'self'):
+            if hasattr(client, "agent") and hasattr(client.agent, "self"):
                 client.agent.self()
                 return True
             return False
         except Exception:
             return False
-    
+
     async def _remove_connection(self, conn_key: str):
         """Safely remove a connection from the pool."""
         if conn_key in self._connections:
@@ -217,17 +214,17 @@ class ConsulConnectionPool:
                 self._logger.debug(f"Removed Consul connection: {conn_key}")
             except Exception as e:
                 self._logger.error(f"Error removing Consul connection: {e}")
-    
+
     def get_client(self):
         """Get a Consul client from the pool or create a new one."""
         # Create connection key based on config
         conn_key = f"{self._config['host']}:{self._config['port']}:{self._config['datacenter']}"
-        
+
         # Return existing connection if available
         if conn_key in self._connections:
             self._connection_usage[conn_key] = self._connection_usage.get(conn_key, 0) + 1
             return self._connections[conn_key]
-        
+
         # Check if we should create new connection (not at max capacity and no recent failures)
         if (len(self._connections) >= self._max_connections or
             conn_key in self._failed_connections):
@@ -237,31 +234,31 @@ class ConsulConnectionPool:
                 self._connection_usage[least_used_key] += 1
                 return self._connections[least_used_key]
             return None
-        
+
         # Create new connection
         try:
             import consul as python_consul
-            
+
             client = python_consul.Consul(
                 host=self._config["host"],
                 port=self._config["port"],
                 dc=self._config["datacenter"],
             )
-            
+
             # Test connection
             client.agent.self()
-            
+
             # Add to pool
             self._connections[conn_key] = client
             self._connection_usage[conn_key] = 1
-            
+
             # Clear failure tracking on success
             if conn_key in self._failed_connections:
                 del self._failed_connections[conn_key]
-            
+
             self._logger.info(f"Created new Consul connection in pool: {conn_key}")
             return client
-            
+
         except ImportError:
             self._logger.warning("python-consul library not available, connection pool disabled")
             return None
@@ -270,13 +267,13 @@ class ConsulConnectionPool:
             # Track failure for backoff
             self._failed_connections[conn_key] = asyncio.get_event_loop().time()
             return None
-    
+
     async def close_all(self):
         """Close all connections in the pool and cleanup resources."""
         # Cancel background cleanup task
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
-        
+
         # Clear all connections (Consul client doesn't need explicit cleanup)
         self._connections.clear()
         self._connection_usage.clear()
@@ -302,7 +299,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
         # ONEX logger initialization with fallback
         try:
             self.logger = getattr(container, "get_tool", lambda x: None)(
-                "LOGGER"
+                "LOGGER",
             ) or logging.getLogger(__name__)
         except (AttributeError, Exception):
             self.logger = logging.getLogger(__name__)
@@ -362,22 +359,22 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             self.consul_connection_pool = ConsulConnectionPool(
                 config=self.consul_config,
                 max_connections=10,  # Configurable pool size
-                cleanup_interval=300  # 5 minute cleanup interval
+                cleanup_interval=300,  # 5 minute cleanup interval
             )
-            
+
             # Get initial client from pool (will create pool and test connection)
             self.consul_client = self.consul_connection_pool.get_client()
-            
+
             if self.consul_client is None:
                 # Fallback to mock client for basic functionality
                 self.logger.warning(
-                    "Failed to create Consul connection pool, using mock client"
+                    "Failed to create Consul connection pool, using mock client",
                 )
                 self.consul_client = MockConsulClient(self.consul_config)
 
             # Test connection - skip for mock client
             # Protocol-based duck typing: Check if it's NOT a mock client (ONEX compliance)
-            if not (hasattr(self.consul_client, 'kv_store') and hasattr(self.consul_client, 'services') and hasattr(self.consul_client, 'config')):
+            if not (hasattr(self.consul_client, "kv_store") and hasattr(self.consul_client, "services") and hasattr(self.consul_client, "config")):
                 # Test connection with health check
                 health_status = self.health_check()
                 if health_status.status == EnumHealthStatus.UNREACHABLE:
@@ -391,7 +388,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
 
             self._initialized = True
             self.logger.info(
-                "Consul client initialized successfully with event handlers"
+                "Consul client initialized successfully with event handlers",
             )
 
         except Exception as e:
@@ -462,7 +459,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             elif consul_input.action == "consul_kv_delete":
                 if consul_input.key_path:
                     result = await self.effect_kv_delete(
-                        consul_input.key_path, recurse=consul_input.recurse or False
+                        consul_input.key_path, recurse=consul_input.recurse or False,
                     )
                 else:
                     raise OnexError(
@@ -476,7 +473,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                         name=consul_input.service_config.service_name,
                         port=consul_input.service_config.port,
                         address=consul_input.service_config.address,
-                        health_check=None  # Will be handled separately if needed
+                        health_check=None,  # Will be handled separately if needed
                     )
                     result = await self.effect_service_register(service_data)
                 else:
@@ -487,7 +484,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             elif consul_input.action == "consul_service_deregister":
                 if consul_input.service_config and consul_input.service_config.service_id:
                     result = await self.effect_service_deregister(
-                        consul_input.service_config.service_id
+                        consul_input.service_config.service_id,
                     )
                 else:
                     raise OnexError(
@@ -498,7 +495,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 result = await self.effect_health_check(
                     consul_input.service_config.service_name
                     if consul_input.service_config
-                    else None
+                    else None,
                 )
             else:
                 raise OnexError(
@@ -592,7 +589,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             self.logger.error(f"Consul health check failed: {e}")
             return ModelHealthStatus(
                 status=EnumHealthStatus.UNREACHABLE,
-                message=f"Consul server unreachable: {str(e)}",
+                message=f"Consul server unreachable: {e!s}",
             )
 
     async def effect_kv_get(self, key: str) -> ModelConsulKVResponse:
@@ -653,7 +650,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             ) from e
 
     async def effect_kv_delete(
-        self, key: str, recurse: bool = False
+        self, key: str, recurse: bool = False,
     ) -> ModelConsulKVResponse:
         """Delete key(s) from Consul KV store"""
         try:
@@ -677,7 +674,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             ) from e
 
     async def effect_service_register(
-        self, service_data: ModelConsulServiceRegistration
+        self, service_data: ModelConsulServiceRegistration,
     ) -> ModelConsulServiceResponse:
         """Register service with Consul"""
         try:
@@ -724,7 +721,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             ) from e
 
     async def effect_service_deregister(
-        self, service_id: str
+        self, service_id: str,
     ) -> ModelConsulServiceResponse:
         """Deregister service from Consul"""
         try:
@@ -755,7 +752,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
 
         except Exception as e:
             self.logger.error(
-                f"Consul service deregistration failed for {service_id}: {e}"
+                f"Consul service deregistration failed for {service_id}: {e}",
             )
             raise OnexError(
                 message=f"Service deregistration failed: {e}",
@@ -780,7 +777,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                         port=service_info.get("Port", 0),
                         address=service_info.get("Address", ""),
                         tags=service_info.get("Tags", []),
-                    )
+                    ),
                 )
 
             return ModelConsulServiceListResponse(
@@ -797,7 +794,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             ) from e
 
     async def effect_health_check(
-        self, service_name: Optional[str] = None
+        self, service_name: str | None = None,
     ) -> ModelConsulHealthResponse:
         """Get health check status from Consul"""
         try:
@@ -807,7 +804,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
             if service_name:
                 # Get health for specific service
                 index, checks = self.consul_client.health.service(
-                    service_name, passing=None
+                    service_name, passing=None,
                 )
 
                 health_status = []
@@ -829,7 +826,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                             service_id=service.get("ID"),
                             service_name=service.get("Service"),
                             status=overall_status,
-                        )
+                        ),
                     )
 
                 return ModelConsulHealthResponse(
@@ -837,26 +834,25 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                     service_name=service_name,
                     health_checks=health_status,
                 )
-            else:
-                # Get all health checks
-                index, checks = self.consul_client.health.state("any")
+            # Get all health checks
+            index, checks = self.consul_client.health.state("any")
 
-                health_summary = {}
-                for check in checks:
-                    service_name_key = check.get("ServiceName", "consul")
-                    status = check.get("Status", "unknown")
+            health_summary = {}
+            for check in checks:
+                service_name_key = check.get("ServiceName", "consul")
+                status = check.get("Status", "unknown")
 
-                    if service_name_key not in health_summary:
-                        health_summary[service_name_key] = {}
+                if service_name_key not in health_summary:
+                    health_summary[service_name_key] = {}
 
-                    health_summary[service_name_key][
-                        check.get("CheckID", "unknown")
-                    ] = status
+                health_summary[service_name_key][
+                    check.get("CheckID", "unknown")
+                ] = status
 
-                return ModelConsulHealthResponse(
-                    status="success",
-                    health_summary=health_summary,
-                )
+            return ModelConsulHealthResponse(
+                status="success",
+                health_summary=health_summary,
+            )
 
         except Exception as e:
             self.logger.error(f"Consul health check failed: {e}")
@@ -874,8 +870,8 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
         """
 
         async def consul_operation_handler(
-            operation_data: Dict[str, object],
-            transaction: Optional[object] = None,
+            operation_data: dict[str, object],
+            transaction: object | None = None,
         ) -> dict:
             """Handle consul operations through events."""
             try:
@@ -900,7 +896,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 elif consul_input.action == "consul_kv_delete":
                     if consul_input.key_path:
                         result = await self.effect_kv_delete(
-                            consul_input.key_path, recurse=consul_input.recurse or False
+                            consul_input.key_path, recurse=consul_input.recurse or False,
                         )
                     else:
                         raise OnexError(
@@ -914,7 +910,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                             name=consul_input.service_config.service_name,
                             port=consul_input.service_config.port,
                             address=consul_input.service_config.address,
-                            health_check=None  # Will be handled separately if needed
+                            health_check=None,  # Will be handled separately if needed
                         )
                         result = await self.effect_service_register(service_data)
                     else:
@@ -925,7 +921,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                 elif consul_input.action == "consul_service_deregister":
                     if consul_input.service_config and consul_input.service_config.service_id:
                         result = await self.effect_service_deregister(
-                            consul_input.service_config.service_id
+                            consul_input.service_config.service_id,
                         )
                     else:
                         raise OnexError(
@@ -936,7 +932,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
                     result = await self.effect_health_check(
                         consul_input.service_config.service_name
                         if consul_input.service_config
-                        else None
+                        else None,
                     )
                 else:
                     raise OnexError(
@@ -961,7 +957,7 @@ class NodeInfrastructureConsulAdapterEffect(NodeEffectService):
 
         # Effect handlers registration removed - using direct process method override
         self.logger.info(
-            "Consul effect handlers ready for event-driven processing"
+            "Consul effect handlers ready for event-driven processing",
         )
 
 

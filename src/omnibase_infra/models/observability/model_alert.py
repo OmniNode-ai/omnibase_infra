@@ -4,10 +4,11 @@ Shared model for infrastructure alerts and notifications.
 Used across observability infrastructure for alert management.
 """
 
-from enum import Enum
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
 from .model_alert_details import ModelAlertDetails
 
 
@@ -21,67 +22,67 @@ class AlertSeverityEnum(str, Enum):
 
 class ModelAlert(BaseModel):
     """Model for infrastructure alerts."""
-    
+
     id: str = Field(
-        description="Unique alert identifier"
+        description="Unique alert identifier",
     )
-    
+
     name: str = Field(
-        description="Alert name/title"
+        description="Alert name/title",
     )
-    
+
     description: str = Field(
-        description="Detailed alert description"
+        description="Detailed alert description",
     )
-    
+
     severity: AlertSeverityEnum = Field(
-        description="Alert severity level"
+        description="Alert severity level",
     )
-    
+
     timestamp: datetime = Field(
-        description="Alert creation timestamp"
+        description="Alert creation timestamp",
     )
-    
+
     source: str = Field(
-        description="Source component that generated the alert"
+        description="Source component that generated the alert",
     )
-    
+
     resolved: bool = Field(
         default=False,
-        description="Whether the alert has been resolved"
+        description="Whether the alert has been resolved",
     )
-    
-    resolution_timestamp: Optional[datetime] = Field(
+
+    resolution_timestamp: datetime | None = Field(
         default=None,
-        description="Alert resolution timestamp"
+        description="Alert resolution timestamp",
     )
-    
-    details: Optional[ModelAlertDetails] = Field(
+
+    details: ModelAlertDetails | None = Field(
         default=None,
-        description="Additional alert details and context"
+        description="Additional alert details and context",
     )
-    
-    environment: Optional[str] = Field(
+
+    environment: str | None = Field(
         default=None,
-        description="Environment where alert was generated"
+        description="Environment where alert was generated",
     )
-    
-    threshold_value: Optional[float] = Field(
+
+    threshold_value: float | None = Field(
         default=None,
-        description="Threshold value that triggered the alert"
+        description="Threshold value that triggered the alert",
     )
-    
-    current_value: Optional[float] = Field(
+
+    current_value: float | None = Field(
         default=None,
-        description="Current metric value when alert was triggered"
+        description="Current metric value when alert was triggered",
     )
-    
-    alert_rule: Optional[str] = Field(
+
+    alert_rule: str | None = Field(
         default=None,
-        description="Alert rule that triggered this alert"
+        description="Alert rule that triggered this alert",
     )
 
     class Config:
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat(),
         }

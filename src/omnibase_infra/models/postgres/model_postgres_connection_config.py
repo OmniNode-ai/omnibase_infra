@@ -1,7 +1,6 @@
 """PostgreSQL connection configuration model."""
 
 import os
-from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -20,21 +19,21 @@ class ModelPostgresConnectionConfig(BaseModel):
     min_connections: int = Field(default=5, description="Minimum pool connections")
     max_connections: int = Field(default=50, description="Maximum pool connections")
     max_inactive_connection_lifetime: float = Field(
-        default=300.0, description="Max inactive connection lifetime in seconds"
+        default=300.0, description="Max inactive connection lifetime in seconds",
     )
     max_queries: int = Field(default=50000, description="Maximum queries per connection")
 
     # Connection timeouts
     command_timeout: float = Field(default=60.0, description="Command timeout in seconds")
-    server_settings: Optional[Dict[str, str]] = Field(
-        default=None, description="Additional server settings"
+    server_settings: dict[str, str] | None = Field(
+        default=None, description="Additional server settings",
     )
 
     # SSL configuration
     ssl_mode: str = Field(default="prefer", description="SSL mode")
-    ssl_cert_file: Optional[str] = Field(default=None, description="SSL certificate file")
-    ssl_key_file: Optional[str] = Field(default=None, description="SSL key file")
-    ssl_ca_file: Optional[str] = Field(default=None, description="SSL CA file")
+    ssl_cert_file: str | None = Field(default=None, description="SSL certificate file")
+    ssl_key_file: str | None = Field(default=None, description="SSL key file")
+    ssl_ca_file: str | None = Field(default=None, description="SSL CA file")
 
     @classmethod
     def from_environment(cls) -> "ModelPostgresConnectionConfig":
@@ -49,7 +48,7 @@ class ModelPostgresConnectionConfig(BaseModel):
             min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS", "5")),
             max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS", "50")),
             max_inactive_connection_lifetime=float(
-                os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME", "300.0")
+                os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME", "300.0"),
             ),
             command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT", "60.0")),
             ssl_mode=os.getenv("POSTGRES_SSL_MODE", "prefer"),

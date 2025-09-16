@@ -4,8 +4,8 @@ Strongly-typed model for OpenTelemetry parent context.
 Replaces Dict[str, Any] usage to maintain ONEX compliance.
 """
 
+
 from pydantic import BaseModel, Field
-from typing import Optional
 
 
 class ModelParentContext(BaseModel):
@@ -15,13 +15,13 @@ class ModelParentContext(BaseModel):
     trace_id: str = Field(
         min_length=32,
         max_length=32,
-        description="OpenTelemetry trace ID (32 hex characters)"
+        description="OpenTelemetry trace ID (32 hex characters)",
     )
 
     span_id: str = Field(
         min_length=16,
         max_length=16,
-        description="OpenTelemetry span ID (16 hex characters)"
+        description="OpenTelemetry span ID (16 hex characters)",
     )
 
     # Trace flags
@@ -29,96 +29,96 @@ class ModelParentContext(BaseModel):
         default=1,
         ge=0,
         le=255,
-        description="OpenTelemetry trace flags (8-bit value)"
+        description="OpenTelemetry trace flags (8-bit value)",
     )
 
     # Sampling decision
     is_sampled: bool = Field(
         default=True,
-        description="Whether this trace is sampled"
+        description="Whether this trace is sampled",
     )
 
     # Trace state (W3C format)
-    trace_state: Optional[str] = Field(
+    trace_state: str | None = Field(
         default=None,
         max_length=512,
-        description="W3C trace state header value"
+        description="W3C trace state header value",
     )
 
     # Parent span information
-    parent_span_name: Optional[str] = Field(
+    parent_span_name: str | None = Field(
         default=None,
         max_length=200,
-        description="Name of the parent span"
+        description="Name of the parent span",
     )
 
-    parent_service_name: Optional[str] = Field(
+    parent_service_name: str | None = Field(
         default=None,
         max_length=100,
-        description="Name of the service that created the parent span"
+        description="Name of the service that created the parent span",
     )
 
-    parent_service_version: Optional[str] = Field(
+    parent_service_version: str | None = Field(
         default=None,
         max_length=50,
-        description="Version of the parent service"
+        description="Version of the parent service",
     )
 
     # Context propagation
-    propagation_format: Optional[str] = Field(
+    propagation_format: str | None = Field(
         default=None,
         pattern="^(w3c|b3|jaeger|opencensus)$",
-        description="Context propagation format used"
+        description="Context propagation format used",
     )
 
     # Remote context indicator
     is_remote: bool = Field(
         default=False,
-        description="Whether this is a remote parent context"
+        description="Whether this is a remote parent context",
     )
 
     # Timing information
-    parent_start_time: Optional[str] = Field(
+    parent_start_time: str | None = Field(
         default=None,
-        description="ISO timestamp when parent span started"
+        description="ISO timestamp when parent span started",
     )
 
     # Baggage (OpenTelemetry baggage)
-    baggage_count: Optional[int] = Field(
+    baggage_count: int | None = Field(
         default=None,
         ge=0,
         le=100,
-        description="Number of baggage items"
+        description="Number of baggage items",
     )
 
     # Debug information
-    debug_enabled: Optional[bool] = Field(
+    debug_enabled: bool | None = Field(
         default=None,
-        description="Whether debug tracing is enabled"
+        description="Whether debug tracing is enabled",
     )
 
-    force_sampling: Optional[bool] = Field(
+    force_sampling: bool | None = Field(
         default=None,
-        description="Whether sampling should be forced for this trace"
+        description="Whether sampling should be forced for this trace",
     )
 
     # Priority information
-    priority: Optional[int] = Field(
+    priority: int | None = Field(
         default=None,
         ge=0,
         le=10,
-        description="Trace priority level (0-10)"
+        description="Trace priority level (0-10)",
     )
 
     # Environment context
-    environment: Optional[str] = Field(
+    environment: str | None = Field(
         default=None,
         max_length=50,
-        description="Environment where parent span was created"
+        description="Environment where parent span was created",
     )
 
-    cluster: Optional[str] = Field(
+    cluster: str | None = Field(
         default=None,
         max_length=100,
-        description="Cluster where parent span was created"
+        description="Cluster where parent span was created",
     )

@@ -4,182 +4,182 @@ Strongly-typed model for audit event details to replace Dict[str, Any] usage.
 Maintains ONEX compliance with proper field validation and security measures.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List, Union
 from datetime import datetime
 from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 
 class ModelAuditDetails(BaseModel):
     """Model for audit event details with comprehensive typing."""
 
     # Request/Response information
-    request_id: Optional[str] = Field(
+    request_id: str | None = Field(
         default=None,
         max_length=100,
-        description="Request identifier"
+        description="Request identifier",
     )
 
-    response_status: Optional[int] = Field(
+    response_status: int | None = Field(
         default=None,
         ge=100,
         le=599,
-        description="HTTP response status code"
+        description="HTTP response status code",
     )
 
-    response_time_ms: Optional[float] = Field(
+    response_time_ms: float | None = Field(
         default=None,
         ge=0.0,
-        description="Response time in milliseconds"
+        description="Response time in milliseconds",
     )
 
     # Resource information
-    resource_id: Optional[str] = Field(
+    resource_id: str | None = Field(
         default=None,
         max_length=200,
-        description="Identifier of the affected resource"
+        description="Identifier of the affected resource",
     )
 
-    resource_type: Optional[str] = Field(
+    resource_type: str | None = Field(
         default=None,
         max_length=100,
-        description="Type of resource being accessed"
+        description="Type of resource being accessed",
     )
 
-    resource_path: Optional[str] = Field(
+    resource_path: str | None = Field(
         default=None,
         max_length=500,
-        description="Path to the resource"
+        description="Path to the resource",
     )
 
     # Authentication/Authorization information
-    user_id: Optional[str] = Field(
+    user_id: str | None = Field(
         default=None,
         max_length=100,
-        description="User identifier (non-sensitive)"
+        description="User identifier (non-sensitive)",
     )
 
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         default=None,
         max_length=100,
-        description="Session identifier (hashed)"
+        description="Session identifier (hashed)",
     )
 
-    permissions_checked: Optional[List[str]] = Field(
+    permissions_checked: list[str] | None = Field(
         default=None,
         max_items=50,
-        description="List of permissions that were verified"
+        description="List of permissions that were verified",
     )
 
-    authentication_method: Optional[str] = Field(
+    authentication_method: str | None = Field(
         default=None,
         max_length=50,
-        description="Authentication method used"
+        description="Authentication method used",
     )
 
     # Operation details
-    operation_name: Optional[str] = Field(
+    operation_name: str | None = Field(
         default=None,
         max_length=100,
-        description="Name of the operation performed"
+        description="Name of the operation performed",
     )
 
-    operation_parameters: Optional[List[str]] = Field(
+    operation_parameters: list[str] | None = Field(
         default=None,
         max_items=20,
-        description="Operation parameters (sanitized)"
+        description="Operation parameters (sanitized)",
     )
 
-    data_modified: Optional[bool] = Field(
+    data_modified: bool | None = Field(
         default=None,
-        description="Whether data was modified by this operation"
+        description="Whether data was modified by this operation",
     )
 
-    records_affected: Optional[int] = Field(
+    records_affected: int | None = Field(
         default=None,
         ge=0,
-        description="Number of records affected"
+        description="Number of records affected",
     )
 
     # Error information
-    error_code: Optional[str] = Field(
+    error_code: str | None = Field(
         default=None,
         max_length=50,
-        description="Error code if operation failed"
+        description="Error code if operation failed",
     )
 
-    error_category: Optional[str] = Field(
+    error_category: str | None = Field(
         default=None,
         max_length=100,
-        description="Category of error"
+        description="Category of error",
     )
 
-    error_context: Optional[str] = Field(
+    error_context: str | None = Field(
         default=None,
         max_length=500,
-        description="Additional error context (sanitized)"
+        description="Additional error context (sanitized)",
     )
 
     # Security relevant information
-    security_violation_type: Optional[str] = Field(
+    security_violation_type: str | None = Field(
         default=None,
         max_length=100,
-        description="Type of security violation detected"
+        description="Type of security violation detected",
     )
 
-    suspicious_activity: Optional[bool] = Field(
+    suspicious_activity: bool | None = Field(
         default=None,
-        description="Whether activity was flagged as suspicious"
+        description="Whether activity was flagged as suspicious",
     )
 
-    threat_level: Optional[str] = Field(
+    threat_level: str | None = Field(
         default=None,
         pattern="^(low|medium|high|critical)$",
-        description="Assessed threat level"
+        description="Assessed threat level",
     )
 
     # Compliance information
-    compliance_requirements: Optional[List[str]] = Field(
+    compliance_requirements: list[str] | None = Field(
         default=None,
         max_items=10,
-        description="Applicable compliance requirements"
+        description="Applicable compliance requirements",
     )
 
-    data_classification: Optional[str] = Field(
+    data_classification: str | None = Field(
         default=None,
         pattern="^(public|internal|confidential|restricted)$",
-        description="Classification of data accessed"
+        description="Classification of data accessed",
     )
 
-    retention_period_days: Optional[int] = Field(
+    retention_period_days: int | None = Field(
         default=None,
         ge=1,
         le=3650,
-        description="Required retention period in days"
+        description="Required retention period in days",
     )
 
     # Additional context
-    environment: Optional[str] = Field(
+    environment: str | None = Field(
         default=None,
         max_length=50,
-        description="Environment where event occurred"
+        description="Environment where event occurred",
     )
 
-    service_version: Optional[str] = Field(
+    service_version: str | None = Field(
         default=None,
         max_length=50,
-        description="Version of the service"
+        description="Version of the service",
     )
 
-    correlation_id: Optional[UUID] = Field(
+    correlation_id: UUID | None = Field(
         default=None,
-        description="Correlation ID for request tracing"
+        description="Correlation ID for request tracing",
     )
 
-    custom_fields: Optional[List[str]] = Field(
+    custom_fields: list[str] | None = Field(
         default=None,
         max_items=10,
-        description="Additional custom field names (values omitted for security)"
+        description="Additional custom field names (values omitted for security)",
     )
 
     class Config:
@@ -198,8 +198,8 @@ class ModelAuditDetails(BaseModel):
                 "data_modified": True,
                 "records_affected": 1,
                 "environment": "production",
-                "data_classification": "confidential"
-            }
+                "data_classification": "confidential",
+            },
         }
 
 
@@ -207,92 +207,92 @@ class ModelAuditMetadata(BaseModel):
     """Model for audit event metadata with comprehensive typing."""
 
     # Processing information
-    processing_node: Optional[str] = Field(
+    processing_node: str | None = Field(
         default=None,
         max_length=100,
-        description="Node that processed this audit event"
+        description="Node that processed this audit event",
     )
 
-    processing_time: Optional[datetime] = Field(
+    processing_time: datetime | None = Field(
         default=None,
-        description="When audit event was processed"
+        description="When audit event was processed",
     )
 
-    batch_id: Optional[str] = Field(
+    batch_id: str | None = Field(
         default=None,
         max_length=100,
-        description="Batch identifier if processed in batch"
+        description="Batch identifier if processed in batch",
     )
 
     # Storage information
-    storage_location: Optional[str] = Field(
+    storage_location: str | None = Field(
         default=None,
         max_length=200,
-        description="Where audit event is stored"
+        description="Where audit event is stored",
     )
 
-    compression_used: Optional[bool] = Field(
+    compression_used: bool | None = Field(
         default=None,
-        description="Whether compression was applied"
+        description="Whether compression was applied",
     )
 
-    encryption_used: Optional[bool] = Field(
+    encryption_used: bool | None = Field(
         default=None,
-        description="Whether encryption was applied"
+        description="Whether encryption was applied",
     )
 
     # Quality information
-    data_quality_score: Optional[float] = Field(
+    data_quality_score: float | None = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="Data quality score (0-1)"
+        description="Data quality score (0-1)",
     )
 
-    completeness_percentage: Optional[float] = Field(
+    completeness_percentage: float | None = Field(
         default=None,
         ge=0.0,
         le=100.0,
-        description="Data completeness percentage"
+        description="Data completeness percentage",
     )
 
-    validation_passed: Optional[bool] = Field(
+    validation_passed: bool | None = Field(
         default=None,
-        description="Whether validation passed"
+        description="Whether validation passed",
     )
 
     # Alerting information
-    alert_triggered: Optional[bool] = Field(
+    alert_triggered: bool | None = Field(
         default=None,
-        description="Whether event triggered an alert"
+        description="Whether event triggered an alert",
     )
 
-    alert_severity: Optional[str] = Field(
+    alert_severity: str | None = Field(
         default=None,
         pattern="^(info|warning|error|critical)$",
-        description="Alert severity level"
+        description="Alert severity level",
     )
 
-    notification_sent: Optional[bool] = Field(
+    notification_sent: bool | None = Field(
         default=None,
-        description="Whether notification was sent"
+        description="Whether notification was sent",
     )
 
     # Archival information
-    archival_required: Optional[bool] = Field(
+    archival_required: bool | None = Field(
         default=None,
-        description="Whether event requires archival"
+        description="Whether event requires archival",
     )
 
-    archival_date: Optional[datetime] = Field(
+    archival_date: datetime | None = Field(
         default=None,
-        description="When event should be archived"
+        description="When event should be archived",
     )
 
-    retention_policy: Optional[str] = Field(
+    retention_policy: str | None = Field(
         default=None,
         max_length=100,
-        description="Applicable retention policy"
+        description="Applicable retention policy",
     )
 
     class Config:
@@ -300,5 +300,5 @@ class ModelAuditMetadata(BaseModel):
         validate_assignment = True
         extra = "forbid"
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat(),
         }

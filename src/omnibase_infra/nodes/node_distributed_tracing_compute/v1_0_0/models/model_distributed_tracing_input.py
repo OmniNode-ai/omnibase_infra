@@ -4,11 +4,11 @@ Node-specific input model for the distributed tracing compute node.
 """
 
 from enum import Enum
-from pydantic import BaseModel, Field
-from typing import Optional
 from uuid import UUID
 
 from omnibase_core.models.core.model_onex_event import ModelOnexEvent
+from pydantic import BaseModel, Field
+
 from omnibase_infra.models.tracing.model_span_attributes import ModelSpanAttributes
 
 
@@ -34,46 +34,46 @@ class SpanKind(str, Enum):
 
 class ModelDistributedTracingInput(BaseModel):
     """Input model for distributed tracing operations."""
-    
+
     operation_type: TracingOperation = Field(
-        description="Type of tracing operation to perform"
+        description="Type of tracing operation to perform",
     )
-    
-    operation_name: Optional[str] = Field(
+
+    operation_name: str | None = Field(
         default=None,
-        description="Name of the operation to trace (required for trace operations)"
+        description="Name of the operation to trace (required for trace operations)",
     )
-    
+
     correlation_id: UUID = Field(
-        description="Correlation ID for the operation"
+        description="Correlation ID for the operation",
     )
-    
-    event: Optional[ModelOnexEvent] = Field(
+
+    event: ModelOnexEvent | None = Field(
         default=None,
-        description="Event for context injection/extraction operations"
+        description="Event for context injection/extraction operations",
     )
-    
+
     span_kind: SpanKind = Field(
         default=SpanKind.INTERNAL,
-        description="OpenTelemetry span kind"
+        description="OpenTelemetry span kind",
     )
-    
-    attributes: Optional[ModelSpanAttributes] = Field(
+
+    attributes: ModelSpanAttributes | None = Field(
         default=None,
-        description="Additional span attributes"
+        description="Additional span attributes",
     )
-    
+
     environment: str = Field(
         default="development",
-        description="Environment configuration (development, staging, production)"
+        description="Environment configuration (development, staging, production)",
     )
-    
-    database_query: Optional[str] = Field(
+
+    database_query: str | None = Field(
         default=None,
-        description="Database query for database tracing operations"
+        description="Database query for database tracing operations",
     )
-    
-    kafka_topic: Optional[str] = Field(
+
+    kafka_topic: str | None = Field(
         default=None,
-        description="Kafka topic for Kafka tracing operations"
+        description="Kafka topic for Kafka tracing operations",
     )

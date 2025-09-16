@@ -5,9 +5,9 @@ from enum import Enum
 
 class EnumPostgresQueryType(str, Enum):
     """PostgreSQL query type enumeration."""
-    
+
     SELECT = "select"
-    INSERT = "insert" 
+    INSERT = "insert"
     UPDATE = "update"
     DELETE = "delete"
     DDL = "ddl"  # Data Definition Language (CREATE, DROP, ALTER, etc.)

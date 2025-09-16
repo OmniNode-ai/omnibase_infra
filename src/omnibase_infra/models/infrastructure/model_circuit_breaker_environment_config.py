@@ -7,82 +7,80 @@ deployment environments (production, staging, development).
 Following ONEX shared model architecture with contract-driven configuration.
 """
 
-from typing import Dict, Optional
-from pydantic import BaseModel, Field, validator
 from enum import Enum
 
-from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.errors.onex_error import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
+from pydantic import BaseModel, Field, validator
 
 
 class EnvironmentType(str, Enum):
     """Supported deployment environments."""
     PRODUCTION = "production"
-    STAGING = "staging" 
+    STAGING = "staging"
     DEVELOPMENT = "development"
 
 
 class ModelCircuitBreakerConfig(BaseModel):
     """Circuit breaker configuration for a specific environment."""
-    
+
     failure_threshold: int = Field(
-        ..., 
-        ge=1, 
-        le=20, 
-        description="Number of failures before opening circuit"
+        ...,
+        ge=1,
+        le=20,
+        description="Number of failures before opening circuit",
     )
     recovery_timeout: int = Field(
-        ..., 
-        ge=5, 
-        le=300, 
-        description="Seconds before transitioning to half-open"
+        ...,
+        ge=5,
+        le=300,
+        description="Seconds before transitioning to half-open",
     )
     success_threshold: int = Field(
-        ..., 
-        ge=1, 
-        le=10, 
-        description="Successes needed in half-open to close circuit"
+        ...,
+        ge=1,
+        le=10,
+        description="Successes needed in half-open to close circuit",
     )
     timeout_seconds: int = Field(
-        ..., 
-        ge=5, 
-        le=120, 
-        description="Event publishing timeout in seconds"
+        ...,
+        ge=5,
+        le=120,
+        description="Event publishing timeout in seconds",
     )
     max_queue_size: int = Field(
-        ..., 
-        ge=10, 
-        le=10000, 
-        description="Maximum queued events when circuit is open"
+        ...,
+        ge=10,
+        le=10000,
+        description="Maximum queued events when circuit is open",
     )
     dead_letter_enabled: bool = Field(
-        ..., 
-        description="Enable dead letter queue for failed events"
+        ...,
+        description="Enable dead letter queue for failed events",
     )
     graceful_degradation: bool = Field(
-        ..., 
-        description="Allow operations to continue without events"
+        ...,
+        description="Allow operations to continue without events",
     )
 
     @validator("recovery_timeout")
-    def validate_recovery_timeout(cls, v: int, values: Dict) -> int:
+    def validate_recovery_timeout(cls, v: int, values: dict) -> int:
         """Validate recovery timeout is reasonable for failure threshold."""
         failure_threshold = values.get("failure_threshold", 0)
         if failure_threshold > 0 and v < failure_threshold * 2:
             raise OnexError(
                 code=CoreErrorCode.VALIDATION_ERROR,
-                message=f"Recovery timeout ({v}s) should be at least 2x failure threshold ({failure_threshold})"
+                message=f"Recovery timeout ({v}s) should be at least 2x failure threshold ({failure_threshold})",
             )
         return v
 
     @validator("success_threshold")
-    def validate_success_threshold(cls, v: int, values: Dict) -> int:
+    def validate_success_threshold(cls, v: int, values: dict) -> int:
         """Validate success threshold is reasonable for failure threshold."""
         failure_threshold = values.get("failure_threshold", 0)
         if failure_threshold > 0 and v > failure_threshold:
             raise OnexError(
                 code=CoreErrorCode.VALIDATION_ERROR,
-                message=f"Success threshold ({v}) should not exceed failure threshold ({failure_threshold})"
+                message=f"Success threshold ({v}) should not exceed failure threshold ({failure_threshold})",
             )
         return v
 
@@ -98,8 +96,8 @@ class ModelCircuitBreakerConfig(BaseModel):
                 "timeout_seconds": 30,
                 "max_queue_size": 1000,
                 "dead_letter_enabled": True,
-                "graceful_degradation": True
-            }
+                "graceful_degradation": True,
+            },
         }
 
 
@@ -119,24 +117,24 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
         
         prod_config = config.get_config_for_environment("production")
     """
-    
+
     production: ModelCircuitBreakerConfig = Field(
-        ..., 
-        description="Circuit breaker configuration for production environment"
+        ...,
+        description="Circuit breaker configuration for production environment",
     )
     staging: ModelCircuitBreakerConfig = Field(
-        ..., 
-        description="Circuit breaker configuration for staging environment"
+        ...,
+        description="Circuit breaker configuration for staging environment",
     )
     development: ModelCircuitBreakerConfig = Field(
-        ..., 
-        description="Circuit breaker configuration for development environment"
+        ...,
+        description="Circuit breaker configuration for development environment",
     )
-    
+
     def get_config_for_environment(
-        self, 
-        environment: str, 
-        default_environment: Optional[str] = None
+        self,
+        environment: str,
+        default_environment: str | None = None,
     ) -> ModelCircuitBreakerConfig:
         """Get circuit breaker configuration for specified environment.
         
@@ -159,30 +157,30 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
                 except ValueError:
                     raise OnexError(
                         code=CoreErrorCode.CONFIGURATION_ERROR,
-                        message=f"Unknown environment '{environment}' and invalid default '{default_environment}'"
+                        message=f"Unknown environment '{environment}' and invalid default '{default_environment}'",
                     )
             else:
                 raise OnexError(
                     code=CoreErrorCode.CONFIGURATION_ERROR,
-                    message=f"Unknown environment '{environment}'. Supported: {list(EnvironmentType)}"
+                    message=f"Unknown environment '{environment}'. Supported: {list(EnvironmentType)}",
                 )
-        
+
         config_map = {
             EnvironmentType.PRODUCTION: self.production,
-            EnvironmentType.STAGING: self.staging, 
-            EnvironmentType.DEVELOPMENT: self.development
+            EnvironmentType.STAGING: self.staging,
+            EnvironmentType.DEVELOPMENT: self.development,
         }
-        
+
         return config_map[env_type]
-    
-    def get_all_environments(self) -> Dict[str, ModelCircuitBreakerConfig]:
+
+    def get_all_environments(self) -> dict[str, ModelCircuitBreakerConfig]:
         """Get all environment configurations as dictionary."""
         return {
             "production": self.production,
             "staging": self.staging,
-            "development": self.development
+            "development": self.development,
         }
-    
+
     @classmethod
     def create_default_config(cls) -> "ModelCircuitBreakerEnvironmentConfig":
         """Create default environment configuration following production requirements."""
@@ -194,7 +192,7 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
                 timeout_seconds=30,
                 max_queue_size=1000,
                 dead_letter_enabled=True,
-                graceful_degradation=True
+                graceful_degradation=True,
             ),
             staging=ModelCircuitBreakerConfig(
                 failure_threshold=3,
@@ -203,7 +201,7 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
                 timeout_seconds=20,
                 max_queue_size=500,
                 dead_letter_enabled=True,
-                graceful_degradation=True
+                graceful_degradation=True,
             ),
             development=ModelCircuitBreakerConfig(
                 failure_threshold=2,
@@ -212,8 +210,8 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
                 timeout_seconds=10,
                 max_queue_size=100,
                 dead_letter_enabled=False,
-                graceful_degradation=True
-            )
+                graceful_degradation=True,
+            ),
         )
 
     class Config:
@@ -229,7 +227,7 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
                     "timeout_seconds": 30,
                     "max_queue_size": 1000,
                     "dead_letter_enabled": True,
-                    "graceful_degradation": True
+                    "graceful_degradation": True,
                 },
                 "staging": {
                     "failure_threshold": 3,
@@ -238,7 +236,7 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
                     "timeout_seconds": 20,
                     "max_queue_size": 500,
                     "dead_letter_enabled": True,
-                    "graceful_degradation": True
+                    "graceful_degradation": True,
                 },
                 "development": {
                     "failure_threshold": 2,
@@ -247,7 +245,7 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
                     "timeout_seconds": 10,
                     "max_queue_size": 100,
                     "dead_letter_enabled": False,
-                    "graceful_degradation": True
-                }
-            }
+                    "graceful_degradation": True,
+                },
+            },
         }

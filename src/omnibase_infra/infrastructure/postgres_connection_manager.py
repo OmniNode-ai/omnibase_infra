@@ -8,16 +8,15 @@ and high-availability database operations for the ONEX infrastructure system.
 import os
 import time
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import AsyncIterator, Dict, List, Optional, Union
 
 import asyncpg
 from asyncpg import Connection, Pool, Record
 
 # Updated import to use omnibase_core consistently
-from omnibase_core.core.errors.onex_error import OnexError
-from omnibase_core.core.errors.onex_error import CoreErrorCode
+from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 
 
 @dataclass
@@ -28,7 +27,7 @@ class ConnectionConfig:
     port: int = 5432
     database: str = None  # No hardcoded database - use credential manager
     user: str = None  # No hardcoded user - use credential manager
-    password: str = None  # No hardcoded password - use credential manager  
+    password: str = None  # No hardcoded password - use credential manager
     schema: str = "infrastructure"
 
     # Pool configuration
@@ -39,13 +38,13 @@ class ConnectionConfig:
 
     # Connection timeouts
     command_timeout: float = 60.0
-    server_settings: Optional[Dict[str, str]] = None
+    server_settings: dict[str, str] | None = None
 
     # SSL configuration
     ssl_mode: str = "prefer"
-    ssl_cert_file: Optional[str] = None
-    ssl_key_file: Optional[str] = None
-    ssl_ca_file: Optional[str] = None
+    ssl_cert_file: str | None = None
+    ssl_key_file: str | None = None
+    ssl_ca_file: str | None = None
 
     @classmethod
     def from_environment(cls) -> "ConnectionConfig":
@@ -55,7 +54,7 @@ class ConnectionConfig:
             from ..security.credential_manager import get_credential_manager
             credential_manager = get_credential_manager()
             db_creds = credential_manager.get_database_credentials()
-            
+
             return cls(
                 host=db_creds.host,
                 port=db_creds.port,
@@ -66,7 +65,7 @@ class ConnectionConfig:
                 min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS", "5")),
                 max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS", "50")),
                 max_inactive_connection_lifetime=float(
-                    os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME", "300.0")
+                    os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME", "300.0"),
                 ),
                 command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT", "60.0")),
                 ssl_mode=db_creds.ssl_mode,
@@ -82,55 +81,55 @@ class ConnectionConfig:
                     code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
                     message="POSTGRES_HOST environment variable is required when credential manager is unavailable",
                 )
-            
+
             # Read password from Docker secrets file or environment variable
             password = ""
             password_file = os.getenv("POSTGRES_PASSWORD_FILE")
             if password_file and os.path.exists(password_file):
                 try:
-                    with open(password_file, 'r') as f:
+                    with open(password_file) as f:
                         password = f.read().strip()
                 except Exception as e:
                     raise OnexError(
                         code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
-                        message=f"Failed to read PostgreSQL password from file {password_file}: {str(e)}",
+                        message=f"Failed to read PostgreSQL password from file {password_file}: {e!s}",
                     ) from e
             else:
                 # ONEX zero backwards compatibility - no fallbacks allowed
                 raise OnexError(
                     code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
-                    message="POSTGRES_PASSWORD_FILE environment variable is required - no fallback to insecure environment variables"
+                    message="POSTGRES_PASSWORD_FILE environment variable is required - no fallback to insecure environment variables",
                 )
-            
+
             # Ensure required environment variables are present
             port_env = os.getenv("POSTGRES_PORT")
             if not port_env:
                 raise OnexError(
                     code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
-                    message="POSTGRES_PORT environment variable is required - no default fallbacks"
+                    message="POSTGRES_PORT environment variable is required - no default fallbacks",
                 )
-            
+
             # Validate all required environment variables
             database_env = os.getenv("POSTGRES_DATABASE")
-            user_env = os.getenv("POSTGRES_USER") 
+            user_env = os.getenv("POSTGRES_USER")
             schema_env = os.getenv("POSTGRES_SCHEMA")
-            
+
             if not database_env:
                 raise OnexError(
                     code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
-                    message="POSTGRES_DATABASE environment variable is required - no default fallbacks"
+                    message="POSTGRES_DATABASE environment variable is required - no default fallbacks",
                 )
             if not user_env:
                 raise OnexError(
                     code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
-                    message="POSTGRES_USER environment variable is required - no default fallbacks"
+                    message="POSTGRES_USER environment variable is required - no default fallbacks",
                 )
             if not schema_env:
                 raise OnexError(
                     code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
-                    message="POSTGRES_SCHEMA environment variable is required - no default fallbacks"
+                    message="POSTGRES_SCHEMA environment variable is required - no default fallbacks",
                 )
-            
+
             return cls(
                 host=host,
                 port=int(port_env),
@@ -141,7 +140,7 @@ class ConnectionConfig:
                 min_connections=int(os.getenv("POSTGRES_MIN_CONNECTIONS") or "5"),
                 max_connections=int(os.getenv("POSTGRES_MAX_CONNECTIONS") or "50"),
                 max_inactive_connection_lifetime=float(
-                    os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME") or "300.0"
+                    os.getenv("POSTGRES_MAX_INACTIVE_LIFETIME") or "300.0",
                 ),
                 command_timeout=float(os.getenv("POSTGRES_COMMAND_TIMEOUT") or "60.0"),
                 ssl_mode=os.getenv("POSTGRES_SSL_MODE") or "prefer",
@@ -176,7 +175,7 @@ class QueryMetrics:
     connection_id: str
     timestamp: float
     was_successful: bool
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 class PostgresConnectionManager:
@@ -192,12 +191,12 @@ class PostgresConnectionManager:
     - Health checking and connection validation
     """
 
-    def __init__(self, config: Optional[ConnectionConfig] = None):
+    def __init__(self, config: ConnectionConfig | None = None):
         """Initialize connection manager with configuration."""
         self.config = config or ConnectionConfig.from_environment()
-        self.pool: Optional[Pool] = None
+        self.pool: Pool | None = None
         self.is_initialized = False
-        self.query_metrics: List[QueryMetrics] = []
+        self.query_metrics: list[QueryMetrics] = []
         self.connection_stats = ConnectionStats(
             size=0,
             checked_out=0,
@@ -260,7 +259,7 @@ class PostgresConnectionManager:
             self.connection_stats.failed_connections += 1
             raise OnexError(
                 code=CoreErrorCode.DATABASE_CONNECTION_FAILED,
-                message=f"Failed to initialize PostgreSQL connection pool: {str(e)}",
+                message=f"Failed to initialize PostgreSQL connection pool: {e!s}",
             ) from e
 
     async def close(self) -> None:
@@ -296,7 +295,7 @@ class PostgresConnectionManager:
             self.connection_stats.failed_connections += 1
             raise OnexError(
                 code=CoreErrorCode.DATABASE_OPERATION_ERROR,
-                message=f"Database connection error: {str(e)}",
+                message=f"Database connection error: {e!s}",
             ) from e
         finally:
             if connection:
@@ -325,7 +324,7 @@ class PostgresConnectionManager:
         """
         async with self.acquire_connection() as conn:
             async with conn.transaction(
-                isolation=isolation, readonly=readonly, deferrable=deferrable
+                isolation=isolation, readonly=readonly, deferrable=deferrable,
             ):
                 yield conn
 
@@ -333,9 +332,9 @@ class PostgresConnectionManager:
         self,
         query: str,
         *args,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         record_metrics: bool = True,
-    ) -> Union[str, List[Record]]:
+    ) -> str | list[Record]:
         """
         Execute a query with metrics collection.
 
@@ -362,22 +361,21 @@ class PostgresConnectionManager:
                     rows_affected = len(result)
                     was_successful = True
                     return result
-                else:
-                    result = await conn.execute(query, *args, timeout=timeout)
-                    # Parse rows affected from result string (e.g., "UPDATE 5")
-                    if result and result.split():
-                        try:
-                            rows_affected = int(result.split()[-1])
-                        except (ValueError, IndexError):
-                            rows_affected = 0
-                    was_successful = True
-                    return result
+                result = await conn.execute(query, *args, timeout=timeout)
+                # Parse rows affected from result string (e.g., "UPDATE 5")
+                if result and result.split():
+                    try:
+                        rows_affected = int(result.split()[-1])
+                    except (ValueError, IndexError):
+                        rows_affected = 0
+                was_successful = True
+                return result
 
         except Exception as e:
             error_message = str(e)
             raise OnexError(
                 code=CoreErrorCode.DATABASE_QUERY_ERROR,
-                message=f"Query execution failed: {str(e)}",
+                message=f"Query execution failed: {e!s}",
             ) from e
         finally:
             if record_metrics:
@@ -392,8 +390,8 @@ class PostgresConnectionManager:
                 )
 
     async def fetch_one(
-        self, query: str, *args, timeout: Optional[float] = None
-    ) -> Optional[Record]:
+        self, query: str, *args, timeout: float | None = None,
+    ) -> Record | None:
         """
         Fetch a single record from a query.
 
@@ -411,12 +409,12 @@ class PostgresConnectionManager:
         except Exception as e:
             raise OnexError(
                 code=CoreErrorCode.DATABASE_QUERY_ERROR,
-                message=f"Single record fetch failed: {str(e)}",
+                message=f"Single record fetch failed: {e!s}",
             ) from e
 
     async def fetch_value(
-        self, query: str, *args, timeout: Optional[float] = None
-    ) -> Union[List[Record], Record, str, int, float, bool]:
+        self, query: str, *args, timeout: float | None = None,
+    ) -> list[Record] | Record | str | int | float | bool:
         """
         Fetch a single value from a query.
 
@@ -434,16 +432,16 @@ class PostgresConnectionManager:
         except Exception as e:
             raise OnexError(
                 code=CoreErrorCode.DATABASE_QUERY_ERROR,
-                message=f"Value fetch failed: {str(e)}",
+                message=f"Value fetch failed: {e!s}",
             ) from e
 
     async def call_function(
         self,
         function_name: str,
         *args,
-        schema: Optional[str] = None,
-        timeout: Optional[float] = None,
-    ) -> List[Record]:
+        schema: str | None = None,
+        timeout: float | None = None,
+    ) -> list[Record]:
         """
         Call a PostgreSQL function.
 
@@ -464,7 +462,7 @@ class PostgresConnectionManager:
 
     async def health_check(
         self,
-    ) -> Dict[str, Union[str, bool, int, float, Dict[str, Union[str, int, float]]]]:
+    ) -> dict[str, str | bool | int | float | dict[str, str | int | float]]:
         """
         Perform comprehensive health check of the database connection.
 
@@ -530,17 +528,17 @@ class PostgresConnectionManager:
                         "failed_connections": self.connection_stats.failed_connections,
                         "average_response_time_ms": self.connection_stats.average_response_time_ms,
                     },
-                }
+                },
             )
 
             if not schema_exists:
                 health_status["errors"].append(
-                    f"Schema '{self.config.schema}' does not exist"
+                    f"Schema '{self.config.schema}' does not exist",
                 )
                 health_status["status"] = "degraded"
 
         except Exception as e:
-            health_status["errors"].append(f"Health check failed: {str(e)}")
+            health_status["errors"].append(f"Health check failed: {e!s}")
             health_status["status"] = "unhealthy"
 
         return health_status
@@ -553,7 +551,7 @@ class PostgresConnectionManager:
 
         return self.connection_stats
 
-    def get_query_metrics(self, limit: int = 100) -> List[QueryMetrics]:
+    def get_query_metrics(self, limit: int = 100) -> list[QueryMetrics]:
         """Get recent query metrics."""
         return self.query_metrics[-limit:]
 
@@ -579,7 +577,7 @@ class PostgresConnectionManager:
         rows_affected: int,
         connection_id: str,
         was_successful: bool,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> None:
         """Record query execution metrics."""
         metric = QueryMetrics(
@@ -611,7 +609,7 @@ class PostgresConnectionManager:
 
 
 # Global connection manager instance
-_connection_manager: Optional[PostgresConnectionManager] = None
+_connection_manager: PostgresConnectionManager | None = None
 
 
 def get_connection_manager() -> PostgresConnectionManager:

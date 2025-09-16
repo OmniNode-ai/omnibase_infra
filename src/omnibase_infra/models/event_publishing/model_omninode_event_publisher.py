@@ -1,24 +1,16 @@
 """OmniNode Event Publisher for ModelEventEnvelope integration."""
 
-import json
-import logging
-from datetime import datetime
-from typing import Optional
-from uuid import UUID, uuid4
-
-from pydantic import BaseModel, Field
-
-from omnibase_core.core.errors.onex_error import CoreErrorCode
-from omnibase_core.core.errors.onex_error import OnexError
+from uuid import UUID
 
 # Import ModelEventEnvelope from omnibase_core
 from omnibase_core.models.core.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 from omnibase_core.models.core.model_route_spec import ModelRouteSpec
+from pydantic import BaseModel, Field
 
-from .model_omninode_topic_spec import ModelOmniNodeTopicSpec
-from ..postgres.model_postgres_query_data import ModelPostgresQueryData
 from ..postgres.model_postgres_health_data import ModelPostgresHealthData
+from ..postgres.model_postgres_query_data import ModelPostgresQueryData
+from .model_omninode_topic_spec import ModelOmniNodeTopicSpec
 
 
 class ModelOmniNodeEventPublisher(BaseModel):
@@ -28,18 +20,18 @@ class ModelOmniNodeEventPublisher(BaseModel):
     Wraps PostgreSQL adapter operations in proper ModelEventEnvelope structure
     for publishing to RedPanda topics following OmniNode topic namespace design.
     """
-    
+
     node_id: str = Field(
-        default="postgres_adapter_node", 
-        description="Node identifier for envelope source"
+        default="postgres_adapter_node",
+        description="Node identifier for envelope source",
     )
-    
+
     def create_postgres_query_completed_envelope(
-        self, 
+        self,
         correlation_id: UUID,
         query_data: ModelPostgresQueryData,
         execution_time_ms: float,
-        row_count: Optional[int] = None
+        row_count: int | None = None,
     ) -> ModelEventEnvelope:
         """
         Create event envelope for PostgreSQL query completed.
@@ -67,16 +59,16 @@ class ModelOmniNodeEventPublisher(BaseModel):
                 "query_length": query_data.query_length,
                 "parameter_count": query_data.parameter_count,
                 "status_message": query_data.status_message,
-                "affected_tables": query_data.affected_tables
-            }
+                "affected_tables": query_data.affected_tables,
+            },
         )
-        
+
         # Create topic spec for routing
         topic_spec = ModelOmniNodeTopicSpec.for_postgres_query_completed(str(correlation_id))
-        
+
         # Create direct route to the topic
         route_spec = ModelRouteSpec.create_direct_route(topic_spec.to_topic_string())
-        
+
         # Create and return the event envelope
         envelope = ModelEventEnvelope(
             payload=event_payload,
@@ -86,21 +78,21 @@ class ModelOmniNodeEventPublisher(BaseModel):
             metadata={
                 "topic_spec": topic_spec.to_topic_string(),
                 "database_operation": "query_completed",
-                "omninode_namespace": f"{topic_spec.env}.{topic_spec.tenant}.{topic_spec.context}"
-            }
+                "omninode_namespace": f"{topic_spec.env}.{topic_spec.tenant}.{topic_spec.context}",
+            },
         )
-        
+
         # Add source hop to trace
         envelope.add_source_hop(self.node_id, "PostgreSQL Adapter")
-        
+
         return envelope
-    
+
     def create_postgres_query_failed_envelope(
         self,
-        correlation_id: UUID, 
+        correlation_id: UUID,
         error_message: str,
         query_data: ModelPostgresQueryData,
-        execution_time_ms: float
+        execution_time_ms: float,
     ) -> ModelEventEnvelope:
         """
         Create event envelope for PostgreSQL query failure.
@@ -114,9 +106,9 @@ class ModelOmniNodeEventPublisher(BaseModel):
         Returns:
             ModelEventEnvelope with PostgreSQL query failure event
         """
-        # Create the ONEX event payload  
+        # Create the ONEX event payload
         event_payload = ModelOnexEvent.create_core_event(
-            event_type="core.database.query_failed", 
+            event_type="core.database.query_failed",
             node_id=self.node_id,
             correlation_id=correlation_id,
             data={
@@ -128,16 +120,16 @@ class ModelOmniNodeEventPublisher(BaseModel):
                 "query_length": query_data.query_length,
                 "parameter_count": query_data.parameter_count,
                 "status_message": query_data.status_message,
-                "affected_tables": query_data.affected_tables
-            }
+                "affected_tables": query_data.affected_tables,
+            },
         )
-        
+
         # Create topic spec for routing
         topic_spec = ModelOmniNodeTopicSpec.for_postgres_query_failed(str(correlation_id))
-        
+
         # Create direct route to the topic
-        route_spec = ModelRouteSpec.create_direct_route(topic_spec.to_topic_string()) 
-        
+        route_spec = ModelRouteSpec.create_direct_route(topic_spec.to_topic_string())
+
         # Create and return the event envelope
         envelope = ModelEventEnvelope(
             payload=event_payload,
@@ -147,20 +139,20 @@ class ModelOmniNodeEventPublisher(BaseModel):
             metadata={
                 "topic_spec": topic_spec.to_topic_string(),
                 "database_operation": "query_failed",
-                "omninode_namespace": f"{topic_spec.env}.{topic_spec.tenant}.{topic_spec.context}"
-            }
+                "omninode_namespace": f"{topic_spec.env}.{topic_spec.tenant}.{topic_spec.context}",
+            },
         )
-        
+
         # Add source hop to trace
         envelope.add_source_hop(self.node_id, "PostgreSQL Adapter")
-        
+
         return envelope
-    
+
     def create_postgres_health_response_envelope(
         self,
         correlation_id: UUID,
         health_status: str,
-        health_data: ModelPostgresHealthData
+        health_data: ModelPostgresHealthData,
     ) -> ModelEventEnvelope:
         """
         Create event envelope for PostgreSQL health check response.
@@ -189,16 +181,16 @@ class ModelOmniNodeEventPublisher(BaseModel):
                 "circuit_breaker_state": health_data.circuit_breaker_state,
                 "last_failure_time": health_data.last_failure_time,
                 "connection_pool": health_data.connection_pool,
-                "database": health_data.database
-            }
+                "database": health_data.database,
+            },
         )
-        
+
         # Create topic spec for routing
         topic_spec = ModelOmniNodeTopicSpec.for_postgres_health_check()
-        
+
         # Create direct route to the topic
         route_spec = ModelRouteSpec.create_direct_route(topic_spec.to_topic_string())
-        
+
         # Create and return the event envelope
         envelope = ModelEventEnvelope(
             payload=event_payload,
@@ -208,11 +200,11 @@ class ModelOmniNodeEventPublisher(BaseModel):
             metadata={
                 "topic_spec": topic_spec.to_topic_string(),
                 "database_operation": "health_check",
-                "omninode_namespace": f"{topic_spec.env}.{topic_spec.tenant}.{topic_spec.context}"
-            }
+                "omninode_namespace": f"{topic_spec.env}.{topic_spec.tenant}.{topic_spec.context}",
+            },
         )
-        
+
         # Add source hop to trace
         envelope.add_source_hop(self.node_id, "PostgreSQL Adapter")
-        
+
         return envelope

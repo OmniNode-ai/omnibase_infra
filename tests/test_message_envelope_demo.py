@@ -13,17 +13,25 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, Any
 
 # Add src to path for imports when running as script
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from omnibase_infra.infrastructure.postgres_connection_manager import PostgresConnectionManager
-from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import ModelPostgresAdapterInput
-from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import ModelPostgresAdapterOutput
-from omnibase_infra.models.postgres.model_postgres_query_request import ModelPostgresQueryRequest
-from omnibase_infra.models.postgres.model_postgres_health_request import ModelPostgresHealthRequest
-
+from omnibase_infra.infrastructure.postgres_connection_manager import (
+    PostgresConnectionManager,
+)
+from omnibase_infra.models.postgres.model_postgres_health_request import (
+    ModelPostgresHealthRequest,
+)
+from omnibase_infra.models.postgres.model_postgres_query_request import (
+    ModelPostgresQueryRequest,
+)
+from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_input import (
+    ModelPostgresAdapterInput,
+)
+from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.models.model_postgres_adapter_output import (
+    ModelPostgresAdapterOutput,
+)
 
 # Configure logging following omnibase_3 infrastructure pattern
 logger = logging.getLogger(__name__)
@@ -31,17 +39,17 @@ logger = logging.getLogger(__name__)
 
 async def demo_service_registration_envelope():
     """Demo: Service registration through event envelope."""
-    
+
     logger.info("🎯 Demo: Service Registration via Event Envelope")
     logger.info("=" * 60)
-    
+
     # Step 1: Create event envelope (as would come from message bus)
     correlation_id = uuid.uuid4()
-    
+
     # This represents a service wanting to register itself
     service_data = {
         "service_name": "payment-processor",
-        "service_type": "microservice", 
+        "service_type": "microservice",
         "hostname": "payment-01.prod.local",
         "port": 8080,
         "status": "healthy",
@@ -49,10 +57,10 @@ async def demo_service_registration_envelope():
             "version": "2.1.3",
             "environment": "production",
             "capabilities": ["payments", "refunds", "webhooks"],
-            "health_check_url": "http://payment-01.prod.local:8080/health"
-        }
+            "health_check_url": "http://payment-01.prod.local:8080/health",
+        },
     }
-    
+
     # Create PostgreSQL query request
     query_request = ModelPostgresQueryRequest(
         query="""
@@ -63,12 +71,12 @@ async def demo_service_registration_envelope():
         """,
         parameters=[
             service_data["service_name"],
-            service_data["service_type"], 
+            service_data["service_type"],
             service_data["hostname"],
             service_data["port"],
             service_data["status"],
             service_data["metadata"],
-            service_data["metadata"]["health_check_url"]
+            service_data["metadata"]["health_check_url"],
         ],
         correlation_id=correlation_id,
         timeout=30.0,
@@ -76,10 +84,10 @@ async def demo_service_registration_envelope():
         context={
             "operation": "service_registration",
             "source": "service_mesh",
-            "priority": "high"
-        }
+            "priority": "high",
+        },
     )
-    
+
     # Create message envelope (as would come from event bus)
     input_envelope = ModelPostgresAdapterInput(
         operation_type="query",
@@ -89,11 +97,11 @@ async def demo_service_registration_envelope():
         context={
             "source": "service_discovery_system",
             "event_type": "SERVICE_REGISTRATION_REQUEST",
-            "routing_key": "infrastructure.postgres.query"
-        }
+            "routing_key": "infrastructure.postgres.query",
+        },
     )
-    
-    logger.info(f"📨 Input Event Envelope:")
+
+    logger.info("📨 Input Event Envelope:")
     logger.info(f"   Operation: {input_envelope.operation_type}")
     logger.info(f"   Correlation ID: {input_envelope.correlation_id}")
     logger.info(f"   Service: {service_data['service_name']}")
@@ -101,23 +109,23 @@ async def demo_service_registration_envelope():
 
     # Step 2: Process through "adapter" (direct connection manager call for demo)
     logger.info("⚡ Processing through PostgreSQL Adapter...")
-    
+
     try:
         connection_manager = PostgresConnectionManager()
         await connection_manager.initialize()
-        
+
         start_time = time.perf_counter()
-        
+
         # Execute the database operation
         db_result = await connection_manager.execute_query(
             query_request.query,
             *query_request.parameters,
             timeout=query_request.timeout,
-            record_metrics=query_request.record_metrics
+            record_metrics=query_request.record_metrics,
         )
-        
+
         execution_time_ms = (time.perf_counter() - start_time) * 1000
-        
+
         # Create response envelope (as adapter would return to message bus)
         if isinstance(db_result, list) and db_result:
             success = True
@@ -127,7 +135,7 @@ async def demo_service_registration_envelope():
             success = False
             registration_result = None
             status_message = "Service registration failed - no result returned"
-        
+
         # Create output envelope
         output_envelope = ModelPostgresAdapterOutput(
             operation_type="query",
@@ -142,38 +150,38 @@ async def demo_service_registration_envelope():
                 "rows_affected": 1 if registration_result else 0,
                 "status_message": status_message,
                 "execution_time_ms": execution_time_ms,
-                "correlation_id": correlation_id
-            }
+                "correlation_id": correlation_id,
+            },
         )
-        
-        logger.info(f"✅ Success! Database operation completed")
+
+        logger.info("✅ Success! Database operation completed")
         logger.info(f"   Execution time: {execution_time_ms:.2f}ms")
         logger.info(f"   Service ID: {registration_result['id'] if registration_result else 'N/A'}")
         logger.info(f"   Registered at: {registration_result['registered_at'] if registration_result else 'N/A'}")
-        
-        logger.info(f"📤 Output Event Envelope:")
+
+        logger.info("📤 Output Event Envelope:")
         logger.info(f"   Success: {output_envelope.success}")
         logger.info(f"   Correlation ID: {output_envelope.correlation_id}")
         logger.info(f"   Execution time: {output_envelope.execution_time_ms:.2f}ms")
         logger.info(f"   Rows affected: {output_envelope.query_response['rows_affected']}")
-        
+
         await connection_manager.close()
         return True
-        
+
     except Exception as e:
-        logger.error(f"❌ Error: {str(e)}")
+        logger.error(f"❌ Error: {e!s}")
         return False
 
 
 async def demo_service_discovery_envelope():
     """Demo: Service discovery through event envelope."""
-    
+
     logger.info("🔍 Demo: Service Discovery via Event Envelope")
     logger.info("=" * 60)
-    
+
     # Create service discovery request
     correlation_id = uuid.uuid4()
-    
+
     query_request = ModelPostgresQueryRequest(
         query="""
             SELECT 
@@ -194,9 +202,9 @@ async def demo_service_discovery_envelope():
         parameters=["microservice", 10],
         correlation_id=correlation_id,
         record_metrics=True,
-        context={"operation": "service_discovery", "filter": "active_services"}
+        context={"operation": "service_discovery", "filter": "active_services"},
     )
-    
+
     input_envelope = ModelPostgresAdapterInput(
         operation_type="query",
         query_request=query_request,
@@ -205,63 +213,63 @@ async def demo_service_discovery_envelope():
         context={
             "source": "load_balancer",
             "event_type": "SERVICE_DISCOVERY_REQUEST",
-            "routing_key": "infrastructure.postgres.query"
-        }
+            "routing_key": "infrastructure.postgres.query",
+        },
     )
-    
-    logger.info(f"📨 Service Discovery Request:")
-    logger.info(f"   Looking for: microservice type")
-    logger.info(f"   Status filter: healthy, degraded")
-    logger.info(f"   Max results: 10")
-    
+
+    logger.info("📨 Service Discovery Request:")
+    logger.info("   Looking for: microservice type")
+    logger.info("   Status filter: healthy, degraded")
+    logger.info("   Max results: 10")
+
     try:
         connection_manager = PostgresConnectionManager()
         await connection_manager.initialize()
-        
+
         start_time = time.perf_counter()
-        
+
         # Execute discovery query
         services = await connection_manager.execute_query(
             query_request.query,
             *query_request.parameters,
             timeout=query_request.timeout,
-            record_metrics=query_request.record_metrics
+            record_metrics=query_request.record_metrics,
         )
-        
+
         execution_time_ms = (time.perf_counter() - start_time) * 1000
-        
+
         logger.info(f"🔍 Found {len(services)} active microservices:")
         for service in services:
             service_dict = dict(service)
             logger.info(f"   • {service_dict['service_name']} ({service_dict['hostname']}:{service_dict['port']}) - {service_dict['status']}")
-        
+
         logger.info(f"⚡ Query executed in {execution_time_ms:.2f}ms")
-        
+
         await connection_manager.close()
         return True
-        
+
     except Exception as e:
-        logger.error(f"❌ Discovery error: {str(e)}")
+        logger.error(f"❌ Discovery error: {e!s}")
         return False
 
 
 async def demo_health_check_envelope():
     """Demo: Health check through event envelope."""
-    
+
     logger.info("💚 Demo: Health Check via Event Envelope")
     logger.info("=" * 60)
-    
+
     # Create health check request
     correlation_id = uuid.uuid4()
-    
+
     health_request = ModelPostgresHealthRequest(
         include_connection_stats=True,
         include_performance_metrics=True,
         include_schema_info=False,
         correlation_id=correlation_id,
-        context={"source": "monitoring_system", "check_type": "infrastructure"}
+        context={"source": "monitoring_system", "check_type": "infrastructure"},
     )
-    
+
     input_envelope = ModelPostgresAdapterInput(
         operation_type="health_check",
         health_request=health_request,
@@ -270,85 +278,85 @@ async def demo_health_check_envelope():
         context={
             "source": "prometheus_scraper",
             "event_type": "INFRASTRUCTURE_HEALTH_CHECK",
-            "routing_key": "infrastructure.postgres.health"
-        }
+            "routing_key": "infrastructure.postgres.health",
+        },
     )
-    
-    logger.info(f"📨 Health Check Request:")
+
+    logger.info("📨 Health Check Request:")
     logger.info(f"   Include connection stats: {health_request.include_connection_stats}")
     logger.info(f"   Include performance metrics: {health_request.include_performance_metrics}")
-    
+
     try:
         connection_manager = PostgresConnectionManager()
         await connection_manager.initialize()
-        
+
         # Execute health check
         health_data = await connection_manager.health_check()
-        
-        logger.info(f"💚 Health Check Results:")
+
+        logger.info("💚 Health Check Results:")
         logger.info(f"   Status: {health_data.get('status', 'unknown')}")
         logger.info(f"   Database: {health_data.get('database_info', {}).get('version', 'unknown')}")
-        
-        if 'connection_pool' in health_data:
-            pool = health_data['connection_pool']
+
+        if "connection_pool" in health_data:
+            pool = health_data["connection_pool"]
             logger.info(f"   Connection Pool: {pool.get('active', 0)} active, {pool.get('idle', 0)} idle, {pool.get('total', 0)} total")
-        
-        if 'errors' in health_data and health_data['errors']:
+
+        if health_data.get("errors"):
             logger.warning(f"   ⚠️  Errors: {len(health_data['errors'])}")
-            for error in health_data['errors']:
+            for error in health_data["errors"]:
                 logger.warning(f"      - {error}")
-        
+
         await connection_manager.close()
         return True
-        
+
     except Exception as e:
-        logger.error(f"❌ Health check error: {str(e)}")
+        logger.error(f"❌ Health check error: {e!s}")
         return False
 
 
 async def main():
     """Run all message envelope demos."""
-    
+
     logger.info("🚀 PostgreSQL Adapter Message Envelope Demo")
     logger.info("=" * 60)
     logger.info("Demonstrating event bus message envelope to PostgreSQL conversion")
     logger.info("Running against Docker PostgreSQL environment")
-    
+
     demos = [
         ("Service Registration", demo_service_registration_envelope),
-        ("Service Discovery", demo_service_discovery_envelope), 
-        ("Health Check", demo_health_check_envelope)
+        ("Service Discovery", demo_service_discovery_envelope),
+        ("Health Check", demo_health_check_envelope),
     ]
-    
+
     results = []
-    
+
     for demo_name, demo_func in demos:
         try:
             logger.info(f"Running {demo_name} demo...")
             success = await demo_func()
             results.append((demo_name, success))
-            
+
             if success:
                 logger.info(f"✅ {demo_name} demo completed successfully")
             else:
                 logger.error(f"❌ {demo_name} demo failed")
-                
+
         except Exception as e:
-            logger.error(f"❌ {demo_name} demo error: {str(e)}")
+            logger.error(f"❌ {demo_name} demo error: {e!s}")
             results.append((demo_name, False))
-    
+
     # Summary
     logger.info("📊 Demo Summary:")
     logger.info("=" * 40)
     successful = sum(1 for _, success in results if success)
     total = len(results)
-    
+
     for demo_name, success in results:
-        status = "✅ PASS" if success else "❌ FAIL" 
+        status = "✅ PASS" if success else "❌ FAIL"
         logger.info(f"   {demo_name}: {status}")
-    
+
     logger.info(f"Overall: {successful}/{total} demos successful")
-    
+
     if successful == total:
         logger.info("🎉 All message envelope conversions working correctly!")
     else:
@@ -359,6 +367,6 @@ if __name__ == "__main__":
     # Configure logging for demo
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     asyncio.run(main())
