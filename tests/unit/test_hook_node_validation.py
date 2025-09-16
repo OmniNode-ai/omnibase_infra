@@ -16,22 +16,20 @@ Validates:
 - Performance characteristics and observability
 """
 
+import asyncio
 import sys
 import time
-import inspect
-import asyncio
 from pathlib import Path
-from typing import Dict, Union, List
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 # Add the src directory to Python path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 # Import strongly typed webhook models
 from tests.models.test_webhook_models import (
-    SlackWebhookPayloadModel,
     DiscordWebhookPayloadModel,
-    GenericWebhookPayloadModel
+    GenericWebhookPayloadModel,
+    SlackWebhookPayloadModel,
 )
 
 print("🚀 Hook Node Phase 1 Implementation Validation")
@@ -42,13 +40,16 @@ print("\n1. 📋 Validating Hook Node Implementation Structure...")
 
 try:
     # Check if we can import the basic node structure
-    from omnibase_infra.nodes.hook_node.v1_0_0.node import HookStructuredLogger, CircuitBreakerState
+    from omnibase_infra.nodes.hook_node.v1_0_0.node import (
+        CircuitBreakerState,
+        HookStructuredLogger,
+    )
 
     # Validate HookStructuredLogger
     logger = HookStructuredLogger("test_hook_node")
-    assert hasattr(logger, '_build_extra'), "HookStructuredLogger missing _build_extra method"
-    assert hasattr(logger, '_sanitize_url_for_logging'), "HookStructuredLogger missing URL sanitization"
-    assert hasattr(logger, 'log_notification_start'), "HookStructuredLogger missing notification logging"
+    assert hasattr(logger, "_build_extra"), "HookStructuredLogger missing _build_extra method"
+    assert hasattr(logger, "_sanitize_url_for_logging"), "HookStructuredLogger missing URL sanitization"
+    assert hasattr(logger, "log_notification_start"), "HookStructuredLogger missing notification logging"
 
     # Test URL sanitization
     test_url = "https://webhook.com/api?token=secret123&key=apikey456&normal=value"
@@ -60,9 +61,9 @@ try:
     print("   ✅ HookStructuredLogger implementation: PASSED")
 
     # Validate CircuitBreakerState enum
-    assert hasattr(CircuitBreakerState, 'CLOSED'), "CircuitBreakerState missing CLOSED state"
-    assert hasattr(CircuitBreakerState, 'OPEN'), "CircuitBreakerState missing OPEN state"
-    assert hasattr(CircuitBreakerState, 'HALF_OPEN'), "CircuitBreakerState missing HALF_OPEN state"
+    assert hasattr(CircuitBreakerState, "CLOSED"), "CircuitBreakerState missing CLOSED state"
+    assert hasattr(CircuitBreakerState, "OPEN"), "CircuitBreakerState missing OPEN state"
+    assert hasattr(CircuitBreakerState, "HALF_OPEN"), "CircuitBreakerState missing HALF_OPEN state"
 
     print("   ✅ CircuitBreakerState implementation: PASSED")
 
@@ -146,7 +147,7 @@ print("\n4. 🔐 Validating Authentication Header Generation...")
 
 try:
     # Test Bearer token authentication
-    def generate_bearer_header(token: str) -> Dict[str, str]:
+    def generate_bearer_header(token: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {token}"}
 
     bearer_header = generate_bearer_header("test-token-123")
@@ -154,7 +155,7 @@ try:
 
     # Test Basic authentication
     import base64
-    def generate_basic_header(username: str, password: str) -> Dict[str, str]:
+    def generate_basic_header(username: str, password: str) -> dict[str, str]:
         credentials = f"{username}:{password}"
         encoded = base64.b64encode(credentials.encode()).decode()
         return {"Authorization": f"Basic {encoded}"}
@@ -168,7 +169,7 @@ try:
     assert decoded == "testuser:testpass", "Basic auth encoding/decoding failed"
 
     # Test API key authentication
-    def generate_api_key_header(header_name: str, api_key: str) -> Dict[str, str]:
+    def generate_api_key_header(header_name: str, api_key: str) -> dict[str, str]:
         return {header_name: api_key}
 
     api_header = generate_api_key_header("X-API-Key", "api-key-123")
@@ -189,20 +190,19 @@ try:
         """Map HTTP status codes to error categories."""
         if status_code == 400:
             return "INVALID_INPUT"
-        elif status_code == 401:
+        if status_code == 401:
             return "AUTHENTICATION_ERROR"
-        elif status_code == 403:
+        if status_code == 403:
             return "AUTHORIZATION_ERROR"
-        elif status_code == 404:
+        if status_code == 404:
             return "NOT_FOUND"
-        elif status_code == 429:
+        if status_code == 429:
             return "RATE_LIMIT_ERROR"
-        elif status_code in [500, 502, 503]:
+        if status_code in [500, 502, 503]:
             return "EXTERNAL_SERVICE_ERROR"
-        elif status_code == 504:
+        if status_code == 504:
             return "TIMEOUT_ERROR"
-        else:
-            return "UNKNOWN_ERROR"
+        return "UNKNOWN_ERROR"
 
     # Test error mappings
     assert map_http_status_to_error_code(400) == "INVALID_INPUT"
@@ -222,7 +222,7 @@ try:
         except ConnectionError as original:
             try:
                 # This simulates OnexError chaining
-                chained_message = f"Hook Node processing failed: {str(original)}"
+                chained_message = f"Hook Node processing failed: {original!s}"
                 assert "Hook Node processing failed" in chained_message
                 assert "Network unreachable" in chained_message
                 return True
@@ -297,7 +297,7 @@ print("\n7. 📦 Validating Webhook Payload Formatting...")
 
 try:
     # Test Slack payload formatting
-    def format_slack_payload(payload: SlackWebhookPayloadModel) -> Dict[str, Union[str, List]]:
+    def format_slack_payload(payload: SlackWebhookPayloadModel) -> dict[str, str | list]:
         """Format payload for Slack webhook delivery."""
         if not payload.text:
             raise ValueError("Slack payload requires 'text' field")
@@ -306,7 +306,7 @@ try:
     slack_payload = SlackWebhookPayloadModel(
         text="🚨 System Alert",
         channel="#alerts",
-        username="ONEX Bot"
+        username="ONEX Bot",
     )
 
     formatted = format_slack_payload(slack_payload)
@@ -323,14 +323,14 @@ try:
     print("   ✅ Slack payload formatting: PASSED")
 
     # Test Discord payload formatting
-    def format_discord_payload(payload: DiscordWebhookPayloadModel) -> Dict[str, Union[str, List]]:
+    def format_discord_payload(payload: DiscordWebhookPayloadModel) -> dict[str, str | list]:
         """Format payload for Discord webhook delivery."""
         # Discord accepts content, embeds, etc.
         return payload.dict(exclude_none=True)  # Discord format is preserved as-is
 
     discord_payload = DiscordWebhookPayloadModel(
         content="🔥 **CRITICAL ALERT**",
-        embeds=[{"title": "System Status", "color": "16711680"}]
+        embeds=[{"title": "System Status", "color": "16711680"}],
     )
 
     formatted_discord = format_discord_payload(discord_payload)
@@ -340,7 +340,7 @@ try:
     print("   ✅ Discord payload formatting: PASSED")
 
     # Test generic webhook formatting
-    def format_generic_payload(payload: GenericWebhookPayloadModel) -> Dict[str, Union[str, Dict]]:
+    def format_generic_payload(payload: GenericWebhookPayloadModel) -> dict[str, str | dict]:
         """Format payload for generic webhook delivery."""
         return payload.dict()  # Generic webhooks preserve original structure
 
@@ -348,7 +348,7 @@ try:
         event_type="infrastructure.alert",
         data={"severity": "critical", "correlation_id": "test-123"},
         timestamp="2025-01-01T00:00:00Z",
-        source="hook_node_test"
+        source="hook_node_test",
     )
 
     formatted_generic = format_generic_payload(generic_payload)
@@ -366,7 +366,7 @@ print("\n8. ⚡ Validating Async Processing Patterns...")
 
 try:
     # Test async timeout handling
-    async def mock_http_request_with_timeout(url: str, timeout: float = 30.0) -> Dict[str, Union[int, str, float]]:
+    async def mock_http_request_with_timeout(url: str, timeout: float = 30.0) -> dict[str, int | str | float]:
         """Mock HTTP request with timeout simulation."""
         try:
             # Simulate network delay
@@ -374,10 +374,10 @@ try:
             return {
                 "status_code": 200,
                 "body": '{"status": "ok"}',
-                "execution_time_ms": 100.0
+                "execution_time_ms": 100.0,
             }
-        except asyncio.TimeoutError:
-            raise asyncio.TimeoutError(f"Request timeout after {timeout} seconds")
+        except TimeoutError:
+            raise TimeoutError(f"Request timeout after {timeout} seconds")
 
     # Test successful request
     async def test_successful_request():
@@ -425,7 +425,7 @@ try:
         # This would normally inspect the actual code for type hints
         # For now, we validate the principle with mock type checking
 
-        def typed_function(url: str, headers: Dict[str, str], payload: Dict[str, Union[str, int, float, bool, List, Dict]]) -> bool:
+        def typed_function(url: str, headers: dict[str, str], payload: dict[str, str | int | float | bool | list | dict]) -> bool:
             """Example of proper typing - payload uses Union for webhook flexibility."""
             return isinstance(url, str) and isinstance(headers, dict)
 
@@ -443,7 +443,7 @@ try:
             raise ConnectionError("Network unreachable")
         except ConnectionError as original:
             # Simulate OnexError chaining
-            error_message = f"Hook Node processing failed: {str(original)}"
+            error_message = f"Hook Node processing failed: {original!s}"
             assert "Hook Node processing failed" in error_message
             assert str(original) in error_message
             return True
@@ -456,10 +456,10 @@ try:
         def __init__(self):
             self._dependencies = {}
 
-        def provide(self, name: str, instance: Union[Mock, object]):
+        def provide(self, name: str, instance: Mock | object):
             self._dependencies[name] = instance
 
-        def get(self, name: str) -> Union[Mock, object, None]:
+        def get(self, name: str) -> Mock | object | None:
             return self._dependencies.get(name)
 
     container = MockContainer()
@@ -490,7 +490,7 @@ try:
         "node.py",
         "models/model_hook_node_input.py",
         "models/model_hook_node_output.py",
-        "registry"
+        "registry",
     ]
 
     for required_file in required_files:

@@ -4,88 +4,89 @@ Shared model for health monitoring operation responses.
 Used for returning results from health monitoring operations.
 """
 
-from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
-from uuid import UUID
 from datetime import datetime
-from .model_health_status import ModelHealthStatus
-from .model_health_metrics import ModelHealthMetrics
-from .model_trend_analysis import ModelTrendAnalysis
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
 from .model_component_status import ModelComponentHealthStatus
 from .model_health_alert import ModelHealthAlert
+from .model_health_metrics import ModelHealthMetrics
+from .model_health_status import ModelHealthStatus
+from .model_trend_analysis import ModelTrendAnalysis
 
 
 class ModelHealthResponse(BaseModel):
     """Model for health monitoring operation responses."""
-    
+
     operation_type: str = Field(
-        description="Type of operation that was executed"
+        description="Type of operation that was executed",
     )
-    
+
     success: bool = Field(
-        description="Whether the operation was successful"
+        description="Whether the operation was successful",
     )
-    
+
     correlation_id: UUID = Field(
-        description="Request correlation ID for tracking"
+        description="Request correlation ID for tracking",
     )
-    
+
     timestamp: datetime = Field(
-        description="Response timestamp"
+        description="Response timestamp",
     )
-    
+
     execution_time_ms: float = Field(
         ge=0.0,
-        description="Operation execution time in milliseconds"
-    )
-    
-    health_status: Optional[ModelHealthStatus] = Field(
-        default=None,
-        description="Current health status (for health_check operations)"
-    )
-    
-    health_metrics: Optional[ModelHealthMetrics] = Field(
-        default=None,
-        description="Detailed health metrics (for get_metrics operations)"
-    )
-    
-    trend_analysis: Optional[ModelTrendAnalysis] = Field(
-        default=None,
-        description="Health trend analysis (for get_trends operations)"
+        description="Operation execution time in milliseconds",
     )
 
-    monitoring_started: Optional[bool] = Field(
+    health_status: ModelHealthStatus | None = Field(
         default=None,
-        description="Whether monitoring was started (for start_monitoring operations)"
+        description="Current health status (for health_check operations)",
     )
 
-    monitoring_stopped: Optional[bool] = Field(
+    health_metrics: ModelHealthMetrics | None = Field(
         default=None,
-        description="Whether monitoring was stopped (for stop_monitoring operations)"
+        description="Detailed health metrics (for get_metrics operations)",
     )
 
-    component_statuses: Optional[Dict[str, ModelComponentHealthStatus]] = Field(
+    trend_analysis: ModelTrendAnalysis | None = Field(
         default=None,
-        description="Individual component health statuses mapped by component name"
+        description="Health trend analysis (for get_trends operations)",
     )
 
-    alerts: Optional[List[ModelHealthAlert]] = Field(
+    monitoring_started: bool | None = Field(
         default=None,
-        description="Active health alerts"
+        description="Whether monitoring was started (for start_monitoring operations)",
     )
-    
-    prometheus_metrics: Optional[str] = Field(
+
+    monitoring_stopped: bool | None = Field(
         default=None,
-        description="Prometheus-formatted metrics string"
+        description="Whether monitoring was stopped (for stop_monitoring operations)",
     )
-    
-    error_message: Optional[str] = Field(
+
+    component_statuses: dict[str, ModelComponentHealthStatus] | None = Field(
         default=None,
-        description="Error message if operation failed"
+        description="Individual component health statuses mapped by component name",
+    )
+
+    alerts: list[ModelHealthAlert] | None = Field(
+        default=None,
+        description="Active health alerts",
+    )
+
+    prometheus_metrics: str | None = Field(
+        default=None,
+        description="Prometheus-formatted metrics string",
+    )
+
+    error_message: str | None = Field(
+        default=None,
+        description="Error message if operation failed",
     )
 
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v)
+            UUID: lambda v: str(v),
         }

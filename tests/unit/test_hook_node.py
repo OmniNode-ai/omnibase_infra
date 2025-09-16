@@ -10,34 +10,46 @@ Tests the core NodeHookEffect service functionality including:
 - Performance metrics and observability
 """
 
-import asyncio
-import json
-import pytest
 import time
-from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from uuid import UUID, uuid4
-from typing import Dict
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
-from omnibase_core.core.onex_container import ModelONEXContainer
+import pytest
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.enums.enum_health_status import EnumHealthStatus
-from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
+from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_auth_type import EnumAuthType
 from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
+from omnibase_core.enums.enum_health_status import EnumHealthStatus
+from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_spi.protocols.core import ProtocolHttpResponse
 
-# Hook Node implementation
-from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect, HookStructuredLogger, CircuitBreakerState
-from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
-from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_output import ModelHookNodeOutput
+from omnibase_infra.models.notification.model_notification_attempt import (
+    ModelNotificationAttempt,
+)
+from omnibase_infra.models.notification.model_notification_auth import (
+    ModelNotificationAuth,
+)
 
 # Shared notification models
-from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
-from omnibase_infra.models.notification.model_notification_result import ModelNotificationResult
-from omnibase_infra.models.notification.model_notification_attempt import ModelNotificationAttempt
-from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
-from omnibase_infra.models.notification.model_notification_retry_policy import ModelNotificationRetryPolicy
+from omnibase_infra.models.notification.model_notification_request import (
+    ModelNotificationRequest,
+)
+from omnibase_infra.models.notification.model_notification_result import (
+    ModelNotificationResult,
+)
+from omnibase_infra.models.notification.model_notification_retry_policy import (
+    ModelNotificationRetryPolicy,
+)
+from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import (
+    ModelHookNodeInput,
+)
+
+# Hook Node implementation
+from omnibase_infra.nodes.hook_node.v1_0_0.node import (
+    CircuitBreakerState,
+    HookStructuredLogger,
+    NodeHookEffect,
+)
 
 
 class TestNotificationModels:
@@ -52,8 +64,8 @@ class TestNotificationModels:
             headers={"Content-Type": "application/json"},
             auth=ModelNotificationAuth(
                 auth_type=EnumAuthType.BEARER,
-                credentials={"token": "test-token"}
-            )
+                credentials={"token": "test-token"},
+            ),
         )
 
         assert str(request.url) == "https://hooks.slack.com/services/test"
@@ -65,7 +77,7 @@ class TestNotificationModels:
         """Test Bearer token authentication configuration."""
         auth = ModelNotificationAuth(
             auth_type=EnumAuthType.BEARER,
-            credentials={"token": "bearer-token-123"}
+            credentials={"token": "bearer-token-123"},
         )
 
         assert auth.is_bearer_auth is True
@@ -79,7 +91,7 @@ class TestNotificationModels:
         """Test Basic authentication configuration."""
         auth = ModelNotificationAuth(
             auth_type=EnumAuthType.BASIC,
-            credentials={"username": "testuser", "password": "testpass"}
+            credentials={"username": "testuser", "password": "testpass"},
         )
 
         assert auth.is_basic_auth is True
@@ -93,7 +105,7 @@ class TestNotificationModels:
         """Test API key authentication configuration."""
         auth = ModelNotificationAuth(
             auth_type=EnumAuthType.API_KEY_HEADER,
-            credentials={"header_name": "X-API-Key", "api_key": "api-key-123"}
+            credentials={"header_name": "X-API-Key", "api_key": "api-key-123"},
         )
 
         assert auth.is_api_key_auth is True
@@ -106,21 +118,21 @@ class TestNotificationModels:
         with pytest.raises(ValueError, match="Bearer auth requires 'token'"):
             ModelNotificationAuth(
                 auth_type=EnumAuthType.BEARER,
-                credentials={}
+                credentials={},
             )
 
         # Basic auth without required fields
         with pytest.raises(ValueError, match="Basic auth requires 'username' and 'password'"):
             ModelNotificationAuth(
                 auth_type=EnumAuthType.BASIC,
-                credentials={"username": "test"}
+                credentials={"username": "test"},
             )
 
         # API key auth without required fields
         with pytest.raises(ValueError, match="API key auth requires 'header_name' and 'api_key'"):
             ModelNotificationAuth(
                 auth_type=EnumAuthType.API_KEY_HEADER,
-                credentials={"header_name": "X-API-Key"}
+                credentials={"header_name": "X-API-Key"},
             )
 
     def test_notification_retry_policy(self):
@@ -130,7 +142,7 @@ class TestNotificationModels:
             strategy=EnumBackoffStrategy.EXPONENTIAL,
             base_delay_ms=1000,
             max_delay_ms=30000,
-            backoff_multiplier=2.0
+            backoff_multiplier=2.0,
         )
 
         assert retry_policy.max_attempts == 5
@@ -147,7 +159,7 @@ class TestNotificationModels:
             execution_time_ms=150.5,
             http_status_code=200,
             is_success=True,
-            error_message=None
+            error_message=None,
         )
 
         assert attempt.attempt_number == 1
@@ -163,8 +175,8 @@ class TestNotificationModels:
                 start_time=time.time(),
                 execution_time_ms=120.0,
                 http_status_code=200,
-                is_success=True
-            )
+                is_success=True,
+            ),
         ]
 
         result = ModelNotificationResult(
@@ -173,7 +185,7 @@ class TestNotificationModels:
             attempts=attempts,
             final_status_code=200,
             final_error_message=None,
-            total_execution_time_ms=120.0
+            total_execution_time_ms=120.0,
         )
 
         assert result.is_success is True
@@ -195,15 +207,15 @@ class TestHookStructuredLogger:
         logger = HookStructuredLogger()
         correlation_id = uuid4()
 
-        with patch.object(logger.logger, 'info') as mock_info:
+        with patch.object(logger.logger, "info") as mock_info:
             logger.info("Test message", correlation_id=correlation_id)
 
             # Verify correlation ID is in extra data
             call_args = mock_info.call_args
-            extra = call_args[1]['extra']
-            assert extra['correlation_id'] == str(correlation_id)
-            assert extra['operation'] == "notification"
-            assert extra['component'] == "hook_node"
+            extra = call_args[1]["extra"]
+            assert extra["correlation_id"] == str(correlation_id)
+            assert extra["operation"] == "notification"
+            assert extra["component"] == "hook_node"
 
     def test_url_sanitization(self):
         """Test URL sanitization removes sensitive parameters."""
@@ -224,45 +236,45 @@ class TestHookStructuredLogger:
         logger = HookStructuredLogger()
         correlation_id = uuid4()
 
-        with patch.object(logger.logger, 'info') as mock_info:
+        with patch.object(logger.logger, "info") as mock_info:
             logger.log_notification_start(
                 correlation_id=correlation_id,
                 url="https://hooks.slack.com/test",
                 method="POST",
-                retry_attempt=2
+                retry_attempt=2,
             )
 
             call_args = mock_info.call_args
             assert "Starting notification attempt 2" in call_args[0][0]
-            extra = call_args[1]['extra']
-            assert extra['operation'] == "notification_send"
-            assert extra['retry_attempt'] == 2
+            extra = call_args[1]["extra"]
+            assert extra["operation"] == "notification_send"
+            assert extra["retry_attempt"] == 2
 
-        with patch.object(logger.logger, 'info') as mock_info:
+        with patch.object(logger.logger, "info") as mock_info:
             logger.log_notification_success(
                 correlation_id=correlation_id,
                 execution_time_ms=125.5,
                 status_code=200,
-                retry_attempt=1
+                retry_attempt=1,
             )
 
             call_args = mock_info.call_args
             assert "succeeded: 200 (125.50ms)" in call_args[0][0]
 
-        with patch.object(logger.logger, 'error') as mock_error:
+        with patch.object(logger.logger, "error") as mock_error:
             test_exception = Exception("Network timeout")
             logger.log_notification_error(
                 correlation_id=correlation_id,
                 execution_time_ms=30000.0,
                 exception=test_exception,
-                retry_attempt=3
+                retry_attempt=3,
             )
 
             call_args = mock_error.call_args
             assert "Notification attempt 3 failed" in call_args[0][0]
-            extra = call_args[1]['extra']
-            assert extra['exception_type'] == "Exception"
-            assert extra['exception_message'] == "Network timeout"
+            extra = call_args[1]["extra"]
+            assert extra["exception_type"] == "Exception"
+            assert extra["exception_message"] == "Network timeout"
 
 
 class TestNodeHookEffect:
@@ -294,7 +306,7 @@ class TestNodeHookEffect:
         return ModelNotificationRequest(
             url="https://hooks.slack.com/services/test",
             method=EnumNotificationMethod.POST,
-            payload={"text": "Test notification", "channel": "#alerts"}
+            payload={"text": "Test notification", "channel": "#alerts"},
         )
 
     def test_hook_node_initialization(self, hook_node):
@@ -313,7 +325,7 @@ class TestNodeHookEffect:
             headers={"Content-Type": "application/json"},
             body='{"status": "ok"}',
             execution_time_ms=125.0,
-            is_success=True
+            is_success=True,
         )
 
         hook_node._http_client.post = AsyncMock(return_value=mock_response)
@@ -333,14 +345,14 @@ class TestNodeHookEffect:
         """Test notification delivery with Bearer token authentication."""
         auth = ModelNotificationAuth(
             auth_type=EnumAuthType.BEARER,
-            credentials={"token": "test-bearer-token"}
+            credentials={"token": "test-bearer-token"},
         )
 
         request = ModelNotificationRequest(
             url="https://api.example.com/webhook",
             method=EnumNotificationMethod.POST,
             payload={"message": "Authenticated notification"},
-            auth=auth
+            auth=auth,
         )
 
         mock_response = ProtocolHttpResponse(
@@ -348,7 +360,7 @@ class TestNodeHookEffect:
             headers={},
             body='{"received": true}',
             execution_time_ms=100.0,
-            is_success=True
+            is_success=True,
         )
 
         hook_node._http_client.post = AsyncMock(return_value=mock_response)
@@ -358,7 +370,7 @@ class TestNodeHookEffect:
 
         # Verify authentication headers were added
         call_args = hook_node._http_client.post.call_args
-        headers = call_args[1]['headers']
+        headers = call_args[1]["headers"]
         assert "Authorization" in headers
         assert headers["Authorization"] == "Bearer test-bearer-token"
 
@@ -372,14 +384,14 @@ class TestNodeHookEffect:
             strategy=EnumBackoffStrategy.EXPONENTIAL,
             base_delay_ms=100,
             max_delay_ms=1000,
-            backoff_multiplier=2.0
+            backoff_multiplier=2.0,
         )
 
         request = ModelNotificationRequest(
             url="https://hooks.discord.com/api/webhooks/test",
             method=EnumNotificationMethod.POST,
             payload={"content": "Test message"},
-            retry_policy=retry_policy
+            retry_policy=retry_policy,
         )
 
         # Mock two failures, then success
@@ -388,7 +400,7 @@ class TestNodeHookEffect:
             headers={},
             body='{"error": "Internal server error"}',
             execution_time_ms=50.0,
-            is_success=False
+            is_success=False,
         )
 
         success_response = ProtocolHttpResponse(
@@ -396,16 +408,16 @@ class TestNodeHookEffect:
             headers={},
             body='{"success": true}',
             execution_time_ms=75.0,
-            is_success=True
+            is_success=True,
         )
 
         hook_node._http_client.post = AsyncMock(side_effect=[
             failure_response,  # First attempt fails
             failure_response,  # Second attempt fails
-            success_response   # Third attempt succeeds
+            success_response,   # Third attempt succeeds
         ])
 
-        with patch('asyncio.sleep') as mock_sleep:
+        with patch("asyncio.sleep") as mock_sleep:
             input_data = ModelHookNodeInput(notification_request=request)
             result = await hook_node.process(input_data)
 
@@ -428,7 +440,7 @@ class TestNodeHookEffect:
         request = ModelNotificationRequest(
             url="https://failing.webhook.com/api/notify",
             method=EnumNotificationMethod.POST,
-            payload={"alert": "System alert"}
+            payload={"alert": "System alert"},
         )
 
         # Mock consistent failures to trigger circuit breaker
@@ -437,7 +449,7 @@ class TestNodeHookEffect:
             headers={},
             body='{"error": "Service unavailable"}',
             execution_time_ms=30000.0,  # Timeout
-            is_success=False
+            is_success=False,
         )
 
         hook_node._http_client.post = AsyncMock(return_value=failure_response)
@@ -464,7 +476,7 @@ class TestNodeHookEffect:
         request = ModelNotificationRequest(
             url="https://blocked.webhook.com/api/notify",
             method=EnumNotificationMethod.POST,
-            payload={"message": "This should be blocked"}
+            payload={"message": "This should be blocked"},
         )
 
         # Manually set circuit breaker to OPEN state
@@ -491,7 +503,7 @@ class TestNodeHookEffect:
     async def test_error_handling_network_timeout(self, hook_node, basic_notification_request):
         """Test error handling for network timeouts."""
         # Mock network timeout exception
-        hook_node._http_client.post = AsyncMock(side_effect=asyncio.TimeoutError("Request timeout"))
+        hook_node._http_client.post = AsyncMock(side_effect=TimeoutError("Request timeout"))
 
         input_data = ModelHookNodeInput(notification_request=basic_notification_request)
 
@@ -555,7 +567,7 @@ class TestNodeHookEffect:
             "event": "system.alert",
             "severity": "high",
             "message": "Memory usage exceeded threshold",
-            "timestamp": "2023-09-15T10:30:00Z"
+            "timestamp": "2023-09-15T10:30:00Z",
         }
 
         formatted = hook_node._format_generic_webhook(payload)
@@ -571,7 +583,7 @@ class TestNodeHookEffect:
             headers={},
             body='{"status": "received"}',
             execution_time_ms=150.0,
-            is_success=True
+            is_success=True,
         )
 
         hook_node._http_client.post = AsyncMock(return_value=mock_response)
@@ -596,7 +608,7 @@ class TestNodeHookEffect:
         assert input_data.correlation_id is None
 
         # After processing, result should have correlation ID
-        with patch.object(hook_node._http_client, 'post', return_value=AsyncMock()):
+        with patch.object(hook_node._http_client, "post", return_value=AsyncMock()):
             # Note: This test would need actual processing to verify correlation ID generation
             pass
 
@@ -608,7 +620,7 @@ class TestNodeHookEffect:
             strategy=EnumBackoffStrategy.EXPONENTIAL,
             base_delay_ms=100,
             max_delay_ms=10000,
-            backoff_multiplier=2.0
+            backoff_multiplier=2.0,
         )
 
         delay1 = hook_node._calculate_retry_delay(exponential_policy, attempt=1)
@@ -625,7 +637,7 @@ class TestNodeHookEffect:
             strategy=EnumBackoffStrategy.LINEAR,
             base_delay_ms=500,
             max_delay_ms=5000,
-            backoff_multiplier=1.5
+            backoff_multiplier=1.5,
         )
 
         linear_delay1 = hook_node._calculate_retry_delay(linear_policy, attempt=1)
@@ -640,7 +652,7 @@ class TestNodeHookEffect:
             strategy=EnumBackoffStrategy.FIXED,
             base_delay_ms=1000,
             max_delay_ms=1000,
-            backoff_multiplier=1.0
+            backoff_multiplier=1.0,
         )
 
         fixed_delay1 = hook_node._calculate_retry_delay(fixed_policy, attempt=1)

@@ -4,9 +4,10 @@ Strongly-typed model for OpenTelemetry span data.
 Replaces Dict[str, Any] usage to maintain ONEX compliance.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+
+from pydantic import BaseModel, Field
+
 from .model_span_attributes import ModelSpanAttributes
 
 
@@ -15,16 +16,16 @@ class ModelSpanEvent(BaseModel):
 
     name: str = Field(
         max_length=200,
-        description="Event name"
+        description="Event name",
     )
 
     timestamp: datetime = Field(
-        description="Event timestamp"
+        description="Event timestamp",
     )
 
-    attributes: Optional[ModelSpanAttributes] = Field(
+    attributes: ModelSpanAttributes | None = Field(
         default=None,
-        description="Event attributes"
+        description="Event attributes",
     )
 
 
@@ -34,25 +35,25 @@ class ModelSpanLink(BaseModel):
     trace_id: str = Field(
         min_length=32,
         max_length=32,
-        description="Linked trace ID (32 hex characters)"
+        description="Linked trace ID (32 hex characters)",
     )
 
     span_id: str = Field(
         min_length=16,
         max_length=16,
-        description="Linked span ID (16 hex characters)"
+        description="Linked span ID (16 hex characters)",
     )
 
     trace_flags: int = Field(
         default=1,
         ge=0,
         le=255,
-        description="Trace flags for linked span"
+        description="Trace flags for linked span",
     )
 
-    attributes: Optional[ModelSpanAttributes] = Field(
+    attributes: ModelSpanAttributes | None = Field(
         default=None,
-        description="Link attributes"
+        description="Link attributes",
     )
 
 
@@ -61,13 +62,13 @@ class ModelSpanStatus(BaseModel):
 
     code: str = Field(
         pattern="^(UNSET|OK|ERROR)$",
-        description="Span status code"
+        description="Span status code",
     )
 
-    message: Optional[str] = Field(
+    message: str | None = Field(
         default=None,
         max_length=1000,
-        description="Status description message"
+        description="Status description message",
     )
 
 
@@ -78,147 +79,147 @@ class ModelSpanData(BaseModel):
     trace_id: str = Field(
         min_length=32,
         max_length=32,
-        description="OpenTelemetry trace ID (32 hex characters)"
+        description="OpenTelemetry trace ID (32 hex characters)",
     )
 
     span_id: str = Field(
         min_length=16,
         max_length=16,
-        description="OpenTelemetry span ID (16 hex characters)"
+        description="OpenTelemetry span ID (16 hex characters)",
     )
 
-    parent_span_id: Optional[str] = Field(
+    parent_span_id: str | None = Field(
         default=None,
         min_length=16,
         max_length=16,
-        description="Parent span ID (16 hex characters)"
+        description="Parent span ID (16 hex characters)",
     )
 
     # Span metadata
     name: str = Field(
         max_length=200,
-        description="Span operation name"
+        description="Span operation name",
     )
 
     kind: str = Field(
         pattern="^(INTERNAL|SERVER|CLIENT|PRODUCER|CONSUMER)$",
-        description="Span kind"
+        description="Span kind",
     )
 
     status: ModelSpanStatus = Field(
-        description="Span status information"
+        description="Span status information",
     )
 
     # Timing information
     start_time: datetime = Field(
-        description="Span start timestamp"
+        description="Span start timestamp",
     )
 
-    end_time: Optional[datetime] = Field(
+    end_time: datetime | None = Field(
         default=None,
-        description="Span end timestamp (None if still active)"
+        description="Span end timestamp (None if still active)",
     )
 
-    duration_ms: Optional[float] = Field(
+    duration_ms: float | None = Field(
         default=None,
         ge=0.0,
-        description="Span duration in milliseconds"
+        description="Span duration in milliseconds",
     )
 
     # Span data
-    attributes: Optional[ModelSpanAttributes] = Field(
+    attributes: ModelSpanAttributes | None = Field(
         default=None,
-        description="Span attributes"
+        description="Span attributes",
     )
 
-    events: Optional[List[ModelSpanEvent]] = Field(
+    events: list[ModelSpanEvent] | None = Field(
         default=None,
         max_items=1000,
-        description="Span events/logs"
+        description="Span events/logs",
     )
 
-    links: Optional[List[ModelSpanLink]] = Field(
+    links: list[ModelSpanLink] | None = Field(
         default=None,
         max_items=100,
-        description="Span links to other spans"
+        description="Span links to other spans",
     )
 
     # Resource information
     service_name: str = Field(
         max_length=100,
-        description="Service name that created the span"
+        description="Service name that created the span",
     )
 
-    service_version: Optional[str] = Field(
+    service_version: str | None = Field(
         default=None,
         max_length=50,
-        description="Service version"
+        description="Service version",
     )
 
-    service_instance_id: Optional[str] = Field(
+    service_instance_id: str | None = Field(
         default=None,
         max_length=100,
-        description="Service instance identifier"
+        description="Service instance identifier",
     )
 
     # Instrumentation information
-    instrumentation_library_name: Optional[str] = Field(
+    instrumentation_library_name: str | None = Field(
         default=None,
         max_length=100,
-        description="Name of the instrumentation library"
+        description="Name of the instrumentation library",
     )
 
-    instrumentation_library_version: Optional[str] = Field(
+    instrumentation_library_version: str | None = Field(
         default=None,
         max_length=50,
-        description="Version of the instrumentation library"
+        description="Version of the instrumentation library",
     )
 
     # Sampling information
     is_sampled: bool = Field(
-        description="Whether this span is sampled"
+        description="Whether this span is sampled",
     )
 
-    sampling_priority: Optional[int] = Field(
+    sampling_priority: int | None = Field(
         default=None,
         ge=0,
         le=10,
-        description="Sampling priority (0-10)"
+        description="Sampling priority (0-10)",
     )
 
     # Error information
     has_error: bool = Field(
         default=False,
-        description="Whether the span contains error information"
+        description="Whether the span contains error information",
     )
 
-    error_type: Optional[str] = Field(
+    error_type: str | None = Field(
         default=None,
         max_length=100,
-        description="Error type/class name"
+        description="Error type/class name",
     )
 
-    error_message: Optional[str] = Field(
+    error_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="Error message"
+        description="Error message",
     )
 
     # Performance metrics
-    cpu_usage_percent: Optional[float] = Field(
+    cpu_usage_percent: float | None = Field(
         default=None,
         ge=0.0,
         le=100.0,
-        description="CPU usage during span"
+        description="CPU usage during span",
     )
 
-    memory_usage_mb: Optional[float] = Field(
+    memory_usage_mb: float | None = Field(
         default=None,
         ge=0.0,
-        description="Memory usage during span in MB"
+        description="Memory usage during span in MB",
     )
 
     class Config:
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat(),
         }

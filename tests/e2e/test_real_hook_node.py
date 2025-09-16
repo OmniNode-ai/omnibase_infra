@@ -7,10 +7,10 @@ This is how infrastructure services will actually use the Hook Node.
 """
 
 import asyncio
-import json
 import os
 from datetime import datetime
 from uuid import uuid4
+
 
 async def test_real_hook_node(slack_webhook_url: str):
     """Test the actual Hook Node with real Slack webhook."""
@@ -41,7 +41,7 @@ async def test_real_hook_node(slack_webhook_url: str):
                             headers=dict(response.headers),
                             body=response_body,
                             execution_time_ms=100.0,
-                            is_success=(200 <= response.status < 300)
+                            is_success=(200 <= response.status < 300),
                         )
 
         class SimpleEventBus:
@@ -62,8 +62,11 @@ async def test_real_hook_node(slack_webhook_url: str):
         hook_node = NodeHookEffect(container)
 
         # Create real notification request
-        from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
         from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
+
+        from omnibase_infra.models.notification.model_notification_request import (
+            ModelNotificationRequest,
+        )
 
         # Create infrastructure alert message
         notification_request = ModelNotificationRequest(
@@ -81,31 +84,33 @@ async def test_real_hook_node(slack_webhook_url: str):
                             {
                                 "title": "Service",
                                 "value": "hook_node_test",
-                                "short": True
+                                "short": True,
                             },
                             {
                                 "title": "Status",
                                 "value": "✅ Hook Node is operational",
-                                "short": True
+                                "short": True,
                             },
                             {
                                 "title": "Timestamp",
                                 "value": datetime.utcnow().isoformat(),
-                                "short": True
-                            }
+                                "short": True,
+                            },
                         ],
-                        "footer": "ONEX Infrastructure"
-                    }
-                ]
-            }
+                        "footer": "ONEX Infrastructure",
+                    },
+                ],
+            },
         )
 
         # Create Hook Node input
-        from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
+        from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import (
+            ModelHookNodeInput,
+        )
 
         hook_input = ModelHookNodeInput(
             notification_request=notification_request,
-            correlation_id=str(uuid4())
+            correlation_id=str(uuid4()),
         )
 
         print("📤 Processing notification through Hook Node...")

@@ -5,9 +5,9 @@ Shared model for tracking individual webhook delivery attempts in the ONEX infra
 Records the outcome and timing of each notification attempt.
 """
 
-from typing import Optional
-from pydantic import BaseModel, Field
 import time
+
+from pydantic import BaseModel, Field
 
 
 class ModelNotificationAttempt(BaseModel):
@@ -28,28 +28,28 @@ class ModelNotificationAttempt(BaseModel):
     attempt_number: int = Field(
         ...,
         ge=1,
-        description="Attempt number (1-based)"
+        description="Attempt number (1-based)",
     )
 
     timestamp: float = Field(
         ...,
-        description="Unix timestamp when the attempt was made"
+        description="Unix timestamp when the attempt was made",
     )
 
-    status_code: Optional[int] = Field(
+    status_code: int | None = Field(
         default=None,
-        description="HTTP status code received (null if network error)"
+        description="HTTP status code received (null if network error)",
     )
 
-    error: Optional[str] = Field(
+    error: str | None = Field(
         default=None,
-        description="Error message if the attempt failed"
+        description="Error message if the attempt failed",
     )
 
     execution_time_ms: float = Field(
         ...,
         ge=0,
-        description="Time taken for this attempt in milliseconds"
+        description="Time taken for this attempt in milliseconds",
     )
 
     class Config:
@@ -62,8 +62,8 @@ class ModelNotificationAttempt(BaseModel):
         cls,
         attempt_number: int,
         execution_time_ms: float,
-        status_code: Optional[int] = None,
-        error: Optional[str] = None
+        status_code: int | None = None,
+        error: str | None = None,
     ) -> "ModelNotificationAttempt":
         """
         Create a new attempt record with the current timestamp.
@@ -82,7 +82,7 @@ class ModelNotificationAttempt(BaseModel):
             timestamp=time.time(),
             status_code=status_code,
             error=error,
-            execution_time_ms=execution_time_ms
+            execution_time_ms=execution_time_ms,
         )
 
     @property

@@ -5,9 +5,9 @@ Shared model for webhook retry configuration in the ONEX infrastructure.
 Defines how failed notification attempts should be retried.
 """
 
-from typing import List
-from pydantic import BaseModel, Field, field_validator
+
 from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
+from pydantic import BaseModel, Field, field_validator
 
 
 class ModelNotificationRetryPolicy(BaseModel):
@@ -28,23 +28,23 @@ class ModelNotificationRetryPolicy(BaseModel):
         default=3,
         ge=1,
         le=10,
-        description="Maximum number of delivery attempts"
+        description="Maximum number of delivery attempts",
     )
 
     backoff_strategy: EnumBackoffStrategy = Field(
         default=EnumBackoffStrategy.EXPONENTIAL,
-        description="Strategy for calculating delay between retries"
+        description="Strategy for calculating delay between retries",
     )
 
     delay_seconds: float = Field(
         default=5.0,
         ge=1.0,
-        description="Initial delay between retries in seconds"
+        description="Initial delay between retries in seconds",
     )
 
-    retryable_status_codes: List[int] = Field(
+    retryable_status_codes: list[int] = Field(
         default_factory=lambda: [408, 429, 500, 502, 503, 504],
-        description="HTTP status codes that should trigger a retry"
+        description="HTTP status codes that should trigger a retry",
     )
 
     class Config:
@@ -82,15 +82,14 @@ class ModelNotificationRetryPolicy(BaseModel):
         if self.backoff_strategy == EnumBackoffStrategy.EXPONENTIAL:
             return self.delay_seconds * (2 ** (attempt_number - 1))
 
-        elif self.backoff_strategy == EnumBackoffStrategy.LINEAR:
+        if self.backoff_strategy == EnumBackoffStrategy.LINEAR:
             return self.delay_seconds * attempt_number
 
-        elif self.backoff_strategy == EnumBackoffStrategy.FIXED:
+        if self.backoff_strategy == EnumBackoffStrategy.FIXED:
             return self.delay_seconds
 
-        else:
-            # Default to exponential if unknown strategy
-            return self.delay_seconds * (2 ** (attempt_number - 1))
+        # Default to exponential if unknown strategy
+        return self.delay_seconds * (2 ** (attempt_number - 1))
 
     def should_retry(self, status_code: int, attempt_number: int) -> bool:
         """

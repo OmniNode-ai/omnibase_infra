@@ -5,12 +5,11 @@ This module provides a Pydantic model for Slack message attachments
 following ONEX standards for strong typing and data validation.
 """
 
-from pydantic import BaseModel, Field, HttpUrl
-from typing import Optional, List
 from datetime import datetime
 
+from pydantic import BaseModel, Field, HttpUrl
+
 from omnibase_infra.models.slack.model_slack_field import ModelSlackField
-from omnibase_infra.enums.enum_slack_priority import EnumSlackPriority
 
 
 class ModelSlackAttachment(BaseModel):
@@ -24,39 +23,39 @@ class ModelSlackAttachment(BaseModel):
     color: str = Field(
         description="Attachment color bar (danger, warning, good, or hex code)",
         min_length=1,
-        max_length=20
+        max_length=20,
     )
 
     title: str = Field(
         description="Attachment title displayed prominently",
         min_length=1,
-        max_length=200
+        max_length=200,
     )
 
     text: str = Field(
         description="Main attachment content text",
         min_length=1,
-        max_length=8000
+        max_length=8000,
     )
 
-    fields: List[ModelSlackField] = Field(
+    fields: list[ModelSlackField] = Field(
         default_factory=list,
         description="List of structured fields for data display",
-        max_items=20
+        max_items=20,
     )
 
     footer: str = Field(
         default="ONEX Infrastructure Monitoring",
         description="Footer text displayed at bottom of attachment",
-        max_length=300
+        max_length=300,
     )
 
-    footer_icon: Optional[HttpUrl] = Field(
+    footer_icon: HttpUrl | None = Field(
         default="https://github.com/favicon.ico",
-        description="Small icon displayed next to footer text"
+        description="Small icon displayed next to footer text",
     )
 
     ts: int = Field(
         default_factory=lambda: int(datetime.utcnow().timestamp()),
-        description="Unix timestamp for attachment display"
+        description="Unix timestamp for attachment display",
     )

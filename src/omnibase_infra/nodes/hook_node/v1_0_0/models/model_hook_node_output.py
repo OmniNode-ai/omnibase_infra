@@ -5,10 +5,13 @@ Node-specific output model for the Hook Node EFFECT adapter.
 Returns notification delivery results in message bus envelope format.
 """
 
-from typing import Dict, Optional, Union, List
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict
-from omnibase_infra.models.notification.model_notification_result import ModelNotificationResult
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.notification.model_notification_result import (
+    ModelNotificationResult,
+)
 
 
 class ModelHookNodeOutput(BaseModel):
@@ -30,43 +33,43 @@ class ModelHookNodeOutput(BaseModel):
 
     notification_result: ModelNotificationResult = Field(
         ...,
-        description="Notification delivery result with all attempt details"
+        description="Notification delivery result with all attempt details",
     )
 
     success: bool = Field(
         ...,
-        description="Whether the final notification attempt was successful (2xx status code)"
+        description="Whether the final notification attempt was successful (2xx status code)",
     )
 
-    error_message: Optional[str] = Field(
+    error_message: str | None = Field(
         default=None,
-        description="Error message if the operation failed completely"
+        description="Error message if the operation failed completely",
     )
 
     correlation_id: UUID = Field(
         ...,
-        description="Request correlation ID for distributed tracing"
+        description="Request correlation ID for distributed tracing",
     )
 
     timestamp: float = Field(
         ...,
-        description="Unix timestamp when the response was created"
+        description="Unix timestamp when the response was created",
     )
 
     total_execution_time_ms: float = Field(
         ...,
         ge=0,
-        description="Total operation execution time in milliseconds"
+        description="Total operation execution time in milliseconds",
     )
 
-    context: Optional[Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]], Dict[str, Union[str, int, float, bool]]]]] = Field(
+    context: dict[str, str | int | float | bool | list[str | int | float | bool] | dict[str, str | int | float | bool]] | None = Field(
         default=None,
-        description="Additional response context and metadata with strongly typed values"
+        description="Additional response context and metadata with strongly typed values",
     )
 
     model_config = ConfigDict(
         frozen=True,
-        extra="forbid"
+        extra="forbid",
     )
 
     @classmethod
@@ -76,8 +79,8 @@ class ModelHookNodeOutput(BaseModel):
         correlation_id: UUID,
         timestamp: float,
         total_execution_time_ms: float,
-        error_message: Optional[str] = None,
-        context: Optional[Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]], Dict[str, Union[str, int, float, bool]]]]] = None
+        error_message: str | None = None,
+        context: dict[str, str | int | float | bool | list[str | int | float | bool] | dict[str, str | int | float | bool]] | None = None,
     ) -> "ModelHookNodeOutput":
         """
         Create output from a notification result.
@@ -100,7 +103,7 @@ class ModelHookNodeOutput(BaseModel):
             correlation_id=correlation_id,
             timestamp=timestamp,
             total_execution_time_ms=total_execution_time_ms,
-            context=context
+            context=context,
         )
 
     @property
@@ -114,7 +117,7 @@ class ModelHookNodeOutput(BaseModel):
         return self.total_execution_time_ms / 1000.0
 
     @property
-    def final_status_code(self) -> Optional[int]:
+    def final_status_code(self) -> int | None:
         """Get the final HTTP status code from the notification result."""
         return self.notification_result.final_status_code
 

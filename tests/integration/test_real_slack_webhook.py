@@ -8,27 +8,31 @@ with production Slack integration.
 """
 
 import asyncio
-import json
 import os
-import pytest
 from datetime import datetime
 from uuid import uuid4
 
+import pytest
+
 # Load environment variables from .env file
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_spi.protocols.core import ProtocolHttpClient, ProtocolHttpResponse
-from omnibase_spi.protocols.event_bus import ProtocolEventBus
+from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
+from omnibase_spi.protocols.core import ProtocolHttpResponse
+
+# Shared notification models
+from omnibase_infra.models.notification.model_notification_request import (
+    ModelNotificationRequest,
+)
+from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import (
+    ModelHookNodeInput,
+)
 
 # Hook Node implementation
 from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect
-from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
-
-# Shared notification models
-from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
-from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 
 
 class RealSlackHttpClient:
@@ -44,7 +48,7 @@ class RealSlackHttpClient:
                 url=url,
                 headers=headers or {},
                 data=body,
-                timeout=aiohttp.ClientTimeout(total=timeout)
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as response:
                 response_body = await response.text()
 
@@ -53,7 +57,7 @@ class RealSlackHttpClient:
                     headers=dict(response.headers),
                     body=response_body,
                     execution_time_ms=100.0,  # Approximate
-                    is_success=(200 <= response.status < 300)
+                    is_success=(200 <= response.status < 300),
                 )
 
 
@@ -87,7 +91,7 @@ async def test_real_slack_webhook_notification():
     if not slack_webhook_url:
         pytest.skip("SLACK_WEBHOOK_URL not configured in .env file")
 
-    print(f"🚀 Testing Hook Node with real Slack webhook")
+    print("🚀 Testing Hook Node with real Slack webhook")
     print(f"🎯 Target: {slack_webhook_url[:50]}...")
     print("=" * 60)
 
@@ -125,43 +129,43 @@ async def test_real_slack_webhook_notification():
                         {
                             "title": "Service",
                             "value": "hook_node_integration_test",
-                            "short": True
+                            "short": True,
                         },
                         {
                             "title": "Status",
                             "value": "✅ Hook Node operational with ONEX patterns",
-                            "short": True
+                            "short": True,
                         },
                         {
                             "title": "Fix Applied",
                             "value": "Registry pattern removed - using ModelONEXContainer",
-                            "short": True
+                            "short": True,
                         },
                         {
                             "title": "Timestamp",
                             "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
-                            "short": True
+                            "short": True,
                         },
                         {
                             "title": "Test Type",
                             "value": "Real integration test with actual webhook",
-                            "short": False
-                        }
+                            "short": False,
+                        },
                     ],
-                    "footer": "ONEX Infrastructure - Automated Integration Test"
-                }
-            ]
-        }
+                    "footer": "ONEX Infrastructure - Automated Integration Test",
+                },
+            ],
+        },
     )
 
     # Create Hook Node input
     correlation_id = str(uuid4())
     hook_input = ModelHookNodeInput(
         notification_request=notification_request,
-        correlation_id=correlation_id
+        correlation_id=correlation_id,
     )
 
-    print(f"📋 Processing notification through Hook Node...")
+    print("📋 Processing notification through Hook Node...")
     print(f"🔗 Correlation ID: {correlation_id}")
 
     # Process through Hook Node - this will send real Slack notification
@@ -196,3 +200,4 @@ async def test_real_slack_webhook_notification():
 if __name__ == "__main__":
     # Allow running this test directly
     asyncio.run(test_real_slack_webhook_notification())
+

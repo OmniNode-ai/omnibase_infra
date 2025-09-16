@@ -5,9 +5,12 @@ Shared model for the final result of webhook delivery attempts in the ONEX infra
 Aggregates all attempts and provides the final delivery status.
 """
 
-from typing import List, Optional
+
 from pydantic import BaseModel, Field, validator
-from omnibase_infra.models.notification.model_notification_attempt import ModelNotificationAttempt
+
+from omnibase_infra.models.notification.model_notification_attempt import (
+    ModelNotificationAttempt,
+)
 
 
 class ModelNotificationResult(BaseModel):
@@ -24,25 +27,25 @@ class ModelNotificationResult(BaseModel):
         total_attempts: Total number of attempts made
     """
 
-    final_status_code: Optional[int] = Field(
+    final_status_code: int | None = Field(
         default=None,
-        description="Final HTTP status code received (null if all attempts failed with network errors)"
+        description="Final HTTP status code received (null if all attempts failed with network errors)",
     )
 
     is_success: bool = Field(
         ...,
-        description="Whether the notification was ultimately successful"
+        description="Whether the notification was ultimately successful",
     )
 
-    attempts: List[ModelNotificationAttempt] = Field(
+    attempts: list[ModelNotificationAttempt] = Field(
         ...,
-        description="List of all delivery attempts made"
+        description="List of all delivery attempts made",
     )
 
     total_attempts: int = Field(
         ...,
         ge=0,
-        description="Total number of attempts made"
+        description="Total number of attempts made",
     )
 
     class Config:
@@ -70,7 +73,7 @@ class ModelNotificationResult(BaseModel):
         return v
 
     @classmethod
-    def from_attempts(cls, attempts: List[ModelNotificationAttempt]) -> "ModelNotificationResult":
+    def from_attempts(cls, attempts: list[ModelNotificationAttempt]) -> "ModelNotificationResult":
         """
         Create a result from a list of attempts.
 
@@ -85,7 +88,7 @@ class ModelNotificationResult(BaseModel):
                 final_status_code=None,
                 is_success=False,
                 attempts=[],
-                total_attempts=0
+                total_attempts=0,
             )
 
         last_attempt = attempts[-1]
@@ -96,7 +99,7 @@ class ModelNotificationResult(BaseModel):
             final_status_code=final_status_code,
             is_success=is_success,
             attempts=attempts,
-            total_attempts=len(attempts)
+            total_attempts=len(attempts),
         )
 
     @property
@@ -115,7 +118,7 @@ class ModelNotificationResult(BaseModel):
         return self.total_attempts > 1
 
     @property
-    def successful_attempt_number(self) -> Optional[int]:
+    def successful_attempt_number(self) -> int | None:
         """Get the attempt number that succeeded (if any)."""
         for attempt in self.attempts:
             if attempt.was_successful:
@@ -134,7 +137,6 @@ class ModelNotificationResult(BaseModel):
         last_attempt = self.attempts[-1]
         if last_attempt.was_network_error:
             return f"Network error after {self.total_attempts} attempts: {last_attempt.error}"
-        elif last_attempt.status_code:
+        if last_attempt.status_code:
             return f"HTTP {last_attempt.status_code} after {self.total_attempts} attempts"
-        else:
-            return f"Unknown error after {self.total_attempts} attempts"
+        return f"Unknown error after {self.total_attempts} attempts"

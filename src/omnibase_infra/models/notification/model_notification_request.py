@@ -8,12 +8,15 @@ Security Note: URL validation must be performed by the consuming service
 to prevent SSRF attacks.
 """
 
-from typing import Dict, Optional, Union, List
-from pydantic import Json
-from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
-from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
-from omnibase_infra.models.notification.model_notification_retry_policy import ModelNotificationRetryPolicy
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+
+from omnibase_infra.models.notification.model_notification_auth import (
+    ModelNotificationAuth,
+)
+from omnibase_infra.models.notification.model_notification_retry_policy import (
+    ModelNotificationRetryPolicy,
+)
 from omnibase_infra.models.webhook.model_webhook_payload import ModelWebhookPayloadUnion
 
 
@@ -35,41 +38,41 @@ class ModelNotificationRequest(BaseModel):
 
     url: HttpUrl = Field(
         ...,
-        description="Target URL for the webhook notification"
+        description="Target URL for the webhook notification",
     )
 
     method: EnumNotificationMethod = Field(
         ...,
-        description="HTTP method for the notification request"
+        description="HTTP method for the notification request",
     )
 
-    headers: Optional[Dict[str, str]] = Field(
+    headers: dict[str, str] | None = Field(
         default=None,
-        description="Optional HTTP headers to include with the request"
+        description="Optional HTTP headers to include with the request",
     )
 
     payload: ModelWebhookPayloadUnion = Field(
         ...,
-        description="Strongly-typed webhook payload with agent-safe validation"
+        description="Strongly-typed webhook payload with agent-safe validation",
     )
 
-    auth: Optional[ModelNotificationAuth] = Field(
+    auth: ModelNotificationAuth | None = Field(
         default=None,
-        description="Optional authentication configuration"
+        description="Optional authentication configuration",
     )
 
-    retry_policy: Optional[ModelNotificationRetryPolicy] = Field(
+    retry_policy: ModelNotificationRetryPolicy | None = Field(
         default=None,
-        description="Optional retry policy for failed deliveries"
+        description="Optional retry policy for failed deliveries",
     )
 
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
-        use_enum_values=True
+        use_enum_values=True,
     )
 
-    def model_post_init(self, __context: Optional[Dict[str, Union[str, int, bool]]]) -> None:
+    def model_post_init(self, __context: dict[str, str | int | bool] | None) -> None:
         """Post-initialization validation."""
         # Validate that headers don't contain sensitive data in keys
         if self.headers:

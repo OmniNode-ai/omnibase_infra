@@ -4,8 +4,8 @@ Strongly-typed model for Kafka component health metrics.
 Replaces Dict[str, Any] usage to maintain ONEX compliance.
 """
 
+
 from pydantic import BaseModel, Field
-from typing import Optional, List
 
 
 class ModelKafkaMetrics(BaseModel):
@@ -14,146 +14,146 @@ class ModelKafkaMetrics(BaseModel):
     # Producer metrics
     producer_active_count: int = Field(
         ge=0,
-        description="Number of active Kafka producers"
+        description="Number of active Kafka producers",
     )
 
     producer_pool_size: int = Field(
         ge=0,
-        description="Total producer pool size"
+        description="Total producer pool size",
     )
 
     producer_success_rate: float = Field(
         ge=0.0,
         le=100.0,
-        description="Producer success rate percentage"
+        description="Producer success rate percentage",
     )
 
     messages_sent_total: int = Field(
         ge=0,
-        description="Total number of messages sent"
+        description="Total number of messages sent",
     )
 
     messages_per_second: float = Field(
         ge=0.0,
-        description="Average messages sent per second"
+        description="Average messages sent per second",
     )
 
     # Consumer metrics (if applicable)
-    consumer_active_count: Optional[int] = Field(
+    consumer_active_count: int | None = Field(
         default=None,
         ge=0,
-        description="Number of active Kafka consumers"
+        description="Number of active Kafka consumers",
     )
 
-    messages_consumed_total: Optional[int] = Field(
+    messages_consumed_total: int | None = Field(
         default=None,
         ge=0,
-        description="Total number of messages consumed"
+        description="Total number of messages consumed",
     )
 
-    consumer_lag_total: Optional[int] = Field(
+    consumer_lag_total: int | None = Field(
         default=None,
         ge=0,
-        description="Total consumer lag across all partitions"
+        description="Total consumer lag across all partitions",
     )
 
     # Topic metrics
     topics_count: int = Field(
         ge=0,
-        description="Number of topics being used"
+        description="Number of topics being used",
     )
 
     partitions_count: int = Field(
         ge=0,
-        description="Total number of partitions across all topics"
+        description="Total number of partitions across all topics",
     )
 
     # Performance metrics
     avg_send_latency_ms: float = Field(
         ge=0.0,
-        description="Average message send latency in milliseconds"
+        description="Average message send latency in milliseconds",
     )
 
     avg_batch_size: float = Field(
         ge=0.0,
-        description="Average batch size for producer operations"
+        description="Average batch size for producer operations",
     )
 
-    compression_ratio: Optional[float] = Field(
+    compression_ratio: float | None = Field(
         default=None,
         ge=0.0,
         le=100.0,
-        description="Message compression ratio percentage"
+        description="Message compression ratio percentage",
     )
 
     # Error metrics
     send_failures_total: int = Field(
         ge=0,
-        description="Total number of send failures"
+        description="Total number of send failures",
     )
 
     connection_errors: int = Field(
         ge=0,
-        description="Number of Kafka connection errors"
+        description="Number of Kafka connection errors",
     )
 
     timeout_errors: int = Field(
         ge=0,
-        description="Number of timeout errors"
+        description="Number of timeout errors",
     )
 
     serialization_errors: int = Field(
         ge=0,
-        description="Number of message serialization errors"
+        description="Number of message serialization errors",
     )
 
     # Resource utilization
-    memory_usage_mb: Optional[float] = Field(
+    memory_usage_mb: float | None = Field(
         default=None,
         ge=0.0,
-        description="Kafka client memory usage in megabytes"
+        description="Kafka client memory usage in megabytes",
     )
 
-    buffer_memory_usage_percent: Optional[float] = Field(
+    buffer_memory_usage_percent: float | None = Field(
         default=None,
         ge=0.0,
         le=100.0,
-        description="Producer buffer memory usage percentage"
+        description="Producer buffer memory usage percentage",
     )
 
     # Connection health
     broker_connections: int = Field(
         ge=0,
-        description="Number of active broker connections"
+        description="Number of active broker connections",
     )
 
-    metadata_age_ms: Optional[float] = Field(
+    metadata_age_ms: float | None = Field(
         default=None,
         ge=0.0,
-        description="Age of metadata cache in milliseconds"
+        description="Age of metadata cache in milliseconds",
     )
 
     # Topic-specific metrics
-    active_topics: Optional[int] = Field(
+    active_topics: int | None = Field(
         default=None,
         ge=0,
-        description="Number of topics with active message traffic"
+        description="Number of topics with active message traffic",
     )
 
-    high_throughput_topics: Optional[int] = Field(
+    high_throughput_topics: int | None = Field(
         default=None,
         ge=0,
-        description="Number of topics with high message throughput"
+        description="Number of topics with high message throughput",
     )
 
     # Throughput metrics
     bytes_sent_per_second: float = Field(
         ge=0.0,
-        description="Average bytes sent per second"
+        description="Average bytes sent per second",
     )
 
-    bytes_received_per_second: Optional[float] = Field(
+    bytes_received_per_second: float | None = Field(
         default=None,
         ge=0.0,
-        description="Average bytes received per second (for consumers)"
+        description="Average bytes received per second (for consumers)",
     )

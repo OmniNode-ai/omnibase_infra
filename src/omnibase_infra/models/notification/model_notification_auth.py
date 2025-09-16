@@ -7,9 +7,9 @@ Supports multiple authentication types with secure credential handling.
 Security Note: All credential fields use SecretStr for secure handling.
 """
 
-from typing import Dict, Union
-from pydantic import BaseModel, Field, SecretStr
+
 from omnibase_core.enums.enum_auth_type import EnumAuthType
+from pydantic import BaseModel, Field, SecretStr
 
 
 class ModelNotificationAuth(BaseModel):
@@ -26,12 +26,12 @@ class ModelNotificationAuth(BaseModel):
 
     auth_type: EnumAuthType = Field(
         ...,
-        description="Type of authentication to use for the notification"
+        description="Type of authentication to use for the notification",
     )
 
-    credentials: Dict[str, Union[str, SecretStr]] = Field(
+    credentials: dict[str, str | SecretStr] = Field(
         ...,
-        description="Authentication credentials with secure handling - use SecretStr for sensitive values"
+        description="Authentication credentials with secure handling - use SecretStr for sensitive values",
     )
 
     class Config:
@@ -40,7 +40,7 @@ class ModelNotificationAuth(BaseModel):
         extra = "forbid"
         use_enum_values = True
 
-    def model_post_init(self, __context: Union[Dict[str, Union[str, int, bool]], None]) -> None:
+    def model_post_init(self, __context: dict[str, str | int | bool] | None) -> None:
         """Post-initialization validation."""
         self._validate_credentials_for_auth_type()
 
@@ -75,7 +75,7 @@ class ModelNotificationAuth(BaseModel):
         """Check if this is API key authentication."""
         return self.auth_type == EnumAuthType.API_KEY_HEADER
 
-    def get_auth_header(self) -> Dict[str, str]:
+    def get_auth_header(self) -> dict[str, str]:
         """
         Generate the appropriate HTTP header for this authentication type.
 
@@ -91,7 +91,7 @@ class ModelNotificationAuth(BaseModel):
             token_value = token.get_secret_value() if isinstance(token, SecretStr) else str(token)
             return {"Authorization": f"Bearer {token_value}"}
 
-        elif self.auth_type == EnumAuthType.BASIC:
+        if self.auth_type == EnumAuthType.BASIC:
             import base64
             username = self.credentials.get("username", "")
             password = self.credentials.get("password", "")
@@ -102,7 +102,7 @@ class ModelNotificationAuth(BaseModel):
             encoded_credentials = base64.b64encode(credentials_str.encode()).decode()
             return {"Authorization": f"Basic {encoded_credentials}"}
 
-        elif self.auth_type == EnumAuthType.API_KEY_HEADER:
+        if self.auth_type == EnumAuthType.API_KEY_HEADER:
             header_name = self.credentials.get("header_name", "")
             api_key = self.credentials.get("api_key", "")
             # Handle SecretStr values
@@ -110,5 +110,4 @@ class ModelNotificationAuth(BaseModel):
             api_key_value = api_key.get_secret_value() if isinstance(api_key, SecretStr) else str(api_key)
             return {header_name_value: api_key_value}
 
-        else:
-            raise ValueError(f"Unsupported auth type: {self.auth_type}")
+        raise ValueError(f"Unsupported auth type: {self.auth_type}")

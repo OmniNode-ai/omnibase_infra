@@ -12,13 +12,12 @@ Version: 3.1.0 (Python Implementation with Poetry)
 import argparse
 import json
 import logging
-import os
 import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 def json_datetime_serializer(obj):
@@ -116,7 +115,7 @@ class ChangeSummary(BaseModel):
     lines_added: int = Field(0, description="Lines added")
     lines_removed: int = Field(0, description="Lines removed")
     security_status: SecurityStatus = Field(
-        SecurityStatus.CLEAN, description="Security scan result"
+        SecurityStatus.CLEAN, description="Security scan result",
     )
 
 
@@ -124,14 +123,14 @@ class ImpactAssessment(BaseModel):
     """Assessment of change impact"""
 
     coordination_required: bool = Field(
-        False, description="Whether coordination is needed"
+        False, description="Whether coordination is needed",
     )
     risk_level: RiskLevel = Field(RiskLevel.LOW, description="Overall risk level")
-    affected_systems: List[str] = Field(
-        default_factory=list, description="Systems that may be affected"
+    affected_systems: list[str] = Field(
+        default_factory=list, description="Systems that may be affected",
     )
-    breaking_changes: List[str] = Field(
-        default_factory=list, description="Potential breaking changes"
+    breaking_changes: list[str] = Field(
+        default_factory=list, description="Potential breaking changes",
     )
 
 
@@ -139,17 +138,17 @@ class CrossRepositoryCorrelation(BaseModel):
     """Cross-repository correlation analysis"""
 
     enabled: bool = Field(
-        True, description="Whether correlation analysis was performed"
+        True, description="Whether correlation analysis was performed",
     )
     correlation_id: str = Field(..., description="Unique correlation identifier")
-    temporal_correlations: List[Dict[str, Any]] = Field(
-        default_factory=list, description="Time-based correlations"
+    temporal_correlations: list[dict[str, Any]] = Field(
+        default_factory=list, description="Time-based correlations",
     )
-    semantic_correlations: List[Dict[str, Any]] = Field(
-        default_factory=list, description="Semantic correlations"
+    semantic_correlations: list[dict[str, Any]] = Field(
+        default_factory=list, description="Semantic correlations",
     )
-    breaking_changes: List[Dict[str, Any]] = Field(
-        default_factory=list, description="Breaking change correlations"
+    breaking_changes: list[dict[str, Any]] = Field(
+        default_factory=list, description="Breaking change correlations",
     )
     impact_assessment: ImpactAssessment = Field(..., description="Impact assessment")
 
@@ -157,17 +156,17 @@ class CrossRepositoryCorrelation(BaseModel):
 class SecurityAndPrivacy(BaseModel):
     """Security and privacy analysis"""
 
-    sensitive_patterns: List[str] = Field(
-        default_factory=list, description="Detected sensitive patterns"
+    sensitive_patterns: list[str] = Field(
+        default_factory=list, description="Detected sensitive patterns",
     )
     security_score: float = Field(
-        1.0, ge=0.0, le=1.0, description="Security confidence score"
+        1.0, ge=0.0, le=1.0, description="Security confidence score",
     )
-    privacy_concerns: List[str] = Field(
-        default_factory=list, description="Privacy-related concerns"
+    privacy_concerns: list[str] = Field(
+        default_factory=list, description="Privacy-related concerns",
     )
-    recommendations: List[str] = Field(
-        default_factory=list, description="Security recommendations"
+    recommendations: list[str] = Field(
+        default_factory=list, description="Security recommendations",
     )
 
 
@@ -177,9 +176,9 @@ class TechnicalAnalysis(BaseModel):
     complexity_score: float = Field(0.0, ge=0.0, description="Code complexity score")
     quality_score: float = Field(1.0, ge=0.0, le=1.0, description="Code quality score")
     maintainability: str = Field("good", description="Maintainability assessment")
-    test_coverage: Optional[float] = Field(None, description="Test coverage percentage")
-    architecture_compliance: Dict[str, Any] = Field(
-        default_factory=dict, description="Architecture compliance"
+    test_coverage: float | None = Field(None, description="Test coverage percentage")
+    architecture_compliance: dict[str, Any] = Field(
+        default_factory=dict, description="Architecture compliance",
     )
 
 
@@ -190,26 +189,26 @@ class IntelligenceDocumentContent(BaseModel):
     metadata: IntelligenceMetadata = Field(..., description="Document metadata")
     change_summary: ChangeSummary = Field(..., description="Summary of changes")
     cross_repository_correlation: CrossRepositoryCorrelation = Field(
-        ..., description="Correlation analysis"
+        ..., description="Correlation analysis",
     )
     security_and_privacy: SecurityAndPrivacy = Field(
-        ..., description="Security analysis"
+        ..., description="Security analysis",
     )
-    technical_analysis: Optional[TechnicalAnalysis] = Field(
-        None, description="Technical analysis"
+    technical_analysis: TechnicalAnalysis | None = Field(
+        None, description="Technical analysis",
     )
-    raw_diff: Optional[str] = Field(None, description="Raw git diff content")
+    raw_diff: str | None = Field(None, description="Raw git diff content")
 
 
 class MCPCreateDocumentRequest(BaseModel):
     """MCP request for creating intelligence documents"""
 
     method: str = Field("create_document", description="MCP method name")
-    params: Dict[str, Any] = Field(..., description="MCP method parameters")
+    params: dict[str, Any] = Field(..., description="MCP method parameters")
 
     @classmethod
     def create_intelligence_document(
-        cls, project_id: str, content: IntelligenceDocumentContent, repository_name: str
+        cls, project_id: str, content: IntelligenceDocumentContent, repository_name: str,
     ) -> "MCPCreateDocumentRequest":
         """Create an MCP request for intelligence document"""
         return cls(
@@ -234,9 +233,9 @@ class MCPResponse(BaseModel):
     """Standard MCP response"""
 
     success: bool = Field(..., description="Operation success status")
-    document_id: Optional[str] = Field(None, description="Created document ID")
-    message: Optional[str] = Field(None, description="Response message")
-    error: Optional[str] = Field(None, description="Error message if failed")
+    document_id: str | None = Field(None, description="Created document ID")
+    message: str | None = Field(None, description="Response message")
+    error: str | None = Field(None, description="Error message if failed")
 
 
 class IntelligenceServiceRequest(BaseModel):
@@ -244,17 +243,17 @@ class IntelligenceServiceRequest(BaseModel):
 
     content: str = Field(..., description="Raw document content as JSON string")
     source_path: str = Field(..., description="Source path identifier")
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata"
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata",
     )
     store_entities: bool = Field(
-        True, description="Whether to store extracted entities"
+        True, description="Whether to store extracted entities",
     )
     extract_relationships: bool = Field(
-        True, description="Whether to extract relationships"
+        True, description="Whether to extract relationships",
     )
     trigger_freshness_analysis: bool = Field(
-        True, description="Whether to trigger freshness analysis"
+        True, description="Whether to trigger freshness analysis",
     )
 
     @classmethod
@@ -267,7 +266,7 @@ class IntelligenceServiceRequest(BaseModel):
         """Create intelligence service request from document content"""
         return cls(
             content=json.dumps(
-                content.model_dump(), indent=2, default=json_datetime_serializer
+                content.model_dump(), indent=2, default=json_datetime_serializer,
             ),
             source_path=f"git://{repository_name}/commit/{commit_hash}",
             metadata={
@@ -282,14 +281,14 @@ class IntelligenceServiceRequest(BaseModel):
 
 # Helper functions
 def validate_intelligence_document(
-    content: Dict[str, Any],
+    content: dict[str, Any],
 ) -> IntelligenceDocumentContent:
     """Validate and parse intelligence document content"""
     return IntelligenceDocumentContent(**content)
 
 
 def create_intelligence_metadata(
-    repository: str, branch: str, commit: str, author: str, hook_version: str = "3.1"
+    repository: str, branch: str, commit: str, author: str, hook_version: str = "3.1",
 ) -> IntelligenceMetadata:
     """Create intelligence metadata with current timestamp"""
     return IntelligenceMetadata(
@@ -324,7 +323,7 @@ CONFIG_AVAILABLE = False  # No centralized config in other repositories
 
 
 class IntelligenceHook:
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         """Initialize the intelligence hook with configuration."""
         self.config = self._load_config(config_path)
         self.logger = self._setup_logging()
@@ -337,7 +336,7 @@ class IntelligenceHook:
                 self.api_url = f"http://localhost:{archon_config.intelligence_service.port}/extract/document"
                 self.use_mcp_format = False
                 self.logger.info(
-                    f"Using centralized config - Intelligence service: {self.api_url}"
+                    f"Using centralized config - Intelligence service: {self.api_url}",
                 )
             except Exception as e:
                 self.logger.warning(f"Failed to load centralized config: {e}")
@@ -347,10 +346,10 @@ class IntelligenceHook:
         else:
             # Legacy configuration loading
             archon_endpoint = self.config.get(
-                "archon_mcp_endpoint", "http://localhost:8051/mcp"
+                "archon_mcp_endpoint", "http://localhost:8051/mcp",
             )
             intelligence_api_url = self.config.get("intelligence_api", {}).get(
-                "url", "http://localhost:8053/extract/document"
+                "url", "http://localhost:8053/extract/document",
             )
 
             # Use MCP endpoint for document creation (proper format)
@@ -363,7 +362,7 @@ class IntelligenceHook:
 
         self.api_timeout = self.config.get("intelligence_api", {}).get("timeout", 10)
         self.retry_attempts = self.config.get("intelligence_api", {}).get(
-            "retry_attempts", 2
+            "retry_attempts", 2,
         )
 
         # Project ID for document creation
@@ -371,20 +370,20 @@ class IntelligenceHook:
 
         # Feature flags
         self.correlations_enabled = self.config.get("features", {}).get(
-            "correlations", True
+            "correlations", True,
         )
         self.file_analysis_enabled = self.config.get("features", {}).get(
-            "file_analysis", True
+            "file_analysis", True,
         )
         self.commit_analysis_enabled = self.config.get("features", {}).get(
-            "commit_analysis", True
+            "commit_analysis", True,
         )
 
         # Repository configuration
         self.repo_root = Path.cwd()
         self.repo_name = self.repo_root.name
 
-    def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
+    def _load_config(self, config_path: str | None) -> dict[str, Any]:
         """Load configuration from file or use defaults."""
         default_config = {
             "intelligence_api": {
@@ -412,7 +411,7 @@ class IntelligenceHook:
 
         if config_path and Path(config_path).exists():
             try:
-                with open(config_path, "r") as f:
+                with open(config_path) as f:
                     file_config = json.load(f)
                 # Merge with defaults
                 self._deep_merge(default_config, file_config)
@@ -421,7 +420,7 @@ class IntelligenceHook:
 
         return default_config
 
-    def _deep_merge(self, base: Dict, update: Dict) -> None:
+    def _deep_merge(self, base: dict, update: dict) -> None:
         """Deep merge configuration dictionaries."""
         for key, value in update.items():
             if key in base and isinstance(base[key], dict) and isinstance(value, dict):
@@ -433,7 +432,7 @@ class IntelligenceHook:
         """Setup logging configuration."""
         logger = logging.getLogger("intelligence_hook")
         log_level = getattr(
-            logging, self.config.get("logging", {}).get("level", "INFO").upper()
+            logging, self.config.get("logging", {}).get("level", "INFO").upper(),
         )
         logger.setLevel(log_level)
 
@@ -441,18 +440,18 @@ class IntelligenceHook:
             handler = logging.StreamHandler()
             formatter = logging.Formatter(
                 self.config.get("logging", {}).get(
-                    "format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-                )
+                    "format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                ),
             )
             handler.setFormatter(formatter)
             logger.addHandler(handler)
 
         return logger
 
-    def run_git_command(self, cmd: List[str], cwd: Optional[Path] = None) -> str:
+    def run_git_command(self, cmd: list[str], cwd: Path | None = None) -> str:
         """Run a git command and return the output."""
         self.logger.debug(
-            f"Executing git command: {' '.join(cmd)} in {cwd or self.repo_root}"
+            f"Executing git command: {' '.join(cmd)} in {cwd or self.repo_root}",
         )
         try:
             result = subprocess.run(
@@ -464,14 +463,14 @@ class IntelligenceHook:
             )
             output = result.stdout.strip()
             self.logger.debug(
-                f"Git command output ({len(output)} chars): {output[:200]}..."
+                f"Git command output ({len(output)} chars): {output[:200]}...",
             )
             return output
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Git command failed: {' '.join(cmd)}, error: {e.stderr}")
             return ""
 
-    def get_commit_info(self, commit_hash: str) -> Dict[str, Any]:
+    def get_commit_info(self, commit_hash: str) -> dict[str, Any]:
         """Get detailed information about a commit."""
         self.logger.debug(f"Getting commit info for: {commit_hash}")
         try:
@@ -483,7 +482,7 @@ class IntelligenceHook:
                     "--format=%H|%s|%an|%ae|%at|%B",
                     "--name-status",
                     commit_hash,
-                ]
+                ],
             )
 
             if not commit_data:
@@ -496,7 +495,7 @@ class IntelligenceHook:
 
             if len(header) < 6:
                 self.logger.warning(
-                    f"Invalid commit header format for {commit_hash}: {header}"
+                    f"Invalid commit header format for {commit_hash}: {header}",
                 )
                 return {}
 
@@ -508,7 +507,7 @@ class IntelligenceHook:
                 parsed_timestamp = int(timestamp)
             except (ValueError, TypeError) as e:
                 self.logger.warning(
-                    f"Invalid timestamp format '{timestamp}' for commit {commit_hash}, using current time: {e}"
+                    f"Invalid timestamp format '{timestamp}' for commit {commit_hash}, using current time: {e}",
                 )
                 parsed_timestamp = int(time.time())
 
@@ -530,11 +529,11 @@ class IntelligenceHook:
                                 "filename": filename,
                                 "file_type": Path(filename).suffix.lstrip(".")
                                 or "no_extension",
-                            }
+                            },
                         )
 
             self.logger.debug(
-                f"Parsed {len(file_changes)} file changes for commit {commit_hash}"
+                f"Parsed {len(file_changes)} file changes for commit {commit_hash}",
             )
 
             return {
@@ -551,8 +550,8 @@ class IntelligenceHook:
             return {}
 
     def analyze_file_changes(
-        self, file_changes: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        self, file_changes: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         """Analyze file changes to extract patterns and technologies."""
         self.logger.debug(f"Analyzing {len(file_changes)} file changes")
         if not self.file_analysis_enabled:
@@ -602,16 +601,16 @@ class IntelligenceHook:
             "total_files_changed": len(file_changes),
         }
         self.logger.debug(
-            f"File analysis complete: {len(result['technologies_detected'])} technologies, {len(result['directories_affected'])} directories"
+            f"File analysis complete: {len(result['technologies_detected'])} technologies, {len(result['directories_affected'])} directories",
         )
         return result
 
     def find_cross_repo_correlations(
-        self, commit_info: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+        self, commit_info: dict[str, Any],
+    ) -> list[dict[str, Any]]:
         """Find correlations with other repositories."""
         self.logger.debug(
-            f"Finding cross-repo correlations for commit: {commit_info.get('commit_hash', 'unknown')}"
+            f"Finding cross-repo correlations for commit: {commit_info.get('commit_hash', 'unknown')}",
         )
         if not self.correlations_enabled:
             self.logger.debug("Correlations disabled, returning empty result")
@@ -723,12 +722,12 @@ class IntelligenceHook:
                 if (s.is_dir() and s != self.repo_root and (s / ".git").exists())
             ]
             self.logger.debug(
-                f"Found {len(sibling_repos)} sibling repositories to check"
+                f"Found {len(sibling_repos)} sibling repositories to check",
             )
 
             for sibling in sibling_repos:
                 self.logger.debug(
-                    f"Checking correlations with repository: {sibling.name}"
+                    f"Checking correlations with repository: {sibling.name}",
                 )
                 if (
                     sibling.is_dir()
@@ -738,13 +737,13 @@ class IntelligenceHook:
 
                     # Search for similar commits in sibling repos
                     matching_commits = self._find_matching_commits_in_repo(
-                        sibling, keywords
+                        sibling, keywords,
                     )
 
                     if matching_commits:
                         strength = min(len(matching_commits) * 0.2, 1.0)
                         self.logger.debug(
-                            f"Found {len(matching_commits)} matching commits in {sibling.name}, strength: {strength}"
+                            f"Found {len(matching_commits)} matching commits in {sibling.name}, strength: {strength}",
                         )
                         correlations.append(
                             {
@@ -755,11 +754,11 @@ class IntelligenceHook:
                                     :3
                                 ],  # Limit matches
                                 "correlation_strength": strength,
-                            }
+                            },
                         )
                     else:
                         self.logger.debug(
-                            f"No matching commits found in {sibling.name}"
+                            f"No matching commits found in {sibling.name}",
                         )
 
         except Exception as e:
@@ -768,15 +767,15 @@ class IntelligenceHook:
         return correlations
 
     def _find_matching_commits_in_repo(
-        self, repo_path: Path, keywords: List[str]
-    ) -> List[Dict[str, Any]]:
+        self, repo_path: Path, keywords: list[str],
+    ) -> list[dict[str, Any]]:
         """Find matching commits in a specific repository."""
         matching_commits = []
 
         try:
             # Build grep pattern for keywords
             grep_pattern = "|".join(
-                keywords[:5]
+                keywords[:5],
             )  # Limit keywords to avoid long commands
 
             # Search recent commits for keyword matches
@@ -800,7 +799,7 @@ class IntelligenceHook:
                                 "commit": parts[0],
                                 "message": parts[1],
                                 "author": parts[2],
-                            }
+                            },
                         )
 
         except Exception as e:
@@ -808,10 +807,10 @@ class IntelligenceHook:
 
         return matching_commits
 
-    def build_intelligence_document(self, commits_to_push: List[str]) -> Dict[str, Any]:
+    def build_intelligence_document(self, commits_to_push: list[str]) -> dict[str, Any]:
         """Build the complete intelligence document."""
         self.logger.info(
-            f"Building intelligence document for {len(commits_to_push)} commits"
+            f"Building intelligence document for {len(commits_to_push)} commits",
         )
 
         # Get commit information
@@ -821,7 +820,7 @@ class IntelligenceHook:
 
         for idx, commit_hash in enumerate(commits_to_push, 1):
             self.logger.debug(
-                f"Processing commit {idx}/{len(commits_to_push)}: {commit_hash}"
+                f"Processing commit {idx}/{len(commits_to_push)}: {commit_hash}",
             )
             commit_info = self.get_commit_info(commit_hash)
             if commit_info:
@@ -829,7 +828,7 @@ class IntelligenceHook:
                 file_changes = commit_info.get("file_changes", [])
                 all_file_changes.extend(file_changes)
                 self.logger.debug(
-                    f"Commit {commit_hash} has {len(file_changes)} file changes"
+                    f"Commit {commit_hash} has {len(file_changes)} file changes",
                 )
 
                 # Find correlations for this commit
@@ -837,7 +836,7 @@ class IntelligenceHook:
                     correlations = self.find_cross_repo_correlations(commit_info)
                     all_correlations.extend(correlations)
                     self.logger.debug(
-                        f"Found {len(correlations)} correlations for commit {commit_hash}"
+                        f"Found {len(correlations)} correlations for commit {commit_hash}",
                     )
             else:
                 self.logger.warning(f"Failed to get commit info for {commit_hash}")
@@ -847,7 +846,7 @@ class IntelligenceHook:
             return {}
 
         self.logger.info(
-            f"Successfully processed {len(commits_data)} commits with {len(all_file_changes)} total file changes"
+            f"Successfully processed {len(commits_data)} commits with {len(all_file_changes)} total file changes",
         )
 
         # Analyze file changes
@@ -867,7 +866,7 @@ class IntelligenceHook:
             "intelligence_data": {
                 "technologies_detected": file_analysis.get("technologies_detected", []),
                 "architecture_patterns": self._detect_architecture_patterns(
-                    all_file_changes
+                    all_file_changes,
                 ),
                 "file_analysis": file_analysis,
                 "commit_analysis": {
@@ -878,7 +877,7 @@ class IntelligenceHook:
                 "correlation_analysis": {
                     "temporal_correlations": all_correlations,
                     "cross_repository_insights": self._generate_cross_repo_insights(
-                        all_correlations
+                        all_correlations,
                     ),
                 },
             },
@@ -887,24 +886,24 @@ class IntelligenceHook:
         # Log document summary
         tech_count = len(intelligence_doc["intelligence_data"]["technologies_detected"])
         pattern_count = len(
-            intelligence_doc["intelligence_data"]["architecture_patterns"]
+            intelligence_doc["intelligence_data"]["architecture_patterns"],
         )
         correlation_count = len(
             intelligence_doc["intelligence_data"]["correlation_analysis"][
                 "temporal_correlations"
-            ]
+            ],
         )
 
         self.logger.info(
-            f"Intelligence document built: {tech_count} technologies, {pattern_count} patterns, {correlation_count} correlations"
+            f"Intelligence document built: {tech_count} technologies, {pattern_count} patterns, {correlation_count} correlations",
         )
         self.logger.debug(f"Document size: {len(str(intelligence_doc))} characters")
 
         return intelligence_doc
 
     def _detect_architecture_patterns(
-        self, file_changes: List[Dict[str, Any]]
-    ) -> List[str]:
+        self, file_changes: list[dict[str, Any]],
+    ) -> list[str]:
         """Detect architectural patterns from file changes."""
         patterns = []
         filenames = [change.get("filename", "") for change in file_changes]
@@ -941,7 +940,7 @@ class IntelligenceHook:
 
         return patterns
 
-    def _generate_commit_summary(self, commits_data: List[Dict[str, Any]]) -> str:
+    def _generate_commit_summary(self, commits_data: list[dict[str, Any]]) -> str:
         """Generate a summary of the commits."""
         if not commits_data:
             return "No commits to analyze"
@@ -968,12 +967,11 @@ class IntelligenceHook:
         unique_actions = list(set(actions))
         if len(unique_actions) == 1:
             return f"Batch commit focused on {unique_actions[0]}"
-        else:
-            return f"Mixed development including {', '.join(unique_actions)}"
+        return f"Mixed development including {', '.join(unique_actions)}"
 
     def _generate_cross_repo_insights(
-        self, correlations: List[Dict[str, Any]]
-    ) -> List[str]:
+        self, correlations: list[dict[str, Any]],
+    ) -> list[str]:
         """Generate insights from cross-repository correlations."""
         insights = []
 
@@ -993,25 +991,25 @@ class IntelligenceHook:
             strength = sum(c.get("correlation_strength", 0) for c in corrs) / len(corrs)
             if strength > 0.5:
                 insights.append(
-                    f"Strong correlation with {repo} (strength: {strength:.2f})"
+                    f"Strong correlation with {repo} (strength: {strength:.2f})",
                 )
             elif strength > 0.3:
                 insights.append(
-                    f"Moderate correlation with {repo} (strength: {strength:.2f})"
+                    f"Moderate correlation with {repo} (strength: {strength:.2f})",
                 )
 
         if len(repo_correlations) > 2:
             insights.append(
-                f"Cross-repository development activity detected across {len(repo_correlations)} repositories"
+                f"Cross-repository development activity detected across {len(repo_correlations)} repositories",
             )
 
         return insights
 
-    def _create_intelligence_document_content(self, doc: Dict[str, Any]):
+    def _create_intelligence_document_content(self, doc: dict[str, Any]):
         """Transform dictionary document into validated Pydantic IntelligenceDocumentContent."""
         if not PYDANTIC_AVAILABLE:
             raise ImportError(
-                "Pydantic models not available - cannot create validated document"
+                "Pydantic models not available - cannot create validated document",
             )
 
         # Return type is IntelligenceDocumentContent when Pydantic is available
@@ -1139,7 +1137,7 @@ class IntelligenceHook:
             raw_diff=None,  # Could be added if needed
         )
 
-    def submit_intelligence_document(self, doc: Dict[str, Any]) -> bool:
+    def submit_intelligence_document(self, doc: dict[str, Any]) -> bool:
         """Submit the intelligence document to the Archon system."""
         if not doc:
             self.logger.warning("No document to submit")
@@ -1173,14 +1171,13 @@ class IntelligenceHook:
                     """Recursively convert datetime objects to ISO format strings."""
                     if isinstance(obj, datetime):
                         return obj.isoformat()
-                    elif isinstance(obj, dict):
+                    if isinstance(obj, dict):
                         return {
                             k: serialize_datetime_objects(v) for k, v in obj.items()
                         }
-                    elif isinstance(obj, list):
+                    if isinstance(obj, list):
                         return [serialize_datetime_objects(item) for item in obj]
-                    else:
-                        return obj
+                    return obj
 
                 serializable_doc = serialize_datetime_objects(doc)
                 payload = {
@@ -1198,7 +1195,7 @@ class IntelligenceHook:
                     },
                 }
             self.logger.debug(
-                f"Using MCP format for document creation in project {self.project_id}"
+                f"Using MCP format for document creation in project {self.project_id}",
             )
         else:
             # Use intelligence service format with Pydantic validation
@@ -1223,18 +1220,17 @@ class IntelligenceHook:
                     """Recursively convert datetime objects to ISO format strings."""
                     if isinstance(obj, datetime):
                         return obj.isoformat()
-                    elif isinstance(obj, dict):
+                    if isinstance(obj, dict):
                         return {
                             k: serialize_datetime_objects(v) for k, v in obj.items()
                         }
-                    elif isinstance(obj, list):
+                    if isinstance(obj, list):
                         return [serialize_datetime_objects(item) for item in obj]
-                    else:
-                        return obj
+                    return obj
 
                 serializable_doc = serialize_datetime_objects(doc)
                 content = json.dumps(
-                    serializable_doc, indent=2, default=json_datetime_serializer
+                    serializable_doc, indent=2, default=json_datetime_serializer,
                 )
                 source_path = f"git://{serializable_doc.get('repository_name', 'unknown')}/commit/{serializable_doc.get('commit_hash', 'unknown')}"
 
@@ -1253,7 +1249,7 @@ class IntelligenceHook:
                     "extract_relationships": True,
                     "trigger_freshness_analysis": True,
                 }
-            self.logger.debug(f"Using intelligence service format")
+            self.logger.debug("Using intelligence service format")
 
         # Wrap payload in JSON-RPC format only for MCP endpoint
         if self.use_mcp_format:
@@ -1268,21 +1264,21 @@ class IntelligenceHook:
             jsonrpc_payload = payload
 
         payload_size = len(
-            json.dumps(jsonrpc_payload, default=json_datetime_serializer)
+            json.dumps(jsonrpc_payload, default=json_datetime_serializer),
         )
         self.logger.debug(f"API payload prepared: size={payload_size} chars")
         self.logger.debug(
-            f"Using API endpoint: {self.api_url} with timeout: {self.api_timeout}s"
+            f"Using API endpoint: {self.api_url} with timeout: {self.api_timeout}s",
         )
         self.logger.debug(f"HTTP client: {HTTP_CLIENT}")
         self.logger.debug(
-            f"JSON-RPC payload: {json.dumps(jsonrpc_payload, default=json_datetime_serializer, indent=2)[:1000]}..."
+            f"JSON-RPC payload: {json.dumps(jsonrpc_payload, default=json_datetime_serializer, indent=2)[:1000]}...",
         )
 
         for attempt in range(self.retry_attempts + 1):
             try:
                 self.logger.info(
-                    f"Submitting intelligence document (attempt {attempt + 1}/{self.retry_attempts + 1})"
+                    f"Submitting intelligence document (attempt {attempt + 1}/{self.retry_attempts + 1})",
                 )
 
                 start_time = time.time()
@@ -1293,7 +1289,7 @@ class IntelligenceHook:
                         response = client.post(
                             self.api_url,
                             data=json.dumps(
-                                jsonrpc_payload, default=json_datetime_serializer
+                                jsonrpc_payload, default=json_datetime_serializer,
                             ),
                             headers={
                                 "Content-Type": "application/json",
@@ -1304,48 +1300,47 @@ class IntelligenceHook:
                         response_time = time.time() - start_time
 
                         self.logger.debug(
-                            f"API response received in {response_time:.2f}s, status: {response.status_code}"
+                            f"API response received in {response_time:.2f}s, status: {response.status_code}",
                         )
 
                         if response.status_code == 200:
                             try:
                                 result = response.json()
                                 self.logger.debug(
-                                    f"API response content: {str(result)[:200]}..."
+                                    f"API response content: {str(result)[:200]}...",
                                 )
 
                                 # Intelligence service returns different success format
                                 if "entities" in result or "document_id" in result:
                                     self.logger.info(
-                                        f"✅ Intelligence document submitted successfully"
+                                        "✅ Intelligence document submitted successfully",
                                     )
                                     if "entities" in result:
                                         self.logger.info(
-                                            f"Extracted {len(result.get('entities', []))} entities"
+                                            f"Extracted {len(result.get('entities', []))} entities",
                                         )
                                     if "document_id" in result:
                                         self.logger.info(
-                                            f"Document ID: {result['document_id']}"
+                                            f"Document ID: {result['document_id']}",
                                         )
                                     return True
-                                else:
-                                    self.logger.error(
-                                        f"Unexpected API response format: {result}"
-                                    )
+                                self.logger.error(
+                                    f"Unexpected API response format: {result}",
+                                )
                             except Exception as e:
                                 self.logger.error(
-                                    f"Invalid JSON response: {e}, raw response: {response.text[:500]}"
+                                    f"Invalid JSON response: {e}, raw response: {response.text[:500]}",
                                 )
                         else:
                             self.logger.error(
-                                f"HTTP {response.status_code}: {response.text[:500]}"
+                                f"HTTP {response.status_code}: {response.text[:500]}",
                             )
                 else:
                     # Using requests
                     response = requests.post(
                         self.api_url,
                         data=json.dumps(
-                            jsonrpc_payload, default=json_datetime_serializer
+                            jsonrpc_payload, default=json_datetime_serializer,
                         ),
                         headers={
                             "Content-Type": "application/json",
@@ -1356,41 +1351,40 @@ class IntelligenceHook:
                     response_time = time.time() - start_time
 
                     self.logger.debug(
-                        f"API response received in {response_time:.2f}s, status: {response.status_code}"
+                        f"API response received in {response_time:.2f}s, status: {response.status_code}",
                     )
 
                     if response.status_code == 200:
                         try:
                             result = response.json()
                             self.logger.debug(
-                                f"API response content: {str(result)[:200]}..."
+                                f"API response content: {str(result)[:200]}...",
                             )
 
                             # Intelligence service returns different success format
                             if "entities" in result or "document_id" in result:
                                 self.logger.info(
-                                    f"✅ Intelligence document submitted successfully"
+                                    "✅ Intelligence document submitted successfully",
                                 )
                                 if "entities" in result:
                                     self.logger.info(
-                                        f"Extracted {len(result.get('entities', []))} entities"
+                                        f"Extracted {len(result.get('entities', []))} entities",
                                     )
                                 if "document_id" in result:
                                     self.logger.info(
-                                        f"Document ID: {result['document_id']}"
+                                        f"Document ID: {result['document_id']}",
                                     )
                                 return True
-                            else:
-                                self.logger.error(
-                                    f"Unexpected API response format: {result}"
-                                )
+                            self.logger.error(
+                                f"Unexpected API response format: {result}",
+                            )
                         except json.JSONDecodeError as e:
                             self.logger.error(
-                                f"Invalid JSON response: {e}, raw response: {response.text[:500]}"
+                                f"Invalid JSON response: {e}, raw response: {response.text[:500]}",
                             )
                     else:
                         self.logger.error(
-                            f"HTTP {response.status_code}: {response.text[:500]}"
+                            f"HTTP {response.status_code}: {response.text[:500]}",
                         )
 
             except Exception as e:
@@ -1406,28 +1400,28 @@ class IntelligenceHook:
                         self.logger.warning(f"Request timeout (attempt {attempt + 1})")
                     else:
                         self.logger.error(
-                            f"Request failed (attempt {attempt + 1}): {e}"
+                            f"Request failed (attempt {attempt + 1}): {e}",
                         )
                 else:
                     self.logger.error(f"Unexpected error (attempt {attempt + 1}): {e}")
 
             if attempt < self.retry_attempts:
-                self.logger.info(f"Retrying in 1 second...")
+                self.logger.info("Retrying in 1 second...")
                 time.sleep(1)
 
         self.logger.error(
-            "❌ Failed to submit intelligence document after all attempts"
+            "❌ Failed to submit intelligence document after all attempts",
         )
         return False
 
     def process_pre_push_hook(self, remote_name: str, remote_url: str) -> int:
         """Process the pre-push hook."""
         self.logger.info(
-            f"🚀 Processing pre-push hook for {remote_name} ({remote_url})"
+            f"🚀 Processing pre-push hook for {remote_name} ({remote_url})",
         )
         self.logger.info(f"Repository: {self.repo_name} at {self.repo_root}")
         self.logger.info(
-            f"Features enabled - correlations: {self.correlations_enabled}, file_analysis: {self.file_analysis_enabled}"
+            f"Features enabled - correlations: {self.correlations_enabled}, file_analysis: {self.file_analysis_enabled}",
         )
 
         try:
@@ -1448,12 +1442,12 @@ class IntelligenceHook:
                             if remote_sha == "0000000000000000000000000000000000000000":
                                 # New branch, get recent commits
                                 commit_list = self.run_git_command(
-                                    ["git", "rev-list", "--max-count=10", local_sha]
+                                    ["git", "rev-list", "--max-count=10", local_sha],
                                 )
                             else:
                                 # Existing branch, get commits between remote and local
                                 commit_list = self.run_git_command(
-                                    ["git", "rev-list", f"{remote_sha}..{local_sha}"]
+                                    ["git", "rev-list", f"{remote_sha}..{local_sha}"],
                                 )
 
                             if commit_list:
@@ -1463,17 +1457,17 @@ class IntelligenceHook:
             if not commits_to_push:
                 self.logger.info("No commits from stdin, analyzing recent commits")
                 recent_commits = self.run_git_command(
-                    ["git", "rev-list", "--max-count=5", "HEAD"]
+                    ["git", "rev-list", "--max-count=5", "HEAD"],
                 )
                 if recent_commits:
                     commits_to_push = recent_commits.split("\n")
                     self.logger.debug(
-                        f"Found {len(commits_to_push)} recent commits to analyze"
+                        f"Found {len(commits_to_push)} recent commits to analyze",
                     )
 
             if not commits_to_push:
                 self.logger.warning(
-                    "No commits to analyze, skipping intelligence processing"
+                    "No commits to analyze, skipping intelligence processing",
                 )
                 return 0
 
@@ -1484,11 +1478,11 @@ class IntelligenceHook:
             ]
             if len(commits_to_push) != original_count:
                 self.logger.debug(
-                    f"Deduplicated commits: {original_count} → {len(commits_to_push)}"
+                    f"Deduplicated commits: {original_count} → {len(commits_to_push)}",
                 )
 
             self.logger.info(
-                f"📊 Analyzing {len(commits_to_push)} commits: {commits_to_push[:3]}{'...' if len(commits_to_push) > 3 else ''}"
+                f"📊 Analyzing {len(commits_to_push)} commits: {commits_to_push[:3]}{'...' if len(commits_to_push) > 3 else ''}",
             )
 
             # Build intelligence document
@@ -1502,16 +1496,14 @@ class IntelligenceHook:
                 if success:
                     self.logger.info("🎉 Pre-push hook completed successfully")
                     return 0
-                else:
-                    self.logger.error(
-                        "❌ Pre-push hook failed during document submission"
-                    )
-                    return 1
-            else:
-                self.logger.warning(
-                    "No intelligence document generated, continuing without intelligence update"
+                self.logger.error(
+                    "❌ Pre-push hook failed during document submission",
                 )
-                return 0
+                return 1
+            self.logger.warning(
+                "No intelligence document generated, continuing without intelligence update",
+            )
+            return 0
 
         except Exception as e:
             self.logger.error(f"💥 Pre-push hook processing failed with exception: {e}")
@@ -1544,7 +1536,7 @@ def main():
         # Override submit method for dry run
         def dry_run_submit(doc):
             hook.logger.info(
-                f"Would submit document with {len(doc.get('intelligence_data', {}).get('commit_analysis', {}).get('commits', []))} commits"
+                f"Would submit document with {len(doc.get('intelligence_data', {}).get('commit_analysis', {}).get('commits', []))} commits",
             )
             return True
 

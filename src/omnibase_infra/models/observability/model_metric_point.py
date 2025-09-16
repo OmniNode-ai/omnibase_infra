@@ -4,10 +4,10 @@ Shared model for individual metric data points.
 Used across observability infrastructure for metric collection.
 """
 
-from enum import Enum
-from pydantic import BaseModel, Field
-from typing import Dict, Optional
 from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
 
 
 class MetricTypeEnum(str, Enum):
@@ -20,45 +20,45 @@ class MetricTypeEnum(str, Enum):
 
 class ModelMetricPoint(BaseModel):
     """Model for single metric data point."""
-    
+
     name: str = Field(
-        description="Metric name identifier"
+        description="Metric name identifier",
     )
-    
+
     value: float = Field(
-        description="Metric value"
+        description="Metric value",
     )
-    
+
     timestamp: datetime = Field(
-        description="Metric collection timestamp"
+        description="Metric collection timestamp",
     )
-    
+
     metric_type: MetricTypeEnum = Field(
         default=MetricTypeEnum.GAUGE,
-        description="Type of metric"
+        description="Type of metric",
     )
-    
-    labels: Dict[str, str] = Field(
+
+    labels: dict[str, str] = Field(
         default_factory=dict,
-        description="Metric labels for categorization"
+        description="Metric labels for categorization",
     )
-    
-    unit: Optional[str] = Field(
+
+    unit: str | None = Field(
         default=None,
-        description="Unit of measurement (e.g., 'bytes', 'seconds', 'percent')"
+        description="Unit of measurement (e.g., 'bytes', 'seconds', 'percent')",
     )
-    
-    source: Optional[str] = Field(
+
+    source: str | None = Field(
         default=None,
-        description="Source component that generated the metric"
+        description="Source component that generated the metric",
     )
-    
-    environment: Optional[str] = Field(
+
+    environment: str | None = Field(
         default=None,
-        description="Environment where metric was collected"
+        description="Environment where metric was collected",
     )
 
     class Config:
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: v.isoformat(),
         }

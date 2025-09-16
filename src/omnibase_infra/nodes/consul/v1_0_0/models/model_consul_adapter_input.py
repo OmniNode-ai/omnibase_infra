@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
+from typing import Literal
+
 from pydantic import BaseModel
-from typing import Optional, Literal
-from .model_consul_value_data import ModelConsulValueData
+
 from .model_consul_service_config import ModelConsulServiceConfig
+from .model_consul_value_data import ModelConsulValueData
 
 
 class ModelConsulAdapterInput(BaseModel):
@@ -11,17 +13,17 @@ class ModelConsulAdapterInput(BaseModel):
     
     Node-specific model for processing event envelope payloads into Consul operations.
     """
-    
+
     action: Literal[
         "consul_kv_get",
-        "consul_kv_put", 
+        "consul_kv_put",
         "consul_kv_delete",
         "consul_service_register",
         "consul_service_deregister",
         "consul_service_list",
-        "consul_health_check"
+        "consul_health_check",
     ]
-    key_path: Optional[str] = None
-    value_data: Optional[ModelConsulValueData] = None
-    service_config: Optional[ModelConsulServiceConfig] = None
+    key_path: str | None = None
+    value_data: ModelConsulValueData | None = None
+    service_config: ModelConsulServiceConfig | None = None
     recurse: bool = False

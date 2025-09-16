@@ -12,37 +12,45 @@ Tests webhook delivery validation including:
 
 import asyncio
 import json
-import pytest
 import time
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch
-from uuid import UUID, uuid4
-from typing import List, Optional
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
+import pytest
+from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_core.enums.enum_auth_type import EnumAuthType
 from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
+from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_spi.protocols.core import ProtocolHttpResponse
 
-# Hook Node implementation
-from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect, CircuitBreakerState
-from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
+from omnibase_infra.models.notification.model_notification_auth import (
+    ModelNotificationAuth,
+)
 
 # Shared notification models
-from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
-from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
-from omnibase_infra.models.notification.model_notification_retry_policy import ModelNotificationRetryPolicy
+from omnibase_infra.models.notification.model_notification_request import (
+    ModelNotificationRequest,
+)
+from omnibase_infra.models.notification.model_notification_retry_policy import (
+    ModelNotificationRetryPolicy,
+)
+from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import (
+    ModelHookNodeInput,
+)
+
+# Hook Node implementation
+from omnibase_infra.nodes.hook_node.v1_0_0.node import (
+    CircuitBreakerState,
+    NodeHookEffect,
+)
 
 # Test-specific strongly typed models
 from tests.models.test_webhook_models import (
+    MockWebhookFailureConfigModel,
     MockWebhookRequestModel,
     MockWebhookResponseConfigModel,
-    MockWebhookFailureConfigModel,
-    SlackWebhookPayloadModel,
-    DiscordWebhookPayloadModel,
-    GenericWebhookPayloadModel,
 )
 
 
@@ -50,13 +58,13 @@ class MockWebhookServer:
     """Mock webhook server for testing various webhook endpoints."""
 
     def __init__(self):
-        self.received_requests: List[MockWebhookRequestModel] = []
+        self.received_requests: list[MockWebhookRequestModel] = []
         self.response_config: MockWebhookResponseConfigModel = MockWebhookResponseConfigModel()
-        self.failure_config: Optional[MockWebhookFailureConfigModel] = None
+        self.failure_config: MockWebhookFailureConfigModel | None = None
         self.failure_count: int = 0
         self.request_count: int = 0
 
-    def configure_responses(self, success_config: Optional[MockWebhookResponseConfigModel] = None, failure_config: Optional[MockWebhookFailureConfigModel] = None):
+    def configure_responses(self, success_config: MockWebhookResponseConfigModel | None = None, failure_config: MockWebhookFailureConfigModel | None = None):
         """Configure mock server responses."""
         if success_config:
             self.response_config = success_config
@@ -78,7 +86,7 @@ class MockWebhookServer:
             method=method,
             headers=headers,
             body=body,
-            timestamp=time.time()
+            timestamp=time.time(),
         )
         self.received_requests.append(request_data)
 
@@ -94,7 +102,7 @@ class MockWebhookServer:
                 headers=self.failure_config.headers,
                 body=self.failure_config.body,
                 execution_time_ms=self.response_config.delay_ms,
-                is_success=False
+                is_success=False,
             )
 
         # Return success response
@@ -103,14 +111,14 @@ class MockWebhookServer:
             headers=self.response_config.headers,
             body=self.response_config.body,
             execution_time_ms=self.response_config.delay_ms,
-            is_success=True
+            is_success=True,
         )
 
-    def get_last_request(self) -> Optional[MockWebhookRequestModel]:
+    def get_last_request(self) -> MockWebhookRequestModel | None:
         """Get the most recent request received."""
         return self.received_requests[-1] if self.received_requests else None
 
-    def get_requests_for_url(self, url_pattern: str) -> List[MockWebhookRequestModel]:
+    def get_requests_for_url(self, url_pattern: str) -> list[MockWebhookRequestModel]:
         """Get all requests matching a URL pattern."""
         return [req for req in self.received_requests if url_pattern in req.url]
 
@@ -149,13 +157,13 @@ class TestSlackWebhookDelivery:
         slack_payload = {
             "text": "🚨 System Alert: Database connection lost",
             "channel": "#infrastructure-alerts",
-            "username": "ONEX Monitor"
+            "username": "ONEX Monitor",
         }
 
         request = ModelNotificationRequest(
             url="https://hooks.slack.com/services/T1234567890/B1234567890/XXXXXXXXXXXXXXXXXXXXXXXX",
             method=EnumNotificationMethod.POST,
-            payload=slack_payload
+            payload=slack_payload,
         )
 
         # Configure Slack-like response
@@ -164,8 +172,8 @@ class TestSlackWebhookDelivery:
                 status_code=200,
                 body="ok",
                 headers={"Content-Type": "text/plain"},
-                delay_ms=150
-            )
+                delay_ms=150,
+            ),
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -197,22 +205,22 @@ class TestSlackWebhookDelivery:
                         {"title": "Service", "value": "PostgreSQL", "short": True},
                         {"title": "Severity", "value": "Critical", "short": True},
                         {"title": "Duration", "value": "5 minutes", "short": True},
-                        {"title": "Affected Users", "value": "All", "short": True}
+                        {"title": "Affected Users", "value": "All", "short": True},
                     ],
                     "footer": "ONEX Infrastructure",
-                    "ts": int(time.time())
-                }
-            ]
+                    "ts": int(time.time()),
+                },
+            ],
         }
 
         request = ModelNotificationRequest(
             url="https://hooks.slack.com/services/TEAM/CHANNEL/TOKEN",
             method=EnumNotificationMethod.POST,
-            payload=slack_payload
+            payload=slack_payload,
         )
 
         webhook_server.configure_responses(
-            success_config=MockWebhookResponseConfigModel(delay_ms=200)
+            success_config=MockWebhookResponseConfigModel(delay_ms=200),
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -237,7 +245,7 @@ class TestSlackWebhookDelivery:
         """Test Slack webhook with authentication (Bearer token)."""
         auth = ModelNotificationAuth(
             auth_type=EnumAuthType.BEARER,
-            credentials={"token": "xoxb-slack-bot-token"}
+            credentials={"token": "xoxb-slack-bot-token"},
         )
 
         request = ModelNotificationRequest(
@@ -246,9 +254,9 @@ class TestSlackWebhookDelivery:
             payload={
                 "channel": "C1234567890",
                 "text": "Authenticated Slack message",
-                "as_user": True
+                "as_user": True,
             },
-            auth=auth
+            auth=auth,
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -269,14 +277,14 @@ class TestSlackWebhookDelivery:
             strategy=EnumBackoffStrategy.EXPONENTIAL,
             base_delay_ms=100,
             max_delay_ms=1000,
-            backoff_multiplier=2.0
+            backoff_multiplier=2.0,
         )
 
         request = ModelNotificationRequest(
             url="https://hooks.slack.com/services/unreliable/webhook/url",
             method=EnumNotificationMethod.POST,
             payload={"text": "Test retry behavior"},
-            retry_policy=retry_policy
+            retry_policy=retry_policy,
         )
 
         # Configure server to fail first 2 attempts, then succeed
@@ -285,11 +293,11 @@ class TestSlackWebhookDelivery:
             failure_config=MockWebhookFailureConfigModel(
                 fail_count=2,
                 status_code=500,
-                body="Internal Server Error"
-            )
+                body="Internal Server Error",
+            ),
         )
 
-        with patch('asyncio.sleep'):  # Speed up test
+        with patch("asyncio.sleep"):  # Speed up test
             input_data = ModelHookNodeInput(notification_request=request)
             result = await hook_node.process(input_data)
 
@@ -332,13 +340,13 @@ class TestDiscordWebhookDelivery:
         discord_payload = {
             "content": "🔥 **CRITICAL ALERT**\nDatabase connection has been lost!",
             "username": "ONEX Infrastructure Bot",
-            "avatar_url": "https://example.com/bot-avatar.png"
+            "avatar_url": "https://example.com/bot-avatar.png",
         }
 
         request = ModelNotificationRequest(
             url="https://discord.com/api/webhooks/1234567890123456789/very-long-webhook-token-here",
             method=EnumNotificationMethod.POST,
-            payload=discord_payload
+            payload=discord_payload,
         )
 
         # Configure Discord-like response
@@ -347,8 +355,8 @@ class TestDiscordWebhookDelivery:
                 status_code=204,  # Discord returns 204 for successful webhooks
                 body="",
                 headers={},
-                delay_ms=120
-            )
+                delay_ms=120,
+            ),
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -378,22 +386,22 @@ class TestDiscordWebhookDelivery:
                     "fields": [
                         {"name": "Database", "value": "❌ Offline", "inline": True},
                         {"name": "Cache", "value": "✅ Healthy", "inline": True},
-                        {"name": "Load Balancer", "value": "⚠️ Degraded", "inline": True}
+                        {"name": "Load Balancer", "value": "⚠️ Degraded", "inline": True},
                     ],
                     "footer": {"text": "ONEX Infrastructure Monitor"},
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            ]
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            ],
         }
 
         request = ModelNotificationRequest(
             url="https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN",
             method=EnumNotificationMethod.POST,
-            payload=discord_payload
+            payload=discord_payload,
         )
 
         webhook_server.configure_responses(
-            success_config=MockWebhookResponseConfigModel(status_code=204, body="")
+            success_config=MockWebhookResponseConfigModel(status_code=204, body=""),
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -419,7 +427,7 @@ class TestDiscordWebhookDelivery:
         request = ModelNotificationRequest(
             url="https://discord.com/api/webhooks/rate-limited/webhook",
             method=EnumNotificationMethod.POST,
-            payload={"content": "Rate limit test message"}
+            payload={"content": "Rate limit test message"},
         )
 
         # Configure rate limit response
@@ -428,11 +436,11 @@ class TestDiscordWebhookDelivery:
                 fail_count=1,
                 status_code=429,  # Rate limited
                 body='{"retry_after": 1000}',
-                headers={"Retry-After": "1"}
-            )
+                headers={"Retry-After": "1"},
+            ),
         )
 
-        with patch('asyncio.sleep'):  # Speed up test
+        with patch("asyncio.sleep"):  # Speed up test
             input_data = ModelHookNodeInput(notification_request=request)
             result = await hook_node.process(input_data)
 
@@ -473,19 +481,19 @@ class TestGenericWebhookDelivery:
             "source": {
                 "service": "hook_node",
                 "environment": "production",
-                "region": "us-west-2"
+                "region": "us-west-2",
             },
             "alert": {
                 "title": "Database Connection Pool Exhausted",
                 "description": "All database connections are currently in use",
                 "timestamp": datetime.utcnow().isoformat(),
-                "tags": ["database", "connection-pool", "critical"]
+                "tags": ["database", "connection-pool", "critical"],
             },
             "metadata": {
                 "correlation_id": str(uuid4()),
                 "version": "1.0",
-                "schema": "onex-infrastructure-alert-v1"
-            }
+                "schema": "onex-infrastructure-alert-v1",
+            },
         }
 
         request = ModelNotificationRequest(
@@ -495,8 +503,8 @@ class TestGenericWebhookDelivery:
             headers={
                 "Content-Type": "application/json",
                 "X-Webhook-Source": "ONEX-Infrastructure",
-                "X-Event-Type": "infrastructure.alert"
-            }
+                "X-Event-Type": "infrastructure.alert",
+            },
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -525,8 +533,8 @@ class TestGenericWebhookDelivery:
             auth_type=EnumAuthType.API_KEY_HEADER,
             credentials={
                 "header_name": "X-API-Key",
-                "api_key": "ak_1234567890abcdef"
-            }
+                "api_key": "ak_1234567890abcdef",
+            },
         )
 
         request = ModelNotificationRequest(
@@ -535,9 +543,9 @@ class TestGenericWebhookDelivery:
             payload={
                 "alert_type": "infrastructure_failure",
                 "message": "Service degradation detected",
-                "priority": "high"
+                "priority": "high",
             },
-            auth=auth
+            auth=auth,
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -557,8 +565,8 @@ class TestGenericWebhookDelivery:
             auth_type=EnumAuthType.BASIC,
             credentials={
                 "username": "webhook-user",
-                "password": "secure-password-123"
-            }
+                "password": "secure-password-123",
+            },
         )
 
         request = ModelNotificationRequest(
@@ -567,9 +575,9 @@ class TestGenericWebhookDelivery:
             payload={
                 "system": "ONEX Infrastructure",
                 "event": "circuit_breaker_opened",
-                "details": "Circuit breaker opened for failing service"
+                "details": "Circuit breaker opened for failing service",
             },
-            auth=auth
+            auth=auth,
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -599,8 +607,8 @@ class TestGenericWebhookDelivery:
                 "notification_id": "notif_12345",
                 "status": "acknowledged",
                 "updated_by": "onex_infrastructure",
-                "timestamp": datetime.utcnow().isoformat()
-            }
+                "timestamp": datetime.utcnow().isoformat(),
+            },
         )
 
         # Mock PUT method on HTTP client
@@ -609,11 +617,11 @@ class TestGenericWebhookDelivery:
             headers={"Content-Type": "application/json"},
             body='{"updated": true}',
             execution_time_ms=80.0,
-            is_success=True
+            is_success=True,
         ))
 
         # Patch the HTTP client to support PUT
-        with patch.object(hook_node._http_client, 'put', webhook_server.handle_request):
+        with patch.object(hook_node._http_client, "put", webhook_server.handle_request):
             input_data = ModelHookNodeInput(notification_request=request)
             result = await hook_node.process(input_data)
 
@@ -653,13 +661,13 @@ class TestWebhookCircuitBreakerBehavior:
         slack_request = ModelNotificationRequest(
             url="https://hooks.slack.com/services/failing/webhook",
             method=EnumNotificationMethod.POST,
-            payload={"text": "Slack test"}
+            payload={"text": "Slack test"},
         )
 
         discord_request = ModelNotificationRequest(
             url="https://discord.com/api/webhooks/working/webhook",
             method=EnumNotificationMethod.POST,
-            payload={"content": "Discord test"}
+            payload={"content": "Discord test"},
         )
 
         # Configure server to fail only Slack requests
@@ -670,16 +678,15 @@ class TestWebhookCircuitBreakerBehavior:
                     headers={},
                     body="Internal Server Error",
                     execution_time_ms=100.0,
-                    is_success=False
+                    is_success=False,
                 )
-            else:
-                return ProtocolHttpResponse(
-                    status_code=200,
-                    headers={"Content-Type": "application/json"},
-                    body='{"status": "ok"}',
-                    execution_time_ms=50.0,
-                    is_success=True
-                )
+            return ProtocolHttpResponse(
+                status_code=200,
+                headers={"Content-Type": "application/json"},
+                body='{"status": "ok"}',
+                execution_time_ms=50.0,
+                is_success=True,
+            )
 
         hook_node._http_client.post = selective_handler
 
@@ -712,7 +719,7 @@ class TestWebhookCircuitBreakerBehavior:
         request = ModelNotificationRequest(
             url="https://recovery-test.webhook.com/api/notify",
             method=EnumNotificationMethod.POST,
-            payload={"test": "recovery"}
+            payload={"test": "recovery"},
         )
 
         # Configure server to fail initially
@@ -720,8 +727,8 @@ class TestWebhookCircuitBreakerBehavior:
             failure_config=MockWebhookFailureConfigModel(
                 fail_count=10,  # Many failures
                 status_code=503,
-                body="Service Unavailable"
-            )
+                body="Service Unavailable",
+            ),
         )
 
         # Trigger circuit breaker opening
@@ -742,7 +749,7 @@ class TestWebhookCircuitBreakerBehavior:
 
         # Configure server to now succeed
         webhook_server.configure_responses(
-            success_config=MockWebhookResponseConfigModel(status_code=200)
+            success_config=MockWebhookResponseConfigModel(status_code=200),
         )
 
         # Next request should attempt recovery

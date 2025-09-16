@@ -2,39 +2,32 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
 
-from omnibase_core.exceptions.base_onex_error import OnexError
+from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_core_error_code import CoreErrorCode
+from omnibase_core.enums.enum_health_status import EnumHealthStatus
+from omnibase_core.exceptions.base_onex_error import OnexError
+from omnibase_core.model.core.model_health_status import ModelHealthStatus
 from omnibase_core.node_effect import (
     EffectType,
     ModelEffectInput,
     ModelEffectOutput,
 )
 from omnibase_core.node_effect_service import NodeEffectService
-from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.enums.enum_health_status import EnumHealthStatus
-from omnibase_core.model.core.model_health_status import ModelHealthStatus
 
 # Import shared Consul models
-from omnibase_infra.models.consul import (
-    ModelConsulServiceListResponse,
-    ModelConsulHealthResponse,
-    ModelConsulKVResponse,
-)
-
 # Import node-specific models
 from .models import (
+    ModelConsulHealthCacheEntry,
+    ModelConsulHealthProjection,
+    ModelConsulKVCacheEntry,
+    ModelConsulKVProjection,
     ModelConsulProjectorInput,
     ModelConsulProjectorOutput,
-    ModelConsulServiceProjection,
-    ModelConsulHealthProjection,
-    ModelConsulKVProjection,
-    ModelConsulTopologyProjection,
     ModelConsulServiceCacheEntry,
-    ModelConsulHealthCacheEntry,
-    ModelConsulKVCacheEntry,
+    ModelConsulServiceProjection,
+    ModelConsulTopologyProjection,
 )
 
 
@@ -57,15 +50,15 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
         # ONEX logger initialization with fallback
         try:
             self.logger = getattr(container, "get_tool", lambda x: None)(
-                "LOGGER"
+                "LOGGER",
             ) or logging.getLogger(__name__)
         except (AttributeError, Exception):
             self.logger = logging.getLogger(__name__)
 
         # State cache for projection optimization with strong typing
-        self._service_cache: Dict[str, ModelConsulServiceCacheEntry] = {}
-        self._health_cache: Dict[str, ModelConsulHealthCacheEntry] = {}
-        self._kv_cache: Dict[str, ModelConsulKVCacheEntry] = {}
+        self._service_cache: dict[str, ModelConsulServiceCacheEntry] = {}
+        self._health_cache: dict[str, ModelConsulHealthCacheEntry] = {}
+        self._kv_cache: dict[str, ModelConsulKVCacheEntry] = {}
         self._cache_ttl: int = 300  # 5 minutes
 
         self._initialized = False
@@ -93,7 +86,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
 
             self._initialized = True
             self.logger.info(
-                "Consul projector initialized successfully with event handlers"
+                "Consul projector initialized successfully with event handlers",
             )
 
         except Exception as e:
@@ -133,7 +126,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
 
             # Route to appropriate projection operation
             result = None
-            timestamp = datetime.now(timezone.utc).isoformat()
+            timestamp = datetime.now(UTC).isoformat()
 
             if projector_input.projection_type == "service_state":
                 result = await self._project_service_state(projector_input)
@@ -189,7 +182,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
 
             # Check cache health and projector state
             cache_health = len(self._service_cache) + len(self._health_cache) + len(self._kv_cache)
-            
+
             if cache_health == 0:
                 return ModelHealthStatus(
                     status=EnumHealthStatus.DEGRADED,
@@ -205,7 +198,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
             self.logger.error(f"Consul projector health check failed: {e}")
             return ModelHealthStatus(
                 status=EnumHealthStatus.UNREACHABLE,
-                message=f"Consul projector health check failed: {str(e)}",
+                message=f"Consul projector health check failed: {e!s}",
             )
 
     async def _project_service_state(self, input_data: ModelConsulProjectorInput) -> ModelConsulServiceProjection:
@@ -213,7 +206,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
         try:
             # TODO: Integration with Consul adapter to get service data
             # For now, return mock projection structure
-            
+
             services = []
             # Mock service projection - replace with actual Consul adapter integration
             mock_services = [
@@ -222,22 +215,22 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
                     "service_name": "api-gateway",
                     "instances": 3,
                     "health_status": "healthy",
-                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "last_updated": datetime.now(UTC).isoformat(),
                 },
                 {
-                    "service_id": "service-2", 
+                    "service_id": "service-2",
                     "service_name": "user-service",
                     "instances": 2,
                     "health_status": "warning",
-                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "last_updated": datetime.now(UTC).isoformat(),
                 },
             ]
 
             # Apply service filtering if specified
-            target_services = getattr(input_data, 'target_services', [])
+            target_services = getattr(input_data, "target_services", [])
             if target_services:
                 mock_services = [
-                    s for s in mock_services 
+                    s for s in mock_services
                     if s["service_name"] in target_services
                 ]
 
@@ -352,7 +345,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
             metrics = {
                 "node_count": len(topology_graph["nodes"]),
                 "edge_count": len(topology_graph["edges"]),
-                "depth": getattr(input_data, 'depth', 2),
+                "depth": getattr(input_data, "depth", 2),
             }
 
             return ModelConsulTopologyProjection(
@@ -376,9 +369,9 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
         """
 
         async def projection_handler(
-            operation_data: Dict[str, object],
-            transaction: Optional[object] = None,
-        ) -> Dict[str, object]:
+            operation_data: dict[str, object],
+            transaction: object | None = None,
+        ) -> dict[str, object]:
             """Handle projection operations through events."""
             try:
                 # Process projection operation from event envelope
@@ -386,8 +379,8 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
                 projector_input = ModelConsulProjectorInput(**envelope_payload)
 
                 # Route to projection operation
-                timestamp = datetime.now(timezone.utc).isoformat()
-                
+                timestamp = datetime.now(UTC).isoformat()
+
                 if projector_input.projection_type == "service_state":
                     result = await self._project_service_state(projector_input)
                 elif projector_input.projection_type == "health_state":
@@ -423,7 +416,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
         self.effect_handlers[EffectType.MONITORING] = projection_handler
 
         self.logger.info(
-            "Consul projector effect handlers registered for event-driven processing"
+            "Consul projector effect handlers registered for event-driven processing",
         )
 
 

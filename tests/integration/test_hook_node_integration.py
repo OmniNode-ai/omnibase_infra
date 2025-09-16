@@ -10,41 +10,45 @@ Tests the Hook Node integration with:
 """
 
 import asyncio
-import json
-import pytest
 import time
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import patch
 from uuid import UUID, uuid4
-from typing import Dict, List
 
+import pytest
+from omnibase_core.core.errors.onex_error import OnexError
 from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.models.core.model_onex_event import ModelOnexEvent
-from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_core.enums.enum_auth_type import EnumAuthType
-from omnibase_spi.protocols.core import ProtocolHttpClient, ProtocolHttpResponse
-from omnibase_spi.protocols.event_bus import ProtocolEventBus
+from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 
 # Hook Node implementation
-from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect, CircuitBreakerState
+from omnibase_infra.nodes.hook_node.v1_0_0.node import (
+    NodeHookEffect,
+)
 
 
 class MockHttpResponse:
     """Mock HTTP response that implements ProtocolHttpResponse interface."""
 
-    def __init__(self, status_code: int, headers: Dict[str, str] = None, body: str = "",
+    def __init__(self, status_code: int, headers: dict[str, str] = None, body: str = "",
                  execution_time_ms: float = 100.0, is_success: bool = True):
         self.status_code = status_code
         self.headers = headers or {}
         self.body = body
         self.execution_time_ms = execution_time_ms
         self.is_success = is_success
-from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
+from omnibase_infra.models.notification.model_notification_auth import (
+    ModelNotificationAuth,
+)
 
 # Shared notification models
-from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
-from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
+from omnibase_infra.models.notification.model_notification_request import (
+    ModelNotificationRequest,
+)
+from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import (
+    ModelHookNodeInput,
+)
 
 # Test-specific strongly typed models
 from tests.models.test_webhook_models import IntegrationTestRequestModel
@@ -54,16 +58,16 @@ class MockHttpClient:
     """Mock HTTP client that implements ProtocolHttpClient interface."""
 
     def __init__(self):
-        self.requests_made: List[IntegrationTestRequestModel] = []
-        self.response_sequence: List[MockHttpResponse] = []
+        self.requests_made: list[IntegrationTestRequestModel] = []
+        self.response_sequence: list[MockHttpResponse] = []
         self.current_response_index = 0
 
-    def set_response_sequence(self, responses: List[MockHttpResponse]):
+    def set_response_sequence(self, responses: list[MockHttpResponse]):
         """Set a sequence of responses to return."""
         self.response_sequence = responses
         self.current_response_index = 0
 
-    async def post(self, url: str, headers: Dict[str, str] = None, body: str = None, timeout: float = 30.0) -> MockHttpResponse:
+    async def post(self, url: str, headers: dict[str, str] = None, body: str = None, timeout: float = 30.0) -> MockHttpResponse:
         """Mock POST request implementation."""
         # Record the request
         self.requests_made.append(IntegrationTestRequestModel(
@@ -72,7 +76,7 @@ class MockHttpClient:
             headers=headers or {},
             payload={"body": body or "", "timeout": timeout},
             timestamp=time.time(),
-            correlation_id=str(uuid4())
+            correlation_id=str(uuid4()),
         ))
 
         # Return next response in sequence
@@ -80,17 +84,16 @@ class MockHttpClient:
             response = self.response_sequence[self.current_response_index]
             self.current_response_index += 1
             return response
-        else:
-            # Default success response
-            return MockHttpResponse(
-                status_code=200,
-                headers={"Content-Type": "application/json"},
-                body='{"status": "ok"}',
-                execution_time_ms=100.0,
-                is_success=True
-            )
+        # Default success response
+        return MockHttpResponse(
+            status_code=200,
+            headers={"Content-Type": "application/json"},
+            body='{"status": "ok"}',
+            execution_time_ms=100.0,
+            is_success=True,
+        )
 
-    async def get(self, url: str, headers: Dict[str, str] = None, timeout: float = 30.0) -> MockHttpResponse:
+    async def get(self, url: str, headers: dict[str, str] = None, timeout: float = 30.0) -> MockHttpResponse:
         """Mock GET request implementation."""
         self.requests_made.append(IntegrationTestRequestModel(
             url=url,
@@ -98,17 +101,17 @@ class MockHttpClient:
             headers=headers or {},
             payload={"timeout": timeout},
             timestamp=time.time(),
-            correlation_id=str(uuid4())
+            correlation_id=str(uuid4()),
         ))
         return MockHttpResponse(
             status_code=200,
             headers={},
             body='{"status": "ok"}',
             execution_time_ms=50.0,
-            is_success=True
+            is_success=True,
         )
 
-    async def request(self, method, url: str, headers: Dict[str, str] = None, json: Dict = None, timeout: float = 30.0) -> MockHttpResponse:
+    async def request(self, method, url: str, headers: dict[str, str] = None, json: dict = None, timeout: float = 30.0) -> MockHttpResponse:
         """Generic request method that the Hook Node expects."""
         # Convert json payload to Dict[str, str] format for IntegrationTestRequestModel
         payload_str_dict = {}
@@ -119,11 +122,11 @@ class MockHttpClient:
         # Record the request
         self.requests_made.append(IntegrationTestRequestModel(
             url=str(url),
-            method=str(method.value) if hasattr(method, 'value') else str(method),
+            method=str(method.value) if hasattr(method, "value") else str(method),
             headers=headers or {},
             payload=payload_str_dict,
             timestamp=time.time(),
-            correlation_id=str(uuid4())
+            correlation_id=str(uuid4()),
         ))
 
         # Return next response in sequence
@@ -131,23 +134,22 @@ class MockHttpClient:
             response = self.response_sequence[self.current_response_index]
             self.current_response_index += 1
             return response
-        else:
-            # Default success response
-            return MockHttpResponse(
-                status_code=200,
-                headers={"Content-Type": "application/json"},
-                body='{"status": "ok"}',
-                execution_time_ms=100.0,
-                is_success=True
-            )
+        # Default success response
+        return MockHttpResponse(
+            status_code=200,
+            headers={"Content-Type": "application/json"},
+            body='{"status": "ok"}',
+            execution_time_ms=100.0,
+            is_success=True,
+        )
 
 
 class MockEventBus:
     """Mock event bus that implements ProtocolEventBus interface."""
 
     def __init__(self):
-        self.published_events: List[ModelOnexEvent] = []
-        self.event_handlers: Dict[str, callable] = {}
+        self.published_events: list[ModelOnexEvent] = []
+        self.event_handlers: dict[str, callable] = {}
 
     async def publish(self, event=None, topic=None, key=None, value=None, headers=None, **kwargs) -> bool:
         """Mock event publishing - supports both event object and message bus styles."""
@@ -177,7 +179,7 @@ class MockEventBus:
                     event_type=event_data.get("event_type", "unknown"),
                     node_id=event_data.get("node_id", "unknown"),
                     data=event_data.get("payload", {}),  # payload maps to data
-                    correlation_id=correlation_id_value
+                    correlation_id=correlation_id_value,
                 )
                 self.published_events.append(reconstructed_event)
             except Exception as e:
@@ -190,7 +192,7 @@ class MockEventBus:
         self.event_handlers[event_type] = handler
         return True
 
-    def get_published_events_by_type(self, event_type: str) -> List[ModelOnexEvent]:
+    def get_published_events_by_type(self, event_type: str) -> list[ModelOnexEvent]:
         """Get published events filtered by type."""
         return [event for event in self.published_events if event.event_type == event_type]
 
@@ -223,7 +225,7 @@ class TestHookNodeIntegration:
     def hook_node_integration(self, container_with_mocks):
         """Create a Hook Node with integration-ready dependencies."""
         # Mock the node to skip contract loading for tests
-        with patch.object(NodeHookEffect, '__init__', lambda self, container: self._init_for_test(container)):
+        with patch.object(NodeHookEffect, "__init__", lambda self, container: self._init_for_test(container)):
             node = NodeHookEffect(container_with_mocks)
             return node
 
@@ -231,7 +233,7 @@ class TestHookNodeIntegration:
     async def test_container_dependency_injection(self, container_with_mocks):
         """Test that Hook Node properly receives injected dependencies."""
         # Mock the node to skip contract loading for tests
-        with patch.object(NodeHookEffect, '__init__', lambda self, container: self._init_for_test(container)):
+        with patch.object(NodeHookEffect, "__init__", lambda self, container: self._init_for_test(container)):
             hook_node = NodeHookEffect(container_with_mocks)
 
         # Verify dependencies are properly injected
@@ -249,7 +251,7 @@ class TestHookNodeIntegration:
             headers={"Content-Type": "application/json"},
             body='{"message": "received"}',
             execution_time_ms=120.0,
-            is_success=True
+            is_success=True,
         )
         hook_node_integration._http_client.set_response_sequence([success_response])
 
@@ -257,13 +259,13 @@ class TestHookNodeIntegration:
         request = ModelNotificationRequest(
             url="https://hooks.slack.com/services/integration-test",
             method=EnumNotificationMethod.POST,
-            payload={"text": "Integration test notification"}
+            payload={"text": "Integration test notification"},
         )
 
         input_data = ModelHookNodeInput(
             notification_request=request,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
         result = await hook_node_integration.process(input_data)
 
@@ -285,7 +287,7 @@ class TestHookNodeIntegration:
             headers={},
             body='{"error": "Internal server error"}',
             execution_time_ms=30000.0,  # Timeout
-            is_success=False
+            is_success=False,
         )
         # Hook Node will retry, so we need multiple failure responses
         hook_node_integration._http_client.set_response_sequence([failure_response, failure_response, failure_response])
@@ -294,13 +296,13 @@ class TestHookNodeIntegration:
         request = ModelNotificationRequest(
             url="https://failing.webhook.com/api/notify",
             method=EnumNotificationMethod.POST,
-            payload={"text": "System failure alert"}
+            payload={"text": "System failure alert"},
         )
 
         input_data = ModelHookNodeInput(
             notification_request=request,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
         # Process should not raise exception but should report failure
@@ -323,7 +325,7 @@ class TestHookNodeIntegration:
             headers={},
             body='{"error": "Service unavailable"}',
             execution_time_ms=5000.0,
-            is_success=False
+            is_success=False,
         )
 
         # Set up enough failures to trigger state change
@@ -333,13 +335,13 @@ class TestHookNodeIntegration:
         request = ModelNotificationRequest(
             url="https://circuit-breaker-test.com/webhook",
             method=EnumNotificationMethod.POST,
-            payload={"text": "circuit breaker integration test"}
+            payload={"text": "circuit breaker integration test"},
         )
 
         input_data = ModelHookNodeInput(
             notification_request=request,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
         # Send multiple requests to trigger circuit breaker
@@ -368,14 +370,14 @@ class TestHookNodeIntegration:
         # Setup authentication
         auth = ModelNotificationAuth(
             auth_type=EnumAuthType.BEARER,
-            credentials={"token": "integration-test-token"}
+            credentials={"token": "integration-test-token"},
         )
 
         request = ModelNotificationRequest(
             url="https://authenticated.webhook.com/api/notify",
             method=EnumNotificationMethod.POST,
             payload={"text": "Authenticated integration test"},
-            auth=auth
+            auth=auth,
         )
 
         success_response = MockHttpResponse(
@@ -383,14 +385,14 @@ class TestHookNodeIntegration:
             headers={},
             body='{"authenticated": true}',
             execution_time_ms=80.0,
-            is_success=True
+            is_success=True,
         )
         hook_node_integration._http_client.set_response_sequence([success_response])
 
         input_data = ModelHookNodeInput(
             notification_request=request,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
         result = await hook_node_integration.process(input_data)
 
@@ -409,21 +411,21 @@ class TestHookNodeIntegration:
         request = ModelNotificationRequest(
             url="https://timeout-test.webhook.com/slow",
             method=EnumNotificationMethod.POST,
-            payload={"text": "timeout integration test"}
+            payload={"text": "timeout integration test"},
         )
 
         input_data = ModelHookNodeInput(
             notification_request=request,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
         # Mock timeout exception for both post and request methods
         async def mock_post_timeout(*args, **kwargs):
-            raise asyncio.TimeoutError("Request timeout after 30 seconds")
+            raise TimeoutError("Request timeout after 30 seconds")
 
         async def mock_request_timeout(*args, **kwargs):
-            raise asyncio.TimeoutError("Request timeout after 30 seconds")
+            raise TimeoutError("Request timeout after 30 seconds")
 
         hook_node_integration._http_client.post = mock_post_timeout
         hook_node_integration._http_client.request = mock_request_timeout
@@ -450,15 +452,15 @@ class TestHookNodeIntegration:
                 {
                     "title": "Service Details",
                     "text": f"Service: hook_node_integration_test\nTimestamp: {datetime.now().isoformat()}",
-                    "color": "danger"
-                }
-            ]
+                    "color": "danger",
+                },
+            ],
         }
 
         request = ModelNotificationRequest(
             url="https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
             method=EnumNotificationMethod.POST,
-            payload=slack_payload
+            payload=slack_payload,
         )
 
         # Mock Slack's expected response
@@ -467,14 +469,14 @@ class TestHookNodeIntegration:
             headers={"Content-Type": "text/plain"},
             body="ok",
             execution_time_ms=150.0,
-            is_success=True
+            is_success=True,
         )
         hook_node_integration._http_client.set_response_sequence([slack_response])
 
         input_data = ModelHookNodeInput(
             notification_request=request,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
         result = await hook_node_integration.process(input_data)
 
@@ -502,7 +504,7 @@ class TestHookNodeIntegration:
         request = ModelNotificationRequest(
             url="https://unreliable.webhook.com/api/notify",
             method=EnumNotificationMethod.POST,
-            payload={"text": "Retry integration test"}
+            payload={"text": "Retry integration test"},
         )
 
         # Setup response sequence: fail, fail, succeed
@@ -512,30 +514,30 @@ class TestHookNodeIntegration:
                 headers={},
                 body='{"error": "Temporary failure"}',
                 execution_time_ms=200.0,
-                is_success=False
+                is_success=False,
             ),
             MockHttpResponse(
                 status_code=502,
                 headers={},
                 body='{"error": "Bad gateway"}',
                 execution_time_ms=300.0,
-                is_success=False
+                is_success=False,
             ),
             MockHttpResponse(
                 status_code=200,
                 headers={"Content-Type": "application/json"},
                 body='{"status": "delivered"}',
                 execution_time_ms=100.0,
-                is_success=True
-            )
+                is_success=True,
+            ),
         ]
         hook_node_integration._http_client.set_response_sequence(responses)
 
-        with patch('asyncio.sleep'):  # Speed up test by mocking sleep
+        with patch("asyncio.sleep"):  # Speed up test by mocking sleep
             input_data = ModelHookNodeInput(
             notification_request=request,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
             result = await hook_node_integration.process(input_data)
 
@@ -564,7 +566,7 @@ class TestHookNodeIntegration:
             ModelNotificationRequest(
                 url=f"https://concurrent-test-{i}.webhook.com/notify",
                 method=EnumNotificationMethod.POST,
-                payload={"text": f"Concurrent test {i}"}
+                payload={"text": f"Concurrent test {i}"},
             )
             for i in range(5)
         ]
@@ -576,7 +578,7 @@ class TestHookNodeIntegration:
                 headers={},
                 body=f'{{"received": {i}}}',
                 execution_time_ms=100.0 + (i * 10),  # Slightly different timing
-                is_success=True
+                is_success=True,
             )
             for i in range(5)
         ]
@@ -586,7 +588,7 @@ class TestHookNodeIntegration:
         input_data_list = [ModelHookNodeInput(
             notification_request=req,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         ) for req in requests]
 
         tasks = [hook_node_integration.process(input_data) for input_data in input_data_list]
@@ -621,13 +623,13 @@ class TestHookNodeIntegration:
         request = ModelNotificationRequest(
             url="https://network-error-test.webhook.com/notify",
             method=EnumNotificationMethod.POST,
-            payload={"text": "network error test"}
+            payload={"text": "network error test"},
         )
 
         input_data = ModelHookNodeInput(
             notification_request=request,
             correlation_id=uuid4(),
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
         result = await hook_node_integration.process(input_data)
@@ -646,3 +648,4 @@ class TestHookNodeIntegration:
         event_data = str(latest_error_event.data)
         assert "network-error-test.webhook.com" in event_data
         assert "ConnectionError" in event_data or "Network" in event_data
+

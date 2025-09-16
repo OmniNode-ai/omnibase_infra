@@ -7,13 +7,14 @@ This bypasses the Hook Node namespace issues and directly tests webhook delivery
 """
 
 import asyncio
-import json
 import os
-import pytest
 from datetime import datetime
+
+import pytest
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -33,7 +34,7 @@ async def test_production_slack_webhook():
     if not slack_webhook_url:
         pytest.skip("SLACK_WEBHOOK_URL not configured in .env file")
 
-    print(f"🚀 Testing Production Slack Webhook")
+    print("🚀 Testing Production Slack Webhook")
     print(f"🎯 Target: {slack_webhook_url[:50]}...")
     print("=" * 60)
 
@@ -50,37 +51,37 @@ async def test_production_slack_webhook():
                     {
                         "title": "Issue Fixed",
                         "value": "Removed invalid registry/ directory",
-                        "short": True
+                        "short": True,
                     },
                     {
                         "title": "Pattern Applied",
                         "value": "ModelONEXContainer injection",
-                        "short": True
+                        "short": True,
                     },
                     {
                         "title": "Test Status",
                         "value": "✅ All integration tests passing",
-                        "short": True
+                        "short": True,
                     },
                     {
                         "title": "PR Status",
                         "value": "🚀 Ready to merge!",
-                        "short": True
+                        "short": True,
                     },
                     {
                         "title": "Webhook Verification",
                         "value": "✅ Production webhook working",
-                        "short": True
+                        "short": True,
                     },
                     {
                         "title": "Timestamp",
                         "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
-                        "short": True
-                    }
+                        "short": True,
+                    },
                 ],
-                "footer": "ONEX Infrastructure - Production Webhook Test"
-            }
-        ]
+                "footer": "ONEX Infrastructure - Production Webhook Test",
+            },
+        ],
     }
 
     # Make direct HTTP request to Slack webhook
@@ -88,12 +89,12 @@ async def test_production_slack_webhook():
         import aiohttp
 
         async with aiohttp.ClientSession() as session:
-            print(f"📤 Sending production webhook notification...")
+            print("📤 Sending production webhook notification...")
 
             async with session.post(
                 slack_webhook_url,
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=30.0)
+                timeout=aiohttp.ClientTimeout(total=30.0),
             ) as response:
                 response_text = await response.text()
 
@@ -122,3 +123,4 @@ if __name__ == "__main__":
     # Allow running this test directly
     result = asyncio.run(test_production_slack_webhook())
     print(f"\n🎯 Final result: {'SUCCESS' if result else 'FAILED'}")
+

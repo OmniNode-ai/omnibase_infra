@@ -7,10 +7,10 @@ Replace SLACK_WEBHOOK_URL with your actual webhook URL from Slack.
 """
 
 import asyncio
-import json
 import sys
 from datetime import datetime
 from uuid import uuid4
+
 
 # Mock implementations for testing without full infrastructure
 class MockONEXContainer:
@@ -46,22 +46,22 @@ class RealHttpClient:
                         headers=dict(response.headers),
                         body=response_body,
                         execution_time_ms=100.0,  # Approximate
-                        is_success=(200 <= response.status < 300)
+                        is_success=(200 <= response.status < 300),
                     )
 
-        except asyncio.TimeoutError:
-            from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
+        except TimeoutError:
+            from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
             raise OnexError(
                 code=CoreErrorCode.TIMEOUT_ERROR,
                 message=f"HTTP request to {url} timed out after {timeout}s",
-                context={"url": url, "timeout": timeout}
+                context={"url": url, "timeout": timeout},
             )
         except Exception as e:
-            from omnibase_core.core.errors.onex_error import OnexError, CoreErrorCode
+            from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
             raise OnexError(
                 code=CoreErrorCode.NETWORK_ERROR,
-                message=f"HTTP request failed: {str(e)}",
-                context={"url": url, "error": str(e)}
+                message=f"HTTP request failed: {e!s}",
+                context={"url": url, "error": str(e)},
             ) from e
 
 class MockEventBus:
@@ -104,8 +104,11 @@ async def test_slack_webhook_integration():
         hook_node = NodeHookEffect(container)
 
         # Create test notification request
-        from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
         from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
+
+        from omnibase_infra.models.notification.model_notification_request import (
+            ModelNotificationRequest,
+        )
 
         # Create rich Slack message
         slack_payload = {
@@ -120,42 +123,44 @@ async def test_slack_webhook_integration():
                         {
                             "title": "Test Type",
                             "value": "Real Slack Webhook Integration",
-                            "short": True
+                            "short": True,
                         },
                         {
                             "title": "Timestamp",
                             "value": datetime.utcnow().isoformat(),
-                            "short": True
+                            "short": True,
                         },
                         {
                             "title": "Node Version",
                             "value": "v1.0.0",
-                            "short": True
+                            "short": True,
                         },
                         {
                             "title": "Status",
                             "value": "✅ Hook Node is working correctly!",
-                            "short": False
-                        }
+                            "short": False,
+                        },
                     ],
                     "footer": "ONEX Infrastructure",
-                    "footer_icon": "https://github.com/favicon.ico"
-                }
-            ]
+                    "footer_icon": "https://github.com/favicon.ico",
+                },
+            ],
         }
 
         notification_request = ModelNotificationRequest(
             url=SLACK_WEBHOOK_URL,
             method=EnumNotificationMethod.POST,
-            payload=slack_payload
+            payload=slack_payload,
         )
 
         # Create Hook Node input
-        from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
+        from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import (
+            ModelHookNodeInput,
+        )
 
         hook_input = ModelHookNodeInput(
             notification_request=notification_request,
-            correlation_id=str(uuid4())
+            correlation_id=str(uuid4()),
         )
 
         print("📤 Sending test notification to Slack...")
@@ -189,12 +194,11 @@ async def test_slack_webhook_integration():
 
             return True
 
-        else:
-            print("❌ Hook Node test FAILED!")
-            print(f"📊 Status Code: {result.notification_result.final_status_code}")
-            print(f"❌ Error: {result.error_message}")
+        print("❌ Hook Node test FAILED!")
+        print(f"📊 Status Code: {result.notification_result.final_status_code}")
+        print(f"❌ Error: {result.error_message}")
 
-            return False
+        return False
 
     except Exception as e:
         print(f"💥 Test crashed: {e}")
@@ -249,20 +253,25 @@ async def test_error_handling():
         hook_node = NodeHookEffect(container)
 
         # Test with invalid URL
-        from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
         from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
+
+        from omnibase_infra.models.notification.model_notification_request import (
+            ModelNotificationRequest,
+        )
 
         invalid_request = ModelNotificationRequest(
             url="https://invalid-webhook-url-that-does-not-exist.com/webhook",
             method=EnumNotificationMethod.POST,
-            payload={"test": "error handling"}
+            payload={"test": "error handling"},
         )
 
-        from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
+        from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import (
+            ModelHookNodeInput,
+        )
 
         hook_input = ModelHookNodeInput(
             notification_request=invalid_request,
-            correlation_id=str(uuid4())
+            correlation_id=str(uuid4()),
         )
 
         print("📤 Sending request to invalid webhook (should fail)...")
@@ -279,9 +288,8 @@ async def test_error_handling():
                 print(f"📢 Circuit breaker failure events: {len(failure_events)}")
 
             return True
-        else:
-            print("⚠️  Unexpected success - invalid URL should have failed")
-            return False
+        print("⚠️  Unexpected success - invalid URL should have failed")
+        return False
 
     except Exception as e:
         print(f"✅ Exception handled correctly: {e}")
@@ -314,9 +322,8 @@ async def main():
         print("🎉 Hook Node integration testing SUCCESSFUL!")
         print("✅ Your Hook Node is ready for production use with Slack webhooks")
         return True
-    else:
-        print("❌ Some tests failed - check the output above")
-        return False
+    print("❌ Some tests failed - check the output above")
+    return False
 
 if __name__ == "__main__":
     try:

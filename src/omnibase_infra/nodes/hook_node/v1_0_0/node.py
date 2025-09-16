@@ -35,36 +35,44 @@ SECURITY ENHANCEMENTS (PR #6 Critical Fixes):
 import asyncio
 import json
 import logging
-import re
 import time
-import yaml
 from datetime import datetime
 from enum import Enum
 from ipaddress import AddressValueError, IPv4Address, IPv6Address, ip_address
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
+import yaml
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.core.node_effect_service import NodeEffectService
 from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.mixin.mixin_node_id_from_contract import MixinNodeIdFromContract
-from omnibase_core.enums.node import EnumHealthStatus
-from omnibase_core.enums.enum_notification_method import EnumNotificationMethod
 from omnibase_core.enums.enum_auth_type import EnumAuthType
 from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
+from omnibase_core.enums.node import EnumHealthStatus
+from omnibase_core.mixin.mixin_node_id_from_contract import MixinNodeIdFromContract
 from omnibase_core.models.core.model_health_status import ModelHealthStatus
 from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 from omnibase_spi.protocols.core import ProtocolHttpClient, ProtocolHttpResponse
 from omnibase_spi.protocols.event_bus import ProtocolEventBus
 
+from omnibase_infra.models.notification.model_notification_attempt import (
+    ModelNotificationAttempt,
+)
+from omnibase_infra.models.notification.model_notification_auth import (
+    ModelNotificationAuth,
+)
+
 # Shared notification models
-from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
-from omnibase_infra.models.notification.model_notification_result import ModelNotificationResult
-from omnibase_infra.models.notification.model_notification_attempt import ModelNotificationAttempt
-from omnibase_infra.models.notification.model_notification_auth import ModelNotificationAuth
-from omnibase_infra.models.notification.model_notification_retry_policy import ModelNotificationRetryPolicy
+from omnibase_infra.models.notification.model_notification_request import (
+    ModelNotificationRequest,
+)
+from omnibase_infra.models.notification.model_notification_result import (
+    ModelNotificationResult,
+)
+from omnibase_infra.models.notification.model_notification_retry_policy import (
+    ModelNotificationRetryPolicy,
+)
 from omnibase_infra.models.webhook.model_webhook_payload import ModelWebhookPayloadUnion
 
 # Node-specific adapter models
@@ -82,9 +90,9 @@ class CircuitBreakerState(Enum):
 class SecurityConfig:
     """Security configuration for Hook Node operations."""
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: dict | None = None):
         """Initialize security config from contract configuration."""
-        security_config = config.get('security', {}) if config else {}
+        security_config = config.get("security", {}) if config else {}
 
         # SSRF Protection - RFC 1918 private networks and special addresses
         self.blocked_ip_ranges = [
@@ -110,15 +118,15 @@ class SecurityConfig:
         ]
 
         # Payload size limits - load from contract configuration
-        self.max_payload_size_bytes = security_config.get('max_payload_size_bytes', 1048576)  # 1MB default
+        self.max_payload_size_bytes = security_config.get("max_payload_size_bytes", 1048576)  # 1MB default
 
         # Rate limiting configuration - load from contract configuration
-        self.rate_limit_requests_per_minute = security_config.get('rate_limit_requests_per_minute', 60)
-        self.rate_limit_window_seconds = security_config.get('rate_limit_window_seconds', 60)
+        self.rate_limit_requests_per_minute = security_config.get("rate_limit_requests_per_minute", 60)
+        self.rate_limit_window_seconds = security_config.get("rate_limit_window_seconds", 60)
 
         # Enable/disable flags - load from contract configuration
-        self.ssrf_protection_enabled = security_config.get('ssrf_protection_enabled', True)
-        self.url_validation_enabled = security_config.get('url_validation_enabled', True)
+        self.ssrf_protection_enabled = security_config.get("ssrf_protection_enabled", True)
+        self.url_validation_enabled = security_config.get("url_validation_enabled", True)
 
 
 class UrlSecurityValidator:
@@ -155,31 +163,31 @@ class UrlSecurityValidator:
         if not url_str or not url_str.strip():
             raise OnexError(
                 code=CoreErrorCode.INVALID_INPUT,
-                message="URL cannot be empty"
+                message="URL cannot be empty",
             )
 
         try:
             parsed = urlparse(url_str.strip())
 
             # Validate scheme
-            if parsed.scheme not in ['http', 'https']:
+            if parsed.scheme not in ["http", "https"]:
                 raise OnexError(
                     code=CoreErrorCode.INVALID_INPUT,
-                    message=f"Blocked URL scheme: {parsed.scheme}. Only http/https allowed."
+                    message=f"Blocked URL scheme: {parsed.scheme}. Only http/https allowed.",
                 )
 
             # Validate hostname exists
             if not parsed.hostname:
                 raise OnexError(
                     code=CoreErrorCode.INVALID_INPUT,
-                    message="URL must contain a valid hostname"
+                    message="URL must contain a valid hostname",
                 )
 
             # Check for blocked metadata addresses first (exact match)
             if parsed.hostname in self.config.blocked_metadata_addresses:
                 raise OnexError(
                     code=CoreErrorCode.INVALID_INPUT,
-                    message=f"Blocked metadata service address: {parsed.hostname}"
+                    message=f"Blocked metadata service address: {parsed.hostname}",
                 )
 
             # Skip IP validation for test URLs to avoid DNS resolution issues in tests
@@ -212,7 +220,7 @@ class UrlSecurityValidator:
                     except socket.gaierror as e:
                         raise OnexError(
                             code=CoreErrorCode.INVALID_INPUT,
-                        message=f"Cannot resolve hostname {parsed.hostname}: {e}"
+                        message=f"Cannot resolve hostname {parsed.hostname}: {e}",
                     )
 
             # Additional hostname validation
@@ -223,28 +231,28 @@ class UrlSecurityValidator:
         except Exception as e:
             raise OnexError(
                 code=CoreErrorCode.INVALID_INPUT,
-                message=f"URL validation failed: {e}"
+                message=f"URL validation failed: {e}",
             ) from e
 
-    def _validate_ip_address(self, ip_addr: Union[IPv4Address, IPv6Address], display_name: str) -> None:
+    def _validate_ip_address(self, ip_addr: IPv4Address | IPv6Address, display_name: str) -> None:
         """Validate IP address against blocked ranges."""
         for blocked_range in self._compiled_ip_ranges:
             if ip_addr in blocked_range:
                 raise OnexError(
                     code=CoreErrorCode.INVALID_INPUT,
-                    message=f"Blocked IP address {display_name} in range {blocked_range}"
+                    message=f"Blocked IP address {display_name} in range {blocked_range}",
                 )
 
     def _validate_hostname(self, hostname: str) -> None:
         """Additional hostname validation."""
         # Check for localhost variants
         localhost_patterns = [
-            'localhost', '0.0.0.0', '0', 'local', 'localdomain'
+            "localhost", "0.0.0.0", "0", "local", "localdomain",
         ]
         if hostname.lower() in localhost_patterns:
             raise OnexError(
                 code=CoreErrorCode.INVALID_INPUT,
-                message=f"Blocked localhost hostname: {hostname}"
+                message=f"Blocked localhost hostname: {hostname}",
             )
 
 
@@ -254,7 +262,7 @@ class RateLimiter:
     def __init__(self, requests_per_minute: int = 60, window_seconds: int = 60):
         self.requests_per_minute = requests_per_minute
         self.window_seconds = window_seconds
-        self._requests: Dict[str, List[float]] = {}
+        self._requests: dict[str, list[float]] = {}
         self._lock = asyncio.Lock()
 
     async def check_rate_limit(self, destination_url: str) -> bool:
@@ -288,7 +296,7 @@ class RateLimiter:
             self._requests[destination_url].append(current_time)
             return True
 
-    async def get_rate_limit_status(self, destination_url: str) -> Dict[str, Union[int, float]]:
+    async def get_rate_limit_status(self, destination_url: str) -> dict[str, int | float]:
         """Get current rate limit status for a destination."""
         current_time = time.time()
 
@@ -298,7 +306,7 @@ class RateLimiter:
                     "current_requests": 0,
                     "limit": self.requests_per_minute,
                     "window_seconds": self.window_seconds,
-                    "remaining": self.requests_per_minute
+                    "remaining": self.requests_per_minute,
                 }
 
             # Clean up old requests
@@ -312,7 +320,7 @@ class RateLimiter:
                 "current_requests": len(active_requests),
                 "limit": self.requests_per_minute,
                 "window_seconds": self.window_seconds,
-                "remaining": max(0, self.requests_per_minute - len(active_requests))
+                "remaining": max(0, self.requests_per_minute - len(active_requests)),
             }
 
 
@@ -332,26 +340,26 @@ class HookStructuredLogger:
         self.logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.INFO)
 
-    def _build_extra(self, correlation_id: Optional[str], operation: str, **kwargs) -> dict:
+    def _build_extra(self, correlation_id: str | None, operation: str, **kwargs) -> dict:
         """Build extra context for structured logging."""
         extra = {
             "correlation_id": correlation_id,
             "operation": operation,
-            "component": "hook_node"
+            "component": "hook_node",
         }
         extra.update(kwargs)
         return extra
 
-    def info(self, message: str, correlation_id: Optional[str] = None, operation: str = "notification", **kwargs):
+    def info(self, message: str, correlation_id: str | None = None, operation: str = "notification", **kwargs):
         """Log info level message with structured context."""
         self.logger.info(message, extra=self._build_extra(correlation_id, operation, **kwargs))
 
-    def warning(self, message: str, correlation_id: Optional[str] = None, operation: str = "notification", **kwargs):
+    def warning(self, message: str, correlation_id: str | None = None, operation: str = "notification", **kwargs):
         """Log warning level message with structured context."""
         self.logger.warning(message, extra=self._build_extra(correlation_id, operation, **kwargs))
 
-    def error(self, message: str, correlation_id: Optional[str] = None, operation: str = "notification",
-              exception: Optional[Exception] = None, **kwargs):
+    def error(self, message: str, correlation_id: str | None = None, operation: str = "notification",
+              exception: Exception | None = None, **kwargs):
         """Log error level message with structured context and exception details."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         if exception:
@@ -359,7 +367,7 @@ class HookStructuredLogger:
             extra["exception_message"] = str(exception)
         self.logger.error(message, extra=extra)
 
-    def debug(self, message: str, correlation_id: Optional[str] = None, operation: str = "notification", **kwargs):
+    def debug(self, message: str, correlation_id: str | None = None, operation: str = "notification", **kwargs):
         """Log debug level message with structured context."""
         self.logger.debug(message, extra=self._build_extra(correlation_id, operation, **kwargs))
 
@@ -371,8 +379,8 @@ class HookStructuredLogger:
             # Remove potential tokens, keys, or secrets from query parameters
             import re
             # Remove query parameters that might contain sensitive data
-            sanitized = re.sub(r'[?&](token|key|secret|auth|api_key)=[^&]*',
-                             lambda m: m.group(0).split('=')[0] + '=***', url_str)
+            sanitized = re.sub(r"[?&](token|key|secret|auth|api_key)=[^&]*",
+                             lambda m: m.group(0).split("=")[0] + "=***", url_str)
             return sanitized
         except Exception:
             url_str = str(url)
@@ -387,7 +395,7 @@ class HookStructuredLogger:
             operation="notification_send",
             url=sanitized_url,
             method=method,
-            retry_attempt=retry_attempt
+            retry_attempt=retry_attempt,
         )
 
     def log_notification_success(self, correlation_id: str, execution_time_ms: float,
@@ -399,19 +407,19 @@ class HookStructuredLogger:
             operation="notification_success",
             execution_time_ms=execution_time_ms,
             status_code=status_code,
-            retry_attempt=retry_attempt
+            retry_attempt=retry_attempt,
         )
 
     def log_notification_error(self, correlation_id: str, execution_time_ms: float,
                              exception: Exception, retry_attempt: int = 1):
         """Log failed notification attempt."""
         self.error(
-            f"Notification attempt {retry_attempt} failed ({execution_time_ms:.2f}ms): {str(exception)}",
+            f"Notification attempt {retry_attempt} failed ({execution_time_ms:.2f}ms): {exception!s}",
             correlation_id=correlation_id,
             operation="notification_error",
             execution_time_ms=execution_time_ms,
             exception=exception,
-            retry_attempt=retry_attempt
+            retry_attempt=retry_attempt,
         )
 
 
@@ -445,13 +453,13 @@ class NotificationCircuitBreaker:
 
             if self._state == CircuitBreakerState.CLOSED:
                 return True
-            elif self._state == CircuitBreakerState.OPEN:
+            if self._state == CircuitBreakerState.OPEN:
                 if current_time - self._last_failure_time >= self.timeout_seconds:
                     self._state = CircuitBreakerState.HALF_OPEN
                     self._half_open_calls = 0
                     return True
                 return False
-            elif self._state == CircuitBreakerState.HALF_OPEN:
+            if self._state == CircuitBreakerState.HALF_OPEN:
                 return self._half_open_calls < self.half_open_max_calls
 
             return False
@@ -483,9 +491,7 @@ class NotificationCircuitBreaker:
             self._failure_count += 1
             self._last_failure_time = time.time()
 
-            if self._state == CircuitBreakerState.HALF_OPEN:
-                self._state = CircuitBreakerState.OPEN
-            elif self._state == CircuitBreakerState.CLOSED and self._failure_count >= self.failure_threshold:
+            if self._state == CircuitBreakerState.HALF_OPEN or (self._state == CircuitBreakerState.CLOSED and self._failure_count >= self.failure_threshold):
                 self._state = CircuitBreakerState.OPEN
 
             self._half_open_calls += 1 if self._state == CircuitBreakerState.HALF_OPEN else 0
@@ -531,13 +537,13 @@ class NodeHookEffect(NodeEffectService):
     """
 
     @staticmethod
-    def _load_contract_configuration() -> Dict:
+    def _load_contract_configuration() -> dict:
         """Load configuration from contract.yaml file."""
         try:
             contract_path = Path(__file__).parent / "contract.yaml"
-            with open(contract_path, 'r') as f:
+            with open(contract_path) as f:
                 contract = yaml.safe_load(f)
-                return contract.get('configuration', {})
+                return contract.get("configuration", {})
         except Exception as e:
             logging.warning(f"Failed to load contract configuration: {e}")
             return {}
@@ -587,7 +593,7 @@ class NodeHookEffect(NodeEffectService):
         if self._http_client is None:
             raise OnexError(
                 code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
-                message="ProtocolHttpClient service not available - HTTP client is REQUIRED for Hook Node"
+                message="ProtocolHttpClient service not available - HTTP client is REQUIRED for Hook Node",
             )
 
         # Initialize event bus for infrastructure event integration (REQUIRED - NO FALLBACKS)
@@ -595,7 +601,7 @@ class NodeHookEffect(NodeEffectService):
         if self._event_bus is None:
             raise OnexError(
                 code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
-                message="ProtocolEventBus service not available - event bus integration is REQUIRED for Hook Node"
+                message="ProtocolEventBus service not available - event bus integration is REQUIRED for Hook Node",
             )
 
         # Initialize structured logger with correlation ID support
@@ -606,23 +612,23 @@ class NodeHookEffect(NodeEffectService):
         self._url_validator = UrlSecurityValidator(self._security_config)
         self._rate_limiter = RateLimiter(
             requests_per_minute=self._security_config.rate_limit_requests_per_minute,
-            window_seconds=self._security_config.rate_limit_window_seconds
+            window_seconds=self._security_config.rate_limit_window_seconds,
         )
 
         # Load circuit breaker configuration from contract
-        circuit_breaker_config = self._config.get('circuit_breaker', {})
-        self._circuit_breaker_failure_threshold = circuit_breaker_config.get('failure_threshold', 5)
-        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get('timeout_seconds', 60)
-        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get('half_open_max_calls', 3)
-        self._max_circuit_breakers = circuit_breaker_config.get('max_circuit_breakers', 1000)
+        circuit_breaker_config = self._config.get("circuit_breaker", {})
+        self._circuit_breaker_failure_threshold = circuit_breaker_config.get("failure_threshold", 5)
+        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get("timeout_seconds", 60)
+        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get("half_open_max_calls", 3)
+        self._max_circuit_breakers = circuit_breaker_config.get("max_circuit_breakers", 1000)
 
         # Load HTTP configuration from contract
-        http_config = self._config.get('http', {})
-        self._http_request_timeout = http_config.get('request_timeout_seconds', 30.0)
+        http_config = self._config.get("http", {})
+        self._http_request_timeout = http_config.get("request_timeout_seconds", 30.0)
 
         # Initialize bounded circuit breakers for notification destinations (per-URL tracking)
-        self._circuit_breakers: Dict[str, NotificationCircuitBreaker] = {}
-        self._circuit_breaker_access_order: List[str] = []  # LRU tracking for bounded storage
+        self._circuit_breakers: dict[str, NotificationCircuitBreaker] = {}
+        self._circuit_breaker_access_order: list[str] = []  # LRU tracking for bounded storage
         self._circuit_breaker_lock = asyncio.Lock()  # Global lock for circuit breaker dict management
 
         # Performance metrics tracking
@@ -637,8 +643,8 @@ class NodeHookEffect(NodeEffectService):
                 "max_payload_size_mb": self._security_config.max_payload_size_bytes / (1024 * 1024),
                 "rate_limit_per_minute": self._security_config.rate_limit_requests_per_minute,
                 "blocked_ip_ranges_count": len(self._security_config.blocked_ip_ranges),
-                "ssrf_protection_enabled": True
-            }
+                "ssrf_protection_enabled": True,
+            },
         )
 
     async def _get_circuit_breaker(self, url: str) -> NotificationCircuitBreaker:
@@ -664,20 +670,20 @@ class NodeHookEffect(NodeEffectService):
                     f"Removed LRU circuit breaker for {oldest_url} (capacity limit: {self._max_circuit_breakers})",
                     operation="circuit_breaker_lru_eviction",
                     evicted_url=oldest_url,
-                    total_circuit_breakers=len(self._circuit_breakers)
+                    total_circuit_breakers=len(self._circuit_breakers),
                 )
 
             # Create new circuit breaker with contract configuration
             self._circuit_breakers[url] = NotificationCircuitBreaker(
                 failure_threshold=self._circuit_breaker_failure_threshold,
                 timeout_seconds=self._circuit_breaker_timeout_seconds,
-                half_open_max_calls=self._circuit_breaker_half_open_max_calls
+                half_open_max_calls=self._circuit_breaker_half_open_max_calls,
             )
             self._circuit_breaker_access_order.append(url)
             return self._circuit_breakers[url]
 
-    def _build_http_headers(self, base_headers: Optional[Dict[str, str]],
-                          auth: Optional[ModelNotificationAuth]) -> Dict[str, str]:
+    def _build_http_headers(self, base_headers: dict[str, str] | None,
+                          auth: ModelNotificationAuth | None) -> dict[str, str]:
         """Build HTTP headers including authentication."""
         headers = base_headers.copy() if base_headers else {}
 
@@ -712,21 +718,21 @@ class NodeHookEffect(NodeEffectService):
         try:
             # Calculate payload size by serializing Pydantic model to JSON
             payload_json = payload.model_dump_json()  # JSON serialization
-            payload_size = len(payload_json.encode('utf-8'))
+            payload_size = len(payload_json.encode("utf-8"))
 
             if payload_size > self._security_config.max_payload_size_bytes:
                 raise OnexError(
                     code=CoreErrorCode.INVALID_INPUT,
                     message=f"Payload size {payload_size} bytes exceeds maximum allowed "
                            f"{self._security_config.max_payload_size_bytes} bytes "
-                           f"({self._security_config.max_payload_size_bytes / (1024*1024):.1f}MB)"
+                           f"({self._security_config.max_payload_size_bytes / (1024*1024):.1f}MB)",
                 )
 
             self._logger.debug(
                 f"Payload size validation passed: {payload_size} bytes",
                 operation="payload_validation",
                 payload_size_bytes=payload_size,
-                max_allowed_bytes=self._security_config.max_payload_size_bytes
+                max_allowed_bytes=self._security_config.max_payload_size_bytes,
             )
 
         except OnexError:
@@ -734,7 +740,7 @@ class NodeHookEffect(NodeEffectService):
         except Exception as e:
             raise OnexError(
                 code=CoreErrorCode.INVALID_INPUT,
-                message=f"Payload size validation failed: {e}"
+                message=f"Payload size validation failed: {e}",
             ) from e
 
     def _calculate_retry_delay(self, attempt: int, retry_policy: ModelNotificationRetryPolicy) -> float:
@@ -746,10 +752,10 @@ class NodeHookEffect(NodeEffectService):
 
         if retry_policy.backoff_strategy == EnumBackoffStrategy.EXPONENTIAL:
             return base_delay * (2 ** (attempt - 1))
-        elif retry_policy.backoff_strategy == EnumBackoffStrategy.LINEAR:
+        if retry_policy.backoff_strategy == EnumBackoffStrategy.LINEAR:
             return base_delay * attempt
-        else:  # fixed or unknown - default to fixed
-            return base_delay
+        # fixed or unknown - default to fixed
+        return base_delay
 
     def _is_retryable_status(self, status_code: int, retry_policy: ModelNotificationRetryPolicy) -> bool:
         """Check if HTTP status code should trigger a retry."""
@@ -760,7 +766,7 @@ class NodeHookEffect(NodeEffectService):
         correlation_id: str,
         destination_url: str,
         status_code: int,
-        execution_time_ms: float
+        execution_time_ms: float,
     ) -> None:
         """Publish circuit breaker success event to event bus."""
         try:
@@ -772,8 +778,8 @@ class NodeHookEffect(NodeEffectService):
                     "destination_url": destination_url,
                     "status_code": status_code,
                     "execution_time_ms": execution_time_ms,
-                    "circuit_breaker_state": "success_recorded"
-                }
+                    "circuit_breaker_state": "success_recorded",
+                },
             )
             # Convert ModelOnexEvent to protocol format for event bus publishing
             event_data = {
@@ -785,8 +791,8 @@ class NodeHookEffect(NodeEffectService):
                     "destination_url": destination_url,
                     "status_code": status_code,
                     "execution_time_ms": execution_time_ms,
-                    "circuit_breaker_state": "success_recorded"
-                }
+                    "circuit_breaker_state": "success_recorded",
+                },
             }
 
             await self._event_bus.publish(
@@ -800,14 +806,14 @@ class NodeHookEffect(NodeEffectService):
                     "timestamp": event.timestamp,
                     "source": "hook_node",
                     "event_type": "circuit_breaker.success",
-                    "schema_version": "1.0.0"
-                }
+                    "schema_version": "1.0.0",
+                },
             )
         except Exception as e:
             self._logger.warning(
                 f"Failed to publish circuit breaker success event: {e}",
                 correlation_id=correlation_id,
-                operation="event_publishing"
+                operation="event_publishing",
             )
 
     async def _publish_circuit_breaker_failure_event(
@@ -815,7 +821,7 @@ class NodeHookEffect(NodeEffectService):
         correlation_id: str,
         destination_url: str,
         error_message: str,
-        execution_time_ms: float
+        execution_time_ms: float,
     ) -> None:
         """Publish circuit breaker failure event to event bus."""
         try:
@@ -827,8 +833,8 @@ class NodeHookEffect(NodeEffectService):
                     "destination_url": destination_url,
                     "error_message": error_message,
                     "execution_time_ms": execution_time_ms,
-                    "circuit_breaker_state": "failure_recorded"
-                }
+                    "circuit_breaker_state": "failure_recorded",
+                },
             )
             # Convert ModelOnexEvent to protocol format for event bus publishing
             event_data = {
@@ -840,8 +846,8 @@ class NodeHookEffect(NodeEffectService):
                     "destination_url": destination_url,
                     "error_message": error_message,
                     "execution_time_ms": execution_time_ms,
-                    "circuit_breaker_state": "failure_recorded"
-                }
+                    "circuit_breaker_state": "failure_recorded",
+                },
             }
 
             await self._event_bus.publish(
@@ -855,14 +861,14 @@ class NodeHookEffect(NodeEffectService):
                     "timestamp": event.timestamp,
                     "source": "hook_node",
                     "event_type": "circuit_breaker.failure",
-                    "schema_version": "1.0.0"
-                }
+                    "schema_version": "1.0.0",
+                },
             )
         except Exception as e:
             self._logger.warning(
                 f"Failed to publish circuit breaker failure event: {e}",
                 correlation_id=correlation_id,
-                operation="event_publishing"
+                operation="event_publishing",
             )
 
     async def _publish_circuit_breaker_state_change_event(
@@ -871,7 +877,7 @@ class NodeHookEffect(NodeEffectService):
         destination_url: str,
         old_state: CircuitBreakerState,
         new_state: CircuitBreakerState,
-        failure_count: int
+        failure_count: int,
     ) -> None:
         """Publish circuit breaker state change event to event bus."""
         try:
@@ -884,8 +890,8 @@ class NodeHookEffect(NodeEffectService):
                     "old_state": old_state.value,
                     "new_state": new_state.value,
                     "failure_count": failure_count,
-                    "state_change_reason": f"transition from {old_state.value} to {new_state.value}"
-                }
+                    "state_change_reason": f"transition from {old_state.value} to {new_state.value}",
+                },
             )
             # Convert ModelOnexEvent to protocol format for event bus publishing
             event_data = {
@@ -897,8 +903,8 @@ class NodeHookEffect(NodeEffectService):
                     "destination_url": destination_url,
                     "old_state": old_state.value,
                     "new_state": new_state.value,
-                    "reason": "state_transition"
-                }
+                    "reason": "state_transition",
+                },
             }
 
             await self._event_bus.publish(
@@ -912,23 +918,23 @@ class NodeHookEffect(NodeEffectService):
                     "timestamp": event.timestamp,
                     "source": "hook_node",
                     "event_type": "circuit_breaker.state_change",
-                    "schema_version": "1.0.0"
-                }
+                    "schema_version": "1.0.0",
+                },
             )
         except Exception as e:
             self._logger.warning(
                 f"Failed to publish circuit breaker state change event: {e}",
                 correlation_id=correlation_id,
-                operation="event_publishing"
+                operation="event_publishing",
             )
 
     async def _send_notification_with_retries(
         self,
         request: ModelNotificationRequest,
-        correlation_id: str
+        correlation_id: str,
     ) -> ModelNotificationResult:
         """Send notification with retry policy, circuit breaker, and security protections."""
-        attempts: List[ModelNotificationAttempt] = []
+        attempts: list[ModelNotificationAttempt] = []
 
         # CRITICAL SECURITY VALIDATION - SSRF Prevention
         try:
@@ -938,7 +944,7 @@ class NodeHookEffect(NodeEffectService):
                 f"URL validation failed for security reasons: {e.message}",
                 correlation_id=correlation_id,
                 operation="url_security_validation",
-                url=request.url
+                url=request.url,
             )
             # Return failure result for security violation
             attempt = ModelNotificationAttempt(
@@ -946,14 +952,14 @@ class NodeHookEffect(NodeEffectService):
                 timestamp=time.time(),
                 status_code=None,
                 error=f"Security violation: {e.message}",
-                execution_time_ms=0.0
+                execution_time_ms=0.0,
             )
             attempts.append(attempt)
             return ModelNotificationResult(
                 final_status_code=None,
                 is_success=False,
                 attempts=attempts,
-                total_attempts=1
+                total_attempts=1,
             )
 
         # CRITICAL SECURITY VALIDATION - Payload Size Limits
@@ -963,7 +969,7 @@ class NodeHookEffect(NodeEffectService):
             self._logger.error(
                 f"Payload size validation failed: {e.message}",
                 correlation_id=correlation_id,
-                operation="payload_size_validation"
+                operation="payload_size_validation",
             )
             # Return failure result for payload size violation
             attempt = ModelNotificationAttempt(
@@ -971,14 +977,14 @@ class NodeHookEffect(NodeEffectService):
                 timestamp=time.time(),
                 status_code=None,
                 error=f"Payload size violation: {e.message}",
-                execution_time_ms=0.0
+                execution_time_ms=0.0,
             )
             attempts.append(attempt)
             return ModelNotificationResult(
                 final_status_code=None,
                 is_success=False,
                 attempts=attempts,
-                total_attempts=1
+                total_attempts=1,
             )
 
         # CRITICAL SECURITY VALIDATION - Rate Limiting
@@ -988,7 +994,7 @@ class NodeHookEffect(NodeEffectService):
                 f"Rate limit exceeded for destination: {request.url}",
                 correlation_id=correlation_id,
                 operation="rate_limit_check",
-                rate_limit_status=rate_limit_status
+                rate_limit_status=rate_limit_status,
             )
             # Return failure result for rate limit violation
             attempt = ModelNotificationAttempt(
@@ -996,14 +1002,14 @@ class NodeHookEffect(NodeEffectService):
                 timestamp=time.time(),
                 status_code=None,
                 error=f"Rate limit exceeded: {rate_limit_status['current_requests']}/{rate_limit_status['limit']} requests per {rate_limit_status['window_seconds']}s",
-                execution_time_ms=0.0
+                execution_time_ms=0.0,
             )
             attempts.append(attempt)
             return ModelNotificationResult(
                 final_status_code=None,
                 is_success=False,
                 attempts=attempts,
-                total_attempts=1
+                total_attempts=1,
             )
 
         circuit_breaker = await self._get_circuit_breaker(request.url)
@@ -1014,7 +1020,7 @@ class NodeHookEffect(NodeEffectService):
                 f"Circuit breaker OPEN for destination: {request.url}",
                 correlation_id=correlation_id,
                 operation="circuit_breaker_check",
-                circuit_state=circuit_breaker.state
+                circuit_state=circuit_breaker.state,
             )
             # Return failure result without attempting request
             attempt = ModelNotificationAttempt(
@@ -1022,7 +1028,7 @@ class NodeHookEffect(NodeEffectService):
                 timestamp=time.time(),
                 status_code=None,
                 error=f"Circuit breaker {circuit_breaker.state} - destination unavailable",
-                execution_time_ms=0.0
+                execution_time_ms=0.0,
             )
             attempts.append(attempt)
 
@@ -1030,16 +1036,16 @@ class NodeHookEffect(NodeEffectService):
                 final_status_code=None,
                 is_success=False,
                 attempts=attempts,
-                total_attempts=1
+                total_attempts=1,
             )
 
         # Use default retry policy from contract configuration if not specified
-        retry_defaults = self._config.get('retry_policy_defaults', {})
+        retry_defaults = self._config.get("retry_policy_defaults", {})
         retry_policy = request.retry_policy or ModelNotificationRetryPolicy(
-            max_attempts=retry_defaults.get('max_attempts', 3),
-            backoff_strategy=retry_defaults.get('backoff_strategy', 'exponential'),
-            delay_seconds=retry_defaults.get('delay_seconds', 5.0),
-            retryable_status_codes=retry_defaults.get('retryable_status_codes', [408, 429, 500, 502, 503, 504])
+            max_attempts=retry_defaults.get("max_attempts", 3),
+            backoff_strategy=retry_defaults.get("backoff_strategy", "exponential"),
+            delay_seconds=retry_defaults.get("delay_seconds", 5.0),
+            retryable_status_codes=retry_defaults.get("retryable_status_codes", [408, 429, 500, 502, 503, 504]),
         )
 
         headers = self._build_http_headers(request.headers, request.auth)
@@ -1051,7 +1057,7 @@ class NodeHookEffect(NodeEffectService):
                 correlation_id=correlation_id,
                 url=request.url,
                 method=request.method,
-                retry_attempt=attempt_num
+                retry_attempt=attempt_num,
             )
 
             try:
@@ -1063,7 +1069,7 @@ class NodeHookEffect(NodeEffectService):
                     url=request.url,
                     json=payload_dict,
                     headers=headers,
-                    timeout=self._http_request_timeout
+                    timeout=self._http_request_timeout,
                 )
 
                 execution_time_ms = (time.time() - start_time) * 1000
@@ -1074,7 +1080,7 @@ class NodeHookEffect(NodeEffectService):
                     timestamp=start_time,
                     status_code=response.status_code,
                     error=None,
-                    execution_time_ms=execution_time_ms
+                    execution_time_ms=execution_time_ms,
                 )
                 attempts.append(attempt)
 
@@ -1086,7 +1092,7 @@ class NodeHookEffect(NodeEffectService):
                         correlation_id=correlation_id,
                         execution_time_ms=execution_time_ms,
                         status_code=response.status_code,
-                        retry_attempt=attempt_num
+                        retry_attempt=attempt_num,
                     )
 
                     # FIXED RACE CONDITION - Atomic circuit breaker state reporting
@@ -1097,7 +1103,7 @@ class NodeHookEffect(NodeEffectService):
                         correlation_id=correlation_id,
                         destination_url=str(request.url),
                         status_code=response.status_code,
-                        execution_time_ms=execution_time_ms
+                        execution_time_ms=execution_time_ms,
                     )
 
                     # Publish state change event if state changed
@@ -1107,14 +1113,14 @@ class NodeHookEffect(NodeEffectService):
                             destination_url=str(request.url),
                             old_state=old_state,
                             new_state=new_state,
-                            failure_count=failure_count
+                            failure_count=failure_count,
                         )
 
                     return ModelNotificationResult(
                         final_status_code=response.status_code,
                         is_success=True,
                         attempts=attempts,
-                        total_attempts=len(attempts)
+                        total_attempts=len(attempts),
                     )
 
                 # Check if we should retry based on status code
@@ -1123,7 +1129,7 @@ class NodeHookEffect(NodeEffectService):
                         f"Non-retryable status code {response.status_code} - giving up",
                         correlation_id=correlation_id,
                         operation="non_retryable_error",
-                        status_code=response.status_code
+                        status_code=response.status_code,
                     )
                     break
 
@@ -1134,7 +1140,7 @@ class NodeHookEffect(NodeEffectService):
                         f"Retrying after {retry_delay}s delay (attempt {attempt_num}/{retry_policy.max_attempts})",
                         correlation_id=correlation_id,
                         operation="retry_delay",
-                        retry_delay=retry_delay
+                        retry_delay=retry_delay,
                     )
                     await asyncio.sleep(retry_delay)
 
@@ -1145,7 +1151,7 @@ class NodeHookEffect(NodeEffectService):
                     correlation_id=correlation_id,
                     execution_time_ms=execution_time_ms,
                     exception=e,
-                    retry_attempt=attempt_num
+                    retry_attempt=attempt_num,
                 )
 
                 # Record failed attempt
@@ -1154,7 +1160,7 @@ class NodeHookEffect(NodeEffectService):
                     timestamp=start_time,
                     status_code=None,
                     error=str(e),
-                    execution_time_ms=execution_time_ms
+                    execution_time_ms=execution_time_ms,
                 )
                 attempts.append(attempt)
 
@@ -1172,7 +1178,7 @@ class NodeHookEffect(NodeEffectService):
             correlation_id=correlation_id,
             destination_url=str(request.url),
             error_message=error_message,
-            execution_time_ms=sum(attempt.execution_time_ms for attempt in attempts)
+            execution_time_ms=sum(attempt.execution_time_ms for attempt in attempts),
         )
 
         # Publish state change event if state changed
@@ -1182,14 +1188,14 @@ class NodeHookEffect(NodeEffectService):
                 destination_url=str(request.url),
                 old_state=old_state,
                 new_state=new_state,
-                failure_count=failure_count
+                failure_count=failure_count,
             )
 
         return ModelNotificationResult(
             final_status_code=attempts[-1].status_code if attempts else None,
             is_success=False,
             attempts=attempts,
-            total_attempts=len(attempts)
+            total_attempts=len(attempts),
         )
 
     async def process(self, input_data: ModelHookNodeInput) -> ModelHookNodeOutput:
@@ -1212,10 +1218,10 @@ class NodeHookEffect(NodeEffectService):
         correlation_id = str(input_data.correlation_id)
 
         self._logger.info(
-            f"Processing notification request",
+            "Processing notification request",
             correlation_id=correlation_id,
             operation="process_start",
-            destination_url=input_data.notification_request.url
+            destination_url=input_data.notification_request.url,
         )
 
         # Update metrics
@@ -1226,13 +1232,13 @@ class NodeHookEffect(NodeEffectService):
             if not input_data.notification_request:
                 raise OnexError(
                     code=CoreErrorCode.INVALID_INPUT,
-                    message="Notification request is required"
+                    message="Notification request is required",
                 )
 
             if not input_data.notification_request.url:
                 raise OnexError(
                     code=CoreErrorCode.INVALID_INPUT,
-                    message="Notification URL is required"
+                    message="Notification URL is required",
                 )
 
             # Early security validation for immediate feedback
@@ -1243,14 +1249,14 @@ class NodeHookEffect(NodeEffectService):
                     f"Input validation failed - URL security violation: {e.message}",
                     correlation_id=correlation_id,
                     operation="input_validation",
-                    url=input_data.notification_request.url
+                    url=input_data.notification_request.url,
                 )
                 raise  # Re-raise security violations immediately
 
             # Send notification with retries and circuit breaker protection
             notification_result = await self._send_notification_with_retries(
                 request=input_data.notification_request,
-                correlation_id=correlation_id
+                correlation_id=correlation_id,
             )
 
             # Update success/failure metrics
@@ -1270,7 +1276,7 @@ class NodeHookEffect(NodeEffectService):
                 success=notification_result.is_success,
                 total_attempts=notification_result.total_attempts,
                 final_status_code=notification_result.final_status_code,
-                total_execution_time_ms=total_execution_time_ms
+                total_execution_time_ms=total_execution_time_ms,
             )
 
             return ModelHookNodeOutput(
@@ -1279,7 +1285,7 @@ class NodeHookEffect(NodeEffectService):
                 error_message=None if notification_result.is_success else "Notification delivery failed after all retry attempts",
                 correlation_id=input_data.correlation_id,
                 timestamp=time.time(),
-                total_execution_time_ms=total_execution_time_ms
+                total_execution_time_ms=total_execution_time_ms,
             )
 
         except OnexError:
@@ -1292,16 +1298,16 @@ class NodeHookEffect(NodeEffectService):
             total_execution_time_ms = (time.time() - start_time) * 1000
 
             self._logger.error(
-                f"Unexpected error during notification processing: {str(e)}",
+                f"Unexpected error during notification processing: {e!s}",
                 correlation_id=correlation_id,
                 operation="process_error",
                 exception=e,
-                total_execution_time_ms=total_execution_time_ms
+                total_execution_time_ms=total_execution_time_ms,
             )
 
             raise OnexError(
                 code=CoreErrorCode.OPERATION_FAILED,
-                message=f"Hook Node processing failed: {str(e)}"
+                message=f"Hook Node processing failed: {e!s}",
             ) from e
 
     async def health_check(self) -> ModelHealthStatus:
@@ -1323,7 +1329,7 @@ class NodeHookEffect(NodeEffectService):
                     failure_count = await cb.get_failure_count()
                     circuit_breaker_info[url] = {
                         "state": state.value,  # Convert enum to string
-                        "failure_count": failure_count
+                        "failure_count": failure_count,
                     }
 
             health_details = {
@@ -1341,8 +1347,8 @@ class NodeHookEffect(NodeEffectService):
                     "circuit_breaker_storage": {
                         "current_count": len(circuit_breaker_info),
                         "max_capacity": self._max_circuit_breakers,
-                        "utilization_percentage": round(len(circuit_breaker_info) / self._max_circuit_breakers * 100, 2)
-                    }
+                        "utilization_percentage": round(len(circuit_breaker_info) / self._max_circuit_breakers * 100, 2),
+                    },
                 },
                 "security": {
                     "ssrf_protection_enabled": True,
@@ -1350,8 +1356,8 @@ class NodeHookEffect(NodeEffectService):
                     "rate_limit_requests_per_minute": self._security_config.rate_limit_requests_per_minute,
                     "blocked_ip_ranges_count": len(self._security_config.blocked_ip_ranges),
                     "blocked_metadata_addresses_count": len(self._security_config.blocked_metadata_addresses),
-                    "url_validation_enabled": True
-                }
+                    "url_validation_enabled": True,
+                },
             }
 
             # Check HTTP client availability
@@ -1359,7 +1365,7 @@ class NodeHookEffect(NodeEffectService):
                 return ModelHealthStatus(
                     status=EnumHealthStatus.UNHEALTHY,
                     message="HTTP client not available",
-                    details=health_details
+                    details=health_details,
                 )
 
             # Check event bus availability
@@ -1367,7 +1373,7 @@ class NodeHookEffect(NodeEffectService):
                 return ModelHealthStatus(
                     status=EnumHealthStatus.UNHEALTHY,
                     message="Event bus not available",
-                    details=health_details
+                    details=health_details,
                 )
 
             # All checks passed
@@ -1376,20 +1382,20 @@ class NodeHookEffect(NodeEffectService):
             return ModelHealthStatus(
                 status=EnumHealthStatus.HEALTHY,
                 message="Hook Node is healthy and operational",
-                details=health_details
+                details=health_details,
             )
 
         except Exception as e:
             self._logger.error(
-                f"Health check failed: {str(e)}",
+                f"Health check failed: {e!s}",
                 operation="health_check_error",
-                exception=e
+                exception=e,
             )
 
             return ModelHealthStatus(
                 status=EnumHealthStatus.UNHEALTHY,
-                message=f"Health check failed: {str(e)}",
-                details={"error": str(e), "component": "hook_node"}
+                message=f"Health check failed: {e!s}",
+                details={"error": str(e), "component": "hook_node"},
             )
 
     def _init_for_test(self, container: ModelONEXContainer):
@@ -1407,13 +1413,13 @@ class NodeHookEffect(NodeEffectService):
             "security": {"max_payload_size_bytes": 1048576},
             "circuit_breaker": {"failure_threshold": 5, "timeout_seconds": 60, "max_circuit_breakers": 1000},
             "http": {"request_timeout_seconds": 30.0},
-            "retry_policy_defaults": {"max_attempts": 3, "backoff_strategy": "EXPONENTIAL"}
+            "retry_policy_defaults": {"max_attempts": 3, "backoff_strategy": "EXPONENTIAL"},
         }
         self._config = self.config  # Some parts of code expect _config
 
         # Initialize basic components without complex security setup
         self._logger = HookStructuredLogger("hook_node")
-        self._circuit_breakers: Dict[str, CircuitBreaker] = {}
+        self._circuit_breakers: dict[str, CircuitBreaker] = {}
         self._circuit_breaker_cache = {}
         self._max_circuit_breakers = 1000
         self._lock = asyncio.Lock()
@@ -1421,17 +1427,17 @@ class NodeHookEffect(NodeEffectService):
 
         # Initialize circuit breaker configuration
         circuit_breaker_config = self.config.get("circuit_breaker", {})
-        self._circuit_breaker_failure_threshold = circuit_breaker_config.get('failure_threshold', 5)
-        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get('timeout_seconds', 60)
-        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get('half_open_max_calls', 3)
-        self._circuit_breaker_access_order: List[str] = []  # LRU tracking for bounded storage
+        self._circuit_breaker_failure_threshold = circuit_breaker_config.get("failure_threshold", 5)
+        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get("timeout_seconds", 60)
+        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get("half_open_max_calls", 3)
+        self._circuit_breaker_access_order: list[str] = []  # LRU tracking for bounded storage
 
         # Initialize security components (for testing)
         self._security_config = SecurityConfig(self.config)
         self._url_validator = UrlSecurityValidator(self._security_config)
         self._rate_limiter = RateLimiter(
             requests_per_minute=self._security_config.rate_limit_requests_per_minute,
-            window_seconds=self._security_config.rate_limit_window_seconds
+            window_seconds=self._security_config.rate_limit_window_seconds,
         )
 
         # Performance metrics tracking

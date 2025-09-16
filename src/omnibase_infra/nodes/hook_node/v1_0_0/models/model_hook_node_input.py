@@ -5,10 +5,13 @@ Node-specific input model for the Hook Node EFFECT adapter.
 Wraps notification requests for message bus integration.
 """
 
-from typing import Dict, Optional, Union, List
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict
-from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.notification.model_notification_request import (
+    ModelNotificationRequest,
+)
 
 
 class ModelHookNodeInput(BaseModel):
@@ -27,27 +30,27 @@ class ModelHookNodeInput(BaseModel):
 
     notification_request: ModelNotificationRequest = Field(
         ...,
-        description="Notification request payload to process"
+        description="Notification request payload to process",
     )
 
     correlation_id: UUID = Field(
         ...,
-        description="Request correlation ID for distributed tracing"
+        description="Request correlation ID for distributed tracing",
     )
 
     timestamp: float = Field(
         ...,
-        description="Unix timestamp when the request was created"
+        description="Unix timestamp when the request was created",
     )
 
-    context: Optional[Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]], Dict[str, Union[str, int, float, bool]]]]] = Field(
+    context: dict[str, str | int | float | bool | list[str | int | float | bool] | dict[str, str | int | float | bool]] | None = Field(
         default=None,
-        description="Additional request context and metadata with strongly typed values"
+        description="Additional request context and metadata with strongly typed values",
     )
 
     model_config = ConfigDict(
         frozen=True,
-        extra="forbid"
+        extra="forbid",
     )
 
     @property

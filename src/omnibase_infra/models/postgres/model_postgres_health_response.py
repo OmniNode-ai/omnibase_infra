@@ -1,6 +1,5 @@
 """PostgreSQL health check response model."""
 
-from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -18,18 +17,18 @@ class ModelPostgresHealthResponse(BaseModel):
 
     status: str = Field(description="Health status: healthy, degraded, unhealthy")
     timestamp: float = Field(description="Health check timestamp")
-    connection_pool: Optional[ModelPostgresConnectionPoolInfo] = Field(
-        default=None, description="Connection pool information"
+    connection_pool: ModelPostgresConnectionPoolInfo | None = Field(
+        default=None, description="Connection pool information",
     )
-    database_info: Optional[ModelPostgresDatabaseInfo] = Field(
-        default=None, description="Database information"
+    database_info: ModelPostgresDatabaseInfo | None = Field(
+        default=None, description="Database information",
     )
-    schema_info: Optional[ModelPostgresSchemaInfo] = Field(
-        default=None, description="Schema validation information"
+    schema_info: ModelPostgresSchemaInfo | None = Field(
+        default=None, description="Schema validation information",
     )
-    performance: Optional[ModelPostgresPerformanceMetrics] = Field(
-        default=None, description="Performance metrics"
+    performance: ModelPostgresPerformanceMetrics | None = Field(
+        default=None, description="Performance metrics",
     )
-    errors: List[ModelPostgresError] = Field(default_factory=list, description="List of errors or warnings")
-    correlation_id: Optional[UUID] = Field(default=None, description="Request correlation ID")
-    context: Optional[ModelPostgresContext] = Field(default=None, description="Additional response context")
+    errors: list[ModelPostgresError] = Field(default_factory=list, description="List of errors or warnings")
+    correlation_id: UUID | None = Field(default=None, description="Request correlation ID")
+    context: ModelPostgresContext | None = Field(default=None, description="Additional response context")

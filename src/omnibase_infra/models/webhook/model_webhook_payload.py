@@ -8,8 +8,9 @@ ONEX Principle: Zero flexibility - maximum predictability for agent execution.
 """
 
 from datetime import datetime
-from typing import List, Optional, Literal, Union
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Literal, Union
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelWebhookAttachment(BaseModel):
@@ -17,8 +18,8 @@ class ModelWebhookAttachment(BaseModel):
 
     title: str = Field(..., description="Attachment title")
     text: str = Field(..., description="Attachment content")
-    color: Optional[str] = Field(default=None, description="Color indicator (hex or semantic)")
-    timestamp: Optional[datetime] = Field(default=None, description="Attachment timestamp")
+    color: str | None = Field(default=None, description="Color indicator (hex or semantic)")
+    timestamp: datetime | None = Field(default=None, description="Attachment timestamp")
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -28,10 +29,10 @@ class ModelSlackWebhookPayload(BaseModel):
 
     webhook_type: Literal["slack"] = Field(default="slack", description="Webhook type discriminator")
     text: str = Field(..., description="Primary message text")
-    channel: Optional[str] = Field(default=None, description="Target Slack channel")
-    username: Optional[str] = Field(default=None, description="Bot username override")
-    icon_emoji: Optional[str] = Field(default=None, description="Bot emoji icon")
-    attachments: Optional[List[ModelWebhookAttachment]] = Field(default=None, description="Message attachments")
+    channel: str | None = Field(default=None, description="Target Slack channel")
+    username: str | None = Field(default=None, description="Bot username override")
+    icon_emoji: str | None = Field(default=None, description="Bot emoji icon")
+    attachments: list[ModelWebhookAttachment] | None = Field(default=None, description="Message attachments")
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -41,9 +42,9 @@ class ModelDiscordWebhookPayload(BaseModel):
 
     webhook_type: Literal["discord"] = Field(default="discord", description="Webhook type discriminator")
     content: str = Field(..., description="Primary message content")
-    username: Optional[str] = Field(default=None, description="Bot username override")
-    avatar_url: Optional[str] = Field(default=None, description="Bot avatar URL")
-    embeds: Optional[List[ModelWebhookAttachment]] = Field(default=None, description="Discord embeds")
+    username: str | None = Field(default=None, description="Bot username override")
+    avatar_url: str | None = Field(default=None, description="Bot avatar URL")
+    embeds: list[ModelWebhookAttachment] | None = Field(default=None, description="Discord embeds")
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -54,8 +55,8 @@ class ModelTeamsWebhookPayload(BaseModel):
     webhook_type: Literal["teams"] = Field(default="teams", description="Webhook type discriminator")
     summary: str = Field(..., description="Message summary")
     text: str = Field(..., description="Message content")
-    title: Optional[str] = Field(default=None, description="Message title")
-    theme_color: Optional[str] = Field(default=None, description="Theme color (hex)")
+    title: str | None = Field(default=None, description="Message title")
+    theme_color: str | None = Field(default=None, description="Theme color (hex)")
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -71,10 +72,10 @@ class ModelInfrastructureAlertPayload(BaseModel):
     alert_message: str = Field(..., description="Primary alert message")
 
     # Optional context
-    node_id: Optional[str] = Field(default=None, description="ONEX node identifier")
-    correlation_id: Optional[str] = Field(default=None, description="Request correlation ID")
-    timestamp: Optional[datetime] = Field(default=None, description="Alert timestamp")
-    metrics: Optional[List[str]] = Field(default=None, description="Related metrics")
+    node_id: str | None = Field(default=None, description="ONEX node identifier")
+    correlation_id: str | None = Field(default=None, description="Request correlation ID")
+    timestamp: datetime | None = Field(default=None, description="Alert timestamp")
+    metrics: list[str] | None = Field(default=None, description="Related metrics")
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -84,7 +85,7 @@ ModelWebhookPayloadUnion = Union[
     ModelSlackWebhookPayload,
     ModelDiscordWebhookPayload,
     ModelTeamsWebhookPayload,
-    ModelInfrastructureAlertPayload
+    ModelInfrastructureAlertPayload,
 ]
 
 
@@ -99,7 +100,7 @@ class ModelWebhookPayloadWrapper(BaseModel):
     payload: ModelWebhookPayloadUnion = Field(..., description="Strongly-typed webhook payload")
     target_platform: Literal["slack", "discord", "teams", "infrastructure_alert"] = Field(
         ...,
-        description="Target webhook platform"
+        description="Target webhook platform",
     )
 
     model_config = ConfigDict(frozen=True, extra="forbid")

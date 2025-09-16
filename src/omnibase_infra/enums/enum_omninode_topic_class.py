@@ -12,17 +12,17 @@ class EnumOmniNodeTopicClass(str, Enum):
     
     Topic classes define the type of content and usage patterns.
     """
-    
+
     # Core event processing
     EVT = "evt"  # Events - State change notifications
     CMD = "cmd"  # Commands - Action requests
     QRS = "qrs"  # Query-Response - Request/response patterns
-    
-    # Control and management  
+
+    # Control and management
     CTL = "ctl"  # Control - Control plane operations
     RTY = "rty"  # Retry - Retry processing
     DLT = "dlt"  # Dead Letter - Failed messages
-    
+
     # Data and monitoring
     CDC = "cdc"  # Change Data Capture - Database changes
     MET = "met"  # Metrics - Performance and operational metrics
