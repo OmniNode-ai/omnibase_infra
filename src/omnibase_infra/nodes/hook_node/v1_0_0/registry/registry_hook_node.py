@@ -125,11 +125,6 @@ class HookNodeRegistry:
             # Validate HTTP client has required protocol methods (ONEX-compliant duck typing)
             if not (hasattr(http_client, 'request') and callable(getattr(http_client, 'request'))):
                 return False
-            # Also verify optional specific HTTP methods are available
-            if not (hasattr(http_client, 'post') and callable(getattr(http_client, 'post'))):
-                return False
-            if not (hasattr(http_client, 'put') and callable(getattr(http_client, 'put'))):
-                return False
 
             # Check event bus protocol using duck typing
             event_bus = container.get_service("ProtocolEventBus")

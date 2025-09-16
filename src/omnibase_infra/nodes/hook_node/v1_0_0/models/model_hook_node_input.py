@@ -6,7 +6,8 @@ Wraps notification requests for message bus integration.
 """
 
 from typing import Dict, Optional, Union, List
-from pydantic import BaseModel, Field
+from uuid import UUID
+from pydantic import BaseModel, Field, ConfigDict
 from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
 
 
@@ -29,7 +30,7 @@ class ModelHookNodeInput(BaseModel):
         description="Notification request payload to process"
     )
 
-    correlation_id: str = Field(
+    correlation_id: UUID = Field(
         ...,
         description="Request correlation ID for distributed tracing"
     )
@@ -44,10 +45,10 @@ class ModelHookNodeInput(BaseModel):
         description="Additional request context and metadata with strongly typed values"
     )
 
-    class Config:
-        """Pydantic configuration."""
-        frozen = True
-        extra = "forbid"
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid"
+    )
 
     @property
     def has_context(self) -> bool:

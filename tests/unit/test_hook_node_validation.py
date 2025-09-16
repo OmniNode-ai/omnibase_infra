@@ -21,11 +21,18 @@ import time
 import inspect
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Union, List
 from unittest.mock import Mock, AsyncMock
 
 # Add the src directory to Python path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+# Import strongly typed webhook models
+from tests.models.test_webhook_models import (
+    SlackWebhookPayloadModel,
+    DiscordWebhookPayloadModel,
+    GenericWebhookPayloadModel
+)
 
 print("🚀 Hook Node Phase 1 Implementation Validation")
 print("=" * 60)
@@ -290,17 +297,17 @@ print("\n7. 📦 Validating Webhook Payload Formatting...")
 
 try:
     # Test Slack payload formatting
-    def format_slack_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def format_slack_payload(payload: SlackWebhookPayloadModel) -> Dict[str, Union[str, List]]:
         """Format payload for Slack webhook delivery."""
-        if "text" not in payload:
+        if not payload.text:
             raise ValueError("Slack payload requires 'text' field")
-        return payload  # Slack format is preserved as-is
+        return payload.dict(exclude_none=True)  # Convert to dict, excluding None values
 
-    slack_payload = {
-        "text": "🚨 System Alert",
-        "channel": "#alerts",
-        "username": "ONEX Bot"
-    }
+    slack_payload = SlackWebhookPayloadModel(
+        text="🚨 System Alert",
+        channel="#alerts",
+        username="ONEX Bot"
+    )
 
     formatted = format_slack_payload(slack_payload)
     assert formatted["text"] == "🚨 System Alert", "Slack text formatting failed"
@@ -308,23 +315,23 @@ try:
 
     # Test invalid Slack payload
     try:
-        format_slack_payload({})  # Missing required 'text' field
-        assert False, "Should have raised ValueError for missing text field"
+        format_slack_payload(SlackWebhookPayloadModel(text=""))  # Empty text field
+        assert False, "Should have raised ValueError for empty text field"
     except ValueError:
         pass  # Expected
 
     print("   ✅ Slack payload formatting: PASSED")
 
     # Test Discord payload formatting
-    def format_discord_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def format_discord_payload(payload: DiscordWebhookPayloadModel) -> Dict[str, Union[str, List]]:
         """Format payload for Discord webhook delivery."""
         # Discord accepts content, embeds, etc.
-        return payload  # Discord format is preserved as-is
+        return payload.dict(exclude_none=True)  # Discord format is preserved as-is
 
-    discord_payload = {
-        "content": "🔥 **CRITICAL ALERT**",
-        "embeds": [{"title": "System Status", "color": 16711680}]
-    }
+    discord_payload = DiscordWebhookPayloadModel(
+        content="🔥 **CRITICAL ALERT**",
+        embeds=[{"title": "System Status", "color": "16711680"}]
+    )
 
     formatted_discord = format_discord_payload(discord_payload)
     assert formatted_discord["content"] == "🔥 **CRITICAL ALERT**", "Discord content formatting failed"
@@ -333,18 +340,20 @@ try:
     print("   ✅ Discord payload formatting: PASSED")
 
     # Test generic webhook formatting
-    def format_generic_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def format_generic_payload(payload: GenericWebhookPayloadModel) -> Dict[str, Union[str, Dict]]:
         """Format payload for generic webhook delivery."""
-        return payload  # Generic webhooks preserve original structure
+        return payload.dict()  # Generic webhooks preserve original structure
 
-    generic_payload = {
-        "event_type": "infrastructure.alert",
-        "severity": "critical",
-        "metadata": {"correlation_id": "test-123"}
-    }
+    generic_payload = GenericWebhookPayloadModel(
+        event_type="infrastructure.alert",
+        data={"severity": "critical", "correlation_id": "test-123"},
+        timestamp="2025-01-01T00:00:00Z",
+        source="hook_node_test"
+    )
 
     formatted_generic = format_generic_payload(generic_payload)
-    assert formatted_generic == generic_payload, "Generic payload formatting should preserve structure"
+    assert formatted_generic["event_type"] == "infrastructure.alert", "Generic event_type formatting failed"
+    assert formatted_generic["source"] == "hook_node_test", "Generic source formatting failed"
 
     print("   ✅ Generic webhook payload formatting: PASSED")
 
@@ -357,7 +366,7 @@ print("\n8. ⚡ Validating Async Processing Patterns...")
 
 try:
     # Test async timeout handling
-    async def mock_http_request_with_timeout(url: str, timeout: float = 30.0) -> Dict[str, Any]:
+    async def mock_http_request_with_timeout(url: str, timeout: float = 30.0) -> Dict[str, Union[int, str, float]]:
         """Mock HTTP request with timeout simulation."""
         try:
             # Simulate network delay
@@ -416,8 +425,8 @@ try:
         # This would normally inspect the actual code for type hints
         # For now, we validate the principle with mock type checking
 
-        def typed_function(url: str, headers: Dict[str, str], payload: Dict[str, Any]) -> bool:
-            """Example of proper typing - payload can be Any for webhook flexibility."""
+        def typed_function(url: str, headers: Dict[str, str], payload: Dict[str, Union[str, int, float, bool, List, Dict]]) -> bool:
+            """Example of proper typing - payload uses Union for webhook flexibility."""
             return isinstance(url, str) and isinstance(headers, dict)
 
         result = typed_function("https://test.com", {"Content-Type": "application/json"}, {"test": "data"})
@@ -447,10 +456,10 @@ try:
         def __init__(self):
             self._dependencies = {}
 
-        def provide(self, name: str, instance: Any):
+        def provide(self, name: str, instance: Union[Mock, object]):
             self._dependencies[name] = instance
 
-        def get(self, name: str) -> Any:
+        def get(self, name: str) -> Union[Mock, object, None]:
             return self._dependencies.get(name)
 
     container = MockContainer()

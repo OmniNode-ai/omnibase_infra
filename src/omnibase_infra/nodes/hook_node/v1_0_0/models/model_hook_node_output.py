@@ -6,7 +6,8 @@ Returns notification delivery results in message bus envelope format.
 """
 
 from typing import Dict, Optional, Union, List
-from pydantic import BaseModel, Field
+from uuid import UUID
+from pydantic import BaseModel, Field, ConfigDict
 from omnibase_infra.models.notification.model_notification_result import ModelNotificationResult
 
 
@@ -42,7 +43,7 @@ class ModelHookNodeOutput(BaseModel):
         description="Error message if the operation failed completely"
     )
 
-    correlation_id: str = Field(
+    correlation_id: UUID = Field(
         ...,
         description="Request correlation ID for distributed tracing"
     )
@@ -63,16 +64,16 @@ class ModelHookNodeOutput(BaseModel):
         description="Additional response context and metadata with strongly typed values"
     )
 
-    class Config:
-        """Pydantic configuration."""
-        frozen = True
-        extra = "forbid"
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid"
+    )
 
     @classmethod
     def from_result(
         cls,
         notification_result: ModelNotificationResult,
-        correlation_id: str,
+        correlation_id: UUID,
         timestamp: float,
         total_execution_time_ms: float,
         error_message: Optional[str] = None,

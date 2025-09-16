@@ -448,16 +448,20 @@ class TestHookNodeIntegration:
     @pytest.mark.asyncio
     async def test_registry_integration(self, container_with_mocks):
         """Test Hook Node registry integration and dependency resolution."""
-        # Test registry can create Hook Node with proper dependencies
-        registry = HookNodeRegistry()
+        # Test registry can validate Hook Node configuration
+        is_valid = HookNodeRegistry.validate_configuration(container_with_mocks)
+        assert is_valid, "Registry should validate container configuration as valid"
 
-        # Registry should be able to resolve dependencies from container
-        hook_node = registry.create_node(container_with_mocks)
+        # Registry should be able to register dependencies in container
+        HookNodeRegistry.register_dependencies(container_with_mocks)
 
+        # Create Hook Node directly with the configured container
+        hook_node = NodeHookEffect(container_with_mocks)
         assert hook_node is not None
-        assert isinstance(hook_node, NodeHookEffect)
         assert hook_node._http_client is not None
         assert hook_node._event_bus is not None
+        assert hook_node.node_type == "effect"
+        assert hook_node.domain == "infrastructure"
 
     @pytest.mark.asyncio
     async def test_concurrent_notifications_integration(self, hook_node_integration):

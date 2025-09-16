@@ -37,9 +37,11 @@ import json
 import logging
 import re
 import time
+import yaml
 from datetime import datetime
 from enum import Enum
 from ipaddress import AddressValueError, IPv4Address, IPv6Address, ip_address
+from pathlib import Path
 from typing import Dict, List, Optional, Union
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
@@ -78,7 +80,10 @@ class CircuitBreakerState(Enum):
 class SecurityConfig:
     """Security configuration for Hook Node operations."""
 
-    def __init__(self):
+    def __init__(self, config: Optional[Dict] = None):
+        """Initialize security config from contract configuration."""
+        security_config = config.get('security', {}) if config else {}
+
         # SSRF Protection - RFC 1918 private networks and special addresses
         self.blocked_ip_ranges = [
             # RFC 1918 private networks
@@ -102,12 +107,16 @@ class SecurityConfig:
             "fd00:ec2::254",    # AWS IPv6 metadata service
         ]
 
-        # Payload size limits (1MB default, configurable)
-        self.max_payload_size_bytes = 1024 * 1024  # 1MB
+        # Payload size limits - load from contract configuration
+        self.max_payload_size_bytes = security_config.get('max_payload_size_bytes', 1048576)  # 1MB default
 
-        # Rate limiting configuration
-        self.rate_limit_requests_per_minute = 60
-        self.rate_limit_window_seconds = 60
+        # Rate limiting configuration - load from contract configuration
+        self.rate_limit_requests_per_minute = security_config.get('rate_limit_requests_per_minute', 60)
+        self.rate_limit_window_seconds = security_config.get('rate_limit_window_seconds', 60)
+
+        # Enable/disable flags - load from contract configuration
+        self.ssrf_protection_enabled = security_config.get('ssrf_protection_enabled', True)
+        self.url_validation_enabled = security_config.get('url_validation_enabled', True)
 
 
 class UrlSecurityValidator:
@@ -400,7 +409,7 @@ class NotificationCircuitBreaker:
 
     def __init__(self, failure_threshold: int = 5, timeout_seconds: int = 60,
                  half_open_max_calls: int = 3):
-        """Initialize circuit breaker with failure tracking."""
+        """Initialize circuit breaker with configurable failure tracking parameters."""
         self.failure_threshold = failure_threshold
         self.timeout_seconds = timeout_seconds
         self.half_open_max_calls = half_open_max_calls
@@ -503,11 +512,26 @@ class NodeHookEffect(NodeEffectService):
     - Shared notification models: Request/response models for notifications
     """
 
+    @staticmethod
+    def _load_contract_configuration() -> Dict:
+        """Load configuration from contract.yaml file."""
+        try:
+            contract_path = Path(__file__).parent / "contract.yaml"
+            with open(contract_path, 'r') as f:
+                contract = yaml.safe_load(f)
+                return contract.get('configuration', {})
+        except Exception as e:
+            logging.warning(f"Failed to load contract configuration: {e}")
+            return {}
+
     def __init__(self, container: ModelONEXContainer):
-        """Initialize Hook Node with container injection."""
+        """Initialize Hook Node with container injection and contract-driven configuration."""
         super().__init__(container)
         self.node_type = "effect"
         self.domain = "infrastructure"
+
+        # Load configuration from contract
+        self._config = self._load_contract_configuration()
 
         # Initialize HTTP client for webhook delivery (REQUIRED - NO FALLBACKS)
         self._http_client: ProtocolHttpClient = self.container.get_service("ProtocolHttpClient")
@@ -529,17 +553,27 @@ class NodeHookEffect(NodeEffectService):
         self._logger = HookStructuredLogger("hook_node")
 
         # Initialize security components (CRITICAL - BLOCKING SECURITY VULNERABILITIES)
-        self._security_config = SecurityConfig()
+        self._security_config = SecurityConfig(self._config)
         self._url_validator = UrlSecurityValidator(self._security_config)
         self._rate_limiter = RateLimiter(
             requests_per_minute=self._security_config.rate_limit_requests_per_minute,
             window_seconds=self._security_config.rate_limit_window_seconds
         )
 
+        # Load circuit breaker configuration from contract
+        circuit_breaker_config = self._config.get('circuit_breaker', {})
+        self._circuit_breaker_failure_threshold = circuit_breaker_config.get('failure_threshold', 5)
+        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get('timeout_seconds', 60)
+        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get('half_open_max_calls', 3)
+        self._max_circuit_breakers = circuit_breaker_config.get('max_circuit_breakers', 1000)
+
+        # Load HTTP configuration from contract
+        http_config = self._config.get('http', {})
+        self._http_request_timeout = http_config.get('request_timeout_seconds', 30.0)
+
         # Initialize bounded circuit breakers for notification destinations (per-URL tracking)
         self._circuit_breakers: Dict[str, NotificationCircuitBreaker] = {}
         self._circuit_breaker_access_order: List[str] = []  # LRU tracking for bounded storage
-        self._max_circuit_breakers = 1000  # Maximum number of circuit breakers to store
         self._circuit_breaker_lock = asyncio.Lock()  # Global lock for circuit breaker dict management
 
         # Performance metrics tracking
@@ -584,11 +618,11 @@ class NodeHookEffect(NodeEffectService):
                     total_circuit_breakers=len(self._circuit_breakers)
                 )
 
-            # Create new circuit breaker
+            # Create new circuit breaker with contract configuration
             self._circuit_breakers[url] = NotificationCircuitBreaker(
-                failure_threshold=5,  # Open circuit after 5 failures
-                timeout_seconds=60,   # Wait 60 seconds before retry
-                half_open_max_calls=3 # Allow 3 test calls in half-open state
+                failure_threshold=self._circuit_breaker_failure_threshold,
+                timeout_seconds=self._circuit_breaker_timeout_seconds,
+                half_open_max_calls=self._circuit_breaker_half_open_max_calls
             )
             self._circuit_breaker_access_order.append(url)
             return self._circuit_breakers[url]
@@ -953,11 +987,13 @@ class NodeHookEffect(NodeEffectService):
                 total_attempts=1
             )
 
-        # Use default retry policy if not specified
+        # Use default retry policy from contract configuration if not specified
+        retry_defaults = self._config.get('retry_policy_defaults', {})
         retry_policy = request.retry_policy or ModelNotificationRetryPolicy(
-            max_attempts=3,
-            backoff_strategy="exponential",
-            delay_seconds=5.0
+            max_attempts=retry_defaults.get('max_attempts', 3),
+            backoff_strategy=retry_defaults.get('backoff_strategy', 'exponential'),
+            delay_seconds=retry_defaults.get('delay_seconds', 5.0),
+            retryable_status_codes=retry_defaults.get('retryable_status_codes', [408, 429, 500, 502, 503, 504])
         )
 
         headers = self._build_http_headers(request.headers, request.auth)
@@ -973,13 +1009,13 @@ class NodeHookEffect(NodeEffectService):
             )
 
             try:
-                # Make HTTP request
+                # Make HTTP request with contract-configured timeout
                 response: ProtocolHttpResponse = await self._http_client.request(
                     method=request.method,
                     url=request.url,
                     json=request.payload,
                     headers=headers,
-                    timeout=30.0  # 30 second timeout
+                    timeout=self._http_request_timeout
                 )
 
                 execution_time_ms = (time.time() - start_time) * 1000
@@ -1125,7 +1161,7 @@ class NodeHookEffect(NodeEffectService):
             OnexError: For system-level failures (dependency unavailable, invalid input)
         """
         start_time = time.time()
-        correlation_id = input_data.correlation_id
+        correlation_id = str(input_data.correlation_id)
 
         self._logger.info(
             f"Processing notification request",
@@ -1193,7 +1229,7 @@ class NodeHookEffect(NodeEffectService):
                 notification_result=notification_result,
                 success=notification_result.is_success,
                 error_message=None if notification_result.is_success else "Notification delivery failed after all retry attempts",
-                correlation_id=correlation_id,
+                correlation_id=input_data.correlation_id,
                 timestamp=time.time(),
                 total_execution_time_ms=total_execution_time_ms
             )
