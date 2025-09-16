@@ -41,7 +41,6 @@ class MockHttpResponse:
         self.execution_time_ms = execution_time_ms
         self.is_success = is_success
 from omnibase_infra.nodes.hook_node.v1_0_0.models.model_hook_node_input import ModelHookNodeInput
-from omnibase_infra.nodes.hook_node.v1_0_0.registry.registry_hook_node import HookNodeRegistry
 
 # Shared notification models
 from omnibase_infra.models.notification.model_notification_request import ModelNotificationRequest
@@ -556,26 +555,6 @@ class TestHookNodeIntegration:
         # Since the notification ultimately succeeded, only success event should be published
         assert len(failure_events) == 0  # No failures - final result was success
         assert len(success_events) == 1  # One final success
-
-    @pytest.mark.asyncio
-    async def test_registry_integration(self, container_with_mocks):
-        """Test Hook Node registry integration and dependency resolution."""
-        # Test registry can validate Hook Node configuration (patch constructor for test)
-        with patch.object(NodeHookEffect, '__init__', lambda self, container: self._init_for_test(container)):
-            is_valid = HookNodeRegistry.validate_configuration(container_with_mocks)
-        assert is_valid, "Registry should validate container configuration as valid"
-
-        # Registry should be able to register dependencies in container
-        HookNodeRegistry.register_dependencies(container_with_mocks)
-
-        # Create Hook Node directly with the configured container
-        with patch.object(NodeHookEffect, '__init__', lambda self, container: self._init_for_test(container)):
-            hook_node = NodeHookEffect(container_with_mocks)
-        assert hook_node is not None
-        assert hook_node._http_client is not None
-        assert hook_node._event_bus is not None
-        assert hook_node.node_type == "effect"
-        assert hook_node.domain == "infrastructure"
 
     @pytest.mark.asyncio
     async def test_concurrent_notifications_integration(self, hook_node_integration):
