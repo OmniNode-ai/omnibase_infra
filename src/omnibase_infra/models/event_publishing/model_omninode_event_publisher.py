@@ -3,9 +3,9 @@
 from uuid import UUID
 
 # Import ModelEventEnvelope from omnibase_core
-from omnibase_core.models.core.model_event_envelope import ModelEventEnvelope
-from omnibase_core.models.core.model_onex_event import ModelOnexEvent
-from omnibase_core.models.core.model_route_spec import ModelRouteSpec
+from omnibase_core.model.core.model_event_envelope import ModelEventEnvelope
+from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.model.core.model_route_spec import ModelRouteSpec
 from pydantic import BaseModel, Field
 
 from ..postgres.model_postgres_health_data import ModelPostgresHealthData

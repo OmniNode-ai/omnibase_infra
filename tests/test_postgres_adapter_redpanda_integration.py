@@ -33,8 +33,9 @@ from testcontainers.postgres import PostgresContainer
 logger = logging.getLogger(__name__)
 
 # Import ONEX infrastructure components
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.core.onex_container import ModelONEXContainer
+from omnibase_core.core_error_codes import CoreErrorCode
+from omnibase_core.onex_error import OnexError
 
 # Import PostgreSQL adapter components
 from omnibase_infra.infrastructure.postgres_connection_manager import (

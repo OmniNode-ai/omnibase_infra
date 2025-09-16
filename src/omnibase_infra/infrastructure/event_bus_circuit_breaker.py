@@ -16,12 +16,12 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.models.core.model_onex_event import ModelOnexEvent
+from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 
 # Import new environment configuration model
 from ..models.infrastructure.model_circuit_breaker_environment_config import (
@@ -39,8 +39,8 @@ class CircuitBreakerState(Enum):
 
 @dataclass
 class CircuitBreakerConfig:
-    """Configuration for event bus circuit breaker.
-    
+    """Configuration for event bus circuit breaker with memory management.
+
     Note: This dataclass is maintained for backward compatibility.
     For environment-specific configuration, use ModelCircuitBreakerEnvironmentConfig.
     """
@@ -52,6 +52,15 @@ class CircuitBreakerConfig:
     dead_letter_enabled: bool = True   # Enable dead letter queue for failed events
     graceful_degradation: bool = True  # Allow operations to continue without events
 
+<<<<<<< HEAD
+=======
+    # Memory management configuration
+    max_dead_letter_size: int = 500     # Max dead letter queue entries
+    dead_letter_ttl_hours: int = 24     # Dead letter entry expiration (hours)
+    cleanup_interval_seconds: int = 300 # Memory cleanup interval (5 minutes)
+    memory_monitor_enabled: bool = True # Enable memory usage monitoring
+
+>>>>>>> origin/main
     @classmethod
     def from_environment_config(cls, env_config: ModelCircuitBreakerConfig) -> "CircuitBreakerConfig":
         """Create CircuitBreakerConfig from environment-specific configuration."""
@@ -95,8 +104,13 @@ class EventBusCircuitBreaker:
     """
 
     def __init__(self, config: CircuitBreakerConfig | ModelCircuitBreakerConfig):
+<<<<<<< HEAD
         """Initialize circuit breaker with configuration.
         
+=======
+        """Initialize circuit breaker with configuration and memory management.
+
+>>>>>>> origin/main
         Args:
             config: Circuit breaker configuration (legacy dataclass or new Pydantic model)
         """
@@ -116,6 +130,94 @@ class EventBusCircuitBreaker:
         self.logger = logging.getLogger(f"{__name__}.EventBusCircuitBreaker")
         self._lock = asyncio.Lock()
 
+<<<<<<< HEAD
+=======
+        # Memory management components
+        self._memory_cleanup_task: asyncio.Task | None = None
+        self._start_memory_cleanup()
+        self._last_memory_cleanup = time.time()
+
+    def _start_memory_cleanup(self):
+        """Start background memory cleanup task."""
+        if self.config.memory_monitor_enabled:
+            self._memory_cleanup_task = asyncio.create_task(self._memory_cleanup_loop())
+
+    async def _memory_cleanup_loop(self):
+        """Background loop for memory management and cleanup."""
+        try:
+            while True:
+                await asyncio.sleep(self.config.cleanup_interval_seconds)
+                await self._perform_memory_cleanup()
+        except asyncio.CancelledError:
+            self.logger.info("Memory cleanup task cancelled")
+        except Exception as e:
+            self.logger.error(f"Memory cleanup error: {e}")
+
+    async def _perform_memory_cleanup(self):
+        """Perform memory cleanup operations."""
+        async with self._lock:
+            initial_dead_letter_size = len(self.dead_letter_queue)
+            initial_queue_size = len(self.event_queue)
+
+            # Clean up expired dead letter entries
+            await self._cleanup_expired_dead_letters()
+
+            # Enforce dead letter queue size limit
+            await self._enforce_dead_letter_size_limit()
+
+            # Cleanup statistics
+            dead_letter_cleaned = initial_dead_letter_size - len(self.dead_letter_queue)
+
+            if dead_letter_cleaned > 0:
+                self.logger.info(f"Memory cleanup completed: {dead_letter_cleaned} dead letter entries removed")
+
+            self._last_memory_cleanup = time.time()
+
+    async def _cleanup_expired_dead_letters(self):
+        """Remove expired entries from dead letter queue."""
+        current_time = datetime.now()
+        ttl_delta = timedelta(hours=self.config.dead_letter_ttl_hours)
+
+        # Filter out expired entries
+        self.dead_letter_queue = [
+            entry for entry in self.dead_letter_queue
+            if self._is_dead_letter_entry_valid(entry, current_time, ttl_delta)
+        ]
+
+    def _is_dead_letter_entry_valid(self, entry: dict[str, Any], current_time: datetime, ttl_delta: timedelta) -> bool:
+        """Check if a dead letter entry is still valid (not expired)."""
+        try:
+            entry_time = datetime.fromisoformat(entry.get("timestamp", ""))
+            return (current_time - entry_time) < ttl_delta
+        except (ValueError, TypeError):
+            # Invalid timestamp - remove entry
+            return False
+
+    async def _enforce_dead_letter_size_limit(self):
+        """Enforce maximum dead letter queue size."""
+        if len(self.dead_letter_queue) > self.config.max_dead_letter_size:
+            # Remove oldest entries (FIFO)
+            excess_count = len(self.dead_letter_queue) - self.config.max_dead_letter_size
+            self.dead_letter_queue = self.dead_letter_queue[excess_count:]
+            self.logger.warning(f"Dead letter queue size limit exceeded, removed {excess_count} oldest entries")
+
+    async def close(self):
+        """Close circuit breaker and cleanup resources."""
+        # Cancel memory cleanup task
+        if self._memory_cleanup_task and not self._memory_cleanup_task.done():
+            self._memory_cleanup_task.cancel()
+            try:
+                await self._memory_cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        # Clear all queues to free memory
+        self.event_queue.clear()
+        self.dead_letter_queue.clear()
+
+        self.logger.info("Circuit breaker closed and resources cleaned up")
+
+>>>>>>> origin/main
     @classmethod
     def from_environment(
         cls,
@@ -428,6 +530,14 @@ class EventBusCircuitBreaker:
                 "dead_letter_enabled": self.config.dead_letter_enabled,
                 "graceful_degradation": self.config.graceful_degradation,
                 "environment": self._detect_environment(),
+<<<<<<< HEAD
+=======
+                # Memory management configuration
+                "max_dead_letter_size": self.config.max_dead_letter_size,
+                "dead_letter_ttl_hours": self.config.dead_letter_ttl_hours,
+                "cleanup_interval_seconds": self.config.cleanup_interval_seconds,
+                "memory_monitor_enabled": self.config.memory_monitor_enabled,
+>>>>>>> origin/main
             },
             "metrics": {
                 "total_events": self.metrics.total_events,
@@ -439,4 +549,19 @@ class EventBusCircuitBreaker:
                 "last_failure": self.metrics.last_failure.isoformat() if self.metrics.last_failure else None,
                 "last_success": self.metrics.last_success.isoformat() if self.metrics.last_success else None,
             },
+<<<<<<< HEAD
+=======
+            "memory_management": {
+                "event_queue_size": len(self.event_queue),
+                "dead_letter_queue_size": len(self.dead_letter_queue),
+                "dead_letter_utilization": (len(self.dead_letter_queue) / self.config.max_dead_letter_size) * 100,
+                "queue_utilization": (len(self.event_queue) / self.config.max_queue_size) * 100,
+                "memory_cleanup_enabled": self.config.memory_monitor_enabled,
+                "last_cleanup": time.time() - self._last_memory_cleanup,
+                "cleanup_task_running": (
+                    self._memory_cleanup_task is not None and
+                    not self._memory_cleanup_task.done()
+                ),
+            },
+>>>>>>> origin/main
         }

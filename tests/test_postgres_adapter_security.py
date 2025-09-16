@@ -11,8 +11,9 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.core.onex_container import ModelONEXContainer
+from omnibase_core.core_error_codes import CoreErrorCode
+from omnibase_core.onex_error import OnexError
 
 from omnibase_infra.models.postgres.model_postgres_query_request import (
     ModelPostgresQueryRequest,

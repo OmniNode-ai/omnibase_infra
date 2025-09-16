@@ -6,7 +6,8 @@ Validates external dependencies and enforces secure configuration practices.
 
 import os
 
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
+from omnibase_core.enums.enum_core_error_code import CoreErrorCode
+from omnibase_core.exceptions.base_onex_error import OnexError
 from pydantic import BaseModel, Field, HttpUrl, validator
 
 

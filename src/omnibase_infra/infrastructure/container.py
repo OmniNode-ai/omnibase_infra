@@ -18,12 +18,12 @@ import logging
 import os
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.models.core.model_onex_event import ModelOnexEvent
-from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
+from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLoader
+from omnibase_spi.protocols.event_bus import ProtocolEventBus
 
 from omnibase_infra.infrastructure.event_bus_circuit_breaker import (
     CircuitBreakerConfig,
@@ -36,7 +36,6 @@ from omnibase_infra.infrastructure.infrastructure_observability import (
 from omnibase_infra.models.kafka.model_kafka_producer_entry import (
     ModelKafkaFailureRecord,
 )
-
 # Typed models for replacing Any usage
 from omnibase_infra.models.kafka.model_kafka_producer_pool_stats import (
     ModelKafkaProducerPoolStats,
@@ -540,6 +539,12 @@ class RedPandaEventBus(ProtocolEventBus):
         # Clean up producer pool
         await self._producer_pool.close_all()
 
+<<<<<<< HEAD
+=======
+        # Clean up circuit breaker
+        await self._circuit_breaker.close()
+
+>>>>>>> origin/main
         # Clean up observability system
         await self._observability.close()
 

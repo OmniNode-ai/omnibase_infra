@@ -8,7 +8,8 @@ import logging
 
 # Required dependency - fail fast if unavailable (ONEX principle)
 import sqlparse
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
+from omnibase_core.enums.enum_core_error_code import CoreErrorCode
+from omnibase_core.exceptions.base_onex_error import OnexError
 from sqlparse.tokens import (
     Keyword,
     Literal,

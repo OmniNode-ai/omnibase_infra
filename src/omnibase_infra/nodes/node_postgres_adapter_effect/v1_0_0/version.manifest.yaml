@@ -222,7 +222,7 @@ dependencies:
       purpose: "Data validation and serialization"
 
   omnibase_modules:
-    - name: "omnibase_core.protocol.protocol_event_bus"
+    - name: "omnibase_spi.protocols.event_bus"
       purpose: "Event bus protocol interface"
       
     - name: "omnibase_core.core.onex_container"
