@@ -35,7 +35,9 @@
       "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/enums/intelligence/**)",
       "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/metrics/**)",
       "Read(//Volumes/PRO-G40/Code/omnibase_core/src/omnibase_core/models/core/**)",
-      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/**)"
+      "Read(//Volumes/PRO-G40/Code/omnibase_core/src/**)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh repo view:*)"
     ],
     "deny": [],
     "ask": []
