@@ -539,12 +539,8 @@ class RedPandaEventBus(ProtocolEventBus):
         # Clean up producer pool
         await self._producer_pool.close_all()
 
-<<<<<<< HEAD
-=======
         # Clean up circuit breaker
         await self._circuit_breaker.close()
-
->>>>>>> origin/main
         # Clean up observability system
         await self._observability.close()
 

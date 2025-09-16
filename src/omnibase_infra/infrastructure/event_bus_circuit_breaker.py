@@ -52,15 +52,12 @@ class CircuitBreakerConfig:
     dead_letter_enabled: bool = True   # Enable dead letter queue for failed events
     graceful_degradation: bool = True  # Allow operations to continue without events
 
-<<<<<<< HEAD
-=======
     # Memory management configuration
     max_dead_letter_size: int = 500     # Max dead letter queue entries
     dead_letter_ttl_hours: int = 24     # Dead letter entry expiration (hours)
     cleanup_interval_seconds: int = 300 # Memory cleanup interval (5 minutes)
     memory_monitor_enabled: bool = True # Enable memory usage monitoring
 
->>>>>>> origin/main
     @classmethod
     def from_environment_config(cls, env_config: ModelCircuitBreakerConfig) -> "CircuitBreakerConfig":
         """Create CircuitBreakerConfig from environment-specific configuration."""
@@ -104,13 +101,8 @@ class EventBusCircuitBreaker:
     """
 
     def __init__(self, config: CircuitBreakerConfig | ModelCircuitBreakerConfig):
-<<<<<<< HEAD
-        """Initialize circuit breaker with configuration.
-        
-=======
         """Initialize circuit breaker with configuration and memory management.
 
->>>>>>> origin/main
         Args:
             config: Circuit breaker configuration (legacy dataclass or new Pydantic model)
         """
@@ -130,8 +122,6 @@ class EventBusCircuitBreaker:
         self.logger = logging.getLogger(f"{__name__}.EventBusCircuitBreaker")
         self._lock = asyncio.Lock()
 
-<<<<<<< HEAD
-=======
         # Memory management components
         self._memory_cleanup_task: asyncio.Task | None = None
         self._start_memory_cleanup()
@@ -217,7 +207,6 @@ class EventBusCircuitBreaker:
 
         self.logger.info("Circuit breaker closed and resources cleaned up")
 
->>>>>>> origin/main
     @classmethod
     def from_environment(
         cls,
@@ -530,14 +519,11 @@ class EventBusCircuitBreaker:
                 "dead_letter_enabled": self.config.dead_letter_enabled,
                 "graceful_degradation": self.config.graceful_degradation,
                 "environment": self._detect_environment(),
-<<<<<<< HEAD
-=======
                 # Memory management configuration
                 "max_dead_letter_size": self.config.max_dead_letter_size,
                 "dead_letter_ttl_hours": self.config.dead_letter_ttl_hours,
                 "cleanup_interval_seconds": self.config.cleanup_interval_seconds,
                 "memory_monitor_enabled": self.config.memory_monitor_enabled,
->>>>>>> origin/main
             },
             "metrics": {
                 "total_events": self.metrics.total_events,
@@ -549,8 +535,6 @@ class EventBusCircuitBreaker:
                 "last_failure": self.metrics.last_failure.isoformat() if self.metrics.last_failure else None,
                 "last_success": self.metrics.last_success.isoformat() if self.metrics.last_success else None,
             },
-<<<<<<< HEAD
-=======
             "memory_management": {
                 "event_queue_size": len(self.event_queue),
                 "dead_letter_queue_size": len(self.dead_letter_queue),
@@ -563,5 +547,4 @@ class EventBusCircuitBreaker:
                     not self._memory_cleanup_task.done()
                 ),
             },
->>>>>>> origin/main
         }
