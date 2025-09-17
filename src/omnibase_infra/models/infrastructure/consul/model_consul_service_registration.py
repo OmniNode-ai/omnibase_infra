@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, HttpUrl
 
-from .model_consul_health_check import ModelConsulHealthCheck
+from omnibase_infra.models.infrastructure.consul.model_consul_health_check import ModelConsulHealthCheck
 
 
 class ModelConsulServiceRegistration(BaseModel):

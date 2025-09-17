@@ -4,9 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from .enum_postgres_query_type import EnumPostgresQueryType
-from .model_postgres_context import ModelPostgresContext
-from .model_postgres_query_parameter import ModelPostgresQueryParameters
+from omnibase_infra.models.infrastructure.postgres.enum_postgres_query_type import EnumPostgresQueryType
+from omnibase_infra.models.infrastructure.postgres.model_postgres_context import ModelPostgresContext
+from omnibase_infra.models.infrastructure.postgres.model_postgres_query_parameter import ModelPostgresQueryParameters
 
 
 class ModelPostgresQueryRequest(BaseModel):

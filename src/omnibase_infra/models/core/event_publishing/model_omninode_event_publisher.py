@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from ..postgres.model_postgres_health_data import ModelPostgresHealthData
 from ..postgres.model_postgres_query_data import ModelPostgresQueryData
-from .model_omninode_topic_spec import ModelOmniNodeTopicSpec
+from omnibase_infra.models.core.event_publishing.model_omninode_topic_spec import ModelOmniNodeTopicSpec
 
 
 class ModelOmniNodeEventPublisher(BaseModel):

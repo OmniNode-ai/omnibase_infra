@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from .model_postgres_connection_id import ModelPostgresConnectionId
+from omnibase_infra.models.infrastructure.postgres.model_postgres_connection_id import ModelPostgresConnectionId
 from .model_postgres_error import ModelPostgresError
 
 

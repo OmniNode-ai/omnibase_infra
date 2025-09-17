@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from .model_request_context import ModelHealthRequestContext
+from omnibase_infra.models.core.health.model_request_context import ModelHealthRequestContext
 
 
 class ModelHealthRequest(BaseModel):

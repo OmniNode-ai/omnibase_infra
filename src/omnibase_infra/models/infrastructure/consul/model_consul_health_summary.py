@@ -3,7 +3,7 @@
 
 from pydantic import BaseModel, Field
 
-from .model_consul_service_info import ModelConsulServiceInfo
+from omnibase_infra.models.infrastructure.consul.model_consul_service_info import ModelConsulServiceInfo
 from .model_consul_service_status import ModelConsulServiceStatus
 
 

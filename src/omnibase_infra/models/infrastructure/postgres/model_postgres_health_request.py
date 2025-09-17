@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from .model_postgres_context import ModelPostgresContext
+from omnibase_infra.models.infrastructure.postgres.model_postgres_context import ModelPostgresContext
 
 
 class ModelPostgresHealthRequest(BaseModel):

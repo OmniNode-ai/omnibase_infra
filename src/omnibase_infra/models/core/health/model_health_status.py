@@ -9,7 +9,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from .model_health_details import ModelHealthDetails
+from omnibase_infra.models.core.health.model_health_details import ModelHealthDetails
 
 
 class HealthStatusEnum(str, Enum):

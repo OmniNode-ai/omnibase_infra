@@ -8,7 +8,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from .model_span_attributes import ModelSpanAttributes
+from omnibase_infra.models.infrastructure.tracing.model_span_attributes import ModelSpanAttributes
 
 
 class ModelSpanEvent(BaseModel):

@@ -3,7 +3,7 @@
 
 from pydantic import BaseModel, Field
 
-from .model_kafka_security_config import ModelKafkaSecurityConfig
+from omnibase_infra.models.infrastructure.kafka.model_kafka_security_config import ModelKafkaSecurityConfig
 
 
 class ModelKafkaProducerConfig(BaseModel):

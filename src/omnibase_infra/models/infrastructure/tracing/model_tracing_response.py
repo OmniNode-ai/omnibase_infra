@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from .model_span_data import ModelSpanData
+from omnibase_infra.models.infrastructure.tracing.model_span_data import ModelSpanData
 from .model_trace_context import ModelTraceContext
 
 

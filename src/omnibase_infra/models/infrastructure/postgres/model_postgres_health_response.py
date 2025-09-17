@@ -4,11 +4,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from .model_postgres_connection_pool_info import ModelPostgresConnectionPoolInfo
+from omnibase_infra.models.infrastructure.postgres.model_postgres_connection_pool_info import ModelPostgresConnectionPoolInfo
 from .model_postgres_context import ModelPostgresContext
-from .model_postgres_database_info import ModelPostgresDatabaseInfo
+from omnibase_infra.models.infrastructure.postgres.model_postgres_database_info import ModelPostgresDatabaseInfo
 from .model_postgres_error import ModelPostgresError
-from .model_postgres_performance_metrics import ModelPostgresPerformanceMetrics
+from omnibase_infra.models.infrastructure.postgres.model_postgres_performance_metrics import ModelPostgresPerformanceMetrics
 from .model_postgres_schema_info import ModelPostgresSchemaInfo
 
 

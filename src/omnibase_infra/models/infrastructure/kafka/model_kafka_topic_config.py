@@ -3,7 +3,7 @@
 
 from pydantic import BaseModel, Field
 
-from .model_kafka_topic_overrides import ModelKafkaTopicOverrides
+from omnibase_infra.models.infrastructure.kafka.model_kafka_topic_overrides import ModelKafkaTopicOverrides
 
 
 class ModelKafkaTopicConfig(BaseModel):

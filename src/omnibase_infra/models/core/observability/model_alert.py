@@ -9,7 +9,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from .model_alert_details import ModelAlertDetails
+from omnibase_infra.models.core.observability.model_alert_details import ModelAlertDetails
 
 
 class AlertSeverityEnum(str, Enum):

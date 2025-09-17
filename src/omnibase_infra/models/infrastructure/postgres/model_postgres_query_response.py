@@ -4,9 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from .model_postgres_context import ModelPostgresContext
+from omnibase_infra.models.infrastructure.postgres.model_postgres_context import ModelPostgresContext
 from .model_postgres_error import ModelPostgresError
-from .model_postgres_query_metrics import ModelPostgresQueryMetrics
+from omnibase_infra.models.infrastructure.postgres.model_postgres_query_metrics import ModelPostgresQueryMetrics
 from .model_postgres_query_result import ModelPostgresQueryResult
 
 

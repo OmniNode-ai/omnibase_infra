@@ -3,7 +3,7 @@
 
 from pydantic import BaseModel, Field
 
-from .model_consul_kv_status import ModelConsulKvStatus
+from omnibase_infra.models.infrastructure.consul.model_consul_kv_status import ModelConsulKvStatus
 
 
 class ModelConsulKVResponse(BaseModel):

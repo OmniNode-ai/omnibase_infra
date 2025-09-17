@@ -3,9 +3,9 @@
 
 from pydantic import BaseModel, Field
 
-from .model_consul_health_check_node import ModelConsulHealthCheckNode
+from omnibase_infra.models.infrastructure.consul.model_consul_health_check_node import ModelConsulHealthCheckNode
 from .model_consul_health_summary import ModelConsulHealthSummary
-from .model_consul_service_status import ModelConsulServiceStatus
+from omnibase_infra.models.infrastructure.consul.model_consul_service_status import ModelConsulServiceStatus
 
 
 class ModelConsulHealthResponse(BaseModel):

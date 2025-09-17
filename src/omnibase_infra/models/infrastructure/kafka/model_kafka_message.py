@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from ...enums.enum_kafka_message_format import EnumKafkaMessageFormat
-from .model_kafka_message_payload import KafkaMessagePayload
+from omnibase_infra.models.infrastructure.kafka.model_kafka_message_payload import KafkaMessagePayload
 
 
 class ModelKafkaMessage(BaseModel):
