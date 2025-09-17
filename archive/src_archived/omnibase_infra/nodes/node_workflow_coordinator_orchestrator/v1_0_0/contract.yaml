@@ -1,0 +1,158 @@
+contract_version: "1.0.0"
+node_version: "1.0.0"
+version: "1.0.0"
+node_name: "node_workflow_coordinator_orchestrator"
+contract_name: "NodeWorkflowCoordinatorOrchestratorContract"
+name: "node_workflow_coordinator_orchestrator"
+node_type: "ORCHESTRATOR"
+description: "Unified Workflow Coordinator Orchestrator for multi-step execution, progress management, and sub-agent fleet coordination across all ONEX domains"
+
+input_model: "ModelWorkflowCoordinatorInput"
+output_model: "ModelWorkflowCoordinatorOutput"
+
+dependencies:
+  # ONEX Container dependency injection
+  - name: "model_onex_container"
+    type: "model"
+    class_name: "ModelONEXContainer"
+    module: "omnibase_core.model.model_onex_container"
+
+  # Shared workflow models
+  - name: "model_workflow_execution_request"
+    type: "model"
+    class_name: "ModelWorkflowExecutionRequest"
+    module: "omnibase_infra.models.workflow.model_workflow_execution_request"
+
+  - name: "model_workflow_execution_result"
+    type: "model"
+    class_name: "ModelWorkflowExecutionResult"
+    module: "omnibase_infra.models.workflow.model_workflow_execution_result"
+
+  - name: "model_workflow_progress_update"
+    type: "model"
+    class_name: "ModelWorkflowProgressUpdate"
+    module: "omnibase_infra.models.workflow.model_workflow_progress_update"
+
+  - name: "model_workflow_coordination_metrics"
+    type: "model"
+    class_name: "ModelWorkflowCoordinationMetrics"
+    module: "omnibase_infra.models.workflow.model_workflow_coordination_metrics"
+
+definitions:
+  ModelWorkflowCoordinatorInput:
+    type: "object"
+    properties:
+      operation_type:
+        type: "string"
+        enum: ["execute_workflow", "get_progress", "cancel_workflow", "get_metrics", "list_active_workflows", "coordinate_agents", "execute_background_task"]
+        description: "Type of workflow coordination operation to perform"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Correlation ID for the operation"
+      workflow_request:
+        $ref: "#/definitions/ModelWorkflowExecutionRequest"
+        description: "Workflow execution request data"
+      workflow_id:
+        type: "string"
+        format: "uuid"
+        description: "Workflow ID for status operations"
+      agent_coordination_config:
+        type: "object"
+        description: "Configuration for sub-agent fleet coordination"
+        properties:
+          max_parallel_agents:
+            type: "integer"
+            default: 5
+            description: "Maximum number of parallel sub-agents"
+          coordination_timeout_seconds:
+            type: "integer"
+            default: 300
+            description: "Timeout for agent coordination"
+          failure_handling:
+            type: "string"
+            enum: ["fail_fast", "continue_on_error", "retry_with_fallback"]
+            default: "retry_with_fallback"
+            description: "How to handle sub-agent failures"
+      environment:
+        type: "string"
+        description: "Environment configuration (development, staging, production)"
+        default: "development"
+    required:
+      - operation_type
+      - correlation_id
+
+  ModelWorkflowCoordinatorOutput:
+    type: "object"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether the operation succeeded"
+      operation_type:
+        type: "string"
+        description: "Type of operation that was performed"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Correlation ID from the request"
+      workflow_id:
+        type: "string"
+        format: "uuid"
+        description: "Workflow ID for the operation"
+      execution_result:
+        $ref: "#/definitions/ModelWorkflowExecutionResult"
+        description: "Workflow execution result data"
+      progress_update:
+        $ref: "#/definitions/ModelWorkflowProgressUpdate"
+        description: "Current workflow progress information"
+      coordination_metrics:
+        $ref: "#/definitions/ModelWorkflowCoordinationMetrics"
+        description: "Current coordination metrics"
+      active_workflows:
+        type: "array"
+        items:
+          type: "object"
+        description: "List of currently active workflows"
+      agent_coordination_status:
+        type: "object"
+        description: "Status of sub-agent coordination"
+        properties:
+          coordinated_agents:
+            type: "integer"
+            description: "Number of agents currently coordinated"
+          coordination_health:
+            type: "string"
+            enum: ["healthy", "degraded", "failing"]
+            description: "Health status of agent coordination"
+          last_coordination_timestamp:
+            type: "string"
+            format: "date-time"
+            description: "Last successful coordination timestamp"
+      error_message:
+        type: "string"
+        description: "Error message if operation failed"
+      timestamp:
+        type: "string"
+        format: "date-time"
+        description: "Response timestamp"
+    required:
+      - success
+      - operation_type
+      - correlation_id
+      - timestamp
+
+  ModelWorkflowExecutionRequest:
+    type: "object"
+    description: "Workflow execution request model (external dependency)"
+
+  ModelWorkflowExecutionResult:
+    type: "object"
+    description: "Workflow execution result model (external dependency)"
+
+  ModelWorkflowProgressUpdate:
+    type: "object"
+    description: "Workflow progress update model (external dependency)"
+
+  ModelWorkflowCoordinationMetrics:
+    type: "object"
+    description: "Workflow coordination metrics model (external dependency)"
