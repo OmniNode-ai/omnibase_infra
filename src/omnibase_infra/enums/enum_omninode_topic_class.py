@@ -6,10 +6,10 @@ from enum import Enum
 class EnumOmniNodeTopicClass(str, Enum):
     """
     OmniNode Topic Classes for proper topic namespace organization.
-    
+
     Following the OmniNode topic design:
     <env>.<tenant>.<context>.<class>.<topic>.<v>
-    
+
     Topic classes define the type of content and usage patterns.
     """
 

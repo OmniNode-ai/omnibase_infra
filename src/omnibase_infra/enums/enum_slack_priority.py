@@ -12,6 +12,6 @@ class EnumSlackPriority(str, Enum):
     """Alert priority levels with corresponding Slack formatting."""
 
     CRITICAL = "danger"  # Red
-    HIGH = "warning"     # Yellow
-    MEDIUM = "good"      # Green
-    INFO = "#36a64f"     # Custom green
+    HIGH = "warning"  # Yellow
+    MEDIUM = "good"  # Green
+    INFO = "#36a64f"  # Custom green
