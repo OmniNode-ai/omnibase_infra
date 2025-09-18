@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from omnibase_core.models.model_base import ModelBase
-from pydantic import Field
+from pydantic import Field, computed_field
 
 if TYPE_CHECKING:
     from omnibase_spi.protocols.types.core_types import HealthStatus
@@ -72,25 +72,31 @@ class ModelSystemHealthDetails(ModelBase):
         description="Number of configuration files loaded",
     )
 
+    @computed_field
+    @property
+    def disk_usage_percent(self) -> float | None:
+        """Calculate disk usage percentage to avoid duplicate calculations."""
+        if self.disk_space_available_gb is None or self.disk_space_total_gb is None:
+            return None
+        if self.disk_space_total_gb == 0:
+            return 0.0
+        return (1 - self.disk_space_available_gb / self.disk_space_total_gb) * 100.0
+
     def get_health_status(self) -> "HealthStatus":
         """Assess system health status based on performance metrics."""
         # Critical conditions
         if self.average_cpu_usage_percent and self.average_cpu_usage_percent > 95:
             return EnumHealthStatus.CRITICAL
 
-        if self.disk_space_available_gb and self.disk_space_total_gb:
-            disk_usage_percent = (1 - self.disk_space_available_gb / self.disk_space_total_gb) * 100
-            if disk_usage_percent > 95:
-                return EnumHealthStatus.CRITICAL
+        if self.disk_usage_percent is not None and self.disk_usage_percent > 95:
+            return EnumHealthStatus.CRITICAL
 
         # Warning conditions
         if self.average_cpu_usage_percent and self.average_cpu_usage_percent > 80:
             return EnumHealthStatus.WARNING
 
-        if self.disk_space_available_gb and self.disk_space_total_gb:
-            disk_usage_percent = (1 - self.disk_space_available_gb / self.disk_space_total_gb) * 100
-            if disk_usage_percent > 85:
-                return EnumHealthStatus.WARNING
+        if self.disk_usage_percent is not None and self.disk_usage_percent > 85:
+            return EnumHealthStatus.WARNING
 
         if (self.external_service_count and self.external_services_healthy and
             self.external_services_healthy < self.external_service_count):
@@ -115,19 +121,15 @@ class ModelSystemHealthDetails(ModelBase):
         if status == EnumHealthStatus.CRITICAL:
             if self.average_cpu_usage_percent and self.average_cpu_usage_percent > 95:
                 return f"System Critical: CPU usage at {self.average_cpu_usage_percent:.1f}%"
-            if self.disk_space_available_gb and self.disk_space_total_gb:
-                disk_usage_percent = (1 - self.disk_space_available_gb / self.disk_space_total_gb) * 100
-                if disk_usage_percent > 95:
-                    return f"System Critical: Disk usage at {disk_usage_percent:.1f}%"
+            if self.disk_usage_percent is not None and self.disk_usage_percent > 95:
+                return f"System Critical: Disk usage at {self.disk_usage_percent:.1f}%"
 
         if status == EnumHealthStatus.WARNING:
             warnings = []
             if self.average_cpu_usage_percent and self.average_cpu_usage_percent > 80:
                 warnings.append(f"CPU {self.average_cpu_usage_percent:.1f}%")
-            if self.disk_space_available_gb and self.disk_space_total_gb:
-                disk_usage_percent = (1 - self.disk_space_available_gb / self.disk_space_total_gb) * 100
-                if disk_usage_percent > 85:
-                    warnings.append(f"Disk {disk_usage_percent:.1f}%")
+            if self.disk_usage_percent is not None and self.disk_usage_percent > 85:
+                warnings.append(f"Disk {self.disk_usage_percent:.1f}%")
             if (self.external_service_count and self.external_services_healthy and
                 self.external_services_healthy < self.external_service_count):
                 warnings.append(f"External services {self.external_services_healthy}/{self.external_service_count}")
@@ -142,9 +144,8 @@ class ModelSystemHealthDetails(ModelBase):
         status_parts = []
         if self.average_cpu_usage_percent is not None:
             status_parts.append(f"CPU {self.average_cpu_usage_percent:.1f}%")
-        if self.disk_space_available_gb and self.disk_space_total_gb:
-            disk_usage_percent = (1 - self.disk_space_available_gb / self.disk_space_total_gb) * 100
-            status_parts.append(f"Disk {disk_usage_percent:.1f}%")
+        if self.disk_usage_percent is not None:
+            status_parts.append(f"Disk {self.disk_usage_percent:.1f}%")
         if self.external_service_count and self.external_services_healthy:
             status_parts.append(f"Services {self.external_services_healthy}/{self.external_service_count}")
 

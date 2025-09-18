@@ -1,7 +1,6 @@
 """Workflow execution result model for ONEX workflow coordination."""
 
 from datetime import datetime
-from typing import Any, Union
 from uuid import UUID
 
 from omnibase_core.models.model_base import ModelBase
@@ -36,21 +35,21 @@ class ModelWorkflowExecutionResult(ModelBase):
     execution_duration_seconds: float = Field(
         ..., description="Total execution duration in seconds",
     )
-    result_data: Union[ModelWorkflowResultData, dict[str, Any]] = Field(
+    result_data: ModelWorkflowResultData = Field(
         default_factory=ModelWorkflowResultData,
         description="Result data from workflow execution",
     )
     error_details: str | None = Field(
         None, description="Error details if execution failed",
     )
-    agent_coordination_summary: Union[ModelAgentCoordinationSummary, dict[str, Any]] = Field(
+    agent_coordination_summary: ModelAgentCoordinationSummary = Field(
         default_factory=ModelAgentCoordinationSummary,
         description="Summary of agent coordination activities",
     )
-    progress_history: list[Union[ModelWorkflowProgressHistory, dict[str, Any]]] = Field(
+    progress_history: list[ModelWorkflowProgressHistory] = Field(
         default_factory=list, description="Detailed progress tracking history",
     )
-    sub_agent_results: list[Union[ModelSubAgentResult, dict[str, Any]]] = Field(
+    sub_agent_results: list[ModelSubAgentResult] = Field(
         default_factory=list, description="Results from coordinated sub-agents",
     )
     metrics: dict[str, float] = Field(
@@ -62,64 +61,58 @@ class ModelWorkflowExecutionResult(ModelBase):
 
     @field_validator('result_data', mode='before')
     @classmethod
-    def convert_result_data(cls, v: Any) -> Union[ModelWorkflowResultData, dict[str, Any]]:
-        """Convert dict to ModelWorkflowResultData for backward compatibility."""
-        if isinstance(v, dict) and not isinstance(v, ModelWorkflowResultData):
-            try:
-                return ModelWorkflowResultData(**v)
-            except Exception:
-                # If conversion fails, keep as dict for backward compatibility
-                return v
-        return v
+    def convert_result_data(cls, v: dict | ModelWorkflowResultData) -> ModelWorkflowResultData:
+        """Convert dict to ModelWorkflowResultData with strict typing."""
+        if isinstance(v, dict):
+            return ModelWorkflowResultData(**v)
+        elif isinstance(v, ModelWorkflowResultData):
+            return v
+        else:
+            raise ValueError(f"result_data must be dict or ModelWorkflowResultData, got {type(v)}")
 
     @field_validator('agent_coordination_summary', mode='before')
     @classmethod
-    def convert_agent_coordination_summary(cls, v: Any) -> Union[ModelAgentCoordinationSummary, dict[str, Any]]:
-        """Convert dict to ModelAgentCoordinationSummary for backward compatibility."""
-        if isinstance(v, dict) and not isinstance(v, ModelAgentCoordinationSummary):
-            try:
-                return ModelAgentCoordinationSummary(**v)
-            except Exception:
-                # If conversion fails, keep as dict for backward compatibility
-                return v
-        return v
+    def convert_agent_coordination_summary(cls, v: dict | ModelAgentCoordinationSummary) -> ModelAgentCoordinationSummary:
+        """Convert dict to ModelAgentCoordinationSummary with strict typing."""
+        if isinstance(v, dict):
+            return ModelAgentCoordinationSummary(**v)
+        elif isinstance(v, ModelAgentCoordinationSummary):
+            return v
+        else:
+            raise ValueError(f"agent_coordination_summary must be dict or ModelAgentCoordinationSummary, got {type(v)}")
 
     @field_validator('progress_history', mode='before')
     @classmethod
-    def convert_progress_history(cls, v: Any) -> list[Union[ModelWorkflowProgressHistory, dict[str, Any]]]:
-        """Convert list of dicts to ModelWorkflowProgressHistory for backward compatibility."""
+    def convert_progress_history(cls, v: list[dict | ModelWorkflowProgressHistory]) -> list[ModelWorkflowProgressHistory]:
+        """Convert list of dicts to ModelWorkflowProgressHistory with strict typing."""
         if not isinstance(v, list):
-            return v
-        
+            raise ValueError(f"progress_history must be a list, got {type(v)}")
+
         converted_history = []
-        for history_entry in v:
-            if isinstance(history_entry, dict) and not isinstance(history_entry, ModelWorkflowProgressHistory):
-                try:
-                    converted_history.append(ModelWorkflowProgressHistory(**history_entry))
-                except Exception:
-                    # If conversion fails, keep as dict for backward compatibility
-                    converted_history.append(history_entry)
-            else:
+        for i, history_entry in enumerate(v):
+            if isinstance(history_entry, dict):
+                converted_history.append(ModelWorkflowProgressHistory(**history_entry))
+            elif isinstance(history_entry, ModelWorkflowProgressHistory):
                 converted_history.append(history_entry)
-        
+            else:
+                raise ValueError(f"progress_history[{i}] must be dict or ModelWorkflowProgressHistory, got {type(history_entry)}")
+
         return converted_history
 
     @field_validator('sub_agent_results', mode='before')
     @classmethod
-    def convert_sub_agent_results(cls, v: Any) -> list[Union[ModelSubAgentResult, dict[str, Any]]]:
-        """Convert list of dicts to ModelSubAgentResult for backward compatibility."""
+    def convert_sub_agent_results(cls, v: list[dict | ModelSubAgentResult]) -> list[ModelSubAgentResult]:
+        """Convert list of dicts to ModelSubAgentResult with strict typing."""
         if not isinstance(v, list):
-            return v
-        
+            raise ValueError(f"sub_agent_results must be a list, got {type(v)}")
+
         converted_results = []
-        for agent_result in v:
-            if isinstance(agent_result, dict) and not isinstance(agent_result, ModelSubAgentResult):
-                try:
-                    converted_results.append(ModelSubAgentResult(**agent_result))
-                except Exception:
-                    # If conversion fails, keep as dict for backward compatibility
-                    converted_results.append(agent_result)
-            else:
+        for i, agent_result in enumerate(v):
+            if isinstance(agent_result, dict):
+                converted_results.append(ModelSubAgentResult(**agent_result))
+            elif isinstance(agent_result, ModelSubAgentResult):
                 converted_results.append(agent_result)
-        
+            else:
+                raise ValueError(f"sub_agent_results[{i}] must be dict or ModelSubAgentResult, got {type(agent_result)}")
+
         return converted_results

@@ -1,7 +1,6 @@
 """Workflow progress update model for ONEX workflow coordination."""
 
 from datetime import datetime
-from typing import Any, Union
 from uuid import UUID
 
 from omnibase_core.models.model_base import ModelBase
@@ -37,11 +36,11 @@ class ModelWorkflowProgressUpdate(ModelBase):
     estimated_remaining_seconds: float | None = Field(
         None, description="Estimated remaining time in seconds",
     )
-    step_details: Union[ModelWorkflowStepDetails, dict[str, Any]] = Field(
+    step_details: ModelWorkflowStepDetails = Field(
         default_factory=ModelWorkflowStepDetails,
         description="Detailed information about current step",
     )
-    agent_activities: list[Union[ModelAgentActivity, dict[str, Any]]] = Field(
+    agent_activities: list[ModelAgentActivity] = Field(
         default_factory=list, description="Current sub-agent activities",
     )
     performance_metrics: dict[str, float] = Field(
@@ -56,32 +55,29 @@ class ModelWorkflowProgressUpdate(ModelBase):
 
     @field_validator('step_details', mode='before')
     @classmethod
-    def convert_step_details(cls, v: Any) -> Union[ModelWorkflowStepDetails, dict[str, Any]]:
-        """Convert dict to ModelWorkflowStepDetails for backward compatibility."""
-        if isinstance(v, dict) and not isinstance(v, ModelWorkflowStepDetails):
-            try:
-                return ModelWorkflowStepDetails(**v)
-            except Exception:
-                # If conversion fails, keep as dict for backward compatibility
-                return v
-        return v
+    def convert_step_details(cls, v: dict | ModelWorkflowStepDetails) -> ModelWorkflowStepDetails:
+        """Convert dict to ModelWorkflowStepDetails with strict typing."""
+        if isinstance(v, dict):
+            return ModelWorkflowStepDetails(**v)
+        elif isinstance(v, ModelWorkflowStepDetails):
+            return v
+        else:
+            raise ValueError(f"step_details must be dict or ModelWorkflowStepDetails, got {type(v)}")
 
     @field_validator('agent_activities', mode='before')
     @classmethod
-    def convert_agent_activities(cls, v: Any) -> list[Union[ModelAgentActivity, dict[str, Any]]]:
-        """Convert list of dicts to ModelAgentActivity for backward compatibility."""
+    def convert_agent_activities(cls, v: list[dict | ModelAgentActivity]) -> list[ModelAgentActivity]:
+        """Convert list of dicts to ModelAgentActivity with strict typing."""
         if not isinstance(v, list):
-            return v
-        
+            raise ValueError(f"agent_activities must be a list, got {type(v)}")
+
         converted_activities = []
-        for activity in v:
-            if isinstance(activity, dict) and not isinstance(activity, ModelAgentActivity):
-                try:
-                    converted_activities.append(ModelAgentActivity(**activity))
-                except Exception:
-                    # If conversion fails, keep as dict for backward compatibility
-                    converted_activities.append(activity)
-            else:
+        for i, activity in enumerate(v):
+            if isinstance(activity, dict):
+                converted_activities.append(ModelAgentActivity(**activity))
+            elif isinstance(activity, ModelAgentActivity):
                 converted_activities.append(activity)
-        
+            else:
+                raise ValueError(f"agent_activities[{i}] must be dict or ModelAgentActivity, got {type(activity)}")
+
         return converted_activities

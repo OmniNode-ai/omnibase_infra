@@ -1,7 +1,6 @@
 """Workflow execution request model for ONEX workflow coordination."""
 
 from datetime import datetime
-from typing import Union, Any
 from uuid import UUID
 
 from omnibase_core.models.model_base import ModelBase
@@ -22,7 +21,7 @@ class ModelWorkflowExecutionRequest(ModelBase):
         ..., description="Correlation ID for tracking across services",
     )
     workflow_type: str = Field(..., description="Type of workflow to execute")
-    execution_context: Union[ModelWorkflowExecutionContext, dict[str, Any]] = Field(
+    execution_context: ModelWorkflowExecutionContext = Field(
         default_factory=ModelWorkflowExecutionContext,
         description="Context data for workflow execution",
     )
@@ -54,12 +53,11 @@ class ModelWorkflowExecutionRequest(ModelBase):
 
     @field_validator('execution_context', mode='before')
     @classmethod
-    def convert_execution_context(cls, v: Any) -> Union[ModelWorkflowExecutionContext, dict[str, Any]]:
-        """Convert dict to ModelWorkflowExecutionContext for backward compatibility."""
-        if isinstance(v, dict) and not isinstance(v, ModelWorkflowExecutionContext):
-            try:
-                return ModelWorkflowExecutionContext(**v)
-            except Exception:
-                # If conversion fails, keep as dict for backward compatibility
-                return v
-        return v
+    def convert_execution_context(cls, v: dict | ModelWorkflowExecutionContext) -> ModelWorkflowExecutionContext:
+        """Convert dict to ModelWorkflowExecutionContext with strict typing."""
+        if isinstance(v, dict):
+            return ModelWorkflowExecutionContext(**v)
+        elif isinstance(v, ModelWorkflowExecutionContext):
+            return v
+        else:
+            raise ValueError(f"execution_context must be dict or ModelWorkflowExecutionContext, got {type(v)}")

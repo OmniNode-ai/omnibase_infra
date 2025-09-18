@@ -1,7 +1,6 @@
 """Sub-agent result model for ONEX workflow coordination."""
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from omnibase_core.models.model_base import ModelBase
@@ -60,7 +59,7 @@ class ModelSubAgentResult(ModelBase):
         ...,
         description="Timestamp when sub-agent execution started"
     )
-    completed_at: Optional[datetime] = Field(
+    completed_at: datetime | None = Field(
         None,
         description="Timestamp when sub-agent execution completed"
     )
@@ -259,7 +258,7 @@ class ModelSubAgentResult(ModelBase):
     )
     
     # Cost and resource analysis
-    estimated_execution_cost: Optional[float] = Field(
+    estimated_execution_cost: float | None = Field(
         None,
         ge=0.0,
         description="Estimated cost of sub-agent execution"
@@ -314,7 +313,7 @@ class ModelSubAgentResult(ModelBase):
         ...,
         description="ID of the parent workflow this sub-agent was part of"
     )
-    parent_agent_id: Optional[UUID] = Field(
+    parent_agent_id: UUID | None = Field(
         None,
         description="ID of the parent agent that coordinated this sub-agent"
     )

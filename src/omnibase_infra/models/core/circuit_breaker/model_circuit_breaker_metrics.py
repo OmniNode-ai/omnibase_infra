@@ -6,10 +6,11 @@ Used across circuit breaker nodes and observability systems.
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from omnibase_core.models.model_base import ModelBase
+from pydantic import Field, field_validator, computed_field
 
 
-class ModelCircuitBreakerMetrics(BaseModel):
+class ModelCircuitBreakerMetrics(ModelBase):
     """Model for circuit breaker metrics tracking."""
 
     total_events: int = Field(
@@ -70,12 +71,22 @@ class ModelCircuitBreakerMetrics(BaseModel):
         description="Timestamp of last success",
     )
 
-    success_rate_percent: float = Field(
-        default=100.0,
-        ge=0.0,
-        le=100.0,
-        description="Success rate percentage",
-    )
+    @computed_field
+    @property
+    def success_rate_percent(self) -> float:
+        """Calculate success rate percentage with division by zero prevention."""
+        if self.total_events == 0:
+            return 0.0
+        return (self.successful_events / self.total_events) * 100.0
+
+    @field_validator('successful_events')
+    @classmethod
+    def validate_successful_events_not_exceed_total(cls, v: int, info) -> int:
+        """Ensure successful events don't exceed total events."""
+        if hasattr(info.data, 'total_events') and info.data['total_events'] > 0:
+            if v > info.data['total_events']:
+                raise ValueError("Successful events cannot exceed total events")
+        return v
 
     average_response_time_ms: float = Field(
         default=0.0,

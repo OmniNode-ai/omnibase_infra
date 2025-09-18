@@ -1,7 +1,7 @@
 """Kafka security configuration model."""
 
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr, field_validator, field_serializer
 
 
 class ModelKafkaSSLConfig(BaseModel):
@@ -11,11 +11,30 @@ class ModelKafkaSSLConfig(BaseModel):
     ssl_cafile: str | None = Field(default=None, description="Path to CA certificate file")
     ssl_certfile: str | None = Field(default=None, description="Path to client certificate file")
     ssl_keyfile: str | None = Field(default=None, description="Path to client private key file")
-    ssl_password: str | None = Field(default=None, description="Password for client private key")
+    ssl_password: SecretStr | None = Field(default=None, description="Password for client private key (securely stored)")
     ssl_crlfile: str | None = Field(default=None, description="Path to certificate revocation list file")
     ssl_ciphers: str | None = Field(default=None, description="SSL cipher suites to use")
     ssl_protocol: str | None = Field(default="TLSv1_2", description="SSL protocol version")
     ssl_context: str | None = Field(default=None, description="SSL context configuration")
+
+    @field_validator("ssl_password", mode="before")
+    @classmethod
+    def validate_ssl_password(cls, v):
+        """Validate SSL password without logging sensitive data."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            if len(v) > 200:
+                raise ValueError("SSL password too long (max 200 characters)")
+            return SecretStr(v)
+        return v
+
+    @field_serializer("ssl_password", when_used="unless-none")
+    def serialize_ssl_password(self, value: SecretStr | None) -> str:
+        """Serialize SSL password securely - excludes actual value."""
+        if value is None:
+            return None
+        return "***REDACTED***"
 
 
 class ModelKafkaSASLConfig(BaseModel):
@@ -23,10 +42,29 @@ class ModelKafkaSASLConfig(BaseModel):
 
     sasl_mechanism: str | None = Field(default="PLAIN", description="SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, GSSAPI)")
     sasl_plain_username: str | None = Field(default=None, description="Username for PLAIN SASL")
-    sasl_plain_password: str | None = Field(default=None, description="Password for PLAIN SASL")
+    sasl_plain_password: SecretStr | None = Field(default=None, description="Password for PLAIN SASL (securely stored)")
     sasl_kerberos_service_name: str | None = Field(default="kafka", description="Kerberos service name")
     sasl_kerberos_domain_name: str | None = Field(default=None, description="Kerberos domain name")
     sasl_oauth_token_provider: str | None = Field(default=None, description="OAuth token provider")
+
+    @field_validator("sasl_plain_password", mode="before")
+    @classmethod
+    def validate_sasl_plain_password(cls, v):
+        """Validate SASL password without logging sensitive data."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            if len(v) > 200:
+                raise ValueError("SASL password too long (max 200 characters)")
+            return SecretStr(v)
+        return v
+
+    @field_serializer("sasl_plain_password", when_used="unless-none")
+    def serialize_sasl_plain_password(self, value: SecretStr | None) -> str:
+        """Serialize SASL password securely - excludes actual value."""
+        if value is None:
+            return None
+        return "***REDACTED***"
 
 
 class ModelKafkaSecurityConfig(BaseModel):
