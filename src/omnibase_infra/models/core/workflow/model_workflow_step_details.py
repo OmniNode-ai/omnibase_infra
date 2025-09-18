@@ -6,6 +6,12 @@ from uuid import UUID
 from omnibase_core.models.model_base import ModelBase
 from pydantic import Field, ConfigDict
 
+from .enum_workflow_step_status import EnumWorkflowStepStatus
+from .enum_workflow_step_type import EnumWorkflowStepType
+from .enum_workflow_step_category import EnumWorkflowStepCategory
+from .enum_workflow_step_priority import EnumWorkflowStepPriority
+from .enum_agent_type import EnumAgentType
+
 
 class ModelWorkflowStepDetails(ModelBase):
     """Model for detailed workflow step information in the ONEX workflow coordinator."""
@@ -23,22 +29,19 @@ class ModelWorkflowStepDetails(ModelBase):
         max_length=200,
         description="Human-readable name of the workflow step"
     )
-    step_type: str = Field(
+    step_type: EnumWorkflowStepType = Field(
         ...,
-        description="Type of workflow step",
-        examples=["agent_execution", "data_processing", "validation", "coordination", "cleanup"]
+        description="Type of workflow step"
     )
-    step_category: str = Field(
-        default="processing",
-        description="Category of the workflow step",
-        examples=["initialization", "processing", "validation", "finalization", "error_handling"]
+    step_category: EnumWorkflowStepCategory = Field(
+        default=EnumWorkflowStepCategory.PROCESSING,
+        description="Category of the workflow step"
     )
     
     # Step status and progress
-    status: str = Field(
+    status: EnumWorkflowStepStatus = Field(
         ...,
-        description="Current status of the step",
-        examples=["pending", "running", "completed", "failed", "skipped", "waiting"]
+        description="Current status of the step"
     )
     progress_percentage: float = Field(
         default=0.0,
@@ -56,34 +59,34 @@ class ModelWorkflowStepDetails(ModelBase):
         None,
         description="Timestamp when step execution completed"
     )
-    duration_seconds: Optional[float] = Field(
+    duration_seconds: float | None = Field(
         None,
         ge=0.0,
         description="Step execution duration in seconds"
     )
-    estimated_duration_seconds: Optional[float] = Field(
+    estimated_duration_seconds: float | None = Field(
         None,
         ge=0.0,
         description="Estimated duration for step completion"
     )
     
     # Step configuration
-    input_data_size_bytes: Optional[int] = Field(
+    input_data_size_bytes: int | None = Field(
         None,
         ge=0,
         description="Size of input data in bytes"
     )
-    output_data_size_bytes: Optional[int] = Field(
+    output_data_size_bytes: int | None = Field(
         None,
         ge=0,
         description="Size of output data in bytes"
     )
-    memory_usage_mb: Optional[float] = Field(
+    memory_usage_mb: float | None = Field(
         None,
         ge=0.0,
         description="Memory usage during step execution in megabytes"
     )
-    cpu_usage_percentage: Optional[float] = Field(
+    cpu_usage_percentage: float | None = Field(
         None,
         ge=0.0,
         le=100.0,
@@ -101,14 +104,13 @@ class ModelWorkflowStepDetails(ModelBase):
     )
     
     # Agent information
-    assigned_agent_id: Optional[str] = Field(
+    assigned_agent_id: UUID | None = Field(
         None,
         description="ID of the agent assigned to execute this step"
     )
-    agent_type: Optional[str] = Field(
+    agent_type: EnumAgentType | None = Field(
         None,
-        description="Type of agent executing this step",
-        examples=["coordinator", "processor", "validator", "specialist"]
+        description="Type of agent executing this step"
     )
     
     # Error handling
@@ -122,17 +124,17 @@ class ModelWorkflowStepDetails(ModelBase):
         ge=0,
         description="Maximum number of retries allowed for this step"
     )
-    error_message: Optional[str] = Field(
+    error_message: str | None = Field(
         None,
         description="Error message if step failed"
     )
-    error_code: Optional[str] = Field(
+    error_code: str | None = Field(
         None,
         description="Structured error code for programmatic handling"
     )
     
     # Output and results
-    output_summary: Optional[str] = Field(
+    output_summary: str | None = Field(
         None,
         max_length=1000,
         description="Brief summary of step output or results"
@@ -147,10 +149,9 @@ class ModelWorkflowStepDetails(ModelBase):
     )
     
     # Metadata and context
-    priority: str = Field(
-        default="normal",
-        description="Execution priority for this step",
-        examples=["low", "normal", "high", "critical"]
+    priority: EnumWorkflowStepPriority = Field(
+        default=EnumWorkflowStepPriority.NORMAL,
+        description="Execution priority for this step"
     )
     tags: list[str] = Field(
         default_factory=list,

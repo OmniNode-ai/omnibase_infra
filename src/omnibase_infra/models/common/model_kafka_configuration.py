@@ -1,7 +1,11 @@
 """Strongly typed Kafka configuration models."""
 
-
 from pydantic import BaseModel, Field, SecretStr, field_validator, field_serializer
+
+from ..security.enum_security_protocol import EnumSecurityProtocol
+from .enum_sasl_mechanism import EnumSaslMechanism
+from .enum_kafka_acks import EnumKafkaAcks
+from .enum_kafka_offset_reset import EnumKafkaOffsetReset
 
 
 class ModelKafkaConfiguration(BaseModel):
@@ -11,14 +15,14 @@ class ModelKafkaConfiguration(BaseModel):
         description="List of Kafka bootstrap server addresses",
     )
 
-    security_protocol: str = Field(
-        default="PLAINTEXT",
-        description="Security protocol (PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL)",
+    security_protocol: EnumSecurityProtocol = Field(
+        default=EnumSecurityProtocol.PLAINTEXT,
+        description="Security protocol for Kafka connection",
     )
 
-    sasl_mechanism: str | None = Field(
+    sasl_mechanism: EnumSaslMechanism | None = Field(
         default=None,
-        description="SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, GSSAPI)",
+        description="SASL mechanism for authentication",
     )
 
     sasl_username: str | None = Field(
@@ -51,9 +55,9 @@ class ModelKafkaConfiguration(BaseModel):
         description="SSL private key password (securely stored)",
     )
 
-    acks: str = Field(
-        default="1",
-        description="Producer acknowledgment setting (0, 1, all)",
+    acks: EnumKafkaAcks = Field(
+        default=EnumKafkaAcks.LEADER,
+        description="Producer acknowledgment setting",
     )
 
     retries: int = Field(
@@ -109,9 +113,9 @@ class ModelKafkaConfiguration(BaseModel):
         description="Enable automatic offset commits for consumers",
     )
 
-    auto_offset_reset: str = Field(
-        default="latest",
-        description="Consumer offset reset policy (earliest, latest, none)",
+    auto_offset_reset: EnumKafkaOffsetReset = Field(
+        default=EnumKafkaOffsetReset.LATEST,
+        description="Consumer offset reset policy",
     )
 
     @field_validator("sasl_password", "ssl_key_password", mode="before")
