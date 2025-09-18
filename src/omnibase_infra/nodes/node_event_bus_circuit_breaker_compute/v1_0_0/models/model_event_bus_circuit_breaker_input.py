@@ -6,7 +6,7 @@ Node-specific input model for the circuit breaker compute node.
 from enum import Enum
 from uuid import UUID
 
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 from pydantic import BaseModel, Field
 
 

@@ -21,7 +21,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLoader
 from omnibase_spi.protocols.event_bus import ProtocolEventBus
 

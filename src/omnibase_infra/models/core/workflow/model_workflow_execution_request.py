@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Union, Any
 from uuid import UUID
 
-from omnibase_core.model.model_base import ModelBase
+from omnibase_core.models.model_base import ModelBase
 from pydantic import Field, field_validator, ConfigDict
 
 from .model_workflow_execution_context import ModelWorkflowExecutionContext

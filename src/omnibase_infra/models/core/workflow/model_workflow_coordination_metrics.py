@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from omnibase_core.model.model_base import ModelBase
+from omnibase_core.models.model_base import ModelBase
 from pydantic import Field
 
 
