@@ -1,0 +1,294 @@
+# Health Check Mixin Subcontract - Standardized Health Monitoring Pattern
+# This subcontract defines health check patterns for MixinHealthCheck integration
+
+contract_type: "health_check_mixin_subcontract"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+metadata:
+  name: "HealthCheckMixinSubcontract"
+  description: "Standardized health monitoring pattern for MixinHealthCheck integration with ONEX nodes"
+  author: "ONEX Framework Team"
+  created: "2025-01-15"
+  purpose: "Define health check patterns for comprehensive node health monitoring via MixinHealthCheck"
+
+business_logic:
+  pattern: "standardized_health_monitoring"
+  ai_agent:
+    capabilities: ["health_assessment", "dependency_monitoring", "performance_tracking", "status_aggregation"]
+    coordination_patterns: ["health_aggregator", "status_publisher", "monitoring_agent"]
+    performance_targets:
+      health_check_duration: "<100ms"
+      status_reporting_frequency: "30s"
+      dependency_check_timeout: "<500ms"
+
+# Health Check Architecture
+health_check_architecture:
+  name: "StandardizedHealthMonitoring"
+  description: "Comprehensive health monitoring system for ONEX infrastructure nodes"
+
+  # Health check execution patterns
+  execution_patterns:
+    synchronous_checks:
+      - check_type: "basic_operational_status"
+        description: "Verify node is operational and responsive"
+        timeout_ms: 50
+        required: true
+
+      - check_type: "immediate_dependency_status"
+        description: "Check critical dependencies that must be immediately available"
+        timeout_ms: 100
+        required: true
+
+    asynchronous_checks:
+      - check_type: "comprehensive_dependency_analysis"
+        description: "Deep analysis of all service dependencies"
+        timeout_ms: 2000
+        required: false
+
+      - check_type: "performance_metrics_collection"
+        description: "Collect detailed performance metrics"
+        timeout_ms: 1000
+        required: false
+
+      - check_type: "resource_utilization_assessment"
+        description: "Assess memory, CPU, and I/O utilization"
+        timeout_ms: 500
+        required: false
+
+  # Health status aggregation
+  status_aggregation:
+    aggregation_strategy: "worst_case_wins"
+    status_hierarchy:
+      - status: "CRITICAL"
+        priority: 1
+        escalation: "immediate_alert"
+
+      - status: "UNHEALTHY"
+        priority: 2
+        escalation: "urgent_notification"
+
+      - status: "DEGRADED"
+        priority: 3
+        escalation: "monitoring_alert"
+
+      - status: "HEALTHY"
+        priority: 4
+        escalation: "none"
+
+    aggregation_rules:
+      - condition: "any_critical_check_failed"
+        result_status: "CRITICAL"
+
+      - condition: "any_unhealthy_check_failed"
+        result_status: "UNHEALTHY"
+
+      - condition: "any_degraded_check_failed"
+        result_status: "DEGRADED"
+
+      - condition: "all_checks_passed"
+        result_status: "HEALTHY"
+
+# PostgreSQL-Specific Health Checks
+postgresql_health_checks:
+  database_connectivity:
+    check_name: "database_connectivity"
+    description: "Verify PostgreSQL database connection is established and responsive"
+    implementation: "_check_database_connectivity"
+    timeout_ms: 2000
+    retry_attempts: 2
+    critical: true
+
+  connection_pool_health:
+    check_name: "connection_pool_health"
+    description: "Validate PostgreSQL connection pool status and capacity"
+    implementation: "_check_connection_pool_health"
+    timeout_ms: 500
+    retry_attempts: 1
+    critical: false
+
+  query_execution_capability:
+    check_name: "query_execution_capability"
+    description: "Test basic query execution against PostgreSQL database"
+    implementation: "_check_query_execution_capability"
+    timeout_ms: 1000
+    retry_attempts: 1
+    critical: true
+
+  transaction_capability:
+    check_name: "transaction_capability"
+    description: "Verify transaction management capabilities"
+    implementation: "_check_transaction_capability"
+    timeout_ms: 1500
+    retry_attempts: 1
+    critical: false
+
+# Health Status Models
+health_status_models:
+  model_health_status:
+    fields:
+      - name: "status"
+        type: "EnumHealthStatus"
+        required: true
+        description: "Overall health status using ONEX standard enum"
+
+      - name: "message"
+        type: "Optional[str]"
+        required: false
+        description: "Human-readable status description"
+
+      - name: "timestamp"
+        type: "Optional[str]"
+        required: false
+        description: "ISO format timestamp of health check execution"
+
+      - name: "details"
+        type: "ModelHealthDetails"
+        required: false
+        description: "Additional health check details and metrics"
+
+      - name: "uptime_seconds"
+        type: "Optional[float]"
+        required: false
+        description: "Node uptime in seconds"
+
+      - name: "memory_usage_mb"
+        type: "Optional[float]"
+        required: false
+        description: "Current memory usage in megabytes"
+
+      - name: "cpu_usage_percent"
+        type: "Optional[float]"
+        required: false
+        description: "Current CPU usage percentage"
+
+  enum_health_status:
+    values:
+      - "HEALTHY": "Service is fully operational"
+      - "DEGRADED": "Service is operational but experiencing issues"
+      - "UNHEALTHY": "Service has significant issues affecting functionality"
+      - "CRITICAL": "Service is failing or non-responsive"
+      - "UNKNOWN": "Health status cannot be determined"
+
+# Dependency Health Monitoring
+dependency_monitoring:
+  dependency_categories:
+    critical_dependencies:
+      - dependency: "postgresql_database"
+        check_method: "database_connectivity_check"
+        failure_impact: "service_unavailable"
+
+      - dependency: "connection_manager"
+        check_method: "connection_manager_health_check"
+        failure_impact: "degraded_performance"
+
+    optional_dependencies:
+      - dependency: "monitoring_system"
+        check_method: "monitoring_connectivity_check"
+        failure_impact: "reduced_observability"
+
+      - dependency: "metrics_collector"
+        check_method: "metrics_collection_check"
+        failure_impact: "no_metrics"
+
+  dependency_check_patterns:
+    parallel_execution: true
+    timeout_per_check: 1000 # milliseconds
+    failure_threshold: 2 # consecutive failures before marking as unhealthy
+    recovery_verification: true
+
+# Error Handling and Recovery
+error_handling:
+  health_check_failures:
+    timeout_exceeded:
+      action: "mark_check_as_degraded"
+      fallback: "use_cached_status"
+      log_level: "warning"
+
+    exception_during_check:
+      action: "mark_check_as_unhealthy"
+      fallback: "continue_with_other_checks"
+      log_level: "error"
+
+    dependency_unavailable:
+      action: "mark_dependency_as_unhealthy"
+      fallback: "skip_dependent_checks"
+      log_level: "warning"
+
+  recovery_strategies:
+    automatic_retry:
+      enabled: true
+      max_attempts: 3
+      backoff_strategy: "exponential"
+      base_delay_ms: 100
+
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 5
+      recovery_timeout_ms: 30000
+      half_open_test_requests: 1
+
+# Performance Optimization
+performance_optimization:
+  execution_efficiency:
+    parallel_health_checks: true
+    check_result_caching: true
+    cache_duration_seconds: 30
+    lazy_dependency_loading: true
+
+  resource_management:
+    memory_efficient_checks: true
+    connection_reuse: true
+    result_aggregation_optimization: true
+
+# Monitoring Integration
+monitoring_integration:
+  metrics_emission:
+    health_check_metrics:
+      - "health_check.execution_time_ms"
+      - "health_check.success_rate"
+      - "health_check.failure_count"
+      - "health_check.dependency_health_score"
+
+    status_metrics:
+      - "node.health_status"
+      - "node.uptime_seconds"
+      - "node.dependency_count_healthy"
+      - "node.dependency_count_unhealthy"
+
+  alerting_rules:
+    critical_alerts:
+      - condition: "status == CRITICAL"
+        action: "immediate_page"
+
+      - condition: "consecutive_unhealthy > 3"
+        action: "escalate_to_oncall"
+
+    warning_alerts:
+      - condition: "status == DEGRADED"
+        action: "slack_notification"
+
+      - condition: "dependency_failure_rate > 50%"
+        action: "monitoring_alert"
+
+# Code Generation Targets
+generation_targets:
+  health_check_framework:
+    check_execution_engine: true
+    status_aggregation_logic: true
+    dependency_monitoring_system: true
+    error_handling_patterns: true
+
+  integration_patterns:
+    mixin_inheritance_support: true
+    async_check_coordination: true
+    metrics_integration: true
+    alerting_integration: true
+
+# Integration with Main Contract
+integration:
+  main_contract_field: "health_monitoring_configuration"
+  mapping_strategy: "health_check_embedding"
+  backward_compatibility: true

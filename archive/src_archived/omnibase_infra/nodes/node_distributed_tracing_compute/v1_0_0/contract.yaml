@@ -1,0 +1,129 @@
+contract_version: "1.0.0"
+node_version: "1.0.0"
+version: "1.0.0"
+node_name: "node_distributed_tracing_compute"
+contract_name: "NodeDistributedTracingComputeContract"
+name: "node_distributed_tracing_compute"
+node_type: "COMPUTE"
+description: "Distributed Tracing Compute Node for OpenTelemetry integration with trace context processing and enrichment"
+
+input_model: "ModelDistributedTracingInput"
+output_model: "ModelDistributedTracingOutput"
+
+dependencies:
+  # ONEX Container dependency injection
+  - name: "model_onex_container"
+    type: "model"
+    class_name: "ModelONEXContainer"
+    module: "omnibase_core.core.onex_container"
+
+  # Core ONEX event model
+  - name: "model_onex_event"
+    type: "model"
+    class_name: "ModelOnexEvent"
+    module: "omnibase_core.model.core.model_onex_event"
+
+  # Shared tracing models
+  - name: "model_tracing_config"
+    type: "model"
+    class_name: "ModelTracingConfig"
+    module: "omnibase_infra.models.tracing.model_tracing_config"
+
+  - name: "model_trace_context"
+    type: "model"
+    class_name: "ModelTraceContext"
+    module: "omnibase_infra.models.tracing.model_trace_context"
+
+  - name: "model_tracing_request"
+    type: "model"
+    class_name: "ModelTracingRequest"
+    module: "omnibase_infra.models.tracing.model_tracing_request"
+
+  - name: "model_tracing_response"
+    type: "model"
+    class_name: "ModelTracingResponse"
+    module: "omnibase_infra.models.tracing.model_tracing_response"
+
+definitions:
+  ModelDistributedTracingInput:
+    type: "object"
+    properties:
+      operation_type:
+        type: "string"
+        enum: ["initialize_tracing", "trace_operation", "inject_context", "extract_context", "trace_database", "trace_kafka", "shutdown_tracing"]
+        description: "Type of tracing operation to perform"
+      operation_name:
+        type: "string"
+        description: "Name of the operation to trace (required for trace operations)"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Correlation ID for the operation"
+      event:
+        $ref: "#/definitions/ModelOnexEvent"
+        description: "Event for context injection/extraction operations"
+      span_kind:
+        type: "string"
+        enum: ["INTERNAL", "SERVER", "CLIENT", "PRODUCER", "CONSUMER"]
+        description: "OpenTelemetry span kind"
+        default: "INTERNAL"
+      attributes:
+        type: "object"
+        additionalProperties: true
+        description: "Additional span attributes"
+      environment:
+        type: "string"
+        description: "Environment configuration (development, staging, production)"
+        default: "development"
+      database_query:
+        type: "string"
+        description: "Database query for database tracing operations"
+      kafka_topic:
+        type: "string"
+        description: "Kafka topic for Kafka tracing operations"
+    required:
+      - operation_type
+      - correlation_id
+
+  ModelDistributedTracingOutput:
+    type: "object"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether the operation succeeded"
+      operation_type:
+        type: "string"
+        description: "Type of operation that was performed"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Correlation ID from the request"
+      result:
+        type: "object"
+        description: "Operation-specific result data"
+      error_message:
+        type: "string"
+        description: "Error message if operation failed"
+      trace_id:
+        type: "string"
+        description: "OpenTelemetry trace ID (if applicable)"
+      span_id:
+        type: "string"
+        description: "OpenTelemetry span ID (if applicable)"
+      tracing_enabled:
+        type: "boolean"
+        description: "Whether tracing is currently enabled"
+      timestamp:
+        type: "string"
+        format: "date-time"
+        description: "Response timestamp"
+    required:
+      - success
+      - operation_type
+      - correlation_id
+      - tracing_enabled
+      - timestamp
+
+  ModelOnexEvent:
+    type: "object"
+    description: "ONEX event model (external dependency)"

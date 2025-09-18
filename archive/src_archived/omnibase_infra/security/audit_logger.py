@@ -1,0 +1,521 @@
+"""
+ONEX Audit Logging for Infrastructure Security
+
+Provides comprehensive audit logging for sensitive database operations
+and infrastructure activities for compliance and security monitoring.
+
+Per ONEX security requirements:
+- Structured audit logging with standardized formats
+- Tamper-proof audit trails with integrity verification
+- Real-time security event alerting
+- Compliance reporting and data retention
+"""
+
+import hashlib
+import json
+import logging
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import Enum
+
+# Import strongly-typed models to replace Dict[str, Any] usage
+from omnibase_infra.models.security.model_audit_details import (
+    ModelAuditDetails,
+    ModelAuditMetadata,
+)
+
+
+class AuditEventType(Enum):
+    """Types of events that should be audited."""
+
+    DATABASE_QUERY = "database_query"
+    DATABASE_MODIFICATION = "database_modification"
+    AUTHENTICATION = "authentication"
+    AUTHORIZATION = "authorization"
+    CONFIGURATION_CHANGE = "configuration_change"
+    SECURITY_VIOLATION = "security_violation"
+    EVENT_PUBLISH = "event_publish"
+    ADMIN_OPERATION = "admin_operation"
+    DATA_ACCESS = "data_access"
+    SYSTEM_ERROR = "system_error"
+
+
+class AuditSeverity(Enum):
+    """Severity levels for audit events."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+@dataclass
+class AuditEvent:
+    """Standardized audit event structure."""
+
+    event_id: str
+    timestamp: str
+    event_type: AuditEventType
+    severity: AuditSeverity
+    user_id: str | None
+    client_id: str | None
+    session_id: str | None
+    correlation_id: str | None
+    resource: str
+    action: str
+    outcome: str  # "success", "failure", "denied"
+    details: ModelAuditDetails
+    source_ip: str | None = None
+    user_agent: str | None = None
+    metadata: ModelAuditMetadata | None = None
+
+    def __post_init__(self):
+        """Validate and enrich audit event."""
+        if not self.event_id:
+            self.event_id = self._generate_event_id()
+
+        if not self.timestamp:
+            self.timestamp = datetime.now(UTC).isoformat()
+
+        # Details are now strongly typed - no sanitization needed
+
+    def _generate_event_id(self) -> str:
+        """Generate unique event ID."""
+        timestamp_ms = int(time.time() * 1000)
+        content = f"{timestamp_ms}{self.event_type.value}{self.resource}{self.action}"
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        result = {
+            "event_id": self.event_id,
+            "timestamp": self.timestamp,
+            "event_type": self.event_type.value,
+            "severity": self.severity.value,
+            "user_id": self.user_id,
+            "client_id": self.client_id,
+            "session_id": self.session_id,
+            "correlation_id": self.correlation_id,
+            "resource": self.resource,
+            "action": self.action,
+            "outcome": self.outcome,
+            "details": self.details.dict() if self.details else {},
+            "source_ip": self.source_ip,
+            "user_agent": self.user_agent,
+            "metadata": self.metadata.dict() if self.metadata else None,
+        }
+        return result
+
+    def to_json(self) -> str:
+        """Convert to JSON string."""
+        return json.dumps(self.to_dict(), sort_keys=True)
+
+    def get_integrity_hash(self) -> str:
+        """Generate integrity hash for tamper detection."""
+        content = self.to_json()
+        return hashlib.sha256(content.encode()).hexdigest()
+
+
+class ONEXAuditLogger:
+    """
+    ONEX audit logger for infrastructure security monitoring.
+
+    Features:
+    - Structured audit event logging
+    - Tamper-proof audit trails
+    - Real-time security alerting
+    - Compliance reporting
+    """
+
+    def __init__(self):
+        self._logger = logging.getLogger("onex.audit")
+        self._setup_audit_logger()
+
+        # Audit configuration
+        self._enabled = self._get_audit_config("enabled", True)
+        self._min_severity = AuditSeverity(
+            self._get_audit_config("min_severity", "low"),
+        )
+        self._alert_threshold = AuditSeverity(
+            self._get_audit_config("alert_threshold", "high"),
+        )
+
+        # Audit trail integrity
+        self._last_hash = ""
+        self._sequence_number = 0
+
+        self._logger.info("ONEX audit logger initialized")
+
+    def _setup_audit_logger(self):
+        """Configure audit-specific logger with secure settings."""
+        # Create separate handler for audit logs
+        audit_handler = logging.FileHandler(
+            "/var/log/onex/audit.log",
+            mode="a",
+            encoding="utf-8",
+        )
+
+        # JSON formatter for structured logging
+        formatter = logging.Formatter(
+            '{"timestamp": "%(asctime)s", "level": "%(levelname)s", '
+            '"logger": "%(name)s", "message": %(message)s}',
+        )
+        audit_handler.setFormatter(formatter)
+
+        # Set security-focused configuration
+        audit_handler.setLevel(logging.INFO)
+        self._logger.addHandler(audit_handler)
+        self._logger.setLevel(logging.INFO)
+
+        # Prevent audit logs from going to parent loggers
+        self._logger.propagate = False
+
+    def _get_audit_config(
+        self, key: str, default: str | int | bool,
+    ) -> str | int | bool:
+        """Get audit configuration value."""
+        import os
+
+        env_key = f"ONEX_AUDIT_{key.upper()}"
+        return os.getenv(env_key, default)
+
+    def log_database_operation(
+        self,
+        user_id: str | None,
+        client_id: str | None,
+        correlation_id: str | None,
+        operation: str,
+        table_name: str,
+        query_type: str,
+        row_count: int | None = None,
+        outcome: str = "success",
+        error_message: str | None = None,
+        execution_time_ms: float | None = None,
+    ):
+        """
+        Log database operation for audit trail.
+
+        Args:
+            user_id: User performing the operation
+            client_id: Client identifier
+            correlation_id: Request correlation ID
+            operation: Type of operation (SELECT, INSERT, UPDATE, DELETE)
+            table_name: Database table affected
+            query_type: Query classification (read, write, admin)
+            row_count: Number of rows affected
+            outcome: Operation outcome (success, failure, denied)
+            error_message: Error message if operation failed
+            execution_time_ms: Query execution time in milliseconds
+        """
+        # Determine severity based on operation type and outcome
+        severity = AuditSeverity.LOW
+        if query_type == "admin" or operation in ["DELETE", "DROP", "ALTER"]:
+            severity = AuditSeverity.HIGH
+        elif query_type == "write" or operation in ["INSERT", "UPDATE"]:
+            severity = AuditSeverity.MEDIUM
+
+        if outcome == "failure":
+            severity = AuditSeverity.HIGH
+        elif outcome == "denied":
+            severity = AuditSeverity.CRITICAL
+
+        details = {
+            "operation": operation,
+            "table_name": table_name,
+            "query_type": query_type,
+            "row_count": row_count,
+            "execution_time_ms": execution_time_ms,
+        }
+
+        if error_message:
+            details["error_message"] = error_message
+
+        event = AuditEvent(
+            event_id="",
+            timestamp="",
+            event_type=(
+                AuditEventType.DATABASE_QUERY
+                if query_type == "read"
+                else AuditEventType.DATABASE_MODIFICATION
+            ),
+            severity=severity,
+            user_id=user_id,
+            client_id=client_id,
+            session_id=None,
+            correlation_id=correlation_id,
+            resource=f"database.{table_name}",
+            action=operation.lower(),
+            outcome=outcome,
+            details=details,
+        )
+
+        self._log_audit_event(event)
+
+    def log_authentication_event(
+        self,
+        user_id: str | None,
+        client_id: str | None,
+        auth_method: str,
+        outcome: str,
+        source_ip: str | None = None,
+        user_agent: str | None = None,
+        failure_reason: str | None = None,
+    ):
+        """
+        Log authentication event.
+
+        Args:
+            user_id: User attempting authentication
+            client_id: Client identifier
+            auth_method: Authentication method used
+            outcome: Authentication outcome (success, failure, denied)
+            source_ip: Source IP address
+            user_agent: User agent string
+            failure_reason: Reason for authentication failure
+        """
+        severity = AuditSeverity.MEDIUM if outcome == "success" else AuditSeverity.HIGH
+
+        details = {
+            "auth_method": auth_method,
+        }
+
+        if failure_reason:
+            details["failure_reason"] = failure_reason
+
+        event = AuditEvent(
+            event_id="",
+            timestamp="",
+            event_type=AuditEventType.AUTHENTICATION,
+            severity=severity,
+            user_id=user_id,
+            client_id=client_id,
+            session_id=None,
+            correlation_id=None,
+            resource="authentication",
+            action="authenticate",
+            outcome=outcome,
+            details=details,
+            source_ip=source_ip,
+            user_agent=user_agent,
+        )
+
+        self._log_audit_event(event)
+
+    def log_event_publish(
+        self,
+        client_id: str | None,
+        correlation_id: str | None,
+        event_type: str,
+        topic: str,
+        outcome: str,
+        rate_limited: bool = False,
+        error_message: str | None = None,
+    ):
+        """
+        Log event publishing activity.
+
+        Args:
+            client_id: Client publishing the event
+            correlation_id: Event correlation ID
+            event_type: Type of event being published
+            topic: RedPanda topic
+            outcome: Publishing outcome (success, failure, denied)
+            rate_limited: Whether request was rate limited
+            error_message: Error message if publishing failed
+        """
+        severity = AuditSeverity.LOW
+        if rate_limited or outcome != "success":
+            severity = AuditSeverity.MEDIUM
+
+        details = {
+            "event_type": event_type,
+            "topic": topic,
+            "rate_limited": rate_limited,
+        }
+
+        if error_message:
+            details["error_message"] = error_message
+
+        event = AuditEvent(
+            event_id="",
+            timestamp="",
+            event_type=AuditEventType.EVENT_PUBLISH,
+            severity=severity,
+            user_id=None,
+            client_id=client_id,
+            session_id=None,
+            correlation_id=correlation_id,
+            resource=f"event_bus.{topic}",
+            action="publish",
+            outcome=outcome,
+            details=details,
+        )
+
+        self._log_audit_event(event)
+
+    def log_security_violation(
+        self,
+        client_id: str | None,
+        violation_type: str,
+        description: str,
+        source_ip: str | None = None,
+        details: ModelAuditDetails | None = None,
+    ):
+        """
+        Log security violation event.
+
+        Args:
+            client_id: Client involved in violation
+            violation_type: Type of security violation
+            description: Description of the violation
+            source_ip: Source IP address
+            details: Additional violation details
+        """
+        event_details = {
+            "violation_type": violation_type,
+            "description": description,
+        }
+
+        if details:
+            event_details.update(details)
+
+        event = AuditEvent(
+            event_id="",
+            timestamp="",
+            event_type=AuditEventType.SECURITY_VIOLATION,
+            severity=AuditSeverity.CRITICAL,
+            user_id=None,
+            client_id=client_id,
+            session_id=None,
+            correlation_id=None,
+            resource="security",
+            action="violation",
+            outcome="detected",
+            details=event_details,
+            source_ip=source_ip,
+        )
+
+        self._log_audit_event(event)
+
+    def _log_audit_event(self, event: AuditEvent):
+        """
+        Log audit event with integrity checking.
+
+        Args:
+            event: Audit event to log
+        """
+        if not self._enabled:
+            return
+
+        # Check minimum severity threshold
+        severity_levels = {
+            AuditSeverity.LOW: 1,
+            AuditSeverity.MEDIUM: 2,
+            AuditSeverity.HIGH: 3,
+            AuditSeverity.CRITICAL: 4,
+        }
+
+        if severity_levels[event.severity] < severity_levels[self._min_severity]:
+            return
+
+        # Add sequence number and chain hash for integrity
+        self._sequence_number += 1
+        event.metadata = {
+            "sequence_number": self._sequence_number,
+            "previous_hash": self._last_hash,
+            "integrity_hash": event.get_integrity_hash(),
+        }
+
+        # Update chain hash
+        self._last_hash = event.get_integrity_hash()
+
+        # Log the event
+        self._logger.info(event.to_json())
+
+        # Send alerts for high-severity events
+        if severity_levels[event.severity] >= severity_levels[self._alert_threshold]:
+            self._send_security_alert(event)
+
+    def _send_security_alert(self, event: AuditEvent):
+        """
+        Send real-time security alert for high-severity events.
+
+        Args:
+            event: High-severity audit event
+        """
+        # TODO: Implement integration with alerting systems
+        # (Slack, PagerDuty, email, etc.)
+        self._logger.critical(
+            f"SECURITY ALERT: {event.event_type.value} - {event.action} - {event.outcome}",
+        )
+
+    def get_audit_statistics(self) -> dict:
+        """
+        Get audit logging statistics.
+
+        Returns:
+            Dictionary with audit statistics
+        """
+        return {
+            "enabled": self._enabled,
+            "min_severity": self._min_severity.value,
+            "alert_threshold": self._alert_threshold.value,
+            "sequence_number": self._sequence_number,
+            "last_hash": (
+                self._last_hash[-8:] if self._last_hash else None
+            ),  # Show last 8 chars
+        }
+
+    def verify_integrity(self, events: list[AuditEvent]) -> bool:
+        """
+        Verify integrity of audit event chain.
+
+        Args:
+            events: List of audit events to verify
+
+        Returns:
+            True if chain integrity is valid
+        """
+        if not events:
+            return True
+
+        previous_hash = ""
+
+        for event in sorted(events, key=lambda e: e.metadata.get("sequence_number", 0)):
+            if not event.metadata:
+                continue
+
+            # Verify hash chain
+            if event.metadata.get("previous_hash") != previous_hash:
+                return False
+
+            # Verify event integrity
+            expected_hash = event.get_integrity_hash()
+            actual_hash = event.metadata.get("integrity_hash")
+
+            if expected_hash != actual_hash:
+                return False
+
+            previous_hash = actual_hash
+
+        return True
+
+
+# Global audit logger instance
+_audit_logger: ONEXAuditLogger | None = None
+
+
+def get_audit_logger() -> ONEXAuditLogger:
+    """
+    Get global audit logger instance.
+
+    Returns:
+        ONEXAuditLogger singleton instance
+    """
+    global _audit_logger
+
+    if _audit_logger is None:
+        _audit_logger = ONEXAuditLogger()
+
+    return _audit_logger
