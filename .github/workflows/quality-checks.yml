@@ -33,7 +33,9 @@ jobs:
 
       - name: Configure Git for private repositories
         run: |
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${{ secrets.GH_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Install dependencies
         run: |
