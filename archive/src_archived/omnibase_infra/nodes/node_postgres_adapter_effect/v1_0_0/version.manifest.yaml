@@ -92,7 +92,7 @@ external_integrations:
     ssl_support: true
     connection_pooling: true
     transaction_support: true
-    
+
   redpanda_event_bus:
     publishing_required: true
     topic_namespace: "omninode"
@@ -105,11 +105,11 @@ performance:
     query_execution: "50ms"
     event_publishing: "10ms"
     health_check: "5ms"
-    
+
   throughput_targets:
     queries_per_second: 1000
     events_per_second: 2000
-    
+
   resource_usage:
     memory_baseline_mb: 64
     memory_per_connection_mb: 2
@@ -121,19 +121,19 @@ monitoring:
     - path: "/health"
       method: "GET"
       response_model: "ModelHealthCheckResponse"
-      
+
   metrics:
     database_metrics:
       - "postgres_connection_pool_size"
       - "postgres_query_execution_time"
       - "postgres_active_connections"
       - "postgres_query_error_rate"
-      
+
     event_bus_metrics:
       - "redpanda_publish_success_rate"
       - "redpanda_publish_latency"
       - "event_correlation_tracking"
-      
+
     node_metrics:
       - "node_request_count"
       - "node_processing_time"
@@ -146,11 +146,11 @@ error_handling:
     connection_failure: "retry_with_backoff"
     query_timeout: "fail_fast_with_event"
     transaction_rollback: "automatic"
-    
+
   event_bus_errors:
     publish_failure: "log_and_continue"
     connection_failure: "degrade_gracefully"
-    
+
   node_errors:
     validation_errors: "return_error_response"
     processing_errors: "log_and_fail_request"
@@ -163,28 +163,28 @@ configuration:
       type: "string"
       default: "localhost"
       description: "PostgreSQL server hostname"
-      
+
     - name: "POSTGRES_PORT"
       type: "integer"
       default: 5432
       description: "PostgreSQL server port"
-      
+
     - name: "POSTGRES_DATABASE"
       type: "string"
       default: "omnibase_infrastructure"
       description: "PostgreSQL database name"
-      
+
     - name: "POSTGRES_USERNAME"
       type: "string"
       required: true
       description: "PostgreSQL username"
-      
+
     - name: "POSTGRES_PASSWORD"
       type: "string"
       required: true
       sensitive: true
       description: "PostgreSQL password"
-      
+
     - name: "REDPANDA_EXTERNAL_PORT"
       type: "integer"
       default: 29102
@@ -195,12 +195,12 @@ configuration:
       type: "string"
       default: "prefer"
       description: "PostgreSQL SSL connection mode"
-      
+
     - name: "CONNECTION_POOL_SIZE"
       type: "integer"
       default: 10
       description: "Maximum database connection pool size"
-      
+
     - name: "QUERY_TIMEOUT_SECONDS"
       type: "integer"
       default: 30
@@ -212,11 +212,11 @@ dependencies:
     - name: "asyncpg"
       version: ">=0.29.0"
       purpose: "PostgreSQL async database adapter"
-      
+
     - name: "aiokafka"
       version: ">=0.10.0"
       purpose: "RedPanda/Kafka async client for event publishing"
-      
+
     - name: "pydantic"
       version: ">=2.0.0"
       purpose: "Data validation and serialization"
@@ -224,16 +224,16 @@ dependencies:
   omnibase_modules:
     - name: "omnibase_spi.protocols.event_bus"
       purpose: "Event bus protocol interface"
-      
+
     - name: "omnibase_core.core.onex_container"
       purpose: "Dependency injection container"
-      
+
     - name: "omnibase_infra.infrastructure.postgres_connection_manager"
       purpose: "PostgreSQL connection pooling and management"
-      
+
     - name: "omnibase_infra.models.postgres"
       purpose: "Shared PostgreSQL data models"
-      
+
     - name: "omnibase_infra.models.event_publishing"
       purpose: "OmniNode event publishing models"
 

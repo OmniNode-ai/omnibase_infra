@@ -1,8 +1,8 @@
 contract_version: "1.0.0"
-node_version: "1.0.0" 
+node_version: "1.0.0"
 version: "1.0.0"
 node_name: "node_distributed_tracing_compute"
-contract_name: "NodeDistributedTracingComputeContract" 
+contract_name: "NodeDistributedTracingComputeContract"
 name: "node_distributed_tracing_compute"
 node_type: "COMPUTE"
 description: "Distributed Tracing Compute Node for OpenTelemetry integration with trace context processing and enrichment"
@@ -16,29 +16,29 @@ dependencies:
     type: "model"
     class_name: "ModelONEXContainer"
     module: "omnibase_core.core.onex_container"
-  
+
   # Core ONEX event model
   - name: "model_onex_event"
     type: "model"
     class_name: "ModelOnexEvent"
     module: "omnibase_core.model.core.model_onex_event"
-  
+
   # Shared tracing models
   - name: "model_tracing_config"
     type: "model"
     class_name: "ModelTracingConfig"
     module: "omnibase_infra.models.tracing.model_tracing_config"
-  
+
   - name: "model_trace_context"
     type: "model"
     class_name: "ModelTraceContext"
     module: "omnibase_infra.models.tracing.model_trace_context"
-  
+
   - name: "model_tracing_request"
     type: "model"
     class_name: "ModelTracingRequest"
     module: "omnibase_infra.models.tracing.model_tracing_request"
-  
+
   - name: "model_tracing_response"
     type: "model"
     class_name: "ModelTracingResponse"

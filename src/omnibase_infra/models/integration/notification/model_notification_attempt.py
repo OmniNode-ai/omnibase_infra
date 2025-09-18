@@ -54,6 +54,7 @@ class ModelNotificationAttempt(BaseModel):
 
     class Config:
         """Pydantic configuration."""
+
         frozen = True
         extra = "forbid"
 
@@ -97,18 +98,12 @@ class ModelNotificationAttempt(BaseModel):
     @property
     def was_client_error(self) -> bool:
         """Check if this attempt failed due to client error (4xx status code)."""
-        return (
-            self.status_code is not None
-            and 400 <= self.status_code < 500
-        )
+        return self.status_code is not None and 400 <= self.status_code < 500
 
     @property
     def was_server_error(self) -> bool:
         """Check if this attempt failed due to server error (5xx status code)."""
-        return (
-            self.status_code is not None
-            and 500 <= self.status_code < 600
-        )
+        return self.status_code is not None and 500 <= self.status_code < 600
 
     @property
     def was_network_error(self) -> bool:

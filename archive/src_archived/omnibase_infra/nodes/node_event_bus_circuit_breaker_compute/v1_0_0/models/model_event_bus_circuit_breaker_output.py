@@ -37,7 +37,13 @@ class ModelEventBusCircuitBreakerOutput(BaseModel):
         description="Correlation ID from the request",
     )
 
-    result: ModelPublishEventResult | ModelStateResult | ModelResetResult | ModelHealthStatusResult | None = Field(
+    result: (
+        ModelPublishEventResult
+        | ModelStateResult
+        | ModelResetResult
+        | ModelHealthStatusResult
+        | None
+    ) = Field(
         default=None,
         description="Operation-specific result data",
     )

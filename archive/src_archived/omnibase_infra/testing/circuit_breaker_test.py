@@ -22,6 +22,7 @@ from typing import Any
 
 class CircuitBreakerTestResult(Enum):
     """Test result outcomes."""
+
     PASSED = "passed"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -31,6 +32,7 @@ class CircuitBreakerTestResult(Enum):
 @dataclass
 class TestMetrics:
     """Metrics collected during circuit breaker testing."""
+
     total_calls: int = 0
     successful_calls: int = 0
     failed_calls: int = 0
@@ -45,6 +47,7 @@ class TestMetrics:
 @dataclass
 class CircuitBreakerTestCase:
     """Individual circuit breaker test case."""
+
     name: str
     description: str
     test_function: Callable[[], Awaitable[TestMetrics]]
@@ -56,7 +59,7 @@ class CircuitBreakerTestCase:
 class CircuitBreakerTestSuite:
     """
     Comprehensive circuit breaker test suite for ONEX infrastructure.
-    
+
     Tests circuit breaker behavior under various conditions including:
     - Failure threshold validation
     - State transition verification
@@ -67,7 +70,7 @@ class CircuitBreakerTestSuite:
     def __init__(self, circuit_breaker, kafka_adapter=None):
         """
         Initialize circuit breaker test suite.
-        
+
         Args:
             circuit_breaker: Circuit breaker instance to test
             kafka_adapter: Optional Kafka adapter for integration testing
@@ -87,7 +90,7 @@ class CircuitBreakerTestSuite:
     async def run_comprehensive_tests(self) -> dict[str, Any]:
         """
         Run comprehensive circuit breaker test suite.
-        
+
         Returns:
             Dictionary with test results, metrics, and recommendations
         """
@@ -157,7 +160,9 @@ class CircuitBreakerTestSuite:
                     "error": str(e),
                     "metrics": TestMetrics(),
                 }
-                self._logger.error(f"Test case '{test_case.name}' failed with error: {e!s}")
+                self._logger.error(
+                    f"Test case '{test_case.name}' failed with error: {e!s}",
+                )
 
         total_time = time.perf_counter() - start_time
 
@@ -167,7 +172,9 @@ class CircuitBreakerTestSuite:
                 "total_tests": total_tests,
                 "passed": passed_tests,
                 "failed": failed_tests,
-                "success_rate": (passed_tests / total_tests) * 100 if total_tests > 0 else 0,
+                "success_rate": (
+                    (passed_tests / total_tests) * 100 if total_tests > 0 else 0
+                ),
                 "total_duration_seconds": round(total_time, 3),
             },
             "test_results": self._test_results,
@@ -175,10 +182,14 @@ class CircuitBreakerTestSuite:
             "circuit_breaker_config": self._get_circuit_breaker_config(),
         }
 
-        self._logger.info(f"Circuit breaker tests completed: {passed_tests}/{total_tests} passed")
+        self._logger.info(
+            f"Circuit breaker tests completed: {passed_tests}/{total_tests} passed",
+        )
         return results
 
-    async def _execute_test_case(self, test_case: CircuitBreakerTestCase) -> dict[str, Any]:
+    async def _execute_test_case(
+        self, test_case: CircuitBreakerTestCase,
+    ) -> dict[str, Any]:
         """Execute individual test case with timeout and metrics collection."""
         self._logger.info(f"Executing test: {test_case.name}")
         start_time = time.perf_counter()
@@ -241,17 +252,23 @@ class CircuitBreakerTestSuite:
                 current_state = self._circuit_breaker.get_state()
                 if current_state["state"] == "open":
                     metrics.circuit_trips += 1
-                    metrics.state_transitions.append(f"call_{i}: {current_state['state']}")
+                    metrics.state_transitions.append(
+                        f"call_{i}: {current_state['state']}",
+                    )
                     break
 
         # Verify circuit breaker is in OPEN state
         final_state = self._circuit_breaker.get_state()
         if final_state["state"] != "open":
-            raise AssertionError(f"Expected circuit breaker to be OPEN, but was {final_state['state']}")
+            raise AssertionError(
+                f"Expected circuit breaker to be OPEN, but was {final_state['state']}",
+            )
 
         # Verify failure count matches threshold
         if final_state["failure_count"] < self._failure_threshold:
-            raise AssertionError(f"Expected at least {self._failure_threshold} failures, got {final_state['failure_count']}")
+            raise AssertionError(
+                f"Expected at least {self._failure_threshold} failures, got {final_state['failure_count']}",
+            )
 
         return metrics
 
@@ -262,7 +279,9 @@ class CircuitBreakerTestSuite:
         # Start with reset circuit breaker (CLOSED state)
         await self._reset_circuit_breaker()
         state = self._circuit_breaker.get_state()
-        assert state["state"] == "closed", f"Expected CLOSED state, got {state['state']}"
+        assert (
+            state["state"] == "closed"
+        ), f"Expected CLOSED state, got {state['state']}"
         metrics.state_transitions.append("initial: closed")
 
         # Force circuit breaker to OPEN by exceeding failure threshold
@@ -333,7 +352,9 @@ class CircuitBreakerTestSuite:
         for attempt in range(self._half_open_max_calls):
             try:
                 # Successful call
-                result = await self._circuit_breaker.call(lambda: f"recovery_attempt_{attempt}")
+                result = await self._circuit_breaker.call(
+                    lambda: f"recovery_attempt_{attempt}",
+                )
                 metrics.successful_calls += 1
                 metrics.recovery_attempts += 1
 
@@ -341,15 +362,21 @@ class CircuitBreakerTestSuite:
                 if state["state"] == "closed":
                     recovery_success = True
                     half_open_end = time.perf_counter()
-                    metrics.half_open_duration_ms = (half_open_end - half_open_start) * 1000
+                    metrics.half_open_duration_ms = (
+                        half_open_end - half_open_start
+                    ) * 1000
                     break
 
             except Exception as e:
                 metrics.failed_calls += 1
-                metrics.error_details.append(f"Recovery attempt {attempt} failed: {e!s}")
+                metrics.error_details.append(
+                    f"Recovery attempt {attempt} failed: {e!s}",
+                )
 
         if not recovery_success:
-            raise AssertionError("Circuit breaker failed to recover from half-open state")
+            raise AssertionError(
+                "Circuit breaker failed to recover from half-open state",
+            )
 
         return metrics
 
@@ -457,6 +484,7 @@ class CircuitBreakerTestSuite:
 
     async def _force_circuit_breaker_open(self):
         """Force circuit breaker into OPEN state for testing."""
+
         async def always_fail():
             raise Exception("Forced failure")
 
@@ -482,8 +510,11 @@ class CircuitBreakerTestSuite:
 
         # Analyze test results and provide recommendations
         total_tests = len(self._test_results)
-        passed_tests = sum(1 for result in self._test_results.values()
-                          if result.get("status") == CircuitBreakerTestResult.PASSED.value)
+        passed_tests = sum(
+            1
+            for result in self._test_results.values()
+            if result.get("status") == CircuitBreakerTestResult.PASSED.value
+        )
 
         if passed_tests < total_tests:
             recommendations.append(
@@ -500,20 +531,24 @@ class CircuitBreakerTestSuite:
                 )
 
         if not recommendations:
-            recommendations.append("All circuit breaker tests passed successfully. Configuration appears optimal.")
+            recommendations.append(
+                "All circuit breaker tests passed successfully. Configuration appears optimal.",
+            )
 
         return recommendations
 
 
 # Helper function for easy testing integration
-async def run_circuit_breaker_tests(circuit_breaker, kafka_adapter=None) -> dict[str, Any]:
+async def run_circuit_breaker_tests(
+    circuit_breaker, kafka_adapter=None,
+) -> dict[str, Any]:
     """
     Convenience function to run comprehensive circuit breaker tests.
-    
+
     Args:
         circuit_breaker: Circuit breaker instance to test
         kafka_adapter: Optional Kafka adapter for integration testing
-        
+
     Returns:
         Dictionary with test results and recommendations
     """

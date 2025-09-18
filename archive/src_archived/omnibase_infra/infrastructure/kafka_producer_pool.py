@@ -30,6 +30,7 @@ from ..models.kafka.model_kafka_producer_pool_stats import (
 @dataclass
 class ProducerInstance:
     """Internal representation of a producer instance in the pool."""
+
     producer_id: str
     producer: AIOKafkaProducer
     created_at: datetime
@@ -44,10 +45,10 @@ class ProducerInstance:
 class KafkaProducerPool:
     """
     Enterprise Kafka producer pool with connection management and monitoring.
-    
+
     Features:
     - Producer connection pooling with configurable min/max producers
-    - Automatic reconnection and failover handling  
+    - Automatic reconnection and failover handling
     - Comprehensive metrics collection and health monitoring
     - Topic-based statistics tracking
     - Thread-safe producer acquisition and release
@@ -56,7 +57,7 @@ class KafkaProducerPool:
 
     def __init__(self, config: ModelKafkaProducerConfig, pool_name: str = "default"):
         """Initialize Kafka producer pool with configuration.
-        
+
         Args:
             config: Kafka producer configuration
             pool_name: Name of the producer pool for identification
@@ -99,7 +100,9 @@ class KafkaProducerPool:
                     await self._create_producer(producer_id)
 
                 self.is_initialized = True
-                self.logger.info(f"Kafka producer pool '{self.pool_name}' initialized with {len(self.producers)} producers")
+                self.logger.info(
+                    f"Kafka producer pool '{self.pool_name}' initialized with {len(self.producers)} producers",
+                )
 
         except Exception as e:
             raise OnexError(
@@ -109,10 +112,10 @@ class KafkaProducerPool:
 
     async def _create_producer(self, producer_id: str) -> ProducerInstance:
         """Create a new producer instance.
-        
+
         Args:
             producer_id: Unique identifier for the producer
-            
+
         Returns:
             Created producer instance
         """
@@ -158,7 +161,7 @@ class KafkaProducerPool:
     async def acquire_producer(self) -> AsyncIterator[AIOKafkaProducer]:
         """
         Acquire a producer from the pool with automatic cleanup.
-        
+
         Usage:
             async with pool.acquire_producer() as producer:
                 await producer.send('topic', b'message')
@@ -214,7 +217,10 @@ class KafkaProducerPool:
                 async with self._lock:
                     if producer_id in self.active_producers:
                         self.active_producers.remove(producer_id)
-                    if producer_id not in self.failed_producers and producer_id not in self.idle_producers:
+                    if (
+                        producer_id not in self.failed_producers
+                        and producer_id not in self.idle_producers
+                    ):
                         self.idle_producers.append(producer_id)
 
     async def send_message(
@@ -226,14 +232,14 @@ class KafkaProducerPool:
         headers: dict[str, bytes] | None = None,
     ) -> bool:
         """Send message to Kafka topic through producer pool.
-        
+
         Args:
             topic: Kafka topic name
             value: Message value as bytes
             key: Optional message key
             partition: Optional specific partition
             headers: Optional message headers
-            
+
         Returns:
             bool: True if message sent successfully
         """
@@ -263,7 +269,9 @@ class KafkaProducerPool:
                     self.producers[producer_id].message_count += 1
                     self.producers[producer_id].bytes_sent += len(value)
 
-                self.logger.debug(f"Message sent to topic '{topic}': {len(value)} bytes")
+                self.logger.debug(
+                    f"Message sent to topic '{topic}': {len(value)} bytes",
+                )
                 return True
 
         except Exception as e:
@@ -277,7 +285,9 @@ class KafkaProducerPool:
                 message=f"Failed to send Kafka message: {e!s}",
             ) from e
 
-    async def _update_topic_stats(self, topic: str, message_size: int, success: bool) -> None:
+    async def _update_topic_stats(
+        self, topic: str, message_size: int, success: bool,
+    ) -> None:
         """Update per-topic statistics."""
         if topic not in self.topic_stats:
             self.topic_stats[topic] = {
@@ -299,7 +309,7 @@ class KafkaProducerPool:
 
     def get_pool_stats(self) -> ModelKafkaProducerPoolStats:
         """Get comprehensive producer pool statistics.
-        
+
         Returns:
             Kafka producer pool statistics model
         """
@@ -352,7 +362,7 @@ class KafkaProducerPool:
 
     async def health_check(self) -> dict[str, Any]:
         """Perform comprehensive health check of the producer pool.
-        
+
         Returns:
             Health check results with status and metrics
         """
@@ -383,10 +393,15 @@ class KafkaProducerPool:
                         healthy_producers += 1
 
                 except Exception as e:
-                    health_status["errors"].append(f"Producer {producer_id} health check failed: {e!s}")
+                    health_status["errors"].append(
+                        f"Producer {producer_id} health check failed: {e!s}",
+                    )
 
             # Determine overall health
-            if healthy_producers >= self.min_pool_size and len(health_status["errors"]) == 0:
+            if (
+                healthy_producers >= self.min_pool_size
+                and len(health_status["errors"]) == 0
+            ):
                 health_status["status"] = "healthy"
             elif healthy_producers > 0:
                 health_status["status"] = "degraded"
@@ -406,7 +421,9 @@ class KafkaProducerPool:
                     try:
                         await instance.producer.stop()
                     except Exception as e:
-                        self.logger.warning(f"Error closing producer {instance.producer_id}: {e}")
+                        self.logger.warning(
+                            f"Error closing producer {instance.producer_id}: {e}",
+                        )
 
                 self.producers.clear()
                 self.idle_producers.clear()
@@ -441,7 +458,9 @@ def get_producer_pool() -> KafkaProducerPool:
     return _producer_pool
 
 
-async def initialize_producer_pool(config: ModelKafkaProducerConfig | None = None) -> None:
+async def initialize_producer_pool(
+    config: ModelKafkaProducerConfig | None = None,
+) -> None:
     """Initialize the global producer pool."""
     global _producer_pool
     if config and _producer_pool is None:

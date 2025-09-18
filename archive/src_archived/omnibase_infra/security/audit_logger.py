@@ -28,6 +28,7 @@ from omnibase_infra.models.security.model_audit_details import (
 
 class AuditEventType(Enum):
     """Types of events that should be audited."""
+
     DATABASE_QUERY = "database_query"
     DATABASE_MODIFICATION = "database_modification"
     AUTHENTICATION = "authentication"
@@ -42,6 +43,7 @@ class AuditEventType(Enum):
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -51,6 +53,7 @@ class AuditSeverity(Enum):
 @dataclass
 class AuditEvent:
     """Standardized audit event structure."""
+
     event_id: str
     timestamp: str
     event_type: AuditEventType
@@ -117,7 +120,7 @@ class AuditEvent:
 class ONEXAuditLogger:
     """
     ONEX audit logger for infrastructure security monitoring.
-    
+
     Features:
     - Structured audit event logging
     - Tamper-proof audit trails
@@ -131,8 +134,12 @@ class ONEXAuditLogger:
 
         # Audit configuration
         self._enabled = self._get_audit_config("enabled", True)
-        self._min_severity = AuditSeverity(self._get_audit_config("min_severity", "low"))
-        self._alert_threshold = AuditSeverity(self._get_audit_config("alert_threshold", "high"))
+        self._min_severity = AuditSeverity(
+            self._get_audit_config("min_severity", "low"),
+        )
+        self._alert_threshold = AuditSeverity(
+            self._get_audit_config("alert_threshold", "high"),
+        )
 
         # Audit trail integrity
         self._last_hash = ""
@@ -164,26 +171,31 @@ class ONEXAuditLogger:
         # Prevent audit logs from going to parent loggers
         self._logger.propagate = False
 
-    def _get_audit_config(self, key: str, default: str | int | bool) -> str | int | bool:
+    def _get_audit_config(
+        self, key: str, default: str | int | bool,
+    ) -> str | int | bool:
         """Get audit configuration value."""
         import os
+
         env_key = f"ONEX_AUDIT_{key.upper()}"
         return os.getenv(env_key, default)
 
-    def log_database_operation(self,
-                              user_id: str | None,
-                              client_id: str | None,
-                              correlation_id: str | None,
-                              operation: str,
-                              table_name: str,
-                              query_type: str,
-                              row_count: int | None = None,
-                              outcome: str = "success",
-                              error_message: str | None = None,
-                              execution_time_ms: float | None = None):
+    def log_database_operation(
+        self,
+        user_id: str | None,
+        client_id: str | None,
+        correlation_id: str | None,
+        operation: str,
+        table_name: str,
+        query_type: str,
+        row_count: int | None = None,
+        outcome: str = "success",
+        error_message: str | None = None,
+        execution_time_ms: float | None = None,
+    ):
         """
         Log database operation for audit trail.
-        
+
         Args:
             user_id: User performing the operation
             client_id: Client identifier
@@ -222,7 +234,11 @@ class ONEXAuditLogger:
         event = AuditEvent(
             event_id="",
             timestamp="",
-            event_type=AuditEventType.DATABASE_QUERY if query_type == "read" else AuditEventType.DATABASE_MODIFICATION,
+            event_type=(
+                AuditEventType.DATABASE_QUERY
+                if query_type == "read"
+                else AuditEventType.DATABASE_MODIFICATION
+            ),
             severity=severity,
             user_id=user_id,
             client_id=client_id,
@@ -236,17 +252,19 @@ class ONEXAuditLogger:
 
         self._log_audit_event(event)
 
-    def log_authentication_event(self,
-                                user_id: str | None,
-                                client_id: str | None,
-                                auth_method: str,
-                                outcome: str,
-                                source_ip: str | None = None,
-                                user_agent: str | None = None,
-                                failure_reason: str | None = None):
+    def log_authentication_event(
+        self,
+        user_id: str | None,
+        client_id: str | None,
+        auth_method: str,
+        outcome: str,
+        source_ip: str | None = None,
+        user_agent: str | None = None,
+        failure_reason: str | None = None,
+    ):
         """
         Log authentication event.
-        
+
         Args:
             user_id: User attempting authentication
             client_id: Client identifier
@@ -284,17 +302,19 @@ class ONEXAuditLogger:
 
         self._log_audit_event(event)
 
-    def log_event_publish(self,
-                         client_id: str | None,
-                         correlation_id: str | None,
-                         event_type: str,
-                         topic: str,
-                         outcome: str,
-                         rate_limited: bool = False,
-                         error_message: str | None = None):
+    def log_event_publish(
+        self,
+        client_id: str | None,
+        correlation_id: str | None,
+        event_type: str,
+        topic: str,
+        outcome: str,
+        rate_limited: bool = False,
+        error_message: str | None = None,
+    ):
         """
         Log event publishing activity.
-        
+
         Args:
             client_id: Client publishing the event
             correlation_id: Event correlation ID
@@ -334,15 +354,17 @@ class ONEXAuditLogger:
 
         self._log_audit_event(event)
 
-    def log_security_violation(self,
-                              client_id: str | None,
-                              violation_type: str,
-                              description: str,
-                              source_ip: str | None = None,
-                              details: ModelAuditDetails | None = None):
+    def log_security_violation(
+        self,
+        client_id: str | None,
+        violation_type: str,
+        description: str,
+        source_ip: str | None = None,
+        details: ModelAuditDetails | None = None,
+    ):
         """
         Log security violation event.
-        
+
         Args:
             client_id: Client involved in violation
             violation_type: Type of security violation
@@ -379,7 +401,7 @@ class ONEXAuditLogger:
     def _log_audit_event(self, event: AuditEvent):
         """
         Log audit event with integrity checking.
-        
+
         Args:
             event: Audit event to log
         """
@@ -418,18 +440,20 @@ class ONEXAuditLogger:
     def _send_security_alert(self, event: AuditEvent):
         """
         Send real-time security alert for high-severity events.
-        
+
         Args:
             event: High-severity audit event
         """
         # TODO: Implement integration with alerting systems
         # (Slack, PagerDuty, email, etc.)
-        self._logger.critical(f"SECURITY ALERT: {event.event_type.value} - {event.action} - {event.outcome}")
+        self._logger.critical(
+            f"SECURITY ALERT: {event.event_type.value} - {event.action} - {event.outcome}",
+        )
 
     def get_audit_statistics(self) -> dict:
         """
         Get audit logging statistics.
-        
+
         Returns:
             Dictionary with audit statistics
         """
@@ -438,16 +462,18 @@ class ONEXAuditLogger:
             "min_severity": self._min_severity.value,
             "alert_threshold": self._alert_threshold.value,
             "sequence_number": self._sequence_number,
-            "last_hash": self._last_hash[-8:] if self._last_hash else None,  # Show last 8 chars
+            "last_hash": (
+                self._last_hash[-8:] if self._last_hash else None
+            ),  # Show last 8 chars
         }
 
     def verify_integrity(self, events: list[AuditEvent]) -> bool:
         """
         Verify integrity of audit event chain.
-        
+
         Args:
             events: List of audit events to verify
-            
+
         Returns:
             True if chain integrity is valid
         """
@@ -483,7 +509,7 @@ _audit_logger: ONEXAuditLogger | None = None
 def get_audit_logger() -> ONEXAuditLogger:
     """
     Get global audit logger instance.
-    
+
     Returns:
         ONEXAuditLogger singleton instance
     """

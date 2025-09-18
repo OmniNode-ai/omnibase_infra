@@ -7,25 +7,33 @@ progress management, sub-agent fleet coordination, and background task orchestra
 import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
 from datetime import datetime
-from contextlib import asynccontextmanager
+from typing import Any
+from uuid import UUID, uuid4
 
 from omnibase_core.base.node_orchestrator_service import NodeOrchestratorService
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.core.onex_container import ModelONEXContainer
 
-from omnibase_infra.models.workflow.model_workflow_execution_request import ModelWorkflowExecutionRequest
-from omnibase_infra.models.workflow.model_workflow_execution_result import ModelWorkflowExecutionResult
-from omnibase_infra.models.workflow.model_workflow_progress_update import ModelWorkflowProgressUpdate
-from omnibase_infra.models.workflow.model_workflow_coordination_metrics import ModelWorkflowCoordinationMetrics
+from omnibase_infra.models.workflow.model_workflow_coordination_metrics import (
+    ModelWorkflowCoordinationMetrics,
+)
+from omnibase_infra.models.workflow.model_workflow_execution_result import (
+    ModelWorkflowExecutionResult,
+)
+from omnibase_infra.models.workflow.model_workflow_progress_update import (
+    ModelWorkflowProgressUpdate,
+)
 
 from .models.model_workflow_coordinator_input import ModelWorkflowCoordinatorInput
 from .models.model_workflow_coordinator_output import ModelWorkflowCoordinatorOutput
 
 
-class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowCoordinatorInput, ModelWorkflowCoordinatorOutput]):
+class NodeWorkflowCoordinatorOrchestrator(
+    NodeOrchestratorService[
+        ModelWorkflowCoordinatorInput, ModelWorkflowCoordinatorOutput,
+    ],
+):
     """
     Workflow Coordinator Orchestrator Node.
 
@@ -44,19 +52,21 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             container: ONEX container for dependency injection
         """
         super().__init__(container)
-        self.logger = logging.getLogger(f"{__name__}.NodeWorkflowCoordinatorOrchestrator")
+        self.logger = logging.getLogger(
+            f"{__name__}.NodeWorkflowCoordinatorOrchestrator",
+        )
 
         # Workflow state management
-        self._active_workflows: Dict[UUID, Dict[str, Any]] = {}
-        self._workflow_progress: Dict[UUID, ModelWorkflowProgressUpdate] = {}
-        self._workflow_results: Dict[UUID, ModelWorkflowExecutionResult] = {}
+        self._active_workflows: dict[UUID, dict[str, Any]] = {}
+        self._workflow_progress: dict[UUID, ModelWorkflowProgressUpdate] = {}
+        self._workflow_results: dict[UUID, ModelWorkflowExecutionResult] = {}
 
         # Agent coordination state
-        self._coordinated_agents: Dict[UUID, List[Dict[str, Any]]] = {}
+        self._coordinated_agents: dict[UUID, list[dict[str, Any]]] = {}
         self._agent_coordination_health = "healthy"
 
         # Background task queue
-        self._background_tasks: List[Dict[str, Any]] = []
+        self._background_tasks: list[dict[str, Any]] = []
 
         # Metrics tracking
         self._coordination_metrics = ModelWorkflowCoordinationMetrics(
@@ -72,12 +82,14 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             performance_metrics={},
             resource_utilization={},
             error_statistics={},
-            last_updated=datetime.utcnow()
+            last_updated=datetime.utcnow(),
         )
 
         self.logger.info("Workflow Coordinator Orchestrator initialized")
 
-    async def process(self, input_data: ModelWorkflowCoordinatorInput) -> ModelWorkflowCoordinatorOutput:
+    async def process(
+        self, input_data: ModelWorkflowCoordinatorInput,
+    ) -> ModelWorkflowCoordinatorOutput:
         """Process workflow coordination request.
 
         Args:
@@ -92,7 +104,7 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
         try:
             self.logger.info(
                 f"Processing workflow coordination operation: {input_data.operation_type} "
-                f"(correlation_id: {input_data.correlation_id})"
+                f"(correlation_id: {input_data.correlation_id})",
             )
 
             # Route to appropriate operation handler
@@ -110,7 +122,7 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             if not handler:
                 raise OnexError(
                     f"Unsupported operation type: {input_data.operation_type}",
-                    CoreErrorCode.INVALID_OPERATION
+                    CoreErrorCode.INVALID_OPERATION,
                 )
 
             result = await handler(input_data)
@@ -119,24 +131,29 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             await self._update_coordination_metrics()
 
             self.logger.info(
-                f"Workflow coordination operation completed successfully: {input_data.operation_type}"
+                f"Workflow coordination operation completed successfully: {input_data.operation_type}",
             )
 
             return result
 
         except Exception as e:
             self.logger.error(
-                f"Workflow coordination operation failed: {input_data.operation_type} - {str(e)}"
+                f"Workflow coordination operation failed: {input_data.operation_type} - {e!s}",
             )
             raise OnexError(
-                f"Workflow coordination operation failed: {str(e)}",
-                CoreErrorCode.OPERATION_FAILED
+                f"Workflow coordination operation failed: {e!s}",
+                CoreErrorCode.OPERATION_FAILED,
             ) from e
 
-    async def _execute_workflow(self, input_data: ModelWorkflowCoordinatorInput) -> ModelWorkflowCoordinatorOutput:
+    async def _execute_workflow(
+        self, input_data: ModelWorkflowCoordinatorInput,
+    ) -> ModelWorkflowCoordinatorOutput:
         """Execute a workflow with coordination and progress tracking."""
         if not input_data.workflow_request:
-            raise OnexError("Workflow request is required for execution", CoreErrorCode.MISSING_REQUIRED_DATA)
+            raise OnexError(
+                "Workflow request is required for execution",
+                CoreErrorCode.MISSING_REQUIRED_DATA,
+            )
 
         workflow_id = input_data.workflow_request.workflow_id
 
@@ -147,7 +164,7 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             "status": "running",
             "current_step": 0,
             "total_steps": 5,  # Default, should be determined by workflow type
-            "agent_coordination_config": input_data.agent_coordination_config
+            "agent_coordination_config": input_data.agent_coordination_config,
         }
 
         # Initialize progress tracking
@@ -164,12 +181,14 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             agent_activities=[],
             performance_metrics={},
             warning_messages=[],
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
         try:
             # Simulate workflow execution with progress tracking
-            await self._simulate_workflow_execution(workflow_id, input_data.correlation_id)
+            await self._simulate_workflow_execution(
+                workflow_id, input_data.correlation_id,
+            )
 
             # Create execution result
             execution_result = ModelWorkflowExecutionResult(
@@ -179,13 +198,21 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
                 success=True,
                 steps_completed=5,
                 total_steps=5,
-                execution_duration_seconds=time.time() - self._active_workflows[workflow_id]["start_time"].timestamp(),
-                result_data={"workflow_type": input_data.workflow_request.workflow_type, "status": "success"},
-                agent_coordination_summary={"coordinated_agents": len(self._coordinated_agents.get(workflow_id, []))},
+                execution_duration_seconds=time.time()
+                - self._active_workflows[workflow_id]["start_time"].timestamp(),
+                result_data={
+                    "workflow_type": input_data.workflow_request.workflow_type,
+                    "status": "success",
+                },
+                agent_coordination_summary={
+                    "coordinated_agents": len(
+                        self._coordinated_agents.get(workflow_id, []),
+                    ),
+                },
                 progress_history=[self._workflow_progress[workflow_id].dict()],
                 sub_agent_results=[],
                 metrics={"execution_time": 0.5, "success_rate": 1.0},
-                completed_at=datetime.utcnow()
+                completed_at=datetime.utcnow(),
             )
 
             # Store result and cleanup active workflow
@@ -199,7 +226,7 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
                 correlation_id=input_data.correlation_id,
                 workflow_id=workflow_id,
                 execution_result=execution_result,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
             )
 
         except Exception as e:
@@ -212,19 +239,30 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
                 correlation_id=input_data.correlation_id,
                 execution_status="failed",
                 success=False,
-                steps_completed=self._workflow_progress.get(workflow_id, ModelWorkflowProgressUpdate(
-                    workflow_id=workflow_id, correlation_id=input_data.correlation_id,
-                    current_step=0, total_steps=5, step_name="", step_status="failed",
-                    progress_percentage=0.0, elapsed_time_seconds=0.0
-                )).current_step,
+                steps_completed=self._workflow_progress.get(
+                    workflow_id,
+                    ModelWorkflowProgressUpdate(
+                        workflow_id=workflow_id,
+                        correlation_id=input_data.correlation_id,
+                        current_step=0,
+                        total_steps=5,
+                        step_name="",
+                        step_status="failed",
+                        progress_percentage=0.0,
+                        elapsed_time_seconds=0.0,
+                    ),
+                ).current_step,
                 total_steps=5,
-                execution_duration_seconds=time.time() - self._active_workflows.get(workflow_id, {}).get("start_time", datetime.utcnow()).timestamp(),
+                execution_duration_seconds=time.time()
+                - self._active_workflows.get(workflow_id, {})
+                .get("start_time", datetime.utcnow())
+                .timestamp(),
                 error_details=str(e),
                 agent_coordination_summary={},
                 progress_history=[],
                 sub_agent_results=[],
                 metrics={},
-                completed_at=datetime.utcnow()
+                completed_at=datetime.utcnow(),
             )
 
             return ModelWorkflowCoordinatorOutput(
@@ -234,17 +272,19 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
                 workflow_id=workflow_id,
                 execution_result=error_result,
                 error_message=str(e),
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
             )
 
-    async def _simulate_workflow_execution(self, workflow_id: UUID, correlation_id: UUID):
+    async def _simulate_workflow_execution(
+        self, workflow_id: UUID, correlation_id: UUID,
+    ):
         """Simulate multi-step workflow execution with progress updates."""
         steps = [
             "Initialization",
             "Agent Coordination",
             "Task Execution",
             "Result Aggregation",
-            "Finalization"
+            "Finalization",
         ]
 
         for i, step_name in enumerate(steps):
@@ -259,10 +299,12 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
                 progress_percentage=((i + 1) / len(steps)) * 100,
                 elapsed_time_seconds=i * 0.1,
                 step_details={"step_index": i + 1},
-                agent_activities=[{"agent": f"agent-{j}", "status": "active"} for j in range(3)],
+                agent_activities=[
+                    {"agent": f"agent-{j}", "status": "active"} for j in range(3)
+                ],
                 performance_metrics={"step_duration": 0.1},
                 warning_messages=[],
-                updated_at=datetime.utcnow()
+                updated_at=datetime.utcnow(),
             )
 
             self._workflow_progress[workflow_id] = progress
@@ -274,14 +316,22 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             progress.step_status = "completed"
             self._workflow_progress[workflow_id] = progress
 
-    async def _get_progress(self, input_data: ModelWorkflowCoordinatorInput) -> ModelWorkflowCoordinatorOutput:
+    async def _get_progress(
+        self, input_data: ModelWorkflowCoordinatorInput,
+    ) -> ModelWorkflowCoordinatorOutput:
         """Get workflow progress information."""
         if not input_data.workflow_id:
-            raise OnexError("Workflow ID is required for progress query", CoreErrorCode.MISSING_REQUIRED_DATA)
+            raise OnexError(
+                "Workflow ID is required for progress query",
+                CoreErrorCode.MISSING_REQUIRED_DATA,
+            )
 
         progress = self._workflow_progress.get(input_data.workflow_id)
         if not progress:
-            raise OnexError(f"No progress found for workflow {input_data.workflow_id}", CoreErrorCode.RESOURCE_NOT_FOUND)
+            raise OnexError(
+                f"No progress found for workflow {input_data.workflow_id}",
+                CoreErrorCode.RESOURCE_NOT_FOUND,
+            )
 
         return ModelWorkflowCoordinatorOutput(
             success=True,
@@ -289,16 +339,24 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             correlation_id=input_data.correlation_id,
             workflow_id=input_data.workflow_id,
             progress_update=progress,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
-    async def _cancel_workflow(self, input_data: ModelWorkflowCoordinatorInput) -> ModelWorkflowCoordinatorOutput:
+    async def _cancel_workflow(
+        self, input_data: ModelWorkflowCoordinatorInput,
+    ) -> ModelWorkflowCoordinatorOutput:
         """Cancel an active workflow."""
         if not input_data.workflow_id:
-            raise OnexError("Workflow ID is required for cancellation", CoreErrorCode.MISSING_REQUIRED_DATA)
+            raise OnexError(
+                "Workflow ID is required for cancellation",
+                CoreErrorCode.MISSING_REQUIRED_DATA,
+            )
 
         if input_data.workflow_id not in self._active_workflows:
-            raise OnexError(f"Workflow {input_data.workflow_id} not found or not active", CoreErrorCode.RESOURCE_NOT_FOUND)
+            raise OnexError(
+                f"Workflow {input_data.workflow_id} not found or not active",
+                CoreErrorCode.RESOURCE_NOT_FOUND,
+            )
 
         # Remove from active workflows
         self._active_workflows.pop(input_data.workflow_id, None)
@@ -309,10 +367,12 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             operation_type="cancel_workflow",
             correlation_id=input_data.correlation_id,
             workflow_id=input_data.workflow_id,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
-    async def _get_metrics(self, input_data: ModelWorkflowCoordinatorInput) -> ModelWorkflowCoordinatorOutput:
+    async def _get_metrics(
+        self, input_data: ModelWorkflowCoordinatorInput,
+    ) -> ModelWorkflowCoordinatorOutput:
         """Get current coordination metrics."""
         await self._update_coordination_metrics()
 
@@ -321,31 +381,37 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             operation_type="get_metrics",
             correlation_id=input_data.correlation_id,
             coordination_metrics=self._coordination_metrics,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
-    async def _list_active_workflows(self, input_data: ModelWorkflowCoordinatorInput) -> ModelWorkflowCoordinatorOutput:
+    async def _list_active_workflows(
+        self, input_data: ModelWorkflowCoordinatorInput,
+    ) -> ModelWorkflowCoordinatorOutput:
         """List all currently active workflows."""
         active_workflows = []
         for workflow_id, workflow_data in self._active_workflows.items():
-            active_workflows.append({
-                "workflow_id": str(workflow_id),
-                "workflow_type": workflow_data["request"].workflow_type,
-                "start_time": workflow_data["start_time"].isoformat(),
-                "status": workflow_data["status"],
-                "current_step": workflow_data["current_step"],
-                "total_steps": workflow_data["total_steps"]
-            })
+            active_workflows.append(
+                {
+                    "workflow_id": str(workflow_id),
+                    "workflow_type": workflow_data["request"].workflow_type,
+                    "start_time": workflow_data["start_time"].isoformat(),
+                    "status": workflow_data["status"],
+                    "current_step": workflow_data["current_step"],
+                    "total_steps": workflow_data["total_steps"],
+                },
+            )
 
         return ModelWorkflowCoordinatorOutput(
             success=True,
             operation_type="list_active_workflows",
             correlation_id=input_data.correlation_id,
             active_workflows=active_workflows,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
-    async def _coordinate_agents(self, input_data: ModelWorkflowCoordinatorInput) -> ModelWorkflowCoordinatorOutput:
+    async def _coordinate_agents(
+        self, input_data: ModelWorkflowCoordinatorInput,
+    ) -> ModelWorkflowCoordinatorOutput:
         """Coordinate sub-agent fleet for workflow execution."""
         coordination_config = input_data.agent_coordination_config or {}
         max_agents = coordination_config.get("max_parallel_agents", 5)
@@ -357,14 +423,14 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
                 "agent_id": f"agent-{i}",
                 "status": "coordinated",
                 "coordination_time": datetime.utcnow().isoformat(),
-                "capabilities": ["workflow_execution", "task_processing"]
+                "capabilities": ["workflow_execution", "task_processing"],
             }
             coordinated_agents.append(agent_info)
 
         coordination_status = {
             "coordinated_agents": len(coordinated_agents),
             "coordination_health": self._agent_coordination_health,
-            "last_coordination_timestamp": datetime.utcnow().isoformat()
+            "last_coordination_timestamp": datetime.utcnow().isoformat(),
         }
 
         return ModelWorkflowCoordinatorOutput(
@@ -372,10 +438,12 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             operation_type="coordinate_agents",
             correlation_id=input_data.correlation_id,
             agent_coordination_status=coordination_status,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
-    async def _execute_background_task(self, input_data: ModelWorkflowCoordinatorInput) -> ModelWorkflowCoordinatorOutput:
+    async def _execute_background_task(
+        self, input_data: ModelWorkflowCoordinatorInput,
+    ) -> ModelWorkflowCoordinatorOutput:
         """Execute a background task with result aggregation."""
         task_id = str(uuid4())
 
@@ -385,7 +453,7 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             "correlation_id": input_data.correlation_id,
             "created_at": datetime.utcnow().isoformat(),
             "status": "queued",
-            "result": None
+            "result": None,
         }
 
         self._background_tasks.append(background_task)
@@ -398,13 +466,15 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
             operation_type="execute_background_task",
             correlation_id=input_data.correlation_id,
             result_data={"task_id": task_id, "status": "queued"},
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
 
     async def _process_background_task(self, task_id: str):
         """Process a background task asynchronously."""
         # Find the task
-        task = next((t for t in self._background_tasks if t["task_id"] == task_id), None)
+        task = next(
+            (t for t in self._background_tasks if t["task_id"] == task_id), None,
+        )
         if not task:
             return
 
@@ -413,21 +483,28 @@ class NodeWorkflowCoordinatorOrchestrator(NodeOrchestratorService[ModelWorkflowC
 
         # Update task status
         task["status"] = "completed"
-        task["result"] = {"processed_at": datetime.utcnow().isoformat(), "success": True}
+        task["result"] = {
+            "processed_at": datetime.utcnow().isoformat(),
+            "success": True,
+        }
 
     async def _update_coordination_metrics(self):
         """Update internal coordination metrics."""
         self._coordination_metrics.active_workflows = len(self._active_workflows)
-        self._coordination_metrics.background_tasks_queue_size = len(self._background_tasks)
-        self._coordination_metrics.sub_agent_fleet_utilization = min(1.0, len(self._active_workflows) / 10.0)
+        self._coordination_metrics.background_tasks_queue_size = len(
+            self._background_tasks,
+        )
+        self._coordination_metrics.sub_agent_fleet_utilization = min(
+            1.0, len(self._active_workflows) / 10.0,
+        )
         self._coordination_metrics.last_updated = datetime.utcnow()
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """Perform health check for the workflow coordinator."""
         return {
             "status": "healthy",
             "active_workflows": len(self._active_workflows),
             "background_tasks": len(self._background_tasks),
             "agent_coordination_health": self._agent_coordination_health,
-            "last_updated": datetime.utcnow().isoformat()
+            "last_updated": datetime.utcnow().isoformat(),
         }

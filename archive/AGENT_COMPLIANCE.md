@@ -30,7 +30,7 @@ This PR (RedPanda Event Bus Integration) was implemented before full agent-drive
   - Agent selection and coordination
   - Resource allocation and progress tracking
 
-# INFRASTRUCTURE SPECIALISTS 
+# INFRASTRUCTURE SPECIALISTS
 > Use agent-devops-infrastructure for container orchestration changes
   - Docker Compose RedPanda configuration
   - Service discovery and networking setup

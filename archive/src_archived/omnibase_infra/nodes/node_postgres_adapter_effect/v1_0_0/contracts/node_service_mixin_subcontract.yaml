@@ -180,7 +180,7 @@ health_monitoring:
   health_check_integration:
     delegate_to_mixin: true
     mixin_class: "MixinHealthCheck"
-    health_check_frequency: 30000  # milliseconds
+    health_check_frequency: 30000 # milliseconds
 
   monitoring_metrics:
     service_metrics:

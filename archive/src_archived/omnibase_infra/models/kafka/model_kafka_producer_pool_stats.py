@@ -19,15 +19,24 @@ class ModelKafkaProducerStats(BaseModel):
     messages_sent: int = Field(ge=0, description="Total messages sent by this producer")
     messages_failed: int = Field(ge=0, description="Total failed messages")
     bytes_sent: int = Field(ge=0, description="Total bytes sent")
-    average_batch_size: float = Field(ge=0, description="Average batch size in messages")
-    average_response_time_ms: float = Field(ge=0, description="Average response time in milliseconds")
-    last_activity: datetime | None = Field(default=None, description="Last activity timestamp")
+    average_batch_size: float = Field(
+        ge=0, description="Average batch size in messages",
+    )
+    average_response_time_ms: float = Field(
+        ge=0, description="Average response time in milliseconds",
+    )
+    last_activity: datetime | None = Field(
+        default=None, description="Last activity timestamp",
+    )
     error_count: int = Field(ge=0, description="Total error count")
     last_error: str | None = Field(default=None, description="Last error message")
-    connection_state: str = Field(description="Connection state: connected, connecting, disconnected")
+    connection_state: str = Field(
+        description="Connection state: connected, connecting, disconnected",
+    )
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
@@ -40,18 +49,23 @@ class ModelKafkaTopicStats(BaseModel):
     messages_sent: int = Field(ge=0, description="Total messages sent to topic")
     messages_failed: int = Field(ge=0, description="Total failed messages for topic")
     bytes_sent: int = Field(ge=0, description="Total bytes sent to topic")
-    average_message_size: float = Field(ge=0, description="Average message size in bytes")
-    last_activity: datetime | None = Field(default=None, description="Last activity timestamp")
+    average_message_size: float = Field(
+        ge=0, description="Average message size in bytes",
+    )
+    last_activity: datetime | None = Field(
+        default=None, description="Last activity timestamp",
+    )
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
 
 class ModelKafkaProducerPoolStats(BaseModel):
     """Kafka producer pool statistics and health information.
-    
+
     Provides comprehensive statistics for Kafka producer pool monitoring,
     including individual producer stats, topic statistics, and overall pool health.
     Used for health endpoint exposure and Prometheus metrics integration.
@@ -66,14 +80,26 @@ class ModelKafkaProducerPoolStats(BaseModel):
     # Pool configuration
     min_pool_size: int = Field(ge=0, description="Minimum pool size")
     max_pool_size: int = Field(ge=1, description="Maximum pool size")
-    pool_utilization: float = Field(ge=0, le=100, description="Pool utilization percentage")
+    pool_utilization: float = Field(
+        ge=0, le=100, description="Pool utilization percentage",
+    )
 
     # Aggregate statistics
-    total_messages_sent: int = Field(ge=0, description="Total messages sent across all producers")
-    total_messages_failed: int = Field(ge=0, description="Total failed messages across all producers")
-    total_bytes_sent: int = Field(ge=0, description="Total bytes sent across all producers")
-    average_throughput_mps: float = Field(ge=0, description="Average throughput in messages per second")
-    average_response_time_ms: float = Field(ge=0, description="Average response time across all producers")
+    total_messages_sent: int = Field(
+        ge=0, description="Total messages sent across all producers",
+    )
+    total_messages_failed: int = Field(
+        ge=0, description="Total failed messages across all producers",
+    )
+    total_bytes_sent: int = Field(
+        ge=0, description="Total bytes sent across all producers",
+    )
+    average_throughput_mps: float = Field(
+        ge=0, description="Average throughput in messages per second",
+    )
+    average_response_time_ms: float = Field(
+        ge=0, description="Average response time across all producers",
+    )
 
     # Health indicators
     pool_health: str = Field(description="Pool health: healthy, degraded, unhealthy")
@@ -82,7 +108,9 @@ class ModelKafkaProducerPoolStats(BaseModel):
 
     # Time-based metrics
     uptime_seconds: int = Field(ge=0, description="Pool uptime in seconds")
-    last_activity: datetime | None = Field(default=None, description="Last pool activity")
+    last_activity: datetime | None = Field(
+        default=None, description="Last pool activity",
+    )
     created_at: datetime = Field(description="Pool creation timestamp")
 
     # Detailed statistics (optional for detailed monitoring)
@@ -149,6 +177,7 @@ class ModelKafkaProducerPoolStats(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
         schema_extra = {

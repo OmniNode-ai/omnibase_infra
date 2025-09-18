@@ -1,8 +1,8 @@
 contract_version: "1.0.0"
-node_version: "1.0.0" 
+node_version: "1.0.0"
 version: "1.0.0"
 node_name: "node_event_bus_circuit_breaker_compute"
-contract_name: "NodeEventBusCircuitBreakerComputeContract" 
+contract_name: "NodeEventBusCircuitBreakerComputeContract"
 name: "node_event_bus_circuit_breaker_compute"
 node_type: "COMPUTE"
 description: "Event Bus Circuit Breaker for RedPanda reliability with fail-fast behavior and graceful degradation"
@@ -16,24 +16,24 @@ dependencies:
     type: "model"
     class_name: "ModelONEXContainer"
     module: "omnibase_core.model.model_onex_container"
-  
+
   # Core ONEX event model
   - name: "model_onex_event"
     type: "model"
     class_name: "ModelOnexEvent"
     module: "omnibase_core.model.core.model_onex_event"
-  
+
   # Core circuit breaker models
   - name: "model_circuit_breaker_state"
     type: "model"
     class_name: "ModelCircuitBreakerState"
     module: "omnibase_core.models.resilience.model_circuit_breaker_state"
-  
+
   - name: "model_circuit_breaker"
     type: "model"
     class_name: "ModelCircuitBreaker"
     module: "omnibase_core.models.configuration.model_circuit_breaker"
-  
+
   - name: "model_circuit_breaker_metrics"
     type: "model"
     class_name: "ModelCircuitBreakerMetrics"
@@ -111,5 +111,5 @@ definitions:
     description: "Circuit breaker state enumeration"
 
   ModelCircuitBreakerMetrics:
-    type: "object" 
+    type: "object"
     description: "Circuit breaker metrics model (external dependency)"

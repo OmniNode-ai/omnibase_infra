@@ -21,11 +21,13 @@ class ModelPostgresAdapterInput(BaseModel):
     operation_type: EnumPostgresOperationType = Field(description="Type of operation")
 
     query_request: ModelPostgresQueryRequest | None = Field(
-        default=None, description="Query request payload (when operation_type is 'query')",
+        default=None,
+        description="Query request payload (when operation_type is 'query')",
     )
 
     health_request: ModelPostgresHealthRequest | None = Field(
-        default=None, description="Health check request payload (when operation_type is 'health_check')",
+        default=None,
+        description="Health check request payload (when operation_type is 'health_check')",
     )
 
     correlation_id: UUID = Field(description="Request correlation ID for tracing")
@@ -33,5 +35,6 @@ class ModelPostgresAdapterInput(BaseModel):
     timestamp: float = Field(description="Request timestamp as Unix timestamp", ge=0)
 
     context: ModelPostgresContext | None = Field(
-        default=None, description="Additional request context",
+        default=None,
+        description="Additional request context",
     )

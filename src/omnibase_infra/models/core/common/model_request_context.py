@@ -1,6 +1,5 @@
 """Request context model for strongly typed context information."""
 
-
 from pydantic import BaseModel, Field
 
 

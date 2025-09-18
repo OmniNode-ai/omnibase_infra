@@ -27,6 +27,7 @@ try:
         generate_latest,
         start_http_server,
     )
+
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     # Graceful degradation if prometheus_client is not installed
@@ -34,9 +35,9 @@ except ImportError:
     Counter = Histogram = Gauge = Info = CollectorRegistry = None
 
 
-
 class MetricType(Enum):
     """Types of Prometheus metrics."""
+
     COUNTER = "counter"
     GAUGE = "gauge"
     HISTOGRAM = "histogram"
@@ -46,6 +47,7 @@ class MetricType(Enum):
 @dataclass
 class MetricDefinition:
     """Definition for a Prometheus metric."""
+
     name: str
     description: str
     metric_type: MetricType
@@ -56,7 +58,7 @@ class MetricDefinition:
 class ONEXPrometheusMetrics:
     """
     ONEX Prometheus metrics collector for infrastructure monitoring.
-    
+
     Provides centralized metrics collection with automatic instrumentation
     for infrastructure components and business processes.
     """
@@ -64,14 +66,16 @@ class ONEXPrometheusMetrics:
     def __init__(self, registry: CollectorRegistry | None = None):
         """
         Initialize Prometheus metrics collector.
-        
+
         Args:
             registry: Custom Prometheus registry (uses default if None)
         """
         self._logger = logging.getLogger(__name__)
 
         if not PROMETHEUS_AVAILABLE:
-            self._logger.warning("Prometheus client not available, metrics collection disabled")
+            self._logger.warning(
+                "Prometheus client not available, metrics collection disabled",
+            )
             self._enabled = False
             return
 
@@ -102,7 +106,20 @@ class ONEXPrometheusMetrics:
                 "Time spent publishing Kafka messages",
                 MetricType.HISTOGRAM,
                 ["topic", "client_id"],
-                buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+                buckets=[
+                    0.001,
+                    0.005,
+                    0.01,
+                    0.025,
+                    0.05,
+                    0.1,
+                    0.25,
+                    0.5,
+                    1.0,
+                    2.5,
+                    5.0,
+                    10.0,
+                ],
             ),
             MetricDefinition(
                 "kafka_circuit_breaker_state",
@@ -137,7 +154,19 @@ class ONEXPrometheusMetrics:
                 "Time spent executing database queries",
                 MetricType.HISTOGRAM,
                 ["operation", "table", "status"],
-                buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+                buckets=[
+                    0.001,
+                    0.005,
+                    0.01,
+                    0.025,
+                    0.05,
+                    0.1,
+                    0.25,
+                    0.5,
+                    1.0,
+                    2.5,
+                    5.0,
+                ],
             ),
             MetricDefinition(
                 "database_queries_total",
@@ -194,7 +223,9 @@ class ONEXPrometheusMetrics:
         ]
 
         # Register all metrics
-        all_metrics = kafka_metrics + database_metrics + outbox_metrics + security_metrics
+        all_metrics = (
+            kafka_metrics + database_metrics + outbox_metrics + security_metrics
+        )
 
         for metric_def in all_metrics:
             self._register_metric(metric_def)
@@ -243,7 +274,9 @@ class ONEXPrometheusMetrics:
         except Exception as e:
             self._logger.error(f"Failed to register metric {metric_def.name}: {e!s}")
 
-    def record_kafka_message_published(self, topic: str, client_id: str, status: str, duration_seconds: float):
+    def record_kafka_message_published(
+        self, topic: str, client_id: str, status: str, duration_seconds: float,
+    ):
         """Record Kafka message publishing metrics."""
         if not self._enabled:
             return
@@ -257,7 +290,9 @@ class ONEXPrometheusMetrics:
             # Record duration
             histogram = self._metrics.get("kafka_publish_duration_seconds")
             if histogram:
-                histogram.labels(topic=topic, client_id=client_id).observe(duration_seconds)
+                histogram.labels(topic=topic, client_id=client_id).observe(
+                    duration_seconds,
+                )
 
         except Exception as e:
             self._logger.error(f"Failed to record Kafka metrics: {e!s}")
@@ -312,7 +347,9 @@ class ONEXPrometheusMetrics:
         except Exception as e:
             self._logger.error(f"Failed to set database connection metrics: {e!s}")
 
-    def record_database_query(self, operation: str, table: str, status: str, duration_seconds: float):
+    def record_database_query(
+        self, operation: str, table: str, status: str, duration_seconds: float,
+    ):
         """Record database query metrics."""
         if not self._enabled:
             return
@@ -326,7 +363,9 @@ class ONEXPrometheusMetrics:
             # Record duration
             histogram = self._metrics.get("database_query_duration_seconds")
             if histogram:
-                histogram.labels(operation=operation, table=table, status=status).observe(duration_seconds)
+                histogram.labels(
+                    operation=operation, table=table, status=status,
+                ).observe(duration_seconds)
 
         except Exception as e:
             self._logger.error(f"Failed to record database metrics: {e!s}")
@@ -355,7 +394,9 @@ class ONEXPrometheusMetrics:
         except Exception as e:
             self._logger.error(f"Failed to record outbox processed metrics: {e!s}")
 
-    def record_outbox_processing(self, schema: str, duration_seconds: float, batch_size: int):
+    def record_outbox_processing(
+        self, schema: str, duration_seconds: float, batch_size: int,
+    ):
         """Record outbox processing metrics."""
         if not self._enabled:
             return
@@ -401,7 +442,7 @@ class ONEXPrometheusMetrics:
     def get_metrics_text(self) -> str:
         """
         Get metrics in Prometheus text format.
-        
+
         Returns:
             Metrics in Prometheus exposition format
         """
@@ -417,15 +458,17 @@ class ONEXPrometheusMetrics:
     def start_metrics_server(self, port: int = 8000) -> bool:
         """
         Start HTTP metrics server.
-        
+
         Args:
             port: Port to serve metrics on
-            
+
         Returns:
             True if server started successfully
         """
         if not self._enabled:
-            self._logger.warning("Cannot start metrics server - Prometheus not available")
+            self._logger.warning(
+                "Cannot start metrics server - Prometheus not available",
+            )
             return False
 
         try:
@@ -452,7 +495,7 @@ _metrics_collector: ONEXPrometheusMetrics | None = None
 def get_metrics_collector() -> ONEXPrometheusMetrics:
     """
     Get global metrics collector instance.
-    
+
     Returns:
         ONEXPrometheusMetrics singleton instance
     """
@@ -467,10 +510,10 @@ def get_metrics_collector() -> ONEXPrometheusMetrics:
 def initialize_metrics_server(port: int = 8000) -> bool:
     """
     Initialize and start the metrics server.
-    
+
     Args:
         port: Port to serve metrics on
-        
+
     Returns:
         True if server started successfully
     """

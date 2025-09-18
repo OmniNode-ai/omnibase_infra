@@ -1,6 +1,5 @@
 """Strongly typed PostgreSQL query data model."""
 
-
 from pydantic import BaseModel, Field
 
 

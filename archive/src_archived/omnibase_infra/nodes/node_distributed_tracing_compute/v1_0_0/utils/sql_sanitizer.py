@@ -16,9 +16,7 @@ from sqlparse.tokens import (
     Name,
     Number,
 )
-from sqlparse.tokens import (
-    String as StringToken,
-)
+from sqlparse.tokens import String as StringToken
 
 
 class SqlSanitizer:
@@ -55,7 +53,9 @@ class SqlSanitizer:
 
         # Validate input length to prevent resource exhaustion
         if len(query) > 10000:  # 10KB limit
-            SqlSanitizer._logger.warning(f"Query exceeds size limit: {len(query)} chars")
+            SqlSanitizer._logger.warning(
+                f"Query exceeds size limit: {len(query)} chars",
+            )
             return f"-- QUERY TOO LARGE ({len(query)} chars) --"
 
         try:
@@ -92,7 +92,10 @@ class SqlSanitizer:
                 if SqlSanitizer._is_sensitive_literal(token):
                     # Replace sensitive literals with placeholder
                     sanitized_tokens.append("?")
-                elif token.ttype in (Keyword, Name) or token.value.upper() in SqlSanitizer._get_sql_keywords():
+                elif (
+                    token.ttype in (Keyword, Name)
+                    or token.value.upper() in SqlSanitizer._get_sql_keywords()
+                ):
                     # Preserve keywords and identifiers (case insensitive)
                     sanitized_tokens.append(token.value)
                 elif token.ttype is None and token.value.strip():
@@ -105,7 +108,7 @@ class SqlSanitizer:
 
             # Truncate if necessary
             if len(sanitized) > max_length:
-                sanitized = sanitized[:max_length - 3] + "..."
+                sanitized = sanitized[: max_length - 3] + "..."
 
             return sanitized
 
@@ -115,7 +118,6 @@ class SqlSanitizer:
                 message=f"SQL query sanitization failed: {e!s}",
                 error_code=CoreErrorCode.PROCESSING_ERROR,
             ) from e
-
 
     @staticmethod
     def _is_sensitive_literal(token) -> bool:
@@ -130,15 +132,15 @@ class SqlSanitizer:
         """
         # Check for various literal types that should be sanitized
         sensitive_types = [
-            Literal.String.Single,      # 'string'
-            Literal.String.Symbol,      # "string"
-            Literal.Number.Integer,     # 123
-            Literal.Number.Float,       # 123.45
-            Literal.Number.Hexadecimal, # 0xABC
-            Number.Integer,             # Alternative number tokens
+            Literal.String.Single,  # 'string'
+            Literal.String.Symbol,  # "string"
+            Literal.Number.Integer,  # 123
+            Literal.Number.Float,  # 123.45
+            Literal.Number.Hexadecimal,  # 0xABC
+            Number.Integer,  # Alternative number tokens
             Number.Float,
             Number.Hexadecimal,
-            StringToken.Single,         # Alternative string tokens
+            StringToken.Single,  # Alternative string tokens
             StringToken.Symbol,
         ]
 
@@ -153,15 +155,79 @@ class SqlSanitizer:
             Set of SQL keywords to preserve in sanitized queries
         """
         return {
-            "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP",
-            "ALTER", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "ON", "GROUP", "ORDER",
-            "BY", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "AS",
-            "DISTINCT", "ALL", "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE",
-            "IS", "NULL", "TRUE", "FALSE", "CASE", "WHEN", "THEN", "ELSE", "END",
-            "IF", "COALESCE", "NULLIF", "CAST", "CONVERT", "COUNT", "SUM", "AVG",
-            "MIN", "MAX", "FIRST", "LAST", "TOP", "INTO", "VALUES", "SET", "TABLE",
-            "INDEX", "VIEW", "PROCEDURE", "FUNCTION", "TRIGGER", "DATABASE", "SCHEMA",
-            "GRANT", "REVOKE", "COMMIT", "ROLLBACK", "BEGIN", "TRANSACTION",
+            "SELECT",
+            "FROM",
+            "WHERE",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "CREATE",
+            "DROP",
+            "ALTER",
+            "JOIN",
+            "LEFT",
+            "RIGHT",
+            "INNER",
+            "OUTER",
+            "ON",
+            "GROUP",
+            "ORDER",
+            "BY",
+            "HAVING",
+            "LIMIT",
+            "OFFSET",
+            "UNION",
+            "INTERSECT",
+            "EXCEPT",
+            "AS",
+            "DISTINCT",
+            "ALL",
+            "AND",
+            "OR",
+            "NOT",
+            "IN",
+            "EXISTS",
+            "BETWEEN",
+            "LIKE",
+            "IS",
+            "NULL",
+            "TRUE",
+            "FALSE",
+            "CASE",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+            "IF",
+            "COALESCE",
+            "NULLIF",
+            "CAST",
+            "CONVERT",
+            "COUNT",
+            "SUM",
+            "AVG",
+            "MIN",
+            "MAX",
+            "FIRST",
+            "LAST",
+            "TOP",
+            "INTO",
+            "VALUES",
+            "SET",
+            "TABLE",
+            "INDEX",
+            "VIEW",
+            "PROCEDURE",
+            "FUNCTION",
+            "TRIGGER",
+            "DATABASE",
+            "SCHEMA",
+            "GRANT",
+            "REVOKE",
+            "COMMIT",
+            "ROLLBACK",
+            "BEGIN",
+            "TRANSACTION",
         }
 
     @staticmethod
@@ -176,7 +242,7 @@ class SqlSanitizer:
             Query with normalized whitespace
         """
         import re
+
         # Replace multiple whitespace with single space
         cleaned = re.sub(r"\s+", " ", query.strip())
         return cleaned
-

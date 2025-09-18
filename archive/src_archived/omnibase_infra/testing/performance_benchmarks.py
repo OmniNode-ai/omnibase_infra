@@ -26,6 +26,7 @@ import psutil
 @dataclass
 class PerformanceMetrics:
     """Container for performance benchmark results."""
+
     test_name: str
     total_operations: int = 0
     successful_operations: int = 0
@@ -69,16 +70,21 @@ class PerformanceMetrics:
 
         # Calculate throughput
         if self.total_duration_seconds > 0:
-            self.throughput_ops_per_second = self.successful_operations / self.total_duration_seconds
+            self.throughput_ops_per_second = (
+                self.successful_operations / self.total_duration_seconds
+            )
 
 
 @dataclass
 class BenchmarkConfiguration:
     """Configuration for performance benchmarks."""
+
     duration_seconds: int = 30
     concurrent_operations: int = 10
     batch_sizes: list[int] = field(default_factory=lambda: [1, 10, 50, 100])
-    message_sizes: list[int] = field(default_factory=lambda: [1024, 4096, 16384, 65536])  # bytes
+    message_sizes: list[int] = field(
+        default_factory=lambda: [1024, 4096, 16384, 65536],
+    )  # bytes
     warm_up_duration: int = 5
     cool_down_duration: int = 2
     resource_monitoring_interval: float = 0.1
@@ -87,7 +93,7 @@ class BenchmarkConfiguration:
 class InfrastructurePerformanceBenchmarks:
     """
     Comprehensive performance benchmark suite for ONEX infrastructure.
-    
+
     Benchmarks:
     - Kafka message publishing throughput and latency
     - Database query performance and connection pooling
@@ -96,10 +102,12 @@ class InfrastructurePerformanceBenchmarks:
     - Memory usage and resource consumption
     """
 
-    def __init__(self, kafka_adapter=None, postgres_outbox=None, connection_manager=None):
+    def __init__(
+        self, kafka_adapter=None, postgres_outbox=None, connection_manager=None,
+    ):
         """
         Initialize performance benchmark suite.
-        
+
         Args:
             kafka_adapter: Kafka adapter instance for messaging benchmarks
             postgres_outbox: PostgreSQL outbox instance for outbox benchmarks
@@ -120,7 +128,7 @@ class InfrastructurePerformanceBenchmarks:
     async def run_full_benchmark_suite(self) -> dict[str, Any]:
         """
         Run complete performance benchmark suite.
-        
+
         Returns:
             Comprehensive benchmark results with recommendations
         """
@@ -147,7 +155,9 @@ class InfrastructurePerformanceBenchmarks:
                     try:
                         await benchmark_func()
                     except Exception as e:
-                        self._logger.error(f"Benchmark '{benchmark_name}' failed: {e!s}")
+                        self._logger.error(
+                            f"Benchmark '{benchmark_name}' failed: {e!s}",
+                        )
 
                         # Create error metrics for failed benchmark
                         error_metrics = PerformanceMetrics(test_name=benchmark_name)
@@ -165,8 +175,10 @@ class InfrastructurePerformanceBenchmarks:
             # Generate comprehensive report
             report = {
                 "summary": self._generate_benchmark_summary(total_duration),
-                "detailed_results": {name: self._serialize_metrics(metrics)
-                                   for name, metrics in self._benchmark_results.items()},
+                "detailed_results": {
+                    name: self._serialize_metrics(metrics)
+                    for name, metrics in self._benchmark_results.items()
+                },
                 "resource_analysis": self._analyze_resource_usage(),
                 "performance_recommendations": self._generate_performance_recommendations(),
                 "benchmark_configuration": self._serialize_config(),
@@ -183,7 +195,9 @@ class InfrastructurePerformanceBenchmarks:
     async def _benchmark_kafka_messaging(self):
         """Benchmark Kafka message publishing performance."""
         if not self._kafka_adapter:
-            self._logger.warning("Kafka adapter not available, skipping Kafka benchmarks")
+            self._logger.warning(
+                "Kafka adapter not available, skipping Kafka benchmarks",
+            )
             return
 
         for batch_size in self._config.batch_sizes:
@@ -204,7 +218,9 @@ class InfrastructurePerformanceBenchmarks:
                 tasks = []
                 for _ in range(batch_size):
                     task = asyncio.create_task(
-                        self._timed_kafka_publish("benchmark_topic", test_payload, metrics),
+                        self._timed_kafka_publish(
+                            "benchmark_topic", test_payload, metrics,
+                        ),
                     )
                     tasks.append(task)
 
@@ -225,17 +241,22 @@ class InfrastructurePerformanceBenchmarks:
     async def _benchmark_database_operations(self):
         """Benchmark database query and transaction performance."""
         if not self._connection_manager:
-            self._logger.warning("Connection manager not available, skipping DB benchmarks")
+            self._logger.warning(
+                "Connection manager not available, skipping DB benchmarks",
+            )
             return
 
         operations = [
             ("select_simple", "SELECT 1"),
-            ("select_with_join", """
-                SELECT u.id, u.name, p.title 
-                FROM users u 
-                LEFT JOIN posts p ON u.id = p.user_id 
+            (
+                "select_with_join",
+                """
+                SELECT u.id, u.name, p.title
+                FROM users u
+                LEFT JOIN posts p ON u.id = p.user_id
                 LIMIT 100
-            """),
+            """,
+            ),
             ("insert_batch", "INSERT INTO test_table (data) VALUES ($1)"),
         ]
 
@@ -266,7 +287,9 @@ class InfrastructurePerformanceBenchmarks:
     async def _benchmark_outbox_processing(self):
         """Benchmark outbox event processing performance."""
         if not self._postgres_outbox:
-            self._logger.warning("Outbox processor not available, skipping outbox benchmarks")
+            self._logger.warning(
+                "Outbox processor not available, skipping outbox benchmarks",
+            )
             return
 
         for batch_size in [10, 50, 100, 250]:
@@ -285,7 +308,9 @@ class InfrastructurePerformanceBenchmarks:
                     await self._postgres_outbox.process_pending_events()
                     metrics.successful_operations = batch_size
                 else:
-                    self._logger.warning("Outbox processor missing process_pending_events method")
+                    self._logger.warning(
+                        "Outbox processor missing process_pending_events method",
+                    )
 
             except Exception as e:
                 metrics.failed_operations = batch_size
@@ -308,8 +333,7 @@ class InfrastructurePerformanceBenchmarks:
 
         # Test end-to-end processing: outbox -> kafka -> consumer
         test_events = [
-            {"event_type": "test_event", "data": f"test_payload_{i}"}
-            for i in range(20)
+            {"event_type": "test_event", "data": f"test_payload_{i}"} for i in range(20)
         ]
 
         start_time = time.perf_counter()
@@ -330,7 +354,9 @@ class InfrastructurePerformanceBenchmarks:
 
             except Exception as e:
                 metrics.failed_operations += 1
-                metrics.error_types[type(e).__name__] = metrics.error_types.get(type(e).__name__, 0) + 1
+                metrics.error_types[type(e).__name__] = (
+                    metrics.error_types.get(type(e).__name__, 0) + 1
+                )
 
         metrics.total_duration_seconds = time.perf_counter() - start_time
         metrics.calculate_statistics()
@@ -357,7 +383,9 @@ class InfrastructurePerformanceBenchmarks:
         if self._connection_manager:
             for i in range(self._config.concurrent_operations // 2):
                 task = asyncio.create_task(
-                    self._sustained_database_operations(f"load_test_db_{i}", 10, metrics),
+                    self._sustained_database_operations(
+                        f"load_test_db_{i}", 10, metrics,
+                    ),
                 )
                 concurrent_tasks.append(task)
 
@@ -394,7 +422,9 @@ class InfrastructurePerformanceBenchmarks:
 
             if self._kafka_adapter and i % 10 == 0:
                 try:
-                    await self._timed_kafka_publish("memory_test", large_payload, metrics)
+                    await self._timed_kafka_publish(
+                        "memory_test", large_payload, metrics,
+                    )
                 except Exception:
                     pass  # Memory test, errors expected under load
 
@@ -407,8 +437,9 @@ class InfrastructurePerformanceBenchmarks:
 
         self._benchmark_results[test_name] = metrics
 
-    async def _timed_kafka_publish(self, topic: str, payload: dict[str, Any],
-                                 metrics: PerformanceMetrics):
+    async def _timed_kafka_publish(
+        self, topic: str, payload: dict[str, Any], metrics: PerformanceMetrics,
+    ):
         """Publish message to Kafka and record timing metrics."""
         start_time = time.perf_counter()
 
@@ -431,8 +462,9 @@ class InfrastructurePerformanceBenchmarks:
 
         metrics.total_operations += 1
 
-    async def _timed_database_operation(self, query: str, param: str,
-                                      metrics: PerformanceMetrics):
+    async def _timed_database_operation(
+        self, query: str, param: str, metrics: PerformanceMetrics,
+    ):
         """Execute database operation and record timing metrics."""
         start_time = time.perf_counter()
 
@@ -455,8 +487,9 @@ class InfrastructurePerformanceBenchmarks:
 
         metrics.total_operations += 1
 
-    async def _sustained_kafka_publishing(self, client_id: str, messages_per_second: int,
-                                        metrics: PerformanceMetrics):
+    async def _sustained_kafka_publishing(
+        self, client_id: str, messages_per_second: int, metrics: PerformanceMetrics,
+    ):
         """Sustain Kafka publishing at specified rate."""
         interval = 1.0 / messages_per_second
 
@@ -468,8 +501,9 @@ class InfrastructurePerformanceBenchmarks:
             )
             await asyncio.sleep(interval)
 
-    async def _sustained_database_operations(self, client_id: str, ops_per_second: int,
-                                           metrics: PerformanceMetrics):
+    async def _sustained_database_operations(
+        self, client_id: str, ops_per_second: int, metrics: PerformanceMetrics,
+    ):
         """Sustain database operations at specified rate."""
         interval = 1.0 / ops_per_second
 
@@ -509,7 +543,8 @@ class InfrastructurePerformanceBenchmarks:
             "kafka_messaging": self._kafka_adapter is not None,
             "database_operations": self._connection_manager is not None,
             "outbox_processing": self._postgres_outbox is not None,
-            "end_to_end_latency": self._kafka_adapter is not None and self._postgres_outbox is not None,
+            "end_to_end_latency": self._kafka_adapter is not None
+            and self._postgres_outbox is not None,
             "concurrent_load": True,  # Can always run basic concurrent tests
             "memory_efficiency": True,  # Can always measure memory
         }
@@ -538,11 +573,13 @@ class InfrastructurePerformanceBenchmarks:
                 memory_mb = process.memory_info().rss / 1024 / 1024
                 cpu_percent = process.cpu_percent()
 
-                self._resource_metrics.append({
-                    "timestamp": time.perf_counter(),
-                    "memory_mb": memory_mb,
-                    "cpu_percent": cpu_percent,
-                })
+                self._resource_metrics.append(
+                    {
+                        "timestamp": time.perf_counter(),
+                        "memory_mb": memory_mb,
+                        "cpu_percent": cpu_percent,
+                    },
+                )
 
                 await asyncio.sleep(self._config.resource_monitoring_interval)
 
@@ -556,18 +593,26 @@ class InfrastructurePerformanceBenchmarks:
         """Generate high-level benchmark summary."""
         total_benchmarks = len(self._benchmark_results)
         successful_benchmarks = sum(
-            1 for metrics in self._benchmark_results.values()
+            1
+            for metrics in self._benchmark_results.values()
             if metrics.failed_operations == 0 and not metrics.error_types
         )
 
         # Calculate aggregate throughput
-        total_ops = sum(metrics.successful_operations for metrics in self._benchmark_results.values())
+        total_ops = sum(
+            metrics.successful_operations
+            for metrics in self._benchmark_results.values()
+        )
         aggregate_throughput = total_ops / total_duration if total_duration > 0 else 0
 
         return {
             "total_benchmarks": total_benchmarks,
             "successful_benchmarks": successful_benchmarks,
-            "success_rate": (successful_benchmarks / total_benchmarks * 100) if total_benchmarks > 0 else 0,
+            "success_rate": (
+                (successful_benchmarks / total_benchmarks * 100)
+                if total_benchmarks > 0
+                else 0
+            ),
             "total_duration_seconds": round(total_duration, 2),
             "aggregate_throughput_ops_per_second": round(aggregate_throughput, 2),
             "total_operations": total_ops,
@@ -579,7 +624,9 @@ class InfrastructurePerformanceBenchmarks:
             return {"error": "No resource metrics collected"}
 
         memory_values = [m["memory_mb"] for m in self._resource_metrics]
-        cpu_values = [m["cpu_percent"] for m in self._resource_metrics if m["cpu_percent"] > 0]
+        cpu_values = [
+            m["cpu_percent"] for m in self._resource_metrics if m["cpu_percent"] > 0
+        ]
 
         return {
             "memory_usage_mb": {
@@ -591,7 +638,8 @@ class InfrastructurePerformanceBenchmarks:
                 "avg": round(statistics.mean(cpu_values), 2) if cpu_values else 0,
                 "peak": round(max(cpu_values), 2) if cpu_values else 0,
             },
-            "monitoring_duration_seconds": len(self._resource_metrics) * self._config.resource_monitoring_interval,
+            "monitoring_duration_seconds": len(self._resource_metrics)
+            * self._config.resource_monitoring_interval,
         }
 
     def _generate_performance_recommendations(self) -> list[str]:
@@ -615,7 +663,9 @@ class InfrastructurePerformanceBenchmarks:
 
             # Error rate recommendations
             if metrics.failed_operations > 0:
-                error_rate = (metrics.failed_operations / metrics.total_operations) * 100
+                error_rate = (
+                    metrics.failed_operations / metrics.total_operations
+                ) * 100
                 recommendations.append(
                     f"Error rate in {test_name}: {error_rate:.1f}%. "
                     f"Review error types: {list(metrics.error_types.keys())}",
@@ -663,7 +713,14 @@ class InfrastructurePerformanceBenchmarks:
             },
             "error_analysis": {
                 "error_types": metrics.error_types,
-                "error_rate_percent": round((metrics.failed_operations / metrics.total_operations * 100) if metrics.total_operations > 0 else 0, 2),
+                "error_rate_percent": round(
+                    (
+                        (metrics.failed_operations / metrics.total_operations * 100)
+                        if metrics.total_operations > 0
+                        else 0
+                    ),
+                    2,
+                ),
             },
         }
 
@@ -682,16 +739,17 @@ class InfrastructurePerformanceBenchmarks:
 
 
 # Helper function for easy benchmark execution
-async def run_infrastructure_benchmarks(kafka_adapter=None, postgres_outbox=None,
-                                       connection_manager=None) -> dict[str, Any]:
+async def run_infrastructure_benchmarks(
+    kafka_adapter=None, postgres_outbox=None, connection_manager=None,
+) -> dict[str, Any]:
     """
     Convenience function to run infrastructure performance benchmarks.
-    
+
     Args:
         kafka_adapter: Kafka adapter instance
         postgres_outbox: PostgreSQL outbox instance
         connection_manager: Database connection manager
-        
+
     Returns:
         Comprehensive benchmark results
     """

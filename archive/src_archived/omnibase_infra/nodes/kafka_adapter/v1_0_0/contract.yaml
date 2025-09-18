@@ -44,31 +44,31 @@ shared_model_dependencies:
     class_name: "ModelKafkaMessage"
     module: "omnibase_infra.models.kafka.model_kafka_message"
     description: "Shared Kafka message model"
-  
+
   - name: "model_kafka_topic_config"
     type: "model"
     class_name: "ModelKafkaTopicConfig"
     module: "omnibase_infra.models.kafka.model_kafka_topic_config"
     description: "Shared Kafka topic configuration model"
-  
+
   - name: "model_kafka_producer_config"
     type: "model"
     class_name: "ModelKafkaProducerConfig"
     module: "omnibase_infra.models.kafka.model_kafka_producer_config"
     description: "Shared Kafka producer configuration model"
-  
+
   - name: "model_kafka_consumer_config"
     type: "model"
     class_name: "ModelKafkaConsumerConfig"
     module: "omnibase_infra.models.kafka.model_kafka_consumer_config"
     description: "Shared Kafka consumer configuration model"
-  
+
   - name: "model_kafka_health_response"
     type: "model"
     class_name: "ModelKafkaHealthResponse"
     module: "omnibase_infra.models.kafka.model_kafka_health_response"
     description: "Shared Kafka health check response model"
-    
+
   - name: "model_configuration_subcontract"
     type: "model"
     class_name: "ModelConfigurationSubcontract"
@@ -95,36 +95,36 @@ input_state:
       property_type: "string"
       enum: ["produce", "consume", "topic_create", "topic_delete", "health_check"]
       description: "Type of Kafka operation to perform"
-    
+
     message:
       property_type: "object"
       description: "Kafka message payload (for produce operations)"
       reference: "ModelKafkaMessage"
-    
+
     topic_config:
       property_type: "object"
       description: "Topic configuration (for topic operations)"
       reference: "ModelKafkaTopicConfig"
-    
+
     producer_config:
       property_type: "object"
       description: "Producer configuration (for produce operations)"
       reference: "ModelKafkaProducerConfig"
-    
+
     consumer_config:
       property_type: "object"
       description: "Consumer configuration (for consume operations)"
       reference: "ModelKafkaConsumerConfig"
-    
+
     correlation_id:
       property_type: "string"
       description: "Request correlation ID for tracing"
       format: "uuid"
-    
+
     timestamp:
       property_type: "number"
       description: "Request timestamp"
-    
+
     context:
       property_type: "object"
       description: "Additional request context"
@@ -136,43 +136,43 @@ output_state:
       property_type: "string"
       description: "Type of operation that was executed"
       enum: ["produce", "consume", "topic_create", "topic_delete", "health_check"]
-    
+
     messages:
       property_type: "array"
       description: "Consumed messages (for consume operations)"
       items:
         reference: "ModelKafkaMessage"
-    
+
     topic_info:
       property_type: "object"
       description: "Topic information (for topic operations)"
-    
+
     health_response:
       property_type: "object"
       description: "Health check response payload"
       reference: "ModelKafkaHealthResponse"
-    
+
     success:
       property_type: "boolean"
       description: "Whether the operation was successful"
-    
+
     error_message:
       property_type: "string"
       description: "Error message if operation failed"
-    
+
     correlation_id:
       property_type: "string"
       description: "Request correlation ID for tracing"
       format: "uuid"
-    
+
     timestamp:
       property_type: "number"
       description: "Response timestamp"
-    
+
     execution_time_ms:
       property_type: "number"
       description: "Total operation execution time in milliseconds"
-    
+
     record_count:
       property_type: "integer"
       description: "Number of records processed"
@@ -187,7 +187,7 @@ io_operations:
     buffer_size: 65536
     timeout_seconds: 30
     validation_enabled: true
-  
+
   - operation_type: "kafka_message_consume"
     atomic: false
     backup_enabled: false
@@ -196,7 +196,7 @@ io_operations:
     buffer_size: 65536
     timeout_seconds: 60
     validation_enabled: true
-  
+
   - operation_type: "kafka_topic_create"
     atomic: true
     backup_enabled: true
@@ -205,7 +205,7 @@ io_operations:
     buffer_size: 8192
     timeout_seconds: 15
     validation_enabled: true
-  
+
   - operation_type: "kafka_health_check"
     atomic: false
     backup_enabled: false
@@ -221,12 +221,12 @@ subcontracts:
     path: "./contracts/configuration_subcontract.yaml"
     description: "Standardized configuration management for infrastructure nodes"
     integration_type: "mixin"
-    
+
   - name: "kafka_event_processing_subcontract"
     path: "./contracts/kafka_event_processing_subcontract.yaml"
     description: "Event bus integration patterns for Kafka operations"
     integration_type: "mixin"
-    
+
   - name: "kafka_connection_management_subcontract"
     path: "./contracts/kafka_connection_management_subcontract.yaml"
     description: "Connection pool and broker management patterns"
@@ -293,7 +293,7 @@ definitions:
       required: ["operation_type", "success", "correlation_id", "timestamp", "execution_time_ms"]
 
   schemas: {}
-  
+
   responses: {}
 
 # === SHARED MODEL REFERENCES ===
@@ -301,19 +301,19 @@ shared_models:
   ModelKafkaMessage:
     module: "omnibase_infra.models.kafka.model_kafka_message"
     class_name: "ModelKafkaMessage"
-  
+
   ModelKafkaTopicConfig:
     module: "omnibase_infra.models.kafka.model_kafka_topic_config"
     class_name: "ModelKafkaTopicConfig"
-  
+
   ModelKafkaProducerConfig:
     module: "omnibase_infra.models.kafka.model_kafka_producer_config"
     class_name: "ModelKafkaProducerConfig"
-  
+
   ModelKafkaConsumerConfig:
     module: "omnibase_infra.models.kafka.model_kafka_consumer_config"
     class_name: "ModelKafkaConsumerConfig"
-  
+
   ModelKafkaHealthResponse:
     module: "omnibase_infra.models.kafka.model_kafka_health_response"
     class_name: "ModelKafkaHealthResponse"

@@ -18,11 +18,19 @@ from .model_consul_topology_metrics import ModelConsulTopologyMetrics
 
 class ModelConsulProjectorOutput(BaseModel):
     """Output model for Consul projector operation results.
-    
+
     Node-specific model for returning projection operation results through effect outputs.
     """
 
-    projection_result: ModelConsulServiceResponse | ModelConsulHealthResponse | ModelConsulKvResponse | ModelConsulTopologyMetrics | dict[str, str | int | bool | list[str]] | list[dict[str, str | int | bool]] | str
+    projection_result: (
+        ModelConsulServiceResponse
+        | ModelConsulHealthResponse
+        | ModelConsulKvResponse
+        | ModelConsulTopologyMetrics
+        | dict[str, str | int | bool | list[str]]
+        | list[dict[str, str | int | bool]]
+        | str
+    )
     projection_type: str
     timestamp: str  # ISO format datetime
     metadata: dict | None = None

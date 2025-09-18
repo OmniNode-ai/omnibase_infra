@@ -149,7 +149,9 @@ class ProductionSlackWebhook:
     ) -> ModelNotificationRequest:
         """Create circuit breaker state change alert."""
 
-        severity = EnumSlackPriority.CRITICAL if state == "OPEN" else EnumSlackPriority.MEDIUM
+        severity = (
+            EnumSlackPriority.CRITICAL if state == "OPEN" else EnumSlackPriority.MEDIUM
+        )
         emoji = "🔴" if state == "OPEN" else "🟢" if state == "CLOSED" else "🟡"
 
         fields = [
@@ -166,18 +168,22 @@ class ProductionSlackWebhook:
         ]
 
         if failure_count is not None:
-            fields.append(ModelSlackField(
-                title="Failure Count",
-                value=str(failure_count),
-                short=True,
-            ))
+            fields.append(
+                ModelSlackField(
+                    title="Failure Count",
+                    value=str(failure_count),
+                    short=True,
+                ),
+            )
 
         if last_error:
-            fields.append(ModelSlackField(
-                title="Last Error",
-                value=last_error[:200] + ("..." if len(last_error) > 200 else ""),
-                short=False,
-            ))
+            fields.append(
+                ModelSlackField(
+                    title="Last Error",
+                    value=last_error[:200] + ("..." if len(last_error) > 200 else ""),
+                    short=False,
+                ),
+            )
 
         message = f"Circuit breaker for {service} → {destination} changed to {state}"
 
@@ -186,7 +192,11 @@ class ProductionSlackWebhook:
             message=message,
             service=service,
             severity=severity,
-            channel=EnumSlackChannel.CRITICAL if state == "OPEN" else EnumSlackChannel.MONITORING,
+            channel=(
+                EnumSlackChannel.CRITICAL
+                if state == "OPEN"
+                else EnumSlackChannel.MONITORING
+            ),
             additional_fields=fields,
         )
 
@@ -200,7 +210,9 @@ class ProductionSlackWebhook:
     ) -> ModelNotificationRequest:
         """Create deployment status notification."""
 
-        severity = EnumSlackPriority.CRITICAL if status == "FAILED" else EnumSlackPriority.INFO
+        severity = (
+            EnumSlackPriority.CRITICAL if status == "FAILED" else EnumSlackPriority.INFO
+        )
         emoji = "✅" if status == "SUCCESS" else "❌" if status == "FAILED" else "🚀"
 
         fields = [
@@ -222,11 +234,13 @@ class ProductionSlackWebhook:
         ]
 
         if deployer:
-            fields.append(ModelSlackField(
-                title="Deployed By",
-                value=deployer,
-                short=True,
-            ))
+            fields.append(
+                ModelSlackField(
+                    title="Deployed By",
+                    value=deployer,
+                    short=True,
+                ),
+            )
 
         return self.create_infrastructure_alert(
             title=f"Deployment: {service}",
@@ -266,11 +280,13 @@ class ProductionSlackWebhook:
         ]
 
         if duration:
-            fields.append(ModelSlackField(
-                title="Duration",
-                value=duration,
-                short=True,
-            ))
+            fields.append(
+                ModelSlackField(
+                    title="Duration",
+                    value=duration,
+                    short=True,
+                ),
+            )
 
         return self.create_infrastructure_alert(
             title=f"Performance Alert: {service}",
@@ -300,18 +316,22 @@ class ProductionSlackWebhook:
         ]
 
         if source_ip:
-            fields.append(ModelSlackField(
-                title="Source IP",
-                value=source_ip,
-                short=True,
-            ))
+            fields.append(
+                ModelSlackField(
+                    title="Source IP",
+                    value=source_ip,
+                    short=True,
+                ),
+            )
 
         if user:
-            fields.append(ModelSlackField(
-                title="User",
-                value=user,
-                short=True,
-            ))
+            fields.append(
+                ModelSlackField(
+                    title="User",
+                    value=user,
+                    short=True,
+                ),
+            )
 
         return self.create_infrastructure_alert(
             title=f"🔒 Security Alert: {alert_type}",
@@ -322,7 +342,9 @@ class ProductionSlackWebhook:
             additional_fields=fields,
         )
 
-    def _get_retry_policy(self, severity: EnumSlackPriority) -> ModelNotificationRetryPolicy:
+    def _get_retry_policy(
+        self, severity: EnumSlackPriority,
+    ) -> ModelNotificationRetryPolicy:
         """Get retry policy based on alert severity."""
 
         if severity == EnumSlackPriority.CRITICAL:

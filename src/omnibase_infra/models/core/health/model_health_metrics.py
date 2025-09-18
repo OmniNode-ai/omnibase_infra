@@ -11,10 +11,12 @@ from pydantic import BaseModel, Field
 from omnibase_infra.models.circuit_breaker.model_circuit_breaker_metrics import (
     ModelCircuitBreakerMetrics,
 )
-
 from omnibase_infra.models.core.health.model_consul_metrics import ModelConsulMetrics
+from omnibase_infra.models.core.health.model_postgres_metrics import (
+    ModelPostgresMetrics,
+)
+
 from .model_kafka_metrics import ModelKafkaMetrics
-from omnibase_infra.models.core.health.model_postgres_metrics import ModelPostgresMetrics
 from .model_vault_metrics import ModelVaultMetrics
 
 

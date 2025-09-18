@@ -1,6 +1,5 @@
 """Strongly typed Kafka configuration models."""
 
-
 from pydantic import BaseModel, Field
 
 

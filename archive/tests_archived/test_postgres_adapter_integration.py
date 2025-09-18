@@ -29,6 +29,7 @@ def is_postgres_available() -> bool:
     """Check if PostgreSQL is available for testing."""
     try:
         import asyncpg
+
         # Test connection with environment variables
         host = os.getenv("POSTGRES_HOST", "localhost")
         port = int(os.getenv("POSTGRES_PORT", "5432"))
@@ -39,8 +40,11 @@ def is_postgres_available() -> bool:
         async def test_connection():
             try:
                 conn = await asyncpg.connect(
-                    host=host, port=port, database=database,
-                    user=user, password=password,
+                    host=host,
+                    port=port,
+                    database=database,
+                    user=user,
+                    password=password,
                 )
                 await conn.close()
                 return True
@@ -75,7 +79,8 @@ class TestPostgresAdapterIntegration:
         table_name = "integration_test_services"
 
         # Create test table
-        await connection_manager.execute_query(f"""
+        await connection_manager.execute_query(
+            f"""
             CREATE TABLE IF NOT EXISTS infrastructure.{table_name} (
                 id SERIAL PRIMARY KEY,
                 service_name VARCHAR(255) NOT NULL,
@@ -84,28 +89,35 @@ class TestPostgresAdapterIntegration:
                 metadata JSONB DEFAULT '{{}}',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             )
-        """)
+        """,
+        )
 
         # Clean any existing test data
-        await connection_manager.execute_query(f"DELETE FROM infrastructure.{table_name}")
+        await connection_manager.execute_query(
+            f"DELETE FROM infrastructure.{table_name}",
+        )
 
         yield table_name
 
         # Cleanup after test
-        await connection_manager.execute_query(f"DROP TABLE IF EXISTS infrastructure.{table_name}")
+        await connection_manager.execute_query(
+            f"DROP TABLE IF EXISTS infrastructure.{table_name}",
+        )
 
     @skip_if_no_postgres
     @pytest.mark.asyncio
-    async def test_message_envelope_to_database_insert(self, connection_manager, clean_test_table):
+    async def test_message_envelope_to_database_insert(
+        self, connection_manager, clean_test_table,
+    ):
         """Test complete flow: message envelope → adapter → PostgreSQL INSERT."""
 
         # Create query request for service registration
         correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query=f"""
-                INSERT INTO infrastructure.{clean_test_table} 
-                (service_name, service_type, status, metadata) 
-                VALUES ($1, $2, $3, $4) 
+                INSERT INTO infrastructure.{clean_test_table}
+                (service_name, service_type, status, metadata)
+                VALUES ($1, $2, $3, $4)
                 RETURNING id, service_name, status
             """,
             parameters=[
@@ -147,7 +159,9 @@ class TestPostgresAdapterIntegration:
 
     @skip_if_no_postgres
     @pytest.mark.asyncio
-    async def test_message_envelope_to_database_query(self, connection_manager, clean_test_table):
+    async def test_message_envelope_to_database_query(
+        self, connection_manager, clean_test_table,
+    ):
         """Test complete flow: message envelope → adapter → PostgreSQL SELECT."""
 
         # First, insert test data
@@ -159,18 +173,21 @@ class TestPostgresAdapterIntegration:
 
         for service_name, service_type, status, metadata in test_services:
             await connection_manager.execute_query(
-                f"""INSERT INTO infrastructure.{clean_test_table} 
+                f"""INSERT INTO infrastructure.{clean_test_table}
                    (service_name, service_type, status, metadata) VALUES ($1, $2, $3, $4)""",
-                service_name, service_type, status, metadata,
+                service_name,
+                service_type,
+                status,
+                metadata,
             )
 
         # Create query request to retrieve services
         correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query=f"""
-                SELECT service_name, service_type, status, metadata 
-                FROM infrastructure.{clean_test_table} 
-                WHERE service_type = $1 
+                SELECT service_name, service_type, status, metadata
+                FROM infrastructure.{clean_test_table}
+                WHERE service_type = $1
                 ORDER BY service_name
             """,
             parameters=["database"],
@@ -198,14 +215,18 @@ class TestPostgresAdapterIntegration:
 
     @skip_if_no_postgres
     @pytest.mark.asyncio
-    async def test_message_envelope_to_database_update(self, connection_manager, clean_test_table):
+    async def test_message_envelope_to_database_update(
+        self, connection_manager, clean_test_table,
+    ):
         """Test complete flow: message envelope → adapter → PostgreSQL UPDATE."""
 
         # Insert initial test service
         insert_result = await connection_manager.execute_query(
-            f"""INSERT INTO infrastructure.{clean_test_table} 
+            f"""INSERT INTO infrastructure.{clean_test_table}
                (service_name, service_type, status) VALUES ($1, $2, $3) RETURNING id""",
-            "update-test-service", "api", "initializing",
+            "update-test-service",
+            "api",
+            "initializing",
         )
 
         service_id = dict(insert_result[0])["id"]
@@ -214,9 +235,9 @@ class TestPostgresAdapterIntegration:
         correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query=f"""
-                UPDATE infrastructure.{clean_test_table} 
-                SET status = $1, metadata = $2 
-                WHERE id = $3 
+                UPDATE infrastructure.{clean_test_table}
+                SET status = $1, metadata = $2
+                WHERE id = $3
                 RETURNING service_name, status, metadata
             """,
             parameters=[
@@ -273,14 +294,18 @@ class TestPostgresAdapterIntegration:
 
     @skip_if_no_postgres
     @pytest.mark.asyncio
-    async def test_transaction_rollback_on_error(self, connection_manager, clean_test_table):
+    async def test_transaction_rollback_on_error(
+        self, connection_manager, clean_test_table,
+    ):
         """Test error handling and transaction management in message processing."""
 
         # Insert initial service
         await connection_manager.execute_query(
-            f"""INSERT INTO infrastructure.{clean_test_table} 
+            f"""INSERT INTO infrastructure.{clean_test_table}
                (service_name, service_type, status) VALUES ($1, $2, $3)""",
-            "transaction-test", "database", "healthy",
+            "transaction-test",
+            "database",
+            "healthy",
         )
 
         # Create query request that will fail (duplicate key violation)
@@ -289,7 +314,7 @@ class TestPostgresAdapterIntegration:
         # Try to insert duplicate service name (assuming unique constraint)
         try:
             await connection_manager.execute_query(
-                f"""INSERT INTO infrastructure.{clean_test_table} 
+                f"""INSERT INTO infrastructure.{clean_test_table}
                    (service_name, service_type, status) VALUES ($1, $2, $3)""",
                 "transaction-test",  # Duplicate service name
                 "cache",
@@ -308,11 +333,15 @@ class TestPostgresAdapterIntegration:
 
         if verification_result:
             original_record = dict(verification_result[0])
-            assert original_record["service_type"] == "database"  # Original value preserved
+            assert (
+                original_record["service_type"] == "database"
+            )  # Original value preserved
 
     @skip_if_no_postgres
     @pytest.mark.asyncio
-    async def test_concurrent_message_processing(self, connection_manager, clean_test_table):
+    async def test_concurrent_message_processing(
+        self, connection_manager, clean_test_table,
+    ):
         """Test concurrent message envelope processing."""
 
         async def process_service_registration(service_id: int):
@@ -320,7 +349,7 @@ class TestPostgresAdapterIntegration:
             correlation_id = uuid.uuid4()
 
             await connection_manager.execute_query(
-                f"""INSERT INTO infrastructure.{clean_test_table} 
+                f"""INSERT INTO infrastructure.{clean_test_table}
                    (service_name, service_type, status) VALUES ($1, $2, $3)""",
                 f"concurrent-service-{service_id}",
                 "microservice",
@@ -347,7 +376,9 @@ class TestPostgresAdapterIntegration:
 
     @skip_if_no_postgres
     @pytest.mark.asyncio
-    async def test_performance_metrics_integration(self, connection_manager, clean_test_table):
+    async def test_performance_metrics_integration(
+        self, connection_manager, clean_test_table,
+    ):
         """Test performance metrics tracking in real database operations."""
 
         start_time = time.perf_counter()
@@ -357,7 +388,7 @@ class TestPostgresAdapterIntegration:
         result = await connection_manager.execute_query(
             f"""
             WITH service_stats AS (
-                SELECT 
+                SELECT
                     service_type,
                     COUNT(*) as service_count,
                     ARRAY_AGG(service_name) as service_names

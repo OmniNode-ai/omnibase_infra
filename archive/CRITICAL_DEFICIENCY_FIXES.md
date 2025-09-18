@@ -73,10 +73,10 @@ except Exception as e:
 # Add configuration option for event publishing behavior
 class ModelPostgresAdapterConfig(BaseModel):
     event_publishing_required: bool = Field(
-        default=True, 
+        default=True,
         description="Whether event publishing failures should fail the operation"
     )
-    
+
 # Implementation
 if self.config.event_publishing_required and not published:
     raise OnexError(code=CoreErrorCode.EVENT_PUBLISHING_ERROR, ...)
@@ -133,13 +133,13 @@ class EventBusConnectionManager:
         self._producer_pool: Dict[str, KafkaProducer] = {}
         self._pool_lock = asyncio.Lock()
         self._config = config
-        
+
     async def get_producer(self, topic: str) -> KafkaProducer:
         async with self._pool_lock:
             if topic not in self._producer_pool:
                 self._producer_pool[topic] = self._create_secure_producer()
             return self._producer_pool[topic]
-    
+
     async def cleanup(self):
         async with self._pool_lock:
             for producer in self._producer_pool.values():
@@ -153,16 +153,16 @@ class EventBusConnectionManager:
 async def cleanup(self) -> None:
     """Enhanced cleanup with event bus resource management."""
     cleanup_tasks = []
-    
+
     if self._connection_manager:
         cleanup_tasks.append(self._connection_manager.close())
-    
+
     if self._event_bus:
         cleanup_tasks.append(self._event_bus.cleanup())
-    
+
     if cleanup_tasks:
         await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-    
+
     # Clear references
     self._connection_manager = None
     self._event_bus = None
@@ -181,14 +181,14 @@ async def _check_redpanda_connectivity(self) -> ModelHealthStatus:
     try:
         # Test connection to RedPanda
         test_producer = await self._event_bus.get_producer("health-check")
-        
+
         # Send test message with timeout
         test_message = {"type": "health_check", "timestamp": time.time()}
         await asyncio.wait_for(
             test_producer.send("health-check", test_message),
             timeout=5.0
         )
-        
+
         return ModelHealthStatus(
             status=EnumHealthStatus.HEALTHY,
             message="RedPanda connectivity verified",

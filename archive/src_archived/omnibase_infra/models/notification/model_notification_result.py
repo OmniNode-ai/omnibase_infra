@@ -5,7 +5,6 @@ Shared model for the final result of webhook delivery attempts in the ONEX infra
 Aggregates all attempts and provides the final delivery status.
 """
 
-
 from pydantic import BaseModel, Field, validator
 
 from omnibase_infra.models.notification.model_notification_attempt import (
@@ -50,6 +49,7 @@ class ModelNotificationResult(BaseModel):
 
     class Config:
         """Pydantic configuration."""
+
         frozen = True
         extra = "forbid"
 
@@ -58,7 +58,9 @@ class ModelNotificationResult(BaseModel):
         """Validate that total_attempts matches the length of attempts list."""
         attempts = values.get("attempts", [])
         if v != len(attempts):
-            raise ValueError(f"total_attempts ({v}) must match the number of attempts ({len(attempts)})")
+            raise ValueError(
+                f"total_attempts ({v}) must match the number of attempts ({len(attempts)})",
+            )
         return v
 
     @validator("is_success")
@@ -69,11 +71,15 @@ class ModelNotificationResult(BaseModel):
             last_attempt = attempts[-1]
             actual_success = last_attempt.was_successful
             if v != actual_success:
-                raise ValueError(f"is_success ({v}) must match the result of the last attempt ({actual_success})")
+                raise ValueError(
+                    f"is_success ({v}) must match the result of the last attempt ({actual_success})",
+                )
         return v
 
     @classmethod
-    def from_attempts(cls, attempts: list[ModelNotificationAttempt]) -> "ModelNotificationResult":
+    def from_attempts(
+        cls, attempts: list[ModelNotificationAttempt],
+    ) -> "ModelNotificationResult":
         """
         Create a result from a list of attempts.
 
@@ -138,5 +144,7 @@ class ModelNotificationResult(BaseModel):
         if last_attempt.was_network_error:
             return f"Network error after {self.total_attempts} attempts: {last_attempt.error}"
         if last_attempt.status_code:
-            return f"HTTP {last_attempt.status_code} after {self.total_attempts} attempts"
+            return (
+                f"HTTP {last_attempt.status_code} after {self.total_attempts} attempts"
+            )
         return f"Unknown error after {self.total_attempts} attempts"

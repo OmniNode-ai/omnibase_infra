@@ -4,7 +4,6 @@ Strongly-typed models for rate limiter statistics to replace Dict[str, Any] usag
 Maintains ONEX compliance with proper field validation.
 """
 
-
 from pydantic import BaseModel, Field
 
 
@@ -142,6 +141,7 @@ class ModelClientStats(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
@@ -274,5 +274,6 @@ class ModelGlobalStats(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"

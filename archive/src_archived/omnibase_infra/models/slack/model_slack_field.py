@@ -5,7 +5,6 @@ This module provides a Pydantic model for Slack attachment fields
 following ONEX standards for strong typing and data validation.
 """
 
-
 from pydantic import BaseModel, Field
 
 

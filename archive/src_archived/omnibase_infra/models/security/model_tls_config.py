@@ -4,7 +4,6 @@ Strongly-typed models for TLS configuration to replace Dict[str, Any] usage.
 Maintains ONEX compliance with proper field validation.
 """
 
-
 from pydantic import BaseModel, Field
 
 
@@ -116,6 +115,7 @@ class ModelKafkaProducerConfig(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
@@ -215,6 +215,7 @@ class ModelSecurityPolicy(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
@@ -297,5 +298,6 @@ class ModelCredentialCacheEntry(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"

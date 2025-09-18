@@ -1,6 +1,7 @@
 """Registry for workflow coordinator orchestrator dependency injection."""
 
-from typing import Any, Dict, Protocol
+from typing import Any, Protocol
+
 from omnibase_core.core.onex_container import ModelONEXContainer
 
 
@@ -15,7 +16,7 @@ class ProtocolWorkflowCoordinatorRegistry(Protocol):
         """
         ...
 
-    def get_configuration(self) -> Dict[str, Any]:
+    def get_configuration(self) -> dict[str, Any]:
         """Get workflow coordinator configuration.
 
         Returns:
@@ -44,9 +45,8 @@ class RegistryWorkflowCoordinator:
         """
         # Register workflow coordination protocols and services
         # This follows the protocol-based dependency injection pattern
-        pass
 
-    def get_configuration(self) -> Dict[str, Any]:
+    def get_configuration(self) -> dict[str, Any]:
         """Get workflow coordinator configuration.
 
         Returns:
@@ -54,7 +54,7 @@ class RegistryWorkflowCoordinator:
         """
         return self._config
 
-    def _load_default_config(self) -> Dict[str, Any]:
+    def _load_default_config(self) -> dict[str, Any]:
         """Load default configuration for workflow coordinator.
 
         Returns:
@@ -70,5 +70,5 @@ class RegistryWorkflowCoordinator:
             "health_check_interval_seconds": 30,
             "retry_attempts": 3,
             "circuit_breaker_enabled": True,
-            "performance_monitoring_enabled": True
+            "performance_monitoring_enabled": True,
         }

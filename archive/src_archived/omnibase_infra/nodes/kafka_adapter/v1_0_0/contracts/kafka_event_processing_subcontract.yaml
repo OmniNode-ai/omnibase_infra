@@ -148,7 +148,7 @@ async_processing:
 
     stream_processing:
       pattern: "continuous_async_streaming"
-      timeout_ms: 0  # No timeout for continuous streams
+      timeout_ms: 0 # No timeout for continuous streams
       retry_attempts: 10
       error_strategy: "emit_stream_error_with_resume"
 

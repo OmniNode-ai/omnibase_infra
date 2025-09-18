@@ -10,5 +10,9 @@ from ....models.consul.model_consul_health_summary import ModelConsulHealthSumma
 class ModelConsulHealthProjection(BaseModel):
     """Health state projection result model."""
 
-    health_summary: ModelConsulHealthSummary = Field(..., description="Strongly typed health summary")
-    service_health: list[ModelConsulHealthCheckNode] = Field(..., description="List of service health check nodes")
+    health_summary: ModelConsulHealthSummary = Field(
+        ..., description="Strongly typed health summary",
+    )
+    service_health: list[ModelConsulHealthCheckNode] = Field(
+        ..., description="List of service health check nodes",
+    )

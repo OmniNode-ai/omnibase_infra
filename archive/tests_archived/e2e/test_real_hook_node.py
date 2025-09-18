@@ -30,11 +30,19 @@ async def test_real_hook_node(slack_webhook_url: str):
         import aiohttp
 
         class RealHttpClient:
-            async def post(self, url: str, headers: dict = None, body: str = None, timeout: float = 30.0):
+            async def post(
+                self,
+                url: str,
+                headers: dict = None,
+                body: str = None,
+                timeout: float = 30.0,
+            ):
                 from omnibase_spi.protocols.core import ProtocolHttpResponse
 
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(url, headers=headers or {}, data=body, timeout=timeout) as response:
+                    async with session.post(
+                        url, headers=headers or {}, data=body, timeout=timeout,
+                    ) as response:
                         response_body = await response.text()
                         return ProtocolHttpResponse(
                             status_code=response.status,
@@ -59,6 +67,7 @@ async def test_real_hook_node(slack_webhook_url: str):
 
         # Create Hook Node
         from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect
+
         hook_node = NodeHookEffect(container)
 
         # Create real notification request
@@ -140,8 +149,10 @@ async def test_real_hook_node(slack_webhook_url: str):
     except Exception as e:
         print(f"💥 Test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
+
 
 async def main():
     """Main test runner."""
@@ -151,8 +162,12 @@ async def main():
 
     if not SLACK_WEBHOOK_URL:
         print("❌ ERROR: SLACK_WEBHOOK_URL environment variable not set")
-        print("🔧 Set it with: export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/...your-url...'")
-        print("   Get your webhook URL from: Slack App → Incoming Webhooks → Copy webhook URL")
+        print(
+            "🔧 Set it with: export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/...your-url...'",
+        )
+        print(
+            "   Get your webhook URL from: Slack App → Incoming Webhooks → Copy webhook URL",
+        )
         return False
 
     try:
@@ -171,6 +186,7 @@ async def main():
         print("\n❌ Test failed - check the output above")
 
     return success
+
 
 if __name__ == "__main__":
     asyncio.run(main())

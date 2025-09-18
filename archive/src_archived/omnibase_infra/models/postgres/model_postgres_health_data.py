@@ -1,6 +1,5 @@
 """Strongly typed PostgreSQL health data model."""
 
-
 from pydantic import BaseModel, Field
 
 

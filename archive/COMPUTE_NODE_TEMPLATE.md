@@ -95,10 +95,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
     CircuitBreakerMixin
 ):
     """COMPUTE node for {DOMAIN} {MICROSERVICE_NAME} computational operations.
-    
+
     This node provides high-performance computational services for {DOMAIN} domain
     operations, focusing on {MICROSERVICE_NAME} calculations and data transformations.
-    
+
     Key Features:
     - Sub-{PERFORMANCE_TARGET}ms computation performance
     - Type-safe input/output validation
@@ -106,10 +106,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
     - Comprehensive error handling
     - Performance optimization
     """
-    
+
     def __init__(self, config: {DomainCamelCase}{MicroserviceCamelCase}ComputeConfig):
         """Initialize the COMPUTE node with configuration.
-        
+
         Args:
             config: Configuration for the compute operations
         """
@@ -120,13 +120,13 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
             recovery_timeout=config.circuit_breaker_timeout,
             expected_exception=Exception
         )
-        
+
         # Initialize computational components
         self._calculator = {DomainCamelCase}Calculator(config.calculation_config)
         self._transformer = DataTransformer(config.transformation_config)
         self._optimizer = PerformanceOptimizer(config.performance_config)
         self._error_sanitizer = ErrorSanitizer()
-        
+
         # Performance tracking
         self._computation_metrics = []
         self._operation_counts = {}
@@ -152,16 +152,16 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
         input_data: Model{DomainCamelCase}{MicroserviceCamelCase}ComputeInput
     ) -> Model{DomainCamelCase}{MicroserviceCamelCase}ComputeOutput:
         """Process {DOMAIN} {MICROSERVICE_NAME} computation with typed interface.
-        
+
         This is the business logic interface that provides type-safe computation
         processing without ONEX infrastructure concerns.
-        
+
         Args:
             input_data: Validated input data for computation
-            
+
         Returns:
             Computed output data with results and metadata
-            
+
         Raises:
             ValidationError: If input validation fails
             ComputationError: If calculation logic fails
@@ -171,19 +171,19 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
             try:
                 # Pre-computation validation and optimization
                 optimized_input = await self._optimizer.optimize_input(input_data)
-                
+
                 # Execute core computation logic
                 computation_result = await self._execute_computation(optimized_input)
-                
+
                 # Transform and validate output
                 output_data = await self._transformer.transform_output(
                     computation_result,
                     input_data.output_format
                 )
-                
+
                 # Post-computation optimization
                 optimized_output = await self._optimizer.optimize_output(output_data)
-                
+
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ComputeOutput(
                     operation_type=input_data.operation_type,
                     computation_result=optimized_output,
@@ -191,7 +191,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
                     correlation_id=input_data.correlation_id,
                     timestamp=time.time(),
                     processing_time_ms=(
-                        self._computation_metrics[-1]["duration_ms"] 
+                        self._computation_metrics[-1]["duration_ms"]
                         if self._computation_metrics else 0.0
                     ),
                     metadata={
@@ -200,7 +200,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
                         "performance_tier": self._optimizer.get_current_tier()
                     }
                 )
-                
+
             except ValidationError as e:
                 sanitized_error = self._error_sanitizer.sanitize_validation_error(str(e))
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ComputeOutput(
@@ -211,7 +211,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
                     timestamp=time.time(),
                     processing_time_ms=0.0
                 )
-            
+
             except asyncio.TimeoutError:
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ComputeOutput(
                     operation_type=input_data.operation_type,
@@ -221,7 +221,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
                     timestamp=time.time(),
                     processing_time_ms=self.config.computation_timeout_ms
                 )
-            
+
             except Exception as e:
                 sanitized_error = self._error_sanitizer.sanitize_error(str(e))
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ComputeOutput(
@@ -238,10 +238,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
         input_data: Model{DomainCamelCase}{MicroserviceCamelCase}ComputeInput
     ) -> Any:
         """Execute the core computational logic.
-        
+
         Args:
             input_data: Optimized input data
-            
+
         Returns:
             Raw computation result
         """
@@ -252,25 +252,25 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
                     input_data.computation_data,
                     input_data.calculation_parameters
                 )
-            
+
             elif input_data.operation_type == Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.TRANSFORM:
                 return await self._transformer.transform(
                     input_data.computation_data,
                     input_data.transformation_rules
                 )
-            
+
             elif input_data.operation_type == Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.ANALYZE:
                 return await self._calculator.analyze(
                     input_data.computation_data,
                     input_data.analysis_criteria
                 )
-            
+
             else:
                 raise ValueError(f"Unsupported operation type: {input_data.operation_type}")
 
     async def get_performance_metrics(self) -> Dict[str, Any]:
         """Get current performance metrics for monitoring.
-        
+
         Returns:
             Dictionary with performance statistics
         """
@@ -281,10 +281,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
                 "operation_counts": {},
                 "performance_tier": "idle"
             }
-        
+
         total_computations = len(self._computation_metrics)
         average_duration = sum(m["duration_ms"] for m in self._computation_metrics) / total_computations
-        
+
         return {
             "total_computations": total_computations,
             "average_duration_ms": round(average_duration, 2),
@@ -297,7 +297,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
 
     async def health_check(self) -> Dict[str, Any]:
         """Perform comprehensive health check.
-        
+
         Returns:
             Health status information
         """
@@ -306,18 +306,18 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
             calculator_healthy = await self._calculator.health_check()
             transformer_healthy = await self._transformer.health_check()
             optimizer_healthy = await self._optimizer.health_check()
-            
+
             # Check performance metrics
             recent_metrics = [
                 m for m in self._computation_metrics
                 if time.time() - m["timestamp"] < 300  # Last 5 minutes
             ]
-            
+
             avg_performance = (
                 sum(m["duration_ms"] for m in recent_metrics) / len(recent_metrics)
                 if recent_metrics else 0.0
             )
-            
+
             return {
                 "status": "healthy" if all([
                     calculator_healthy,
@@ -337,7 +337,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Compute(
                 },
                 "circuit_breaker": self.circuit_breaker_status
             }
-            
+
         except Exception as e:
             sanitized_error = self._error_sanitizer.sanitize_error(str(e))
             return {
@@ -362,7 +362,7 @@ ConfigT = TypeVar('ConfigT', bound='BaseNodeConfig')
 
 class CalculationConfig(BaseModel):
     """Configuration for calculation operations."""
-    
+
     precision_digits: int = Field(default=6, ge=1, le=15, description="Numerical precision digits")
     max_iterations: int = Field(default=10000, ge=1, description="Maximum calculation iterations")
     convergence_threshold: float = Field(default=1e-6, ge=1e-12, le=1e-1, description="Convergence threshold")
@@ -372,7 +372,7 @@ class CalculationConfig(BaseModel):
 
 class TransformationConfig(BaseModel):
     """Configuration for data transformation operations."""
-    
+
     max_input_size_mb: float = Field(default=50.0, ge=0.1, le=1000.0, description="Maximum input size in MB")
     output_compression: bool = Field(default=False, description="Enable output compression")
     validation_level: str = Field(default="strict", regex="^(minimal|standard|strict)$", description="Validation strictness level")
@@ -381,7 +381,7 @@ class TransformationConfig(BaseModel):
 
 class PerformanceConfig(BaseModel):
     """Configuration for performance optimization."""
-    
+
     caching_enabled: bool = Field(default=True, description="Enable result caching")
     cache_size_mb: float = Field(default=100.0, ge=1.0, le=2000.0, description="Cache size in MB")
     cache_ttl_seconds: int = Field(default=300, ge=1, le=86400, description="Cache TTL in seconds")
@@ -391,34 +391,34 @@ class PerformanceConfig(BaseModel):
 
 class {DomainCamelCase}{MicroserviceCamelCase}ComputeConfig(BaseNodeConfig):
     """Configuration for {DOMAIN} {MICROSERVICE_NAME} COMPUTE operations."""
-    
+
     # Core computation settings
     computation_timeout_ms: float = Field(
-        default=5000.0, 
-        ge=100.0, 
+        default=5000.0,
+        ge=100.0,
         le=60000.0,
         description="Maximum computation time in milliseconds"
     )
-    
+
     performance_threshold_ms: float = Field(
         default=1000.0,
         ge=10.0,
         le=10000.0,
         description="Performance threshold for health checks"
     )
-    
+
     max_concurrent_computations: int = Field(
         default=50,
         ge=1,
         le=1000,
         description="Maximum concurrent computation operations"
     )
-    
+
     # Component configurations
     calculation_config: CalculationConfig = Field(default_factory=CalculationConfig)
     transformation_config: TransformationConfig = Field(default_factory=TransformationConfig)
     performance_config: PerformanceConfig = Field(default_factory=PerformanceConfig)
-    
+
     # Circuit breaker settings
     circuit_breaker_threshold: int = Field(
         default=5,
@@ -426,14 +426,14 @@ class {DomainCamelCase}{MicroserviceCamelCase}ComputeConfig(BaseNodeConfig):
         le=100,
         description="Circuit breaker failure threshold"
     )
-    
+
     circuit_breaker_timeout: int = Field(
         default=60,
         ge=1,
         le=3600,
         description="Circuit breaker recovery timeout in seconds"
     )
-    
+
     # Domain-specific settings
     domain_specific_config: Dict[str, Any] = Field(
         default_factory=dict,
@@ -462,10 +462,10 @@ class {DomainCamelCase}{MicroserviceCamelCase}ComputeConfig(BaseNodeConfig):
     @classmethod
     def for_environment(cls: Type[ConfigT], environment: str) -> ConfigT:
         """Create environment-specific configuration.
-        
+
         Args:
             environment: Environment name (development, staging, production)
-            
+
         Returns:
             Environment-optimized configuration
         """
@@ -488,7 +488,7 @@ class {DomainCamelCase}{MicroserviceCamelCase}ComputeConfig(BaseNodeConfig):
                 circuit_breaker_threshold=3,
                 circuit_breaker_timeout=30
             )
-        
+
         elif environment == "staging":
             return cls(
                 computation_timeout_ms=5000.0,
@@ -503,7 +503,7 @@ class {DomainCamelCase}{MicroserviceCamelCase}ComputeConfig(BaseNodeConfig):
                     memory_limit_mb=512.0
                 )
             )
-        
+
         else:  # development
             return cls(
                 computation_timeout_ms=10000.0,
@@ -558,67 +558,67 @@ from ..enums.enum_{DOMAIN}_{MICROSERVICE_NAME}_operation_type import Enum{Domain
 
 class Model{DomainCamelCase}{MicroserviceCamelCase}ComputeInput(BaseModel):
     """Input model for {DOMAIN} {MICROSERVICE_NAME} computation operations."""
-    
+
     operation_type: Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType = Field(
         description="Type of computation operation to perform"
     )
-    
+
     computation_data: Dict[str, Any] = Field(
         description="Primary data for computation processing"
     )
-    
+
     correlation_id: UUID = Field(
         description="Request correlation ID for tracing"
     )
-    
+
     # Operation-specific parameters
     calculation_parameters: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Parameters for calculation operations"
     )
-    
+
     transformation_rules: Optional[List[Dict[str, Any]]] = Field(
         default=None,
         description="Rules for data transformation operations"
     )
-    
+
     analysis_criteria: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Criteria for analysis operations"
     )
-    
+
     # Output control
     output_format: str = Field(
         default="standard",
         regex="^(minimal|standard|detailed|raw)$",
         description="Desired output format level"
     )
-    
+
     include_metadata: bool = Field(
         default=True,
         description="Include processing metadata in output"
     )
-    
+
     # Performance hints
     priority_level: str = Field(
         default="normal",
         regex="^(low|normal|high|critical)$",
         description="Processing priority level"
     )
-    
+
     max_processing_time_ms: Optional[float] = Field(
         default=None,
         ge=100.0,
         le=60000.0,
         description="Maximum allowed processing time in milliseconds"
     )
-    
+
     # Context information
     context: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Additional processing context"
     )
-    
+
     request_timestamp: float = Field(
         description="Request timestamp as Unix timestamp",
         ge=0
@@ -628,71 +628,71 @@ class Model{DomainCamelCase}{MicroserviceCamelCase}ComputeInput(BaseModel):
     def validate_computation_data(cls, v, values):
         """Validate computation data based on operation type."""
         operation_type = values.get('operation_type')
-        
+
         if not isinstance(v, dict) or not v:
             raise ValueError("Computation data must be a non-empty dictionary")
-        
+
         if operation_type == Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.CALCULATE:
             required_fields = ['input_values', 'calculation_type']
             missing_fields = [field for field in required_fields if field not in v]
             if missing_fields:
                 raise ValueError(f"Calculate operation missing required fields: {missing_fields}")
-        
+
         elif operation_type == Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.TRANSFORM:
             if 'source_data' not in v:
                 raise ValueError("Transform operation requires 'source_data' field")
-        
+
         elif operation_type == Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.ANALYZE:
             if 'analysis_target' not in v:
                 raise ValueError("Analyze operation requires 'analysis_target' field")
-        
+
         return v
 
     @validator('calculation_parameters')
     def validate_calculation_parameters(cls, v, values):
         """Validate calculation parameters when provided."""
         operation_type = values.get('operation_type')
-        
+
         if operation_type == Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.CALCULATE and v is None:
             raise ValueError("Calculate operation requires calculation_parameters")
-        
+
         if v is not None and operation_type != Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.CALCULATE:
             raise ValueError(f"calculation_parameters only valid for CALCULATE operation, got {operation_type}")
-        
+
         return v
 
     @validator('transformation_rules')
     def validate_transformation_rules(cls, v, values):
         """Validate transformation rules when provided."""
         operation_type = values.get('operation_type')
-        
+
         if operation_type == Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.TRANSFORM and v is None:
             raise ValueError("Transform operation requires transformation_rules")
-        
+
         if v is not None:
             if operation_type != Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.TRANSFORM:
                 raise ValueError(f"transformation_rules only valid for TRANSFORM operation, got {operation_type}")
-            
+
             # Validate rule structure
             for i, rule in enumerate(v):
                 if not isinstance(rule, dict):
                     raise ValueError(f"Transformation rule {i} must be a dictionary")
                 if 'rule_type' not in rule:
                     raise ValueError(f"Transformation rule {i} missing 'rule_type'")
-        
+
         return v
 
     @validator('analysis_criteria')
     def validate_analysis_criteria(cls, v, values):
         """Validate analysis criteria when provided."""
         operation_type = values.get('operation_type')
-        
+
         if operation_type == Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.ANALYZE and v is None:
             raise ValueError("Analyze operation requires analysis_criteria")
-        
+
         if v is not None and operation_type != Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType.ANALYZE:
             raise ValueError(f"analysis_criteria only valid for ANALYZE operation, got {operation_type}")
-        
+
         return v
 
     class Config:
@@ -733,51 +733,51 @@ from ..enums.enum_{DOMAIN}_{MICROSERVICE_NAME}_operation_type import Enum{Domain
 
 class Model{DomainCamelCase}{MicroserviceCamelCase}ComputeOutput(BaseModel):
     """Output model for {DOMAIN} {MICROSERVICE_NAME} computation operations."""
-    
+
     operation_type: Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType = Field(
         description="Type of operation that was executed"
     )
-    
+
     computation_result: Optional[Any] = Field(
         default=None,
         description="Primary computation result data"
     )
-    
+
     success: bool = Field(
         description="Whether the computation was successful"
     )
-    
+
     error_message: Optional[str] = Field(
         default=None,
         description="Error message if computation failed"
     )
-    
+
     correlation_id: UUID = Field(
         description="Request correlation ID for tracing"
     )
-    
+
     timestamp: float = Field(
         description="Response timestamp as Unix timestamp",
         ge=0
     )
-    
+
     processing_time_ms: float = Field(
         description="Total computation processing time in milliseconds",
         ge=0
     )
-    
+
     # Computation metrics
     computation_metrics: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Detailed computation performance metrics"
     )
-    
+
     # Result metadata
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Additional result metadata and context"
     )
-    
+
     # Quality indicators
     result_confidence: Optional[float] = Field(
         default=None,
@@ -785,19 +785,19 @@ class Model{DomainCamelCase}{MicroserviceCamelCase}ComputeOutput(BaseModel):
         le=1.0,
         description="Confidence score for the computation result"
     )
-    
+
     optimization_applied: Optional[bool] = Field(
         default=None,
         description="Whether performance optimizations were applied"
     )
-    
+
     # Resource usage
     memory_usage_mb: Optional[float] = Field(
         default=None,
         ge=0.0,
         description="Memory usage during computation in MB"
     )
-    
+
     cpu_utilization_percent: Optional[float] = Field(
         default=None,
         ge=0.0,
@@ -850,34 +850,34 @@ from enum import Enum
 
 class Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType(str, Enum):
     """Enumeration of supported {DOMAIN} {MICROSERVICE_NAME} computation operation types."""
-    
+
     CALCULATE = "calculate"
     """Perform mathematical calculations and statistical analysis."""
-    
+
     TRANSFORM = "transform"
     """Transform data from one format or structure to another."""
-    
+
     ANALYZE = "analyze"
     """Analyze data patterns, trends, and characteristics."""
-    
+
     OPTIMIZE = "optimize"
     """Optimize data structures or computational parameters."""
-    
+
     VALIDATE = "validate"
     """Validate data integrity and business rule compliance."""
-    
+
     AGGREGATE = "aggregate"
     """Aggregate multiple data sources or results."""
-    
+
     FILTER = "filter"
     """Filter data based on specified criteria."""
-    
+
     SORT = "sort"
     """Sort data according to specified ordering rules."""
-    
+
     BATCH_PROCESS = "batch_process"
     """Process multiple computation requests in batch mode."""
-    
+
     HEALTH_CHECK = "health_check"
     """Perform system health and performance validation."""
 
@@ -891,7 +891,7 @@ class Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType(str, Enum):
             cls.OPTIMIZE,
             cls.AGGREGATE
         ]
-    
+
     @classmethod
     def get_data_operations(cls):
         """Get operations that primarily manipulate data structure."""
@@ -901,26 +901,26 @@ class Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType(str, Enum):
             cls.VALIDATE,
             cls.BATCH_PROCESS
         ]
-    
+
     @classmethod
     def get_system_operations(cls):
         """Get operations related to system management."""
         return [
             cls.HEALTH_CHECK
         ]
-    
+
     def is_computational(self) -> bool:
         """Check if this operation involves core computational logic."""
         return self in self.get_computational_operations()
-    
+
     def is_data_operation(self) -> bool:
         """Check if this operation primarily manipulates data."""
         return self in self.get_data_operations()
-    
+
     def is_system_operation(self) -> bool:
         """Check if this operation is system-related."""
         return self in self.get_system_operations()
-    
+
     def get_expected_performance_ms(self) -> float:
         """Get expected performance threshold for this operation type."""
         performance_map = {
@@ -936,7 +936,7 @@ class Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType(str, Enum):
             cls.HEALTH_CHECK: 100.0
         }
         return performance_map.get(self, 1000.0)
-    
+
     def requires_high_precision(self) -> bool:
         """Check if this operation requires high numerical precision."""
         return self in [
@@ -944,7 +944,7 @@ class Enum{DomainCamelCase}{MicroserviceCamelCase}OperationType(str, Enum):
             cls.ANALYZE,
             cls.OPTIMIZE
         ]
-    
+
     def supports_parallel_processing(self) -> bool:
         """Check if this operation supports parallel processing."""
         return self in [
@@ -978,10 +978,10 @@ schema:
   type: "object"
   required:
     - "operation_type"
-    - "computation_data" 
+    - "computation_data"
     - "correlation_id"
     - "request_timestamp"
-  
+
   properties:
     operation_type:
       type: "string"
@@ -997,18 +997,18 @@ schema:
         - "batch_process"
         - "health_check"
       description: "Type of computation operation to perform"
-    
+
     computation_data:
       type: "object"
       minProperties: 1
       description: "Primary data for computation processing"
       # Schema varies by operation_type - validated at runtime
-    
+
     correlation_id:
       type: "string"
       format: "uuid"
       description: "Request correlation ID for tracing"
-    
+
     calculation_parameters:
       type: ["object", "null"]
       description: "Parameters for calculation operations"
@@ -1024,7 +1024,7 @@ schema:
         convergence_criteria:
           type: "object"
           description: "Convergence criteria for iterative calculations"
-    
+
     transformation_rules:
       type: ["array", "null"]
       description: "Rules for data transformation operations"
@@ -1038,7 +1038,7 @@ schema:
           parameters:
             type: "object"
             description: "Rule-specific parameters"
-    
+
     analysis_criteria:
       type: ["object", "null"]
       description: "Criteria for analysis operations"
@@ -1049,34 +1049,34 @@ schema:
         parameters:
           type: "object"
           description: "Analysis-specific parameters"
-    
+
     output_format:
       type: "string"
       enum: ["minimal", "standard", "detailed", "raw"]
       default: "standard"
       description: "Desired output format level"
-    
+
     include_metadata:
       type: "boolean"
       default: true
       description: "Include processing metadata in output"
-    
+
     priority_level:
       type: "string"
       enum: ["low", "normal", "high", "critical"]
       default: "normal"
       description: "Processing priority level"
-    
+
     max_processing_time_ms:
       type: ["number", "null"]
       minimum: 100
       maximum: 60000
       description: "Maximum allowed processing time in milliseconds"
-    
+
     context:
       type: ["object", "null"]
       description: "Additional processing context"
-    
+
     request_timestamp:
       type: "number"
       minimum: 0
@@ -1092,7 +1092,7 @@ validation_rules:
         assert transformation_rules is not None
       elif operation_type == "analyze":
         assert analysis_criteria is not None
-  
+
   - name: "computation_data_structure"
     description: "Validate computation data structure based on operation"
     rule: |
@@ -1103,7 +1103,7 @@ validation_rules:
         assert "source_data" in computation_data
       elif operation_type == "analyze":
         assert "analysis_target" in computation_data
-  
+
   - name: "performance_constraints"
     description: "Validate performance constraints are reasonable"
     rule: |
@@ -1126,7 +1126,7 @@ examples:
       output_format: "detailed"
       priority_level: "normal"
       request_timestamp: 1640995200.0
-  
+
   - name: "data_transformation"
     description: "Data format transformation"
     data:
@@ -1168,7 +1168,7 @@ schema:
     - "correlation_id"
     - "timestamp"
     - "processing_time_ms"
-  
+
   properties:
     operation_type:
       type: "string"
@@ -1184,34 +1184,34 @@ schema:
         - "batch_process"
         - "health_check"
       description: "Type of operation that was executed"
-    
+
     computation_result:
       description: "Primary computation result data"
       # Type varies based on operation - can be any valid result
-    
+
     success:
       type: "boolean"
       description: "Whether the computation was successful"
-    
+
     error_message:
       type: ["string", "null"]
       description: "Error message if computation failed"
-    
+
     correlation_id:
       type: "string"
       format: "uuid"
       description: "Request correlation ID for tracing"
-    
+
     timestamp:
       type: "number"
       minimum: 0
       description: "Response timestamp as Unix timestamp"
-    
+
     processing_time_ms:
       type: "number"
       minimum: 0
       description: "Total computation processing time in milliseconds"
-    
+
     computation_metrics:
       type: ["object", "null"]
       description: "Detailed computation performance metrics"
@@ -1231,7 +1231,7 @@ schema:
           minimum: 0
           maximum: 1
           description: "Memory efficiency score (0-1)"
-    
+
     metadata:
       type: ["object", "null"]
       description: "Additional result metadata and context"
@@ -1251,22 +1251,22 @@ schema:
           minimum: 0
           maximum: 1
           description: "Quality score of input data (0-1)"
-    
+
     result_confidence:
       type: ["number", "null"]
       minimum: 0
       maximum: 1
       description: "Confidence score for the computation result"
-    
+
     optimization_applied:
       type: ["boolean", "null"]
       description: "Whether performance optimizations were applied"
-    
+
     memory_usage_mb:
       type: ["number", "null"]
       minimum: 0
       description: "Memory usage during computation in MB"
-    
+
     cpu_utilization_percent:
       type: ["number", "null"]
       minimum: 0
@@ -1284,7 +1284,7 @@ validation_rules:
       else:
         assert error_message is not None
         assert len(error_message.strip()) > 0
-  
+
   - name: "performance_thresholds"
     description: "Validate performance metrics are within expected ranges"
     rule: |
@@ -1292,7 +1292,7 @@ validation_rules:
       if processing_time_ms > expected_time * 2:
         # Performance degradation detected - should be logged
         pass
-  
+
   - name: "confidence_score_validity"
     description: "Validate confidence scores are reasonable"
     rule: |
@@ -1344,7 +1344,7 @@ examples:
       optimization_applied: true
       memory_usage_mb: 12.4
       cpu_utilization_percent: 23.7
-  
+
   - name: "failed_computation"
     description: "Failed computation with error details"
     data:
@@ -1378,7 +1378,7 @@ schema:
     - "computation_timeout_ms"
     - "performance_threshold_ms"
     - "max_concurrent_computations"
-  
+
   properties:
     # Core computation settings
     computation_timeout_ms:
@@ -1387,21 +1387,21 @@ schema:
       maximum: 60000
       default: 5000
       description: "Maximum computation time in milliseconds"
-    
+
     performance_threshold_ms:
       type: "number"
       minimum: 10
       maximum: 10000
       default: 1000
       description: "Performance threshold for health checks"
-    
+
     max_concurrent_computations:
       type: "integer"
       minimum: 1
       maximum: 1000
       default: 50
       description: "Maximum concurrent computation operations"
-    
+
     # Calculation configuration
     calculation_config:
       type: "object"
@@ -1432,7 +1432,7 @@ schema:
           enum: ["minimal", "balanced", "aggressive"]
           default: "balanced"
           description: "Optimization level"
-    
+
     # Transformation configuration
     transformation_config:
       type: "object"
@@ -1456,7 +1456,7 @@ schema:
           type: "boolean"
           default: true
           description: "Enable batch transformation processing"
-    
+
     # Performance configuration
     performance_config:
       type: "object"
@@ -1487,7 +1487,7 @@ schema:
           maximum: 8192
           default: 500
           description: "Memory usage limit in MB"
-    
+
     # Circuit breaker settings
     circuit_breaker_threshold:
       type: "integer"
@@ -1495,14 +1495,14 @@ schema:
       maximum: 100
       default: 5
       description: "Circuit breaker failure threshold"
-    
+
     circuit_breaker_timeout:
       type: "integer"
       minimum: 1
       maximum: 3600
       default: 60
       description: "Circuit breaker recovery timeout in seconds"
-    
+
     # Domain-specific settings
     domain_specific_config:
       type: "object"
@@ -1514,7 +1514,7 @@ validation_rules:
     description: "Computation timeout must be >= performance threshold"
     rule: |
       computation_timeout_ms >= performance_threshold_ms
-  
+
   - name: "memory_concurrency_balance"
     description: "Memory limit should accommodate concurrent operations"
     rule: |
@@ -1522,7 +1522,7 @@ validation_rules:
       max_memory_usage = max_concurrent_computations * estimated_memory_per_op
       if performance_config and "memory_limit_mb" in performance_config:
         max_memory_usage <= performance_config["memory_limit_mb"] * 1.2
-  
+
   - name: "cache_size_reasonable"
     description: "Cache size should not exceed 50% of memory limit"
     rule: |
@@ -1547,7 +1547,7 @@ environment_profiles:
       memory_limit_mb: 1024
     circuit_breaker_threshold: 3
     circuit_breaker_timeout: 30
-  
+
   staging:
     computation_timeout_ms: 5000
     performance_threshold_ms: 1000
@@ -1558,7 +1558,7 @@ environment_profiles:
     performance_config:
       cache_size_mb: 200
       memory_limit_mb: 512
-  
+
   development:
     computation_timeout_ms: 10000
     performance_threshold_ms: 2000
@@ -1593,7 +1593,7 @@ examples:
         memory_limit_mb: 1024
       circuit_breaker_threshold: 3
       circuit_breaker_timeout: 30
-  
+
   - name: "development_config"
     description: "Development-friendly configuration"
     data:
@@ -1645,7 +1645,7 @@ specification:
   node_class: "COMPUTE"
   processing_type: "synchronous"
   stateful: false
-  
+
   # Performance characteristics
   performance:
     expected_latency_ms: 500
@@ -1654,7 +1654,7 @@ specification:
     memory_requirement_mb: 256
     cpu_requirement_cores: 1.0
     scaling_factor: "horizontal"
-  
+
   # Operational requirements
   reliability:
     availability_target: "99.9%"
@@ -1662,7 +1662,7 @@ specification:
     recovery_time_target_seconds: 30
     circuit_breaker_enabled: true
     retry_policy: "exponential_backoff"
-  
+
   # Resource management
   resources:
     memory:
@@ -1676,7 +1676,7 @@ specification:
     storage:
       temp_space_mb: 100
       cache_space_mb: 200
-  
+
   # Security requirements
   security:
     input_validation: "strict"
@@ -1691,7 +1691,7 @@ dependencies:
     python: ">=3.11,<4.0"
     pydantic: ">=2.0.0"
     asyncio: "builtin"
-  
+
   internal:
     omnibase_core:
       version: ">=2.0.0"
@@ -1701,12 +1701,12 @@ dependencies:
         - "models.model_onex_warning"
         - "utils.error_sanitizer"
         - "utils.circuit_breaker"
-    
+
   external:
     numpy: ">=1.24.0"  # For numerical computations
     scipy: ">=1.10.0"  # For advanced calculations
     pandas: ">=2.0.0"  # For data transformation
-    
+
   optional:
     redis: ">=4.0.0"    # For caching
     prometheus_client: ">=0.16.0"  # For metrics
@@ -1716,11 +1716,11 @@ contracts:
   input:
     contract_file: "subcontracts/input_subcontract.yaml"
     validation_level: "strict"
-    
+
   output:
     contract_file: "subcontracts/output_subcontract.yaml"
     validation_level: "strict"
-    
+
   config:
     contract_file: "subcontracts/config_subcontract.yaml"
     validation_level: "strict"
@@ -1735,13 +1735,13 @@ api:
       output_model: "Model{DomainCamelCase}{MicroserviceCamelCase}ComputeOutput"
       timeout_ms: 30000
       rate_limit: "1000/minute"
-    
+
     health:
       path: "/health"
       method: "GET"
       timeout_ms: 5000
       rate_limit: "100/minute"
-    
+
     metrics:
       path: "/metrics"
       method: "GET"
@@ -1757,7 +1757,7 @@ testing:
       - "test_config.py"
       - "test_models.py"
       - "test_contracts.py"
-  
+
   integration_tests:
     required: true
     test_scenarios:
@@ -1765,7 +1765,7 @@ testing:
       - "error_handling"
       - "performance_limits"
       - "circuit_breaker_activation"
-  
+
   performance_tests:
     required: true
     benchmarks:
@@ -1789,13 +1789,13 @@ deployment:
       interval_seconds: 30
       timeout_seconds: 5
       retries: 3
-  
+
   scaling:
     min_replicas: 1
     max_replicas: 10
     target_cpu_utilization: 70
     target_memory_utilization: 80
-  
+
   environment_variables:
     required:
       - "ONEX_ENVIRONMENT"
@@ -1812,47 +1812,47 @@ monitoring:
       type: "histogram"
       description: "Time spent on computation operations"
       labels: ["operation_type", "success"]
-    
+
     - name: "computation_errors_total"
       type: "counter"
       description: "Total computation errors"
       labels: ["error_type", "operation_type"]
-    
+
     - name: "concurrent_computations"
       type: "gauge"
       description: "Number of concurrent computations"
-    
+
     - name: "memory_usage_bytes"
       type: "gauge"
       description: "Current memory usage"
-    
+
     - name: "circuit_breaker_state"
       type: "gauge"
       description: "Circuit breaker state (0=closed, 1=open, 2=half-open)"
-  
+
   logging:
     level: "INFO"
     format: "structured_json"
     fields:
       - "timestamp"
       - "level"
-      - "correlation_id" 
+      - "correlation_id"
       - "operation_type"
       - "processing_time_ms"
       - "success"
       - "error_message"
-  
+
   alerts:
     - name: "high_error_rate"
       condition: "error_rate > 5%"
       severity: "warning"
       notification: "team_channel"
-    
+
     - name: "high_latency"
       condition: "p99_latency > 2000ms"
-      severity: "warning" 
+      severity: "warning"
       notification: "team_channel"
-    
+
     - name: "circuit_breaker_open"
       condition: "circuit_breaker_state == 1"
       severity: "critical"
@@ -1873,12 +1873,12 @@ compliance:
     type_checking: "strict"
     security_scanning: "enabled"
     dependency_scanning: "enabled"
-  
+
   security:
     vulnerability_scanning: "required"
     penetration_testing: "recommended"
     access_controls: "rbac"
-  
+
   data_governance:
     data_classification: "internal"
     retention_policy: "30_days_logs"
@@ -1897,12 +1897,12 @@ integrations:
     - node_type: "ORCHESTRATOR"
       interface: "onex_standard"
       data_flow: "request_response"
-  
+
   downstream_nodes:
     - node_type: "EFFECT"
-      interface: "onex_standard" 
+      interface: "onex_standard"
       data_flow: "fire_and_forget"
-  
+
   external_services:
     - service_type: "cache"
       protocol: "redis"

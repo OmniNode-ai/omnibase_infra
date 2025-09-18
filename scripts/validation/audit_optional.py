@@ -7,9 +7,6 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
-from typing import Optional as TypingOptional
-from typing import Set
 
 
 @dataclass
@@ -87,13 +84,18 @@ class OptionalUsageAuditor:
 
     def __init__(self, repo_path: Path):
         self.repo_path = repo_path
-        self.violations: List[OptionalViolation] = []
+        self.violations: list[OptionalViolation] = []
 
     def audit_optional_usage(self) -> bool:
         """Audit all Optional type usage."""
         for py_file in self.repo_path.rglob("*.py"):
             # Skip test files, __pycache__, archived directories, and archive folder
-            if "test" in str(py_file).lower() or "__pycache__" in str(py_file) or "/archived/" in str(py_file) or "/archive/" in str(py_file):
+            if (
+                "test" in str(py_file).lower()
+                or "__pycache__" in str(py_file)
+                or "/archived/" in str(py_file)
+                or "/archive/" in str(py_file)
+            ):
                 continue
 
             self._audit_file(py_file)
@@ -103,7 +105,7 @@ class OptionalUsageAuditor:
     def _audit_file(self, file_path: Path):
         """Audit Optional usage in a specific file."""
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 content = f.read()
                 lines = content.splitlines()
 
@@ -123,7 +125,7 @@ class OptionalUsageAuditor:
         except (SyntaxError, UnicodeDecodeError) as e:
             print(f"Warning: Could not parse {file_path}: {e}")
 
-    def _check_annotation(self, file_path: Path, node: ast.AnnAssign, lines: List[str]):
+    def _check_annotation(self, file_path: Path, node: ast.AnnAssign, lines: list[str]):
         """Check type annotations for Optional usage."""
         if hasattr(node, "annotation"):
             annotation_str = ast.unparse(node.annotation)
@@ -134,11 +136,11 @@ class OptionalUsageAuditor:
                     ast.unparse(node.target) if hasattr(node, "target") else "unknown"
                 )
                 self._evaluate_optional_usage(
-                    file_path, node.lineno, var_name, annotation_str, lines
+                    file_path, node.lineno, var_name, annotation_str, lines,
                 )
 
     def _check_function_annotations(
-        self, file_path: Path, node: ast.FunctionDef, lines: List[str]
+        self, file_path: Path, node: ast.FunctionDef, lines: list[str],
     ):
         """Check function parameter and return type annotations for Optional usage."""
         # Check return type
@@ -163,7 +165,7 @@ class OptionalUsageAuditor:
                     "|" in param_annotation and "None" in param_annotation
                 ):
                     self._evaluate_optional_usage(
-                        file_path, node.lineno, arg.arg, param_annotation, lines
+                        file_path, node.lineno, arg.arg, param_annotation, lines,
                     )
 
     def _evaluate_optional_usage(
@@ -172,7 +174,7 @@ class OptionalUsageAuditor:
         line_num: int,
         var_name: str,
         annotation: str,
-        lines: List[str],
+        lines: list[str],
     ):
         """Evaluate whether Optional usage is justified."""
         line_content = lines[line_num - 1] if line_num <= len(lines) else ""
@@ -219,9 +221,9 @@ class OptionalUsageAuditor:
                     justification_needed=True,
                     description=f"Suspicious Optional usage for '{var_name}' needs business justification",
                     severity="error",
-                )
+                ),
             )
-        elif "Optional" in annotation or "|" in annotation and "None" in annotation:
+        elif "Optional" in annotation or ("|" in annotation and "None" in annotation):
             # Track all Optional usage for reporting
             justification_reason = (
                 "pattern justified"
@@ -242,7 +244,7 @@ class OptionalUsageAuditor:
                     justification_needed=False,
                     description=f"Optional usage ({justification_reason})",
                     severity="info",
-                )
+                ),
             )
 
     def _has_comment_justification(self, context: str) -> bool:
@@ -266,8 +268,8 @@ class OptionalUsageAuditor:
         needs_justification = [v for v in self.violations if v.justification_needed]
         justified_usage = [v for v in self.violations if not v.justification_needed]
 
-        report = f"📊 Optional Type Usage Audit Report\n"
-        report += f"=" * 40 + "\n\n"
+        report = "📊 Optional Type Usage Audit Report\n"
+        report += "=" * 40 + "\n\n"
 
         report += f"Total Optional usage found: {len(self.violations)}\n"
         report += f"Needs business justification: {len(needs_justification)}\n"
@@ -282,9 +284,9 @@ class OptionalUsageAuditor:
                 )
                 report += f"   File: {violation.file_path}\n"
                 report += f"   Context: {violation.context}\n"
-                report += f"   Action: Add comment explaining why Optional is needed\n"
+                report += "   Action: Add comment explaining why Optional is needed\n"
                 report += (
-                    f"   Example: # Optional: User might not provide this value\n\n"
+                    "   Example: # Optional: User might not provide this value\n\n"
                 )
 
         # Show summary of justified usage by category
@@ -355,7 +357,7 @@ class OptionalUsageAuditor:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Audit Optional type usage in omni* ecosystem"
+        description="Audit Optional type usage in omni* ecosystem",
     )
     parser.add_argument("repo_path", help="Path to repository root")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
@@ -373,7 +375,7 @@ def main():
     print(auditor.generate_report())
 
     if is_valid:
-        print(f"\n✅ SUCCESS: All Optional usage is justified!")
+        print("\n✅ SUCCESS: All Optional usage is justified!")
         sys.exit(0)
     else:
         errors = len([v for v in auditor.violations if v.justification_needed])

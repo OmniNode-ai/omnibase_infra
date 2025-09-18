@@ -16,7 +16,6 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 
 class ViolationLevel(Enum):
@@ -44,10 +43,10 @@ class OmniStructureValidator:
     def __init__(self, repo_path: str, repo_name: str):
         self.repo_path = Path(repo_path).resolve()
         self.repo_name = repo_name
-        self.violations: List[StructureViolation] = []
+        self.violations: list[StructureViolation] = []
         self.src_path = self.repo_path / "src" / repo_name
 
-    def validate_all(self) -> List[StructureViolation]:
+    def validate_all(self) -> list[StructureViolation]:
         """Run all structure validations."""
         print(f"🔍 Validating structure for repository: {self.repo_name}")
         print(f"📁 Repository path: {self.repo_path}")
@@ -91,7 +90,7 @@ class OmniStructureValidator:
                                 message=f"Found forbidden directory: /{dir_name}/",
                                 path=str(path.relative_to(self.repo_path)),
                                 suggestion=suggestion,
-                            )
+                            ),
                         )
 
         # Check for scattered model directories
@@ -109,7 +108,7 @@ class OmniStructureValidator:
                         message=f"Models directory found outside root: {path}",
                         path=str(path.relative_to(self.repo_path)),
                         suggestion="Move all models to src/{repo_name}/models/ organized by domain",
-                    )
+                    ),
                 )
 
         # Check for scattered enum directories
@@ -127,7 +126,7 @@ class OmniStructureValidator:
                         message=f"Enums directory found outside root: {path}",
                         path=str(path.relative_to(self.repo_path)),
                         suggestion="Move all enums to src/{repo_name}/enums/ organized by domain",
-                    )
+                    ),
                 )
 
     def validate_required_structure(self):
@@ -149,7 +148,7 @@ class OmniStructureValidator:
                         message=f"Missing required directory: {dir_path}",
                         path=dir_path,
                         suggestion=f"Create {description}: mkdir -p {dir_path}",
-                    )
+                    ),
                 )
 
     def validate_model_organization(self):
@@ -164,7 +163,7 @@ class OmniStructureValidator:
                     message="No models/ directory found",
                     path="src/{repo_name}/models/",
                     suggestion="Create models directory organized by domain",
-                )
+                ),
             )
             return
 
@@ -185,7 +184,7 @@ class OmniStructureValidator:
                     message="Models are not organized by domain",
                     path="src/{repo_name}/models/",
                     suggestion=f"Organize models into domains: {', '.join(expected_domains)}",
-                )
+                ),
             )
 
         # Check model file naming
@@ -205,7 +204,7 @@ class OmniStructureValidator:
                                 message=f"Model file must start with 'model_': {file}",
                                 path=str(path.relative_to(self.repo_path)),
                                 suggestion=f"Rename to: model_{file}",
-                            )
+                            ),
                         )
 
     def validate_enum_organization(self):
@@ -220,7 +219,7 @@ class OmniStructureValidator:
                     message="No enums/ directory found",
                     path="src/{repo_name}/enums/",
                     suggestion="Create enums directory organized by domain",
-                )
+                ),
             )
             return
 
@@ -241,7 +240,7 @@ class OmniStructureValidator:
                                 message=f"Enum file must start with 'enum_': {file}",
                                 path=str(path.relative_to(self.repo_path)),
                                 suggestion=f"Rename to: enum_{file}",
-                            )
+                            ),
                         )
 
     def validate_protocol_locations(self):
@@ -253,10 +252,10 @@ class OmniStructureValidator:
                 StructureViolation(
                     level=ViolationLevel.ERROR,
                     category="Protocol Location",
-                    message=f"Only omnibase_spi should contain protocols directory",
+                    message="Only omnibase_spi should contain protocols directory",
                     path="src/{repo_name}/protocols/",
                     suggestion="Remove local protocols, import from omnibase_spi instead",
-                )
+                ),
             )
 
         # Count protocol files in non-SPI repositories
@@ -279,7 +278,7 @@ class OmniStructureValidator:
                         message=f"Found {protocol_count} protocol files (max 3 allowed for non-SPI repos)",
                         path="src/{repo_name}/",
                         suggestion="Migrate excess protocols to omnibase_spi",
-                    )
+                    ),
                 )
 
     def validate_node_structure(self):
@@ -302,7 +301,7 @@ class OmniStructureValidator:
                         message=f"Node directory must start with 'node_': {node_dir.name}",
                         path=str(node_dir.relative_to(self.repo_path)),
                         suggestion=f"Rename to: node_{node_dir.name}",
-                    )
+                    ),
                 )
                 continue
 
@@ -320,7 +319,7 @@ class OmniStructureValidator:
                         message=f"Node must end with type suffix: {node_dir.name}",
                         path=str(node_dir.relative_to(self.repo_path)),
                         suggestion=f"Add suffix: {', '.join(valid_suffixes)}",
-                    )
+                    ),
                 )
 
             # Validate version structure
@@ -330,10 +329,10 @@ class OmniStructureValidator:
                     StructureViolation(
                         level=ViolationLevel.ERROR,
                         category="Node Version",
-                        message=f"Missing version directory: v1_0_0",
+                        message="Missing version directory: v1_0_0",
                         path=str(node_dir.relative_to(self.repo_path)),
                         suggestion="Create v1_0_0 directory with node.py and contracts/",
-                    )
+                    ),
                 )
                 continue
 
@@ -349,7 +348,7 @@ class OmniStructureValidator:
                             message=f"Missing required file: {req_file}",
                             path=str(version_dir.relative_to(self.repo_path)),
                             suggestion=f"Create {req_file} with proper node implementation",
-                        )
+                        ),
                     )
 
     def validate_test_structure(self):
@@ -364,7 +363,7 @@ class OmniStructureValidator:
                     message="No tests directory found",
                     path="tests/",
                     suggestion="Create tests directory that mirrors src/ structure",
-                )
+                ),
             )
             return
 
@@ -379,7 +378,7 @@ class OmniStructureValidator:
                         message=f"Missing test directory: {test_dir}",
                         path=f"tests/{test_dir}/",
                         suggestion=f"Create {test_dir} test directory",
-                    )
+                    ),
                 )
 
     def validate_required_files(self):
@@ -400,11 +399,11 @@ class OmniStructureValidator:
                         message=f"Missing recommended file: {file_name}",
                         path=file_name,
                         suggestion=f"Create {description}",
-                    )
+                    ),
                 )
 
 
-def print_validation_report(violations: List[StructureViolation], repo_name: str):
+def print_validation_report(violations: list[StructureViolation], repo_name: str):
     """Print formatted validation report."""
     print(f"\n🚨 Repository '{repo_name}' Structure Validation Report")
     print("=" * 60)
@@ -421,12 +420,12 @@ def print_validation_report(violations: List[StructureViolation], repo_name: str
         return True
 
     print(
-        f"❌ FAILURE: {error_count + warning_count} structure violations must be fixed!"
+        f"❌ FAILURE: {error_count + warning_count} structure violations must be fixed!",
     )
     print()
 
     # Group violations by category
-    by_category: Dict[str, List[StructureViolation]] = {}
+    by_category: dict[str, list[StructureViolation]] = {}
     for violation in violations:
         if violation.category not in by_category:
             by_category[violation.category] = []
@@ -455,7 +454,7 @@ def print_validation_report(violations: List[StructureViolation], repo_name: str
 def main():
     """Main validation entry point."""
     parser = argparse.ArgumentParser(
-        description="Validate omni* repository structure compliance"
+        description="Validate omni* repository structure compliance",
     )
     parser.add_argument("repo_path", help="Path to repository root")
     parser.add_argument("repo_name", help="Repository name (e.g., omnibase_core)")

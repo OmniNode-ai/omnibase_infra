@@ -26,16 +26,23 @@ class MockONEXContainer:
         else:
             self.services[service_name] = factory
 
+
 class RealHttpClient:
     """Real HTTP client for testing actual webhook delivery."""
 
-    async def post(self, url: str, headers: dict = None, body: str = None, timeout: float = 30.0):
+    async def post(
+        self, url: str, headers: dict = None, body: str = None, timeout: float = 30.0,
+    ):
         """Make real HTTP POST request."""
         import aiohttp
 
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-                async with session.post(url, headers=headers or {}, data=body) as response:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as session:
+                async with session.post(
+                    url, headers=headers or {}, data=body,
+                ) as response:
                     response_body = await response.text()
 
                     # Import the actual response model
@@ -51,6 +58,7 @@ class RealHttpClient:
 
         except TimeoutError:
             from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
+
             raise OnexError(
                 code=CoreErrorCode.TIMEOUT_ERROR,
                 message=f"HTTP request to {url} timed out after {timeout}s",
@@ -58,11 +66,13 @@ class RealHttpClient:
             )
         except Exception as e:
             from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
+
             raise OnexError(
                 code=CoreErrorCode.NETWORK_ERROR,
                 message=f"HTTP request failed: {e!s}",
                 context={"url": url, "error": str(e)},
             ) from e
+
 
 class MockEventBus:
     """Mock event bus to capture published events."""
@@ -75,6 +85,7 @@ class MockEventBus:
         print(f"📢 Event published: {event.event_type}")
         return True
 
+
 async def test_slack_webhook_integration():
     """Test Hook Node with real Slack webhook."""
 
@@ -83,7 +94,9 @@ async def test_slack_webhook_integration():
 
     if SLACK_WEBHOOK_URL == "YOUR_SLACK_WEBHOOK_URL_HERE":
         print("❌ Please replace SLACK_WEBHOOK_URL with your actual Slack webhook URL")
-        print("   Get it from: https://api.slack.com/apps → Your App → Incoming Webhooks")
+        print(
+            "   Get it from: https://api.slack.com/apps → Your App → Incoming Webhooks",
+        )
         return False
 
     print("🚀 Testing Hook Node with Real Slack Webhook")
@@ -101,6 +114,7 @@ async def test_slack_webhook_integration():
 
         # Create Hook Node
         from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect
+
         hook_node = NodeHookEffect(container)
 
         # Create test notification request
@@ -179,7 +193,9 @@ async def test_slack_webhook_integration():
             print("✅ Hook Node test SUCCESSFUL!")
             print(f"📊 Status Code: {result.notification_result.final_status_code}")
             print(f"🔄 Attempts: {result.notification_result.total_attempts}")
-            print(f"⏳ Total Duration: {result.notification_result.total_duration_ms}ms")
+            print(
+                f"⏳ Total Duration: {result.notification_result.total_duration_ms}ms",
+            )
 
             # Check if message appeared in Slack
             if result.notification_result.final_status_code == 200:
@@ -203,8 +219,10 @@ async def test_slack_webhook_integration():
     except Exception as e:
         print(f"💥 Test crashed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
+
 
 async def test_authentication_webhook():
     """Test Hook Node with authentication (if needed)."""
@@ -233,8 +251,11 @@ async def test_authentication_webhook():
     # Process with authentication...
     """
 
-    print("🔐 Authentication test skipped (no auth required for standard Slack webhooks)")
+    print(
+        "🔐 Authentication test skipped (no auth required for standard Slack webhooks)",
+    )
     print("   Uncomment and modify the code above if you need to test authentication")
+
 
 async def test_error_handling():
     """Test Hook Node error handling with invalid webhook."""
@@ -250,6 +271,7 @@ async def test_error_handling():
         container.services["ProtocolEventBus"] = event_bus
 
         from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect
+
         hook_node = NodeHookEffect(container)
 
         # Test with invalid URL
@@ -283,7 +305,9 @@ async def test_error_handling():
             print(f"❌ Expected failure: {result.error_message}")
 
             # Check circuit breaker events
-            failure_events = [e for e in event_bus.published_events if "failure" in e.event_type]
+            failure_events = [
+                e for e in event_bus.published_events if "failure" in e.event_type
+            ]
             if failure_events:
                 print(f"📢 Circuit breaker failure events: {len(failure_events)}")
 
@@ -294,6 +318,7 @@ async def test_error_handling():
     except Exception as e:
         print(f"✅ Exception handled correctly: {e}")
         return True
+
 
 async def main():
     """Main test runner."""
@@ -324,6 +349,7 @@ async def main():
         return True
     print("❌ Some tests failed - check the output above")
     return False
+
 
 if __name__ == "__main__":
     try:

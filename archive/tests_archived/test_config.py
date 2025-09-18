@@ -3,7 +3,7 @@ Test Configuration for Enhanced PostgreSQL Adapter Testing.
 
 Provides centralized configuration for all test types including:
 - Integration tests with RedPanda
-- Performance testing parameters  
+- Performance testing parameters
 - Circuit breaker test settings
 - Load testing configurations
 - Security validation settings
@@ -212,10 +212,10 @@ class LoadTestConfig:
     def __post_init__(self):
         if self.execution_time_thresholds is None:
             self.execution_time_thresholds = {
-                "low": 100.0,     # Simple queries under 100ms
+                "low": 100.0,  # Simple queries under 100ms
                 "medium": 500.0,  # Medium queries under 500ms
-                "high": 2000.0,   # Complex queries under 2s
-                "health": 200.0,   # Health checks under 200ms
+                "high": 2000.0,  # Complex queries under 2s
+                "health": 200.0,  # Health checks under 200ms
             }
 
 
@@ -253,14 +253,28 @@ class IntegrationTestConfig:
         config = cls()
 
         # Override with environment variables if present
-        config.redpanda.kafka_port = int(os.getenv("TEST_REDPANDA_PORT", config.redpanda.kafka_port))
-        config.postgres.port = int(os.getenv("TEST_POSTGRES_PORT", config.postgres.port))
-        config.postgres.password = os.getenv("TEST_POSTGRES_PASSWORD", config.postgres.password)
+        config.redpanda.kafka_port = int(
+            os.getenv("TEST_REDPANDA_PORT", config.redpanda.kafka_port),
+        )
+        config.postgres.port = int(
+            os.getenv("TEST_POSTGRES_PORT", config.postgres.port),
+        )
+        config.postgres.password = os.getenv(
+            "TEST_POSTGRES_PASSWORD", config.postgres.password,
+        )
 
-        config.performance.measurement_runs = int(os.getenv("PERF_MEASUREMENT_RUNS", config.performance.measurement_runs))
-        config.performance.concurrent_operations_count = int(os.getenv("PERF_CONCURRENT_OPS", config.performance.concurrent_operations_count))
+        config.performance.measurement_runs = int(
+            os.getenv("PERF_MEASUREMENT_RUNS", config.performance.measurement_runs),
+        )
+        config.performance.concurrent_operations_count = int(
+            os.getenv(
+                "PERF_CONCURRENT_OPS", config.performance.concurrent_operations_count,
+            ),
+        )
 
-        config.load_test.users = int(os.getenv("LOAD_TEST_USERS", config.load_test.users))
+        config.load_test.users = int(
+            os.getenv("LOAD_TEST_USERS", config.load_test.users),
+        )
         config.load_test.host = os.getenv("LOAD_TEST_HOST", config.load_test.host)
 
         config.test_timeout = int(os.getenv("TEST_TIMEOUT", config.test_timeout))
@@ -323,7 +337,14 @@ def override_test_config(**kwargs) -> IntegrationTestConfig:
             setattr(config, key, value)
         else:
             # Try to set on sub-configs
-            for sub_config_name in ["redpanda", "postgres", "performance", "circuit_breaker", "security", "load_test"]:
+            for sub_config_name in [
+                "redpanda",
+                "postgres",
+                "performance",
+                "circuit_breaker",
+                "security",
+                "load_test",
+            ]:
                 sub_config = getattr(config, sub_config_name)
                 if hasattr(sub_config, key):
                     setattr(sub_config, key, value)
@@ -347,6 +368,7 @@ def validate_test_environment() -> bool:
     # Check Docker availability
     try:
         import docker
+
         client = docker.from_env()
         client.ping()
     except Exception as e:
@@ -375,6 +397,7 @@ if __name__ == "__main__":
     print("=" * 50)
 
     import json
+
     print(json.dumps(config.to_dict(), indent=2))
 
     print("\nEnvironment Validation:")

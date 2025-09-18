@@ -53,7 +53,7 @@ class TracingConfiguration:
 
     def __init__(self, environment: str | None = None):
         """Initialize tracing configuration.
-        
+
         Args:
             environment: Target environment for configuration
         """
@@ -62,16 +62,26 @@ class TracingConfiguration:
         self.service_version = "1.0.0"
 
         # OpenTelemetry configuration
-        self.otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-        self.otlp_headers = self._parse_headers(os.getenv("OTEL_EXPORTER_OTLP_HEADERS", ""))
+        self.otlp_endpoint = os.getenv(
+            "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317",
+        )
+        self.otlp_headers = self._parse_headers(
+            os.getenv("OTEL_EXPORTER_OTLP_HEADERS", ""),
+        )
 
         # Sampling configuration (environment-specific)
         self.trace_sample_rate = self._get_sample_rate()
 
         # Feature flags
-        self.enable_db_instrumentation = os.getenv("OTEL_ENABLE_DB_INSTRUMENTATION", "true").lower() == "true"
-        self.enable_kafka_instrumentation = os.getenv("OTEL_ENABLE_KAFKA_INSTRUMENTATION", "true").lower() == "true"
-        self.enable_audit_integration = os.getenv("OTEL_ENABLE_AUDIT_INTEGRATION", "true").lower() == "true"
+        self.enable_db_instrumentation = (
+            os.getenv("OTEL_ENABLE_DB_INSTRUMENTATION", "true").lower() == "true"
+        )
+        self.enable_kafka_instrumentation = (
+            os.getenv("OTEL_ENABLE_KAFKA_INSTRUMENTATION", "true").lower() == "true"
+        )
+        self.enable_audit_integration = (
+            os.getenv("OTEL_ENABLE_AUDIT_INTEGRATION", "true").lower() == "true"
+        )
 
     def _detect_environment(self) -> str:
         """Detect current deployment environment."""
@@ -85,12 +95,14 @@ class TracingConfiguration:
     def _get_sample_rate(self) -> float:
         """Get environment-specific trace sampling rate."""
         sample_rates = {
-            "production": 0.1,    # 10% sampling in production
-            "staging": 0.5,       # 50% sampling in staging
-            "development": 1.0,    # 100% sampling in development
+            "production": 0.1,  # 10% sampling in production
+            "staging": 0.5,  # 50% sampling in staging
+            "development": 1.0,  # 100% sampling in development
         }
 
-        rate = float(os.getenv("OTEL_TRACE_SAMPLE_RATE", sample_rates.get(self.environment, 1.0)))
+        rate = float(
+            os.getenv("OTEL_TRACE_SAMPLE_RATE", sample_rates.get(self.environment, 1.0)),
+        )
         return max(0.0, min(1.0, rate))  # Clamp between 0 and 1
 
     def _parse_headers(self, headers_str: str) -> Dict[str, str]:
@@ -107,7 +119,7 @@ class TracingConfiguration:
 class DistributedTracingManager:
     """
     Distributed tracing manager for ONEX infrastructure.
-    
+
     Provides:
     - OpenTelemetry integration with automatic instrumentation
     - Trace context propagation through event envelopes
@@ -118,7 +130,7 @@ class DistributedTracingManager:
 
     def __init__(self, config: TracingConfiguration | None = None):
         """Initialize distributed tracing manager.
-        
+
         Args:
             config: Tracing configuration (optional, auto-detected if None)
         """
@@ -135,7 +147,9 @@ class DistributedTracingManager:
 
         # Check OpenTelemetry availability
         if not OPENTELEMETRY_AVAILABLE:
-            self.logger.warning("OpenTelemetry not available - tracing will be disabled")
+            self.logger.warning(
+                "OpenTelemetry not available - tracing will be disabled",
+            )
 
     async def initialize(self) -> None:
         """Initialize distributed tracing infrastructure."""
@@ -144,12 +158,14 @@ class DistributedTracingManager:
 
         try:
             # Create resource with service information
-            resource = Resource.create({
-                SERVICE_NAME: self.config.service_name,
-                SERVICE_VERSION: self.config.service_version,
-                "deployment.environment": self.config.environment,
-                "service.namespace": "omnibase_infrastructure",
-            })
+            resource = Resource.create(
+                {
+                    SERVICE_NAME: self.config.service_name,
+                    SERVICE_VERSION: self.config.service_version,
+                    "deployment.environment": self.config.environment,
+                    "service.namespace": "omnibase_infrastructure",
+                },
+            )
 
             # Create tracer provider
             self.tracer_provider = TracerProvider(resource=resource)
@@ -181,7 +197,9 @@ class DistributedTracingManager:
                 self.audit_logger = AuditLogger()
 
             self.is_initialized = True
-            self.logger.info(f"Distributed tracing initialized for environment: {self.config.environment}")
+            self.logger.info(
+                f"Distributed tracing initialized for environment: {self.config.environment}",
+            )
 
         except Exception as e:
             self.logger.error(f"Failed to initialize distributed tracing: {e}")
@@ -217,14 +235,14 @@ class DistributedTracingManager:
     ) -> AsyncIterator[Span]:
         """
         Create a trace span for an operation with automatic error handling.
-        
+
         Args:
             operation_name: Name of the operation being traced
             correlation_id: Correlation ID for the operation
             parent_context: Parent trace context (optional)
             span_kind: OpenTelemetry span kind
             attributes: Additional span attributes
-            
+
         Yields:
             Active span for the operation
         """
@@ -275,7 +293,10 @@ class DistributedTracingManager:
                     # Log audit event for successful operation
                     if self.audit_logger and self.config.enable_audit_integration:
                         await self._log_trace_audit_event(
-                            operation_name, correlation_str, "success", span,
+                            operation_name,
+                            correlation_str,
+                            "success",
+                            span,
                         )
 
                 except Exception as e:
@@ -286,7 +307,11 @@ class DistributedTracingManager:
                     # Log audit event for failed operation
                     if self.audit_logger and self.config.enable_audit_integration:
                         await self._log_trace_audit_event(
-                            operation_name, correlation_str, "failure", span, error=str(e),
+                            operation_name,
+                            correlation_str,
+                            "failure",
+                            span,
+                            error=str(e),
                         )
 
                     raise
@@ -298,13 +323,17 @@ class DistributedTracingManager:
 
     def _create_noop_span(self) -> object:
         """Create a no-op span when tracing is disabled."""
+
         class NoOpSpan:
             def set_attribute(self, key: str, value: str | int | float | bool) -> None:
                 pass
+
             def set_status(self, status: object) -> None:
                 pass
+
             def record_exception(self, exception: Exception) -> None:
                 pass
+
             def end(self) -> None:
                 pass
 
@@ -312,10 +341,10 @@ class DistributedTracingManager:
 
     def inject_trace_context(self, event: ModelOnexEvent) -> ModelOnexEvent:
         """Inject current trace context into an event envelope.
-        
+
         Args:
             event: Event envelope to inject trace context into
-            
+
         Returns:
             Event with trace context injected into metadata
         """
@@ -331,12 +360,14 @@ class DistributedTracingManager:
             if not hasattr(event, "metadata") or event.metadata is None:
                 event.metadata = {}
 
-            event.metadata.update({
-                "trace_context": carrier,
-                "trace_timestamp": datetime.now().isoformat(),
-                "trace_service": self.config.service_name,
-                "trace_environment": self.config.environment,
-            })
+            event.metadata.update(
+                {
+                    "trace_context": carrier,
+                    "trace_timestamp": datetime.now().isoformat(),
+                    "trace_service": self.config.service_name,
+                    "trace_environment": self.config.environment,
+                },
+            )
 
             return event
 
@@ -346,10 +377,10 @@ class DistributedTracingManager:
 
     def extract_trace_context(self, event: ModelOnexEvent) -> Context | None:
         """Extract trace context from an event envelope.
-        
+
         Args:
             event: Event envelope to extract trace context from
-            
+
         Returns:
             Extracted trace context or None if not available
         """
@@ -379,7 +410,7 @@ class DistributedTracingManager:
         parent_context: Context | None = None,
     ) -> AsyncIterator[Span]:
         """Trace a database operation with database-specific attributes.
-        
+
         Args:
             operation_type: Type of database operation (query, transaction, etc.)
             query: SQL query (optional, will be sanitized)
@@ -415,7 +446,7 @@ class DistributedTracingManager:
         parent_context: Context | None = None,
     ) -> AsyncIterator[Span]:
         """Trace a Kafka operation with messaging-specific attributes.
-        
+
         Args:
             operation_type: Type of Kafka operation (produce, consume, etc.)
             topic: Kafka topic name
@@ -436,7 +467,9 @@ class DistributedTracingManager:
             operation_name=f"kafka.{operation_type}",
             correlation_id=correlation_id,
             parent_context=parent_context,
-            span_kind=SpanKind.PRODUCER if operation_type == "produce" else SpanKind.CONSUMER,
+            span_kind=(
+                SpanKind.PRODUCER if operation_type == "produce" else SpanKind.CONSUMER
+            ),
             attributes=attributes,
         ) as span:
             yield span
@@ -477,8 +510,14 @@ class DistributedTracingManager:
             audit_event = AuditEvent(
                 event_id="",  # Will be auto-generated
                 timestamp="",  # Will be auto-generated
-                event_type=AuditEventType.SYSTEM_ERROR if outcome == "failure" else AuditEventType.DATA_ACCESS,
-                severity=AuditSeverity.HIGH if outcome == "failure" else AuditSeverity.LOW,
+                event_type=(
+                    AuditEventType.SYSTEM_ERROR
+                    if outcome == "failure"
+                    else AuditEventType.DATA_ACCESS
+                ),
+                severity=(
+                    AuditSeverity.HIGH if outcome == "failure" else AuditSeverity.LOW
+                ),
                 user_id=None,  # System operation
                 client_id="infrastructure_tracing",
                 session_id=None,
@@ -508,7 +547,9 @@ class DistributedTracingManager:
         try:
             if self.tracer_provider:
                 # Force flush pending spans
-                await asyncio.to_thread(self.tracer_provider.force_flush, timeout_millis=5000)
+                await asyncio.to_thread(
+                    self.tracer_provider.force_flush, timeout_millis=5000,
+                )
 
             self.is_initialized = False
             self.logger.info("Distributed tracing shutdown complete")
@@ -521,7 +562,9 @@ class DistributedTracingManager:
 _tracing_manager: DistributedTracingManager | None = None
 
 
-def get_tracing_manager(config: TracingConfiguration | None = None) -> DistributedTracingManager:
+def get_tracing_manager(
+    config: TracingConfiguration | None = None,
+) -> DistributedTracingManager:
     """Get the global distributed tracing manager instance."""
     global _tracing_manager
     if _tracing_manager is None:
@@ -529,7 +572,9 @@ def get_tracing_manager(config: TracingConfiguration | None = None) -> Distribut
     return _tracing_manager
 
 
-async def initialize_distributed_tracing(config: TracingConfiguration | None = None) -> None:
+async def initialize_distributed_tracing(
+    config: TracingConfiguration | None = None,
+) -> None:
     """Initialize global distributed tracing."""
     manager = get_tracing_manager(config)
     await manager.initialize()

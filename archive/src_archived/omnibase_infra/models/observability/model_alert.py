@@ -14,10 +14,11 @@ from .model_alert_details import ModelAlertDetails
 
 class AlertSeverityEnum(str, Enum):
     """Alert severity levels."""
-    CRITICAL = "critical"        # Service-affecting issues
-    HIGH = "high"               # Performance degradation
-    MEDIUM = "medium"           # Potential issues
-    LOW = "low"                 # Informational
+
+    CRITICAL = "critical"  # Service-affecting issues
+    HIGH = "high"  # Performance degradation
+    MEDIUM = "medium"  # Potential issues
+    LOW = "low"  # Informational
 
 
 class ModelAlert(BaseModel):

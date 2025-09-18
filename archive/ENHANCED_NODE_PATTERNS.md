@@ -49,7 +49,7 @@ ConfigT = TypeVar('ConfigT', bound='BaseNodeConfig')
 
 class SecurityConfig(BaseModel):
     """Enhanced security configuration with canary patterns."""
-    
+
     # Pre-compiled security patterns for maximum performance
     _PII_PATTERNS: List[Pattern] = [
         re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),  # SSN
@@ -57,19 +57,19 @@ class SecurityConfig(BaseModel):
         re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),  # Email
         re.compile(r'(?i)(password|pwd|token|key|secret)[\s]*[:=][\s]*[^\s]+'),  # Credentials
     ]
-    
+
     _COMPILED_AT: float = time.time()
-    
+
     enable_pii_sanitization: bool = Field(default=True, description="Enable PII sanitization")
     enable_credential_detection: bool = Field(default=True, description="Enable credential detection")
     sanitization_performance_target_ms: float = Field(default=1.0, description="Target sanitization performance")
     security_validation_level: str = Field(default="strict", regex="^(minimal|standard|strict|paranoid)$")
-    
+
     @classmethod
     def get_compiled_patterns(cls) -> List[Pattern]:
         """Get pre-compiled security patterns for maximum performance."""
         return cls._PII_PATTERNS
-    
+
     @classmethod
     def get_pattern_compilation_age_seconds(cls) -> float:
         """Get age of pattern compilation for monitoring."""
@@ -78,20 +78,20 @@ class SecurityConfig(BaseModel):
 
 class PerformanceConfig(BaseModel):
     """Enhanced performance configuration with canary monitoring."""
-    
+
     # Performance targets based on canary benchmarks
     target_latency_ms: float = Field(default=100.0, description="Target operation latency")
     target_throughput_ops_sec: int = Field(default=1000, description="Target throughput")
     security_validation_budget_ms: float = Field(default=1.0, description="Security validation time budget")
-    
+
     # Resource management
     memory_limit_mb: float = Field(default=512.0, description="Memory limit in MB")
     cpu_limit_cores: float = Field(default=1.0, description="CPU limit in cores")
-    
+
     # Scaling triggers from canary implementations
     scale_up_threshold_percent: float = Field(default=80.0, description="Scale up threshold")
     scale_down_threshold_percent: float = Field(default=30.0, description="Scale down threshold")
-    
+
     # Performance monitoring
     enable_detailed_timing: bool = Field(default=True, description="Enable detailed performance timing")
     enable_resource_monitoring: bool = Field(default=True, description="Enable resource usage monitoring")
@@ -99,12 +99,12 @@ class PerformanceConfig(BaseModel):
 
 class EventConfig(BaseModel):
     """Event bus configuration based on canary patterns."""
-    
+
     enable_event_bus: bool = Field(default=True, description="Enable event bus integration")
     event_buffer_size: int = Field(default=1000, description="Event buffer size")
     event_batch_size: int = Field(default=100, description="Event processing batch size")
     event_timeout_ms: float = Field(default=5000.0, description="Event processing timeout")
-    
+
     # Event types to emit
     emit_performance_events: bool = Field(default=True, description="Emit performance metrics events")
     emit_security_events: bool = Field(default=True, description="Emit security validation events")
@@ -114,27 +114,27 @@ class EventConfig(BaseModel):
 
 class Enhanced{NodeType}Config(BaseNodeConfig):
     """Enhanced configuration template with canary innovations."""
-    
+
     # Core node settings
     node_timeout_ms: float = Field(default=30000.0, ge=1000.0, le=300000.0)
     performance_threshold_ms: float = Field(default=5000.0, ge=100.0, le=30000.0)
     max_concurrent_operations: int = Field(default=50, ge=1, le=1000)
-    
+
     # Enhanced configurations
     security_config: SecurityConfig = Field(default_factory=SecurityConfig)
     performance_config: PerformanceConfig = Field(default_factory=PerformanceConfig)
     event_config: EventConfig = Field(default_factory=EventConfig)
-    
+
     # Circuit breaker with canary patterns
     circuit_breaker_threshold: int = Field(default=5, ge=1, le=100)
     circuit_breaker_timeout: int = Field(default=60, ge=1, le=3600)
     circuit_breaker_half_open_max_calls: int = Field(default=3, ge=1, le=10)
-    
+
     # Health check configuration
     health_check_interval_ms: float = Field(default=30000.0, description="Health check interval")
     health_check_timeout_ms: float = Field(default=5000.0, description="Health check timeout")
     enable_deep_health_checks: bool = Field(default=True, description="Enable comprehensive health checks")
-    
+
     # Tool manifest integration
     tool_manifest_path: Optional[str] = Field(default=None, description="Path to tool manifest")
     enable_tool_validation: bool = Field(default=True, description="Enable tool interface validation")
@@ -144,10 +144,10 @@ class Enhanced{NodeType}Config(BaseNodeConfig):
         """Validate performance configuration consistency."""
         security_budget = values.get('performance_config', {}).get('security_validation_budget_ms', 1.0)
         target_latency = values.get('performance_config', {}).get('target_latency_ms', 100.0)
-        
+
         if security_budget > target_latency * 0.1:  # Security should be <10% of total latency
             raise ValueError(f"Security validation budget ({security_budget}ms) too high for target latency ({target_latency}ms)")
-        
+
         return values
 
     @validator('node_timeout_ms')
@@ -161,7 +161,7 @@ class Enhanced{NodeType}Config(BaseNodeConfig):
     @classmethod
     def for_environment(cls: Type[ConfigT], environment: str) -> ConfigT:
         """Create environment-specific configuration with canary optimizations."""
-        
+
         # Environment-specific security settings
         security_levels = {
             "production": SecurityConfig(
@@ -180,7 +180,7 @@ class Enhanced{NodeType}Config(BaseNodeConfig):
                 enable_pii_sanitization=False  # Disable for dev performance
             )
         }
-        
+
         # Environment-specific performance settings
         performance_levels = {
             "production": PerformanceConfig(
@@ -208,7 +208,7 @@ class Enhanced{NodeType}Config(BaseNodeConfig):
                 enable_resource_monitoring=True
             )
         }
-        
+
         return cls(
             security_config=security_levels.get(environment, security_levels["development"]),
             performance_config=performance_levels.get(environment, performance_levels["development"]),
@@ -257,7 +257,7 @@ class Enhanced{NodeType}Node(
     CircuitBreakerMixin
 ):
     """Enhanced node implementation with canary security and performance patterns."""
-    
+
     def __init__(self, config: ConfigT):
         """Initialize enhanced node with comprehensive monitoring and security."""
         super().__init__(config)
@@ -268,17 +268,17 @@ class Enhanced{NodeType}Node(
             expected_exception=Exception,
             half_open_max_calls=config.circuit_breaker_half_open_max_calls
         )
-        
+
         # Enhanced components
         self._security_validator = SecurityValidator(config.security_config)
         self._performance_timer = PerformanceTimer(config.performance_config)
         self._event_emitter = EventEmitter(config.event_config) if config.event_config.enable_event_bus else None
         self._error_sanitizer = ErrorSanitizer(config.security_config)
-        
+
         # Performance tracking
         self._metrics = PerformanceMetrics()
         self._health_status = {"status": "initializing", "last_check": time.time()}
-        
+
         # Pre-compile security patterns for maximum performance
         self._compiled_patterns = SecurityConfig.get_compiled_patterns()
 
@@ -287,7 +287,7 @@ class Enhanced{NodeType}Node(
         """Enhanced performance tracking with security validation timing."""
         operation_start = time.perf_counter()
         security_validation_time = 0.0
-        
+
         try:
             # Emit lifecycle event
             if self._event_emitter:
@@ -296,9 +296,9 @@ class Enhanced{NodeType}Node(
                     "timestamp": time.time(),
                     "correlation_id": getattr(self, '_current_correlation_id', None)
                 })
-            
+
             yield
-            
+
         except Exception as e:
             self._metrics.error_count += 1
             if self._event_emitter:
@@ -308,11 +308,11 @@ class Enhanced{NodeType}Node(
                     "timestamp": time.time()
                 })
             raise
-            
+
         finally:
             operation_end = time.perf_counter()
             duration_ms = (operation_end - operation_start) * 1000
-            
+
             # Update metrics
             self._metrics.operation_count += 1
             self._metrics.total_duration_ms += duration_ms
@@ -320,7 +320,7 @@ class Enhanced{NodeType}Node(
             self._metrics.average_latency_ms = self._metrics.total_duration_ms / self._metrics.operation_count
             self._metrics.max_latency_ms = max(self._metrics.max_latency_ms, duration_ms)
             self._metrics.min_latency_ms = min(self._metrics.min_latency_ms, duration_ms)
-            
+
             # Check performance against targets
             if duration_ms > self.config.performance_config.target_latency_ms:
                 if self._event_emitter:
@@ -334,11 +334,11 @@ class Enhanced{NodeType}Node(
     async def _enhanced_security_validation(self, input_data: Any) -> float:
         """Enhanced security validation with sub-millisecond performance."""
         security_start = time.perf_counter()
-        
+
         try:
             # Fast path: Pre-compiled pattern matching
             input_str = str(input_data)
-            
+
             for pattern in self._compiled_patterns:
                 if pattern.search(input_str):
                     # PII or sensitive data detected
@@ -348,15 +348,15 @@ class Enhanced{NodeType}Node(
                             "pattern_matched": pattern.pattern,
                             "timestamp": time.time()
                         })
-                    
+
                     # Sanitize the input
                     input_data = self._security_validator.sanitize_input(input_data)
                     break
-            
+
             # Additional validation based on security level
             if self.config.security_config.security_validation_level == "paranoid":
                 await self._security_validator.deep_scan(input_data)
-            
+
         except Exception as e:
             if self._event_emitter:
                 await self._event_emitter.emit("security_error", {
@@ -364,11 +364,11 @@ class Enhanced{NodeType}Node(
                     "timestamp": time.time()
                 })
             # Don't raise security errors - log and continue with sanitized data
-        
+
         finally:
             security_end = time.perf_counter()
             security_duration_ms = (security_end - security_start) * 1000
-            
+
             # Validate security performance budget
             if security_duration_ms > self.config.performance_config.security_validation_budget_ms:
                 if self._event_emitter:
@@ -377,28 +377,28 @@ class Enhanced{NodeType}Node(
                         "budget_ms": self.config.performance_config.security_validation_budget_ms,
                         "timestamp": time.time()
                     })
-            
+
             return security_duration_ms
 
     async def process(self, input_data: InputT) -> OutputT:
         """Enhanced process method with integrated canary patterns."""
-        
+
         # Store correlation ID for event tracking
         self._current_correlation_id = getattr(input_data, 'correlation_id', None)
-        
+
         async with self._enhanced_performance_tracking("process"):
             try:
                 # Enhanced security validation with performance tracking
                 security_time = await self._enhanced_security_validation(input_data)
-                
+
                 # Circuit breaker protection
                 async with self.circuit_breaker():
                     # Execute core business logic
                     result = await self._execute_core_logic(input_data)
-                
+
                 # Enhanced result validation
                 await self._validate_output_security(result)
-                
+
                 # Emit success event
                 if self._event_emitter:
                     await self._event_emitter.emit("operation_completed", {
@@ -407,17 +407,17 @@ class Enhanced{NodeType}Node(
                         "processing_time_ms": security_time + (time.perf_counter() * 1000),
                         "timestamp": time.time()
                     })
-                
+
                 return result
-                
+
             except Exception as e:
                 # Enhanced error handling with security sanitization
                 sanitized_error = self._error_sanitizer.sanitize_error(str(e))
-                
+
                 # Check if circuit breaker tripped
                 if isinstance(e, CircuitBreakerError):
                     self._metrics.circuit_breaker_trips += 1
-                
+
                 # Return secure error response
                 return self._create_error_response(sanitized_error, input_data)
 
@@ -443,16 +443,16 @@ class Enhanced{NodeType}Node(
     async def enhanced_health_check(self) -> Dict[str, Any]:
         """Enhanced health check with canary monitoring patterns."""
         health_start = time.perf_counter()
-        
+
         try:
             # Component health checks
             security_healthy = await self._security_validator.health_check()
             performance_healthy = self._check_performance_health()
             circuit_breaker_healthy = self.circuit_breaker_status["state"] != "open"
-            
+
             # Resource health checks
             resource_health = await self._check_resource_health()
-            
+
             # Overall health determination
             overall_healthy = all([
                 security_healthy,
@@ -460,13 +460,13 @@ class Enhanced{NodeType}Node(
                 circuit_breaker_healthy,
                 resource_health["healthy"]
             ])
-            
+
             health_status = {
                 "status": "healthy" if overall_healthy else "degraded",
                 "timestamp": time.time(),
                 "components": {
                     "security_validator": "healthy" if security_healthy else "unhealthy",
-                    "performance": "healthy" if performance_healthy else "unhealthy", 
+                    "performance": "healthy" if performance_healthy else "unhealthy",
                     "circuit_breaker": "healthy" if circuit_breaker_healthy else "unhealthy",
                     "resources": "healthy" if resource_health["healthy"] else "unhealthy"
                 },
@@ -481,16 +481,16 @@ class Enhanced{NodeType}Node(
                 },
                 "resource_usage": resource_health["details"]
             }
-            
+
             # Update health status cache
             self._health_status = health_status
-            
+
             # Emit health event
             if self._event_emitter:
                 await self._event_emitter.emit("health_check_completed", health_status)
-            
+
             return health_status
-            
+
         except Exception as e:
             error_health = {
                 "status": "unhealthy",
@@ -499,7 +499,7 @@ class Enhanced{NodeType}Node(
             }
             self._health_status = error_health
             return error_health
-        
+
         finally:
             health_duration = (time.perf_counter() - health_start) * 1000
             if health_duration > self.config.health_check_timeout_ms:
@@ -514,39 +514,39 @@ class Enhanced{NodeType}Node(
         """Check if performance metrics meet health thresholds."""
         if self._metrics.operation_count == 0:
             return True  # No operations yet, assume healthy
-        
+
         # Check average latency
         if self._metrics.average_latency_ms > self.config.performance_config.target_latency_ms * 2:
             return False
-        
+
         # Check error rate
         error_rate = (self._metrics.error_count / self._metrics.operation_count) * 100
         if error_rate > 10.0:  # >10% error rate is unhealthy
             return False
-        
+
         # Check security performance budget compliance
         avg_security_time = (
             self._metrics.security_validation_time_ms / self._metrics.operation_count
         )
         if avg_security_time > self.config.performance_config.security_validation_budget_ms * 2:
             return False
-        
+
         return True
 
     async def _check_resource_health(self) -> Dict[str, Any]:
         """Check resource utilization health."""
         try:
             import psutil
-            
+
             # Memory usage
             process = psutil.Process()
             memory_usage_mb = process.memory_info().rss / 1024 / 1024
             memory_healthy = memory_usage_mb < self.config.performance_config.memory_limit_mb
-            
+
             # CPU usage
             cpu_percent = process.cpu_percent(interval=0.1)
             cpu_healthy = cpu_percent < (self.config.performance_config.cpu_limit_cores * 100 * 0.8)
-            
+
             return {
                 "healthy": memory_healthy and cpu_healthy,
                 "details": {
@@ -557,13 +557,13 @@ class Enhanced{NodeType}Node(
                     "cpu_limit_percent": self.config.performance_config.cpu_limit_cores * 100
                 }
             }
-            
+
         except ImportError:
             # psutil not available, skip resource checks
             return {"healthy": True, "details": {"resource_monitoring": "unavailable"}}
         except Exception as e:
             return {
-                "healthy": False, 
+                "healthy": False,
                 "details": {"error": self._error_sanitizer.sanitize_error(str(e))}
             }
 
@@ -584,7 +584,7 @@ class Enhanced{NodeType}Node(
                 ),
                 "validation_budget_ms": self.config.performance_config.security_validation_budget_ms,
                 "validation_compliance_percent": min(100, (
-                    self.config.performance_config.security_validation_budget_ms / 
+                    self.config.performance_config.security_validation_budget_ms /
                     max(0.001, self._metrics.security_validation_time_ms / max(1, self._metrics.operation_count))
                 ) * 100),
                 "pattern_compilation_age_seconds": SecurityConfig.get_pattern_compilation_age_seconds()
@@ -623,24 +623,24 @@ schema:
     - "correlation_id"
     - "timestamp"
     - "security_context"
-  
+
   properties:
     # Core operation fields
     operation_type:
       type: "string"
       description: "Type of operation to perform"
       pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"  # Prevent injection
-    
+
     correlation_id:
       type: "string"
       format: "uuid"
       description: "Request correlation ID for tracing"
-    
+
     timestamp:
       type: "number"
       minimum: 0
       description: "Request timestamp as Unix timestamp"
-      
+
     # Enhanced security context
     security_context:
       type: "object"
@@ -651,7 +651,7 @@ schema:
           enum: ["internal", "external", "admin", "system"]
           description: "Source of the request for security validation"
         security_level:
-          type: "string" 
+          type: "string"
           enum: ["minimal", "standard", "strict", "paranoid"]
           description: "Required security validation level"
         client_identity:
@@ -662,7 +662,7 @@ schema:
           items:
             type: "string"
           description: "Required permissions for operation"
-    
+
     # Performance hints
     performance_hints:
       type: "object"
@@ -702,7 +702,7 @@ validation_rules:
       if security_context.security_level == "paranoid":
         assert security_context.client_identity is not None
         assert len(security_context.permissions) > 0
-  
+
   - name: "pii_detection"
     description: "Detect and prevent PII in input data"
     rule: |
@@ -716,7 +716,7 @@ validation_rules:
       for pattern in pii_patterns:
         if re.search(pattern, input_str):
           raise ValueError(f"PII detected in input data matching pattern: {pattern}")
-  
+
   - name: "performance_constraint_validation"
     description: "Validate performance constraints are reasonable"
     rule: |
@@ -732,7 +732,7 @@ performance_guarantees:
     typical_processing_time_ms: 50
     security_validation_time_ms: 1
     throughput_ops_per_second: 1000
-  
+
   - operation_type: "complex_operation"
     max_processing_time_ms: 5000
     typical_processing_time_ms: 2000
@@ -751,13 +751,13 @@ security_specifications:
     - type: "script_injection_prevention"
       patterns: ["javascript", "html_tags", "script_tags"]
       action: "sanitize"
-  
+
   audit_requirements:
     log_all_requests: true
     log_security_violations: true
     log_performance_violations: true
     retention_days: 90
-  
+
   compliance_frameworks:
     - "SOC2"
     - "PCI_DSS"
@@ -770,24 +770,24 @@ monitoring:
       type: "histogram"
       target_percentiles: [50, 90, 95, 99]
       alert_threshold_p99: 10.0  # milliseconds
-    
+
     - name: "pii_detection_events"
       type: "counter"
       alert_threshold_rate: 10  # events per minute
-    
+
     - name: "input_validation_errors"
       type: "counter"
       alert_threshold_rate: 100  # errors per minute
-  
+
   alerts:
     - name: "security_budget_exceeded"
       condition: "security_validation_duration_p99 > 10ms"
       severity: "warning"
-    
+
     - name: "pii_leakage_detected"
       condition: "pii_detection_events > 0"
       severity: "critical"
-    
+
     - name: "high_validation_error_rate"
       condition: "input_validation_errors > 100/min"
       severity: "warning"
@@ -798,15 +798,15 @@ tool_integration:
     - name: "security_validator"
       version: ">=2.0.0"
       purpose: "Input security validation and sanitization"
-    
+
     - name: "performance_timer"
       version: ">=1.5.0"
       purpose: "Sub-millisecond performance timing"
-    
+
     - name: "event_emitter"
       version: ">=1.0.0"
       purpose: "Infrastructure event coordination"
-  
+
   optional_tools:
     - name: "audit_logger"
       version: ">=1.0.0"
@@ -831,7 +831,7 @@ examples:
         resource_constraints:
           max_memory_mb: 512
           max_cpu_percent: 80
-      
+
   - name: "internal_fast_request"
     description: "Internal system request optimized for speed"
     data:

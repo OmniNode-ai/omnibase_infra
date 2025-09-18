@@ -15,7 +15,7 @@
 
 ### 🚨 Critical Mistakes Found
 
-#### 1. **BREAKING CHANGE: Non-existent Imports** 
+#### 1. **BREAKING CHANGE: Non-existent Imports**
 **Severity**: CRITICAL - Complete service failure
 
 **What Was Broken**:
@@ -28,7 +28,7 @@ from omnibase_core.model.core.model_onex_event import ModelOnexEvent
 
 **Impact**: All infrastructure services crash on startup with `No module named 'omnibase_core'`
 
-**Files Affected**: 
+**Files Affected**:
 - `container.py`, `postgres_connection_manager.py`, consul nodes, and many others
 
 #### 2. **ONEX Compliance Violation: Any Types**
@@ -83,7 +83,7 @@ The comprehensive list has been created in `MISSING_OMNIBASE_CORE_COMPONENTS.md`
 ```python
 # Replace all Any types with specific types
 # Example fix:
-# BEFORE: Dict[str, Any] 
+# BEFORE: Dict[str, Any]
 # AFTER: Dict[str, Union[str, int, float, bool]]
 ```
 

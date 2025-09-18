@@ -40,7 +40,9 @@ class ModelKafkaAdapterInput(BaseModel):
 
     # Envelope metadata
     correlation_id: UUID = Field(description="Request correlation ID for tracing")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Request timestamp")
+    timestamp: datetime = Field(
+        default_factory=datetime.utcnow, description="Request timestamp",
+    )
     context: ModelRequestContext | None = Field(
         default=None,
         description="Additional request context",
@@ -61,6 +63,9 @@ class ModelKafkaAdapterInput(BaseModel):
         elif self.operation_type == EnumKafkaOperationType.CONSUME:
             if not self.consumer_config:
                 raise ValueError("consumer_config is required for consume operations")
-        elif self.operation_type in (EnumKafkaOperationType.TOPIC_CREATE, EnumKafkaOperationType.TOPIC_DELETE):
+        elif self.operation_type in (
+            EnumKafkaOperationType.TOPIC_CREATE,
+            EnumKafkaOperationType.TOPIC_DELETE,
+        ):
             if not self.topic_config:
                 raise ValueError("topic_config is required for topic operations")

@@ -10,8 +10,8 @@ Dedicated subcontract model for configuration functionality providing:
 - Sensitive data detection and masking
 - Error handling and logging
 
-This model is composed into infrastructure node contracts that require 
-configuration functionality, providing clean separation between node 
+This model is composed into infrastructure node contracts that require
+configuration functionality, providing clean separation between node
 logic and configuration management behavior.
 
 ZERO TOLERANCE: No Any types allowed in implementation.
@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class ConfigurationSourceType(str, Enum):
     """Configuration source types in priority order."""
+
     CONTAINER = "container"
     ENVIRONMENT = "environment"
     DEFAULTS = "defaults"
@@ -32,6 +33,7 @@ class ConfigurationSourceType(str, Enum):
 
 class ValidationRuleType(str, Enum):
     """Configuration validation rule types."""
+
     FORMAT = "format"
     RANGE = "range"
     ENUM = "enum"
@@ -41,7 +43,7 @@ class ValidationRuleType(str, Enum):
 class ModelConfigurationSource(BaseModel):
     """
     Configuration source with priority and validation.
-    
+
     Defines where configuration values are loaded from
     and in what order, with validation capabilities.
     """
@@ -67,7 +69,7 @@ class ModelConfigurationSource(BaseModel):
 class ModelEnvironmentConfiguration(BaseModel):
     """
     Environment-based configuration loading.
-    
+
     Manages environment variable loading with proper
     prefixing, validation, and fallback values.
     """
@@ -102,15 +104,30 @@ class ModelEnvironmentConfiguration(BaseModel):
             v = f"{v}_"
         if not v.isupper():
             v = v.upper()
-        if not v.replace("_", "").replace("0", "").replace("1", "").replace("2", "").replace("3", "").replace("4", "").replace("5", "").replace("6", "").replace("7", "").replace("8", "").replace("9", "").isalpha():
-            raise ValueError("Environment prefix must contain only letters, numbers, and underscores")
+        if (
+            not v.replace("_", "")
+            .replace("0", "")
+            .replace("1", "")
+            .replace("2", "")
+            .replace("3", "")
+            .replace("4", "")
+            .replace("5", "")
+            .replace("6", "")
+            .replace("7", "")
+            .replace("8", "")
+            .replace("9", "")
+            .isalpha()
+        ):
+            raise ValueError(
+                "Environment prefix must contain only letters, numbers, and underscores",
+            )
         return v
 
 
 class ModelValidationRule(BaseModel):
     """
     Individual validation rule for configuration values.
-    
+
     Defines specific validation logic for configuration
     fields including format, range, and enum constraints.
     """
@@ -182,7 +199,7 @@ class ModelValidationRule(BaseModel):
 class ModelConfigurationValidation(BaseModel):
     """
     Configuration validation rules and patterns.
-    
+
     Manages validation rules, sensitive field detection,
     and required field enforcement for configuration.
     """
@@ -206,7 +223,7 @@ class ModelConfigurationValidation(BaseModel):
 class ModelConfigurationIntegration(BaseModel):
     """
     Configuration integration patterns.
-    
+
     Defines how configuration integrates with container
     services, environment loading, and caching systems.
     """
@@ -252,7 +269,7 @@ class ModelConfigurationIntegration(BaseModel):
 class ModelConfigurationSecurity(BaseModel):
     """
     Configuration security settings.
-    
+
     Manages sensitive data detection, sanitization,
     and secure logging for configuration values.
     """
@@ -281,7 +298,7 @@ class ModelConfigurationSecurity(BaseModel):
 class ModelConfigurationSubcontract(BaseModel):
     """
     Main configuration subcontract model.
-    
+
     Comprehensive configuration management system that provides
     standardized loading, validation, and security patterns
     for ONEX infrastructure nodes.
@@ -294,9 +311,15 @@ class ModelConfigurationSubcontract(BaseModel):
 
     sources: list[ModelConfigurationSource] = Field(
         default_factory=lambda: [
-            ModelConfigurationSource(source_type=ConfigurationSourceType.CONTAINER, priority=1),
-            ModelConfigurationSource(source_type=ConfigurationSourceType.ENVIRONMENT, priority=2),
-            ModelConfigurationSource(source_type=ConfigurationSourceType.DEFAULTS, priority=3),
+            ModelConfigurationSource(
+                source_type=ConfigurationSourceType.CONTAINER, priority=1,
+            ),
+            ModelConfigurationSource(
+                source_type=ConfigurationSourceType.ENVIRONMENT, priority=2,
+            ),
+            ModelConfigurationSource(
+                source_type=ConfigurationSourceType.DEFAULTS, priority=3,
+            ),
         ],
         description="Configuration sources in priority order",
     )

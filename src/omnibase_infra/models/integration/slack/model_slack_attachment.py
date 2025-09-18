@@ -9,7 +9,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, HttpUrl
 
-from omnibase_infra.models.slack.model_slack_field import ModelSlackField
+from omnibase_infra.models.integration.slack.model_slack_field import ModelSlackField
 
 
 class ModelSlackAttachment(BaseModel):

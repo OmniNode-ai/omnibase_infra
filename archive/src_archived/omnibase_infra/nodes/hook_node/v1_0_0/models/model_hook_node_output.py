@@ -62,7 +62,18 @@ class ModelHookNodeOutput(BaseModel):
         description="Total operation execution time in milliseconds",
     )
 
-    context: dict[str, str | int | float | bool | list[str | int | float | bool] | dict[str, str | int | float | bool]] | None = Field(
+    context: (
+        dict[
+            str,
+            str
+            | int
+            | float
+            | bool
+            | list[str | int | float | bool]
+            | dict[str, str | int | float | bool],
+        ]
+        | None
+    ) = Field(
         default=None,
         description="Additional response context and metadata with strongly typed values",
     )
@@ -80,7 +91,18 @@ class ModelHookNodeOutput(BaseModel):
         timestamp: float,
         total_execution_time_ms: float,
         error_message: str | None = None,
-        context: dict[str, str | int | float | bool | list[str | int | float | bool] | dict[str, str | int | float | bool]] | None = None,
+        context: (
+            dict[
+                str,
+                str
+                | int
+                | float
+                | bool
+                | list[str | int | float | bool]
+                | dict[str, str | int | float | bool],
+            ]
+            | None
+        ) = None,
     ) -> "ModelHookNodeOutput":
         """
         Create output from a notification result.

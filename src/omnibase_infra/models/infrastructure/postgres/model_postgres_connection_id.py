@@ -1,6 +1,5 @@
 """PostgreSQL connection identifier model."""
 
-
 from pydantic import BaseModel, Field
 
 

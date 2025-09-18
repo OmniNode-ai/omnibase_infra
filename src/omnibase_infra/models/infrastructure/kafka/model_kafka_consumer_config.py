@@ -1,15 +1,18 @@
 """Kafka consumer configuration model."""
 
-
 from pydantic import BaseModel, Field
 
-from omnibase_infra.models.infrastructure.kafka.model_kafka_security_config import ModelKafkaSecurityConfig
+from omnibase_infra.models.infrastructure.kafka.model_kafka_security_config import (
+    ModelKafkaSecurityConfig,
+)
 
 
 class ModelKafkaConsumerConfig(BaseModel):
     """Kafka consumer configuration model."""
 
-    bootstrap_servers: str = Field(description="Kafka bootstrap servers (comma-separated)")
+    bootstrap_servers: str = Field(
+        description="Kafka bootstrap servers (comma-separated)",
+    )
     group_id: str = Field(description="Consumer group ID")
     client_id: str | None = Field(default=None, description="Consumer client ID")
     topics: list[str] = Field(description="List of topics to subscribe to")

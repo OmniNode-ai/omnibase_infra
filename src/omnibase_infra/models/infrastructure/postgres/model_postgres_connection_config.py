@@ -10,7 +10,9 @@ class ModelPostgresConnectionConfig(BaseModel):
 
     host: str = Field(default="localhost", description="PostgreSQL host")
     port: int = Field(default=5432, description="PostgreSQL port")
-    database: str = Field(default="omnibase_infrastructure", description="Database name")
+    database: str = Field(
+        default="omnibase_infrastructure", description="Database name",
+    )
     user: str = Field(default="postgres", description="Database user")
     password: str = Field(default="", description="Database password")
     schema: str = Field(default="infrastructure", description="Default schema")
@@ -19,14 +21,20 @@ class ModelPostgresConnectionConfig(BaseModel):
     min_connections: int = Field(default=5, description="Minimum pool connections")
     max_connections: int = Field(default=50, description="Maximum pool connections")
     max_inactive_connection_lifetime: float = Field(
-        default=300.0, description="Max inactive connection lifetime in seconds",
+        default=300.0,
+        description="Max inactive connection lifetime in seconds",
     )
-    max_queries: int = Field(default=50000, description="Maximum queries per connection")
+    max_queries: int = Field(
+        default=50000, description="Maximum queries per connection",
+    )
 
     # Connection timeouts
-    command_timeout: float = Field(default=60.0, description="Command timeout in seconds")
+    command_timeout: float = Field(
+        default=60.0, description="Command timeout in seconds",
+    )
     server_settings: dict[str, str] | None = Field(
-        default=None, description="Additional server settings",
+        default=None,
+        description="Additional server settings",
     )
 
     # SSL configuration

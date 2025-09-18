@@ -7,7 +7,6 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set
 
 
 @dataclass
@@ -72,7 +71,7 @@ class NamingConventionValidator:
 
     def __init__(self, repo_path: Path):
         self.repo_path = repo_path
-        self.violations: List[NamingViolation] = []
+        self.violations: list[NamingViolation] = []
 
     def validate_naming_conventions(self) -> bool:
         """Validate all naming conventions."""
@@ -81,12 +80,16 @@ class NamingConventionValidator:
 
         return len([v for v in self.violations if v.severity == "error"]) == 0
 
-    def _validate_category_files(self, category: str, rules: Dict):
+    def _validate_category_files(self, category: str, rules: dict):
         """Validate naming conventions for a specific category."""
         # Find all files matching the prefix pattern
         for file_path in self.repo_path.rglob(f"{rules['file_prefix']}*.py"):
             # Skip __pycache__, archived directories, archive folder, and similar
-            if "__pycache__" in str(file_path) or "/archived/" in str(file_path) or "/archive/" in str(file_path):
+            if (
+                "__pycache__" in str(file_path)
+                or "/archived/" in str(file_path)
+                or "/archive/" in str(file_path)
+            ):
                 continue
 
             self._validate_file_naming(file_path, category, rules)
@@ -96,15 +99,19 @@ class NamingConventionValidator:
         for file_path in self.repo_path.rglob(f"*/{rules['directory']}/*.py"):
             if file_path.name == "__init__.py":
                 continue
-            if "__pycache__" in str(file_path) or "/archived/" in str(file_path) or "/archive/" in str(file_path):
+            if (
+                "__pycache__" in str(file_path)
+                or "/archived/" in str(file_path)
+                or "/archive/" in str(file_path)
+            ):
                 continue
 
             self._validate_file_naming(file_path, category, rules)
 
-    def _validate_file_naming(self, file_path: Path, category: str, rules: Dict):
+    def _validate_file_naming(self, file_path: Path, category: str, rules: dict):
         """Validate naming conventions in a specific file."""
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 content = f.read()
 
             # Check if file name follows convention
@@ -123,7 +130,7 @@ class NamingConventionValidator:
                             expected_pattern=f"{expected_prefix}*.py",
                             description=f"File containing {category} should be named '{expected_prefix}*.py'",
                             severity="warning",
-                        )
+                        ),
                     )
 
             tree = ast.parse(content, filename=str(file_path))
@@ -150,7 +157,7 @@ class NamingConventionValidator:
         return False
 
     def _check_class_naming(
-        self, file_path: Path, node: ast.ClassDef, category: str, rules: Dict
+        self, file_path: Path, node: ast.ClassDef, category: str, rules: dict,
     ):
         """Check if class name follows conventions."""
         class_name = node.name
@@ -174,12 +181,12 @@ class NamingConventionValidator:
                     expected_pattern=f"Should be in /{expected_dir}/ directory",
                     description=f"{class_name} should be in {expected_dir}/ directory",
                     severity="warning",
-                )
+                ),
             )
 
         # If class doesn't match pattern but seems like it should
         elif not re.match(pattern, class_name) and self._should_match_pattern(
-            class_name, category
+            class_name, category,
         ):
             self.violations.append(
                 NamingViolation(
@@ -189,7 +196,7 @@ class NamingConventionValidator:
                     expected_pattern=pattern,
                     description=rules["description"],
                     severity="error",
-                )
+                ),
             )
 
     def _is_exception_class(self, class_name: str) -> bool:
@@ -223,8 +230,8 @@ class NamingConventionValidator:
         errors = [v for v in self.violations if v.severity == "error"]
         warnings = [v for v in self.violations if v.severity == "warning"]
 
-        report = f"🚨 Naming Convention Validation Report\n"
-        report += f"=" * 40 + "\n\n"
+        report = "🚨 Naming Convention Validation Report\n"
+        report += "=" * 40 + "\n\n"
 
         report += f"Summary: {len(errors)} errors, {len(warnings)} warnings\n\n"
 
@@ -274,7 +281,7 @@ def main():
     print(validator.generate_report())
 
     if is_valid:
-        print(f"\n✅ SUCCESS: All naming conventions are compliant!")
+        print("\n✅ SUCCESS: All naming conventions are compliant!")
         sys.exit(0)
     else:
         errors = len([v for v in validator.violations if v.severity == "error"])

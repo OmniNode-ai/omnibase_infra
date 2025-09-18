@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS infrastructure.service_registry (
 
 -- Insert some test data
 INSERT INTO infrastructure.service_registry (service_name, service_version, endpoint, health_endpoint)
-VALUES 
+VALUES
     ('postgres-adapter', 'v1.0.0', 'http://localhost:8080', 'http://localhost:8080/health'),
     ('consul-adapter', 'v1.0.0', 'http://localhost:8081', 'http://localhost:8081/health')
 ON CONFLICT DO NOTHING;

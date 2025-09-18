@@ -18,17 +18,27 @@ class ModelPostgresHealthResponse(BaseModel):
     status: str = Field(description="Health status: healthy, degraded, unhealthy")
     timestamp: float = Field(description="Health check timestamp")
     connection_pool: ModelPostgresConnectionPoolInfo | None = Field(
-        default=None, description="Connection pool information",
+        default=None,
+        description="Connection pool information",
     )
     database_info: ModelPostgresDatabaseInfo | None = Field(
-        default=None, description="Database information",
+        default=None,
+        description="Database information",
     )
     schema_info: ModelPostgresSchemaInfo | None = Field(
-        default=None, description="Schema validation information",
+        default=None,
+        description="Schema validation information",
     )
     performance: ModelPostgresPerformanceMetrics | None = Field(
-        default=None, description="Performance metrics",
+        default=None,
+        description="Performance metrics",
     )
-    errors: list[ModelPostgresError] = Field(default_factory=list, description="List of errors or warnings")
-    correlation_id: UUID | None = Field(default=None, description="Request correlation ID")
-    context: ModelPostgresContext | None = Field(default=None, description="Additional response context")
+    errors: list[ModelPostgresError] = Field(
+        default_factory=list, description="List of errors or warnings",
+    )
+    correlation_id: UUID | None = Field(
+        default=None, description="Request correlation ID",
+    )
+    context: ModelPostgresContext | None = Field(
+        default=None, description="Additional response context",
+    )

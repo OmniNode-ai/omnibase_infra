@@ -7,7 +7,6 @@ Supports multiple authentication types with secure credential handling.
 Security Note: All credential fields use SecretStr for secure handling.
 """
 
-
 from omnibase_core.enums.enum_auth_type import EnumAuthType
 from pydantic import BaseModel, Field, SecretStr
 
@@ -36,6 +35,7 @@ class ModelNotificationAuth(BaseModel):
 
     class Config:
         """Pydantic configuration."""
+
         frozen = True
         extra = "forbid"
         use_enum_values = True
@@ -53,12 +53,16 @@ class ModelNotificationAuth(BaseModel):
         elif self.auth_type == EnumAuthType.BASIC:
             required_fields = {"username", "password"}
             if not required_fields.issubset(self.credentials.keys()):
-                raise ValueError("Basic auth requires 'username' and 'password' in credentials")
+                raise ValueError(
+                    "Basic auth requires 'username' and 'password' in credentials",
+                )
 
         elif self.auth_type == EnumAuthType.API_KEY_HEADER:
             required_fields = {"header_name", "api_key"}
             if not required_fields.issubset(self.credentials.keys()):
-                raise ValueError("API key auth requires 'header_name' and 'api_key' in credentials")
+                raise ValueError(
+                    "API key auth requires 'header_name' and 'api_key' in credentials",
+                )
 
     @property
     def is_bearer_auth(self) -> bool:
@@ -88,16 +92,27 @@ class ModelNotificationAuth(BaseModel):
         if self.auth_type == EnumAuthType.BEARER:
             token = self.credentials.get("token", "")
             # Handle SecretStr values
-            token_value = token.get_secret_value() if isinstance(token, SecretStr) else str(token)
+            token_value = (
+                token.get_secret_value() if isinstance(token, SecretStr) else str(token)
+            )
             return {"Authorization": f"Bearer {token_value}"}
 
         if self.auth_type == EnumAuthType.BASIC:
             import base64
+
             username = self.credentials.get("username", "")
             password = self.credentials.get("password", "")
             # Handle SecretStr values for secure credential extraction
-            username_value = username.get_secret_value() if isinstance(username, SecretStr) else str(username)
-            password_value = password.get_secret_value() if isinstance(password, SecretStr) else str(password)
+            username_value = (
+                username.get_secret_value()
+                if isinstance(username, SecretStr)
+                else str(username)
+            )
+            password_value = (
+                password.get_secret_value()
+                if isinstance(password, SecretStr)
+                else str(password)
+            )
             credentials_str = f"{username_value}:{password_value}"
             encoded_credentials = base64.b64encode(credentials_str.encode()).decode()
             return {"Authorization": f"Basic {encoded_credentials}"}
@@ -106,8 +121,16 @@ class ModelNotificationAuth(BaseModel):
             header_name = self.credentials.get("header_name", "")
             api_key = self.credentials.get("api_key", "")
             # Handle SecretStr values
-            header_name_value = header_name.get_secret_value() if isinstance(header_name, SecretStr) else str(header_name)
-            api_key_value = api_key.get_secret_value() if isinstance(api_key, SecretStr) else str(api_key)
+            header_name_value = (
+                header_name.get_secret_value()
+                if isinstance(header_name, SecretStr)
+                else str(header_name)
+            )
+            api_key_value = (
+                api_key.get_secret_value()
+                if isinstance(api_key, SecretStr)
+                else str(api_key)
+            )
             return {header_name_value: api_key_value}
 
         raise ValueError(f"Unsupported auth type: {self.auth_type}")

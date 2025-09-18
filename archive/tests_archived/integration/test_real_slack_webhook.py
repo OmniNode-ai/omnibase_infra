@@ -38,7 +38,14 @@ from omnibase_infra.nodes.hook_node.v1_0_0.node import NodeHookEffect
 class RealSlackHttpClient:
     """Real HTTP client that makes actual HTTP requests to Slack."""
 
-    async def request(self, method: str, url: str, headers: dict = None, body: str = None, timeout: float = 30.0):
+    async def request(
+        self,
+        method: str,
+        url: str,
+        headers: dict = None,
+        body: str = None,
+        timeout: float = 30.0,
+    ):
         """Make real HTTP request to Slack webhook."""
         import aiohttp
 
@@ -111,7 +118,9 @@ async def test_real_slack_webhook_notification():
 
     assert hook_node.node_type == "effect"
     assert hook_node.domain == "infrastructure"
-    print(f"✅ Hook Node initialized: {hook_node.node_type} in {hook_node.domain} domain")
+    print(
+        f"✅ Hook Node initialized: {hook_node.node_type} in {hook_node.domain} domain",
+    )
 
     # Create infrastructure alert notification
     notification_request = ModelNotificationRequest(
@@ -173,8 +182,12 @@ async def test_real_slack_webhook_notification():
 
     # Verify results
     assert result is not None, "Hook Node should return a result"
-    assert result.success, f"Hook Node processing should succeed: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
-    assert result.notification_result.final_status_code == 200, f"Expected 200 status code, got {result.notification_result.final_status_code}"
+    assert (
+        result.success
+    ), f"Hook Node processing should succeed: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+    assert (
+        result.notification_result.final_status_code == 200
+    ), f"Expected 200 status code, got {result.notification_result.final_status_code}"
 
     print()
     print("📊 REAL SLACK INTEGRATION RESULTS:")
@@ -200,4 +213,3 @@ async def test_real_slack_webhook_notification():
 if __name__ == "__main__":
     # Allow running this test directly
     asyncio.run(test_real_slack_webhook_notification())
-

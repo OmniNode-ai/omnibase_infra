@@ -103,7 +103,9 @@ async def test_production_slack_webhook():
                 print(f"⏱️ Response Headers: {dict(response.headers)}")
 
                 # Verify successful delivery
-                assert response.status == 200, f"Expected 200, got {response.status}: {response_text}"
+                assert (
+                    response.status == 200
+                ), f"Expected 200, got {response.status}: {response_text}"
                 assert response_text == "ok", f"Expected 'ok', got '{response_text}'"
 
                 print()
@@ -123,4 +125,3 @@ if __name__ == "__main__":
     # Allow running this test directly
     result = asyncio.run(test_production_slack_webhook())
     print(f"\n🎯 Final result: {'SUCCESS' if result else 'FAILED'}")
-

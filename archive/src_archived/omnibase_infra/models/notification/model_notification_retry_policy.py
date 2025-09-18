@@ -5,7 +5,6 @@ Shared model for webhook retry configuration in the ONEX infrastructure.
 Defines how failed notification attempts should be retried.
 """
 
-
 from omnibase_core.enums.enum_backoff_strategy import EnumBackoffStrategy
 from pydantic import BaseModel, Field, field_validator
 
@@ -49,6 +48,7 @@ class ModelNotificationRetryPolicy(BaseModel):
 
     class Config:
         """Pydantic configuration."""
+
         frozen = True
         extra = "forbid"
         use_enum_values = True
@@ -62,7 +62,9 @@ class ModelNotificationRetryPolicy(BaseModel):
 
         for code in v:
             if not isinstance(code, int) or code < 400 or code > 599:
-                raise ValueError(f"Invalid HTTP status code: {code}. Must be between 400-599")
+                raise ValueError(
+                    f"Invalid HTTP status code: {code}. Must be between 400-599",
+                )
 
         return v
 

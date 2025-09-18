@@ -5,7 +5,6 @@ This module provides injectable configuration models for Slack webhook
 integration following ONEX contract-driven configuration standards.
 """
 
-
 from pydantic import BaseModel, Field, HttpUrl
 
 from omnibase_infra.enums.enum_slack_channel import EnumSlackChannel

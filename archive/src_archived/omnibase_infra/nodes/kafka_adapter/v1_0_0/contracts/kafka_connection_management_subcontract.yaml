@@ -37,9 +37,9 @@ connection_strategy:
       client_dns_lookup: "use_all_dns_ips"
       reconnect_backoff_ms: 50
       reconnect_backoff_max_ms: 1000
-      connection_max_idle_ms: 540000  # 9 minutes
-      request_timeout_ms: 30000       # 30 seconds
-      metadata_max_age_ms: 300000     # 5 minutes
+      connection_max_idle_ms: 540000 # 9 minutes
+      request_timeout_ms: 30000 # 30 seconds
+      metadata_max_age_ms: 300000 # 5 minutes
 
     broker_health_monitoring:
       health_check_interval: "15s"
@@ -104,7 +104,7 @@ connection_strategy:
       bulk_processing:
         fetch_min_bytes: 65536
         fetch_max_wait_ms: 1000
-        max_partition_fetch_bytes: 10485760  # 10MB
+        max_partition_fetch_bytes: 10485760 # 10MB
 
 # Streaming Operation Patterns
 streaming_patterns:
@@ -294,7 +294,7 @@ performance_optimization:
 security_integration:
   broker_security:
     ssl_encryption: true
-    sasl_authentication: "PLAIN"  # or SCRAM, OAuth
+    sasl_authentication: "PLAIN" # or SCRAM, OAuth
     acl_enforcement: true
 
   topic_security:
@@ -303,14 +303,14 @@ security_integration:
     producer_permissions: true
 
   message_security:
-    message_encryption: false  # Can be enabled for sensitive topics
+    message_encryption: false # Can be enabled for sensitive topics
     message_signing: false
     audit_logging: true
 
 # Schema Management
 schema_management:
   message_schema:
-    schema_validation: false  # Can integrate with Schema Registry
+    schema_validation: false # Can integrate with Schema Registry
     schema_evolution: true
     compatibility_checking: false
 

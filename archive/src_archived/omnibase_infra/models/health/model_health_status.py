@@ -14,9 +14,10 @@ from .model_health_details import ModelHealthDetails
 
 class HealthStatusEnum(str, Enum):
     """Infrastructure health status levels."""
-    HEALTHY = "healthy"          # All systems operational
-    DEGRADED = "degraded"        # Some issues but service available
-    UNHEALTHY = "unhealthy"      # Critical issues affecting service
+
+    HEALTHY = "healthy"  # All systems operational
+    DEGRADED = "degraded"  # Some issues but service available
+    UNHEALTHY = "unhealthy"  # Critical issues affecting service
 
 
 class ModelHealthStatus(BaseModel):

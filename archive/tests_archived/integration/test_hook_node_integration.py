@@ -31,13 +31,21 @@ from omnibase_infra.nodes.hook_node.v1_0_0.node import (
 class MockHttpResponse:
     """Mock HTTP response that implements ProtocolHttpResponse interface."""
 
-    def __init__(self, status_code: int, headers: dict[str, str] = None, body: str = "",
-                 execution_time_ms: float = 100.0, is_success: bool = True):
+    def __init__(
+        self,
+        status_code: int,
+        headers: dict[str, str] = None,
+        body: str = "",
+        execution_time_ms: float = 100.0,
+        is_success: bool = True,
+    ):
         self.status_code = status_code
         self.headers = headers or {}
         self.body = body
         self.execution_time_ms = execution_time_ms
         self.is_success = is_success
+
+
 from omnibase_infra.models.notification.model_notification_auth import (
     ModelNotificationAuth,
 )
@@ -67,17 +75,25 @@ class MockHttpClient:
         self.response_sequence = responses
         self.current_response_index = 0
 
-    async def post(self, url: str, headers: dict[str, str] = None, body: str = None, timeout: float = 30.0) -> MockHttpResponse:
+    async def post(
+        self,
+        url: str,
+        headers: dict[str, str] = None,
+        body: str = None,
+        timeout: float = 30.0,
+    ) -> MockHttpResponse:
         """Mock POST request implementation."""
         # Record the request
-        self.requests_made.append(IntegrationTestRequestModel(
-            url=url,
-            method="POST",
-            headers=headers or {},
-            payload={"body": body or "", "timeout": timeout},
-            timestamp=time.time(),
-            correlation_id=str(uuid4()),
-        ))
+        self.requests_made.append(
+            IntegrationTestRequestModel(
+                url=url,
+                method="POST",
+                headers=headers or {},
+                payload={"body": body or "", "timeout": timeout},
+                timestamp=time.time(),
+                correlation_id=str(uuid4()),
+            ),
+        )
 
         # Return next response in sequence
         if self.current_response_index < len(self.response_sequence):
@@ -93,16 +109,20 @@ class MockHttpClient:
             is_success=True,
         )
 
-    async def get(self, url: str, headers: dict[str, str] = None, timeout: float = 30.0) -> MockHttpResponse:
+    async def get(
+        self, url: str, headers: dict[str, str] = None, timeout: float = 30.0,
+    ) -> MockHttpResponse:
         """Mock GET request implementation."""
-        self.requests_made.append(IntegrationTestRequestModel(
-            url=url,
-            method="GET",
-            headers=headers or {},
-            payload={"timeout": timeout},
-            timestamp=time.time(),
-            correlation_id=str(uuid4()),
-        ))
+        self.requests_made.append(
+            IntegrationTestRequestModel(
+                url=url,
+                method="GET",
+                headers=headers or {},
+                payload={"timeout": timeout},
+                timestamp=time.time(),
+                correlation_id=str(uuid4()),
+            ),
+        )
         return MockHttpResponse(
             status_code=200,
             headers={},
@@ -111,7 +131,14 @@ class MockHttpClient:
             is_success=True,
         )
 
-    async def request(self, method, url: str, headers: dict[str, str] = None, json: dict = None, timeout: float = 30.0) -> MockHttpResponse:
+    async def request(
+        self,
+        method,
+        url: str,
+        headers: dict[str, str] = None,
+        json: dict = None,
+        timeout: float = 30.0,
+    ) -> MockHttpResponse:
         """Generic request method that the Hook Node expects."""
         # Convert json payload to Dict[str, str] format for IntegrationTestRequestModel
         payload_str_dict = {}
@@ -120,14 +147,16 @@ class MockHttpClient:
                 payload_str_dict[str(key)] = str(value)
 
         # Record the request
-        self.requests_made.append(IntegrationTestRequestModel(
-            url=str(url),
-            method=str(method.value) if hasattr(method, "value") else str(method),
-            headers=headers or {},
-            payload=payload_str_dict,
-            timestamp=time.time(),
-            correlation_id=str(uuid4()),
-        ))
+        self.requests_made.append(
+            IntegrationTestRequestModel(
+                url=str(url),
+                method=str(method.value) if hasattr(method, "value") else str(method),
+                headers=headers or {},
+                payload=payload_str_dict,
+                timestamp=time.time(),
+                correlation_id=str(uuid4()),
+            ),
+        )
 
         # Return next response in sequence
         if self.current_response_index < len(self.response_sequence):
@@ -151,7 +180,9 @@ class MockEventBus:
         self.published_events: list[ModelOnexEvent] = []
         self.event_handlers: dict[str, callable] = {}
 
-    async def publish(self, event=None, topic=None, key=None, value=None, headers=None, **kwargs) -> bool:
+    async def publish(
+        self, event=None, topic=None, key=None, value=None, headers=None, **kwargs,
+    ) -> bool:
         """Mock event publishing - supports both event object and message bus styles."""
         if event is not None:
             # Event object style (simple case)
@@ -160,7 +191,10 @@ class MockEventBus:
             # Message bus style - reconstruct event from value
             try:
                 import json
-                event_data = json.loads(value.decode() if isinstance(value, bytes) else value)
+
+                event_data = json.loads(
+                    value.decode() if isinstance(value, bytes) else value,
+                )
 
                 # Create a ModelOnexEvent from the event_data
                 correlation_id_value = None
@@ -194,7 +228,9 @@ class MockEventBus:
 
     def get_published_events_by_type(self, event_type: str) -> list[ModelOnexEvent]:
         """Get published events filtered by type."""
-        return [event for event in self.published_events if event.event_type == event_type]
+        return [
+            event for event in self.published_events if event.event_type == event_type
+        ]
 
 
 class TestHookNodeIntegration:
@@ -225,7 +261,11 @@ class TestHookNodeIntegration:
     def hook_node_integration(self, container_with_mocks):
         """Create a Hook Node with integration-ready dependencies."""
         # Mock the node to skip contract loading for tests
-        with patch.object(NodeHookEffect, "__init__", lambda self, container: self._init_for_test(container)):
+        with patch.object(
+            NodeHookEffect,
+            "__init__",
+            lambda self, container: self._init_for_test(container),
+        ):
             node = NodeHookEffect(container_with_mocks)
             return node
 
@@ -233,7 +273,11 @@ class TestHookNodeIntegration:
     async def test_container_dependency_injection(self, container_with_mocks):
         """Test that Hook Node properly receives injected dependencies."""
         # Mock the node to skip contract loading for tests
-        with patch.object(NodeHookEffect, "__init__", lambda self, container: self._init_for_test(container)):
+        with patch.object(
+            NodeHookEffect,
+            "__init__",
+            lambda self, container: self._init_for_test(container),
+        ):
             hook_node = NodeHookEffect(container_with_mocks)
 
         # Verify dependencies are properly injected
@@ -243,7 +287,9 @@ class TestHookNodeIntegration:
         assert isinstance(hook_node._event_bus, MockEventBus)
 
     @pytest.mark.asyncio
-    async def test_event_bus_integration_success_notification(self, hook_node_integration, mock_event_bus):
+    async def test_event_bus_integration_success_notification(
+        self, hook_node_integration, mock_event_bus,
+    ):
         """Test successful notification triggers circuit breaker success event."""
         # Setup successful response
         success_response = MockHttpResponse(
@@ -272,14 +318,20 @@ class TestHookNodeIntegration:
         assert result.success is True
 
         # Verify circuit breaker success event was published
-        success_events = mock_event_bus.get_published_events_by_type("circuit_breaker.success")
+        success_events = mock_event_bus.get_published_events_by_type(
+            "circuit_breaker.success",
+        )
         assert len(success_events) >= 1
 
         latest_event = success_events[-1]
-        assert "https://hooks.slack.com/services/integration-test" in str(latest_event.data)
+        assert "https://hooks.slack.com/services/integration-test" in str(
+            latest_event.data,
+        )
 
     @pytest.mark.asyncio
-    async def test_event_bus_integration_failure_notification(self, hook_node_integration, mock_event_bus):
+    async def test_event_bus_integration_failure_notification(
+        self, hook_node_integration, mock_event_bus,
+    ):
         """Test failed notification triggers circuit breaker failure event."""
         # Setup failure responses for all retry attempts
         failure_response = MockHttpResponse(
@@ -290,7 +342,9 @@ class TestHookNodeIntegration:
             is_success=False,
         )
         # Hook Node will retry, so we need multiple failure responses
-        hook_node_integration._http_client.set_response_sequence([failure_response, failure_response, failure_response])
+        hook_node_integration._http_client.set_response_sequence(
+            [failure_response, failure_response, failure_response],
+        )
 
         # Create notification request
         request = ModelNotificationRequest(
@@ -310,14 +364,18 @@ class TestHookNodeIntegration:
         assert result.success is False
 
         # Verify circuit breaker failure event was published
-        failure_events = mock_event_bus.get_published_events_by_type("circuit_breaker.failure")
+        failure_events = mock_event_bus.get_published_events_by_type(
+            "circuit_breaker.failure",
+        )
         assert len(failure_events) >= 1
 
         latest_event = failure_events[-1]
         assert "https://failing.webhook.com/api/notify" in str(latest_event.data)
 
     @pytest.mark.asyncio
-    async def test_circuit_breaker_state_change_events(self, hook_node_integration, mock_event_bus):
+    async def test_circuit_breaker_state_change_events(
+        self, hook_node_integration, mock_event_bus,
+    ):
         """Test circuit breaker state change events are published."""
         # Setup consistent failures to trigger state change
         failure_response = MockHttpResponse(
@@ -330,7 +388,9 @@ class TestHookNodeIntegration:
 
         # Set up enough failures to trigger state change
         # 6 iterations × 3 retry attempts = 18 total attempts needed
-        hook_node_integration._http_client.set_response_sequence([failure_response] * 18)
+        hook_node_integration._http_client.set_response_sequence(
+            [failure_response] * 18,
+        )
 
         request = ModelNotificationRequest(
             url="https://circuit-breaker-test.com/webhook",
@@ -352,15 +412,16 @@ class TestHookNodeIntegration:
                 pass  # Expected failures
 
         # Verify circuit breaker opened event was published
-        state_change_events = mock_event_bus.get_published_events_by_type("circuit_breaker.state_change")
+        state_change_events = mock_event_bus.get_published_events_by_type(
+            "circuit_breaker.state_change",
+        )
 
         # Should have at least one state change event (to OPEN)
         assert len(state_change_events) >= 1
 
         # Find the OPEN state change event
         open_events = [
-            event for event in state_change_events
-            if "open" in str(event.data).lower()
+            event for event in state_change_events if "open" in str(event.data).lower()
         ]
         assert len(open_events) >= 1
 
@@ -436,12 +497,19 @@ class TestHookNodeIntegration:
         # Verify the result indicates failure due to timeout
         assert result.success is False
         # Check that at least one attempt has a timeout error
-        timeout_attempts = [attempt for attempt in result.notification_result.attempts
-                          if attempt.error and "timeout" in attempt.error.lower()]
-        assert len(timeout_attempts) > 0, f"No timeout errors found in attempts: {[a.error for a in result.notification_result.attempts]}"
+        timeout_attempts = [
+            attempt
+            for attempt in result.notification_result.attempts
+            if attempt.error and "timeout" in attempt.error.lower()
+        ]
+        assert (
+            len(timeout_attempts) > 0
+        ), f"No timeout errors found in attempts: {[a.error for a in result.notification_result.attempts]}"
 
     @pytest.mark.asyncio
-    async def test_end_to_end_slack_notification_flow(self, hook_node_integration, mock_event_bus):
+    async def test_end_to_end_slack_notification_flow(
+        self, hook_node_integration, mock_event_bus,
+    ):
         """Test complete end-to-end Slack notification flow."""
         # Setup Slack webhook format (ModelSlackWebhookPayload compatible)
         slack_payload = {
@@ -495,11 +563,15 @@ class TestHookNodeIntegration:
         assert "attachments" in request_payload
 
         # Verify success event was published
-        success_events = mock_event_bus.get_published_events_by_type("circuit_breaker.success")
+        success_events = mock_event_bus.get_published_events_by_type(
+            "circuit_breaker.success",
+        )
         assert len(success_events) >= 1
 
     @pytest.mark.asyncio
-    async def test_end_to_end_retry_with_circuit_breaker(self, hook_node_integration, mock_event_bus):
+    async def test_end_to_end_retry_with_circuit_breaker(
+        self, hook_node_integration, mock_event_bus,
+    ):
         """Test end-to-end retry flow with circuit breaker interaction."""
         request = ModelNotificationRequest(
             url="https://unreliable.webhook.com/api/notify",
@@ -535,10 +607,10 @@ class TestHookNodeIntegration:
 
         with patch("asyncio.sleep"):  # Speed up test by mocking sleep
             input_data = ModelHookNodeInput(
-            notification_request=request,
-            correlation_id=uuid4(),
-            timestamp=time.time(),
-        )
+                notification_request=request,
+                correlation_id=uuid4(),
+                timestamp=time.time(),
+            )
             result = await hook_node_integration.process(input_data)
 
         # Verify eventual success
@@ -551,8 +623,12 @@ class TestHookNodeIntegration:
         assert len(requests_made) == 3
 
         # Verify circuit breaker events - should only publish success since final result succeeded
-        failure_events = mock_event_bus.get_published_events_by_type("circuit_breaker.failure")
-        success_events = mock_event_bus.get_published_events_by_type("circuit_breaker.success")
+        failure_events = mock_event_bus.get_published_events_by_type(
+            "circuit_breaker.failure",
+        )
+        success_events = mock_event_bus.get_published_events_by_type(
+            "circuit_breaker.success",
+        )
 
         # Since the notification ultimately succeeded, only success event should be published
         assert len(failure_events) == 0  # No failures - final result was success
@@ -585,13 +661,18 @@ class TestHookNodeIntegration:
         hook_node_integration._http_client.set_response_sequence(responses)
 
         # Process all notifications concurrently
-        input_data_list = [ModelHookNodeInput(
-            notification_request=req,
-            correlation_id=uuid4(),
-            timestamp=time.time(),
-        ) for req in requests]
+        input_data_list = [
+            ModelHookNodeInput(
+                notification_request=req,
+                correlation_id=uuid4(),
+                timestamp=time.time(),
+            )
+            for req in requests
+        ]
 
-        tasks = [hook_node_integration.process(input_data) for input_data in input_data_list]
+        tasks = [
+            hook_node_integration.process(input_data) for input_data in input_data_list
+        ]
         results = await asyncio.gather(*tasks)
 
         # Verify all succeeded
@@ -612,8 +693,11 @@ class TestHookNodeIntegration:
             assert urls_called.count(expected_url) == 1
 
     @pytest.mark.asyncio
-    async def test_event_bus_integration_error_scenarios(self, hook_node_integration, mock_event_bus):
+    async def test_event_bus_integration_error_scenarios(
+        self, hook_node_integration, mock_event_bus,
+    ):
         """Test event bus integration handles various error scenarios."""
+
         # Test with network exception
         async def mock_request_network_error(*args, **kwargs):
             raise ConnectionError("Network unreachable")
@@ -641,11 +725,12 @@ class TestHookNodeIntegration:
 
         # Verify error event was published
         # Hook Node publishes "circuit_breaker.failure" events, not "circuit_breaker.error"
-        error_events = mock_event_bus.get_published_events_by_type("circuit_breaker.failure")
+        error_events = mock_event_bus.get_published_events_by_type(
+            "circuit_breaker.failure",
+        )
         assert len(error_events) >= 1
 
         latest_error_event = error_events[-1]
         event_data = str(latest_error_event.data)
         assert "network-error-test.webhook.com" in event_data
         assert "ConnectionError" in event_data or "Network" in event_data
-

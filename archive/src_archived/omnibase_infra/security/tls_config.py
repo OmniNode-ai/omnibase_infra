@@ -24,6 +24,7 @@ from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 @dataclass
 class TLSCertificateConfig:
     """TLS certificate configuration model."""
+
     ca_cert_path: str | None = None
     client_cert_path: str | None = None
     client_key_path: str | None = None
@@ -36,6 +37,7 @@ class TLSCertificateConfig:
 @dataclass
 class PostgreSQLTLSConfig:
     """PostgreSQL TLS configuration."""
+
     ssl_mode: str = "require"
     ssl_ca: str | None = None
     ssl_cert: str | None = None
@@ -64,6 +66,7 @@ class PostgreSQLTLSConfig:
 @dataclass
 class KafkaTLSConfig:
     """Kafka/RedPanda TLS configuration."""
+
     security_protocol: str = "SSL"
     ssl_ca_location: str | None = None
     ssl_certificate_location: str | None = None
@@ -93,7 +96,9 @@ class KafkaTLSConfig:
         if self.ssl_sigalgs_list:
             config["ssl.sigalgs.list"] = self.ssl_sigalgs_list
 
-        config["ssl.endpoint.identification.algorithm"] = self.ssl_endpoint_identification_algorithm
+        config["ssl.endpoint.identification.algorithm"] = (
+            self.ssl_endpoint_identification_algorithm
+        )
 
         return config
 
@@ -101,7 +106,7 @@ class KafkaTLSConfig:
 class ONEXTLSConfigManager:
     """
     ONEX TLS configuration manager for infrastructure security.
-    
+
     Provides centralized TLS configuration management with support for:
     - Certificate validation and verification
     - Mutual TLS (mTLS) authentication
@@ -118,16 +123,20 @@ class ONEXTLSConfigManager:
         self._enforce_tls = self._environment in ["production", "staging"]
         self._require_mtls = self._environment == "production"
 
-        self._logger.info(f"TLS manager initialized for environment: {self._environment}")
-        self._logger.info(f"TLS enforcement: {self._enforce_tls}, mTLS required: {self._require_mtls}")
+        self._logger.info(
+            f"TLS manager initialized for environment: {self._environment}",
+        )
+        self._logger.info(
+            f"TLS enforcement: {self._enforce_tls}, mTLS required: {self._require_mtls}",
+        )
 
     def get_postgresql_tls_config(self) -> PostgreSQLTLSConfig:
         """
         Get PostgreSQL TLS configuration.
-        
+
         Returns:
             PostgreSQLTLSConfig with appropriate security settings
-            
+
         Raises:
             OnexError: If required certificates are missing in secure environments
         """
@@ -189,10 +198,10 @@ class ONEXTLSConfigManager:
     def get_kafka_tls_config(self) -> KafkaTLSConfig:
         """
         Get Kafka/RedPanda TLS configuration.
-        
+
         Returns:
             KafkaTLSConfig with appropriate security settings
-            
+
         Raises:
             OnexError: If required certificates are missing in secure environments
         """
@@ -249,7 +258,9 @@ class ONEXTLSConfigManager:
 
                 # Environment overrides
                 if os.getenv("KAFKA_SSL_CERT_LOCATION"):
-                    config.ssl_certificate_location = os.getenv("KAFKA_SSL_CERT_LOCATION")
+                    config.ssl_certificate_location = os.getenv(
+                        "KAFKA_SSL_CERT_LOCATION",
+                    )
                 if os.getenv("KAFKA_SSL_KEY_LOCATION"):
                     config.ssl_key_location = os.getenv("KAFKA_SSL_KEY_LOCATION")
                 if os.getenv("KAFKA_SSL_KEY_PASSWORD"):
@@ -257,10 +268,14 @@ class ONEXTLSConfigManager:
 
                 # Cipher suites (production hardening)
                 if self._environment == "production":
-                    config.ssl_cipher_suites = "ECDHE-RSA-AES256-GCM-SHA384,ECDHE-RSA-AES128-GCM-SHA256"
+                    config.ssl_cipher_suites = (
+                        "ECDHE-RSA-AES256-GCM-SHA384,ECDHE-RSA-AES128-GCM-SHA256"
+                    )
                     config.ssl_curves_list = "secp384r1,secp256r1"
 
-            self._logger.info(f"Kafka TLS config: security_protocol={security_protocol}")
+            self._logger.info(
+                f"Kafka TLS config: security_protocol={security_protocol}",
+            )
             return config
 
         except Exception as e:
@@ -272,13 +287,13 @@ class ONEXTLSConfigManager:
     def create_ssl_context(self, cert_config: TLSCertificateConfig) -> ssl.SSLContext:
         """
         Create SSL context from certificate configuration.
-        
+
         Args:
             cert_config: TLS certificate configuration
-            
+
         Returns:
             Configured SSL context
-            
+
         Raises:
             OnexError: If SSL context creation fails
         """
@@ -324,10 +339,10 @@ class ONEXTLSConfigManager:
     def validate_certificate_chain(self, cert_path: str) -> bool:
         """
         Validate certificate chain.
-        
+
         Args:
             cert_path: Path to certificate file
-            
+
         Returns:
             True if certificate chain is valid
         """
@@ -351,7 +366,7 @@ class ONEXTLSConfigManager:
     def get_security_policy(self) -> dict[str, Any]:
         """
         Get current security policy configuration.
-        
+
         Returns:
             Dictionary with security policy settings
         """
@@ -372,7 +387,7 @@ _tls_manager: ONEXTLSConfigManager | None = None
 def get_tls_manager() -> ONEXTLSConfigManager:
     """
     Get global TLS configuration manager instance.
-    
+
     Returns:
         ONEXTLSConfigManager singleton instance
     """

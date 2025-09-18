@@ -195,8 +195,8 @@ dependency_monitoring:
 
   dependency_check_patterns:
     parallel_execution: true
-    timeout_per_check: 1000  # milliseconds
-    failure_threshold: 2  # consecutive failures before marking as unhealthy
+    timeout_per_check: 1000 # milliseconds
+    failure_threshold: 2 # consecutive failures before marking as unhealthy
     recovery_verification: true
 
 # Error Handling and Recovery

@@ -76,7 +76,7 @@ operation_patterns:
       - pattern: "single_row_fetch"
         timeout: "5s"
         caching_enabled: false
-      
+
       - pattern: "bulk_data_fetch"
         timeout: "30s"
         streaming_enabled: true
@@ -86,7 +86,7 @@ operation_patterns:
       - pattern: "single_insert"
         timeout: "10s"
         return_generated_keys: true
-      
+
       - pattern: "bulk_insert"
         timeout: "60s"
         batch_size: 500

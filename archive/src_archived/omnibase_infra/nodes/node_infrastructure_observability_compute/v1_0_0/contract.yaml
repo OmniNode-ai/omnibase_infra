@@ -1,8 +1,8 @@
 contract_version: "1.0.0"
-node_version: "1.0.0" 
+node_version: "1.0.0"
 version: "1.0.0"
 node_name: "node_infrastructure_observability_compute"
-contract_name: "NodeInfrastructureObservabilityComputeContract" 
+contract_name: "NodeInfrastructureObservabilityComputeContract"
 name: "node_infrastructure_observability_compute"
 node_type: "COMPUTE"
 description: "Infrastructure Observability Compute Node for metrics collection, alerting, and performance tracking"
@@ -16,18 +16,18 @@ dependencies:
     type: "model"
     class_name: "ModelONEXContainer"
     module: "omnibase_core.model.model_onex_container"
-  
+
   # Shared observability models
   - name: "model_metric_point"
     type: "model"
     class_name: "ModelMetricPoint"
     module: "omnibase_infra.models.observability.model_metric_point"
-  
+
   - name: "model_alert"
     type: "model"
     class_name: "ModelAlert"
     module: "omnibase_infra.models.observability.model_alert"
-  
+
   # Circuit breaker integration
   - name: "model_circuit_breaker_metrics"
     type: "model"

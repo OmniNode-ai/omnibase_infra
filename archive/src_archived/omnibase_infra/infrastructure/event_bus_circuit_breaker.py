@@ -32,8 +32,9 @@ from ..models.infrastructure.model_circuit_breaker_environment_config import (
 
 class CircuitBreakerState(Enum):
     """Circuit breaker states for event publishing reliability."""
-    CLOSED = "closed"       # Normal operation - events published directly
-    OPEN = "open"          # Failure state - events queued or dropped based on policy
+
+    CLOSED = "closed"  # Normal operation - events published directly
+    OPEN = "open"  # Failure state - events queued or dropped based on policy
     HALF_OPEN = "half_open"  # Testing state - limited event publishing to test recovery
 
 
@@ -44,22 +45,25 @@ class CircuitBreakerConfig:
     Note: This dataclass is maintained for backward compatibility.
     For environment-specific configuration, use ModelCircuitBreakerEnvironmentConfig.
     """
-    failure_threshold: int = 5          # Number of failures before opening circuit
-    recovery_timeout: int = 60          # Seconds before transitioning to half-open
-    success_threshold: int = 3          # Successes needed in half-open to close
-    timeout_seconds: int = 30           # Event publishing timeout
-    max_queue_size: int = 1000         # Max queued events when circuit is open
-    dead_letter_enabled: bool = True   # Enable dead letter queue for failed events
+
+    failure_threshold: int = 5  # Number of failures before opening circuit
+    recovery_timeout: int = 60  # Seconds before transitioning to half-open
+    success_threshold: int = 3  # Successes needed in half-open to close
+    timeout_seconds: int = 30  # Event publishing timeout
+    max_queue_size: int = 1000  # Max queued events when circuit is open
+    dead_letter_enabled: bool = True  # Enable dead letter queue for failed events
     graceful_degradation: bool = True  # Allow operations to continue without events
 
     # Memory management configuration
-    max_dead_letter_size: int = 500     # Max dead letter queue entries
-    dead_letter_ttl_hours: int = 24     # Dead letter entry expiration (hours)
-    cleanup_interval_seconds: int = 300 # Memory cleanup interval (5 minutes)
-    memory_monitor_enabled: bool = True # Enable memory usage monitoring
+    max_dead_letter_size: int = 500  # Max dead letter queue entries
+    dead_letter_ttl_hours: int = 24  # Dead letter entry expiration (hours)
+    cleanup_interval_seconds: int = 300  # Memory cleanup interval (5 minutes)
+    memory_monitor_enabled: bool = True  # Enable memory usage monitoring
 
     @classmethod
-    def from_environment_config(cls, env_config: ModelCircuitBreakerConfig) -> "CircuitBreakerConfig":
+    def from_environment_config(
+        cls, env_config: ModelCircuitBreakerConfig,
+    ) -> "CircuitBreakerConfig":
         """Create CircuitBreakerConfig from environment-specific configuration."""
         return cls(
             failure_threshold=env_config.failure_threshold,
@@ -75,6 +79,7 @@ class CircuitBreakerConfig:
 @dataclass
 class EventBusMetrics:
     """Metrics tracking for event bus circuit breaker."""
+
     total_events: int = 0
     successful_events: int = 0
     failed_events: int = 0
@@ -90,10 +95,10 @@ class EventBusMetrics:
 class EventBusCircuitBreaker:
     """
     Circuit breaker for RedPanda event bus reliability.
-    
+
     Provides resilient event publishing with:
     - Automatic failure detection and circuit opening
-    - Graceful degradation with event queuing  
+    - Graceful degradation with event queuing
     - Dead letter queue for permanently failed events
     - Recovery testing and automatic circuit closing
     - Comprehensive metrics and observability
@@ -159,7 +164,9 @@ class EventBusCircuitBreaker:
             dead_letter_cleaned = initial_dead_letter_size - len(self.dead_letter_queue)
 
             if dead_letter_cleaned > 0:
-                self.logger.info(f"Memory cleanup completed: {dead_letter_cleaned} dead letter entries removed")
+                self.logger.info(
+                    f"Memory cleanup completed: {dead_letter_cleaned} dead letter entries removed",
+                )
 
             self._last_memory_cleanup = time.time()
 
@@ -170,11 +177,14 @@ class EventBusCircuitBreaker:
 
         # Filter out expired entries
         self.dead_letter_queue = [
-            entry for entry in self.dead_letter_queue
+            entry
+            for entry in self.dead_letter_queue
             if self._is_dead_letter_entry_valid(entry, current_time, ttl_delta)
         ]
 
-    def _is_dead_letter_entry_valid(self, entry: dict[str, Any], current_time: datetime, ttl_delta: timedelta) -> bool:
+    def _is_dead_letter_entry_valid(
+        self, entry: dict[str, Any], current_time: datetime, ttl_delta: timedelta,
+    ) -> bool:
         """Check if a dead letter entry is still valid (not expired)."""
         try:
             entry_time = datetime.fromisoformat(entry.get("timestamp", ""))
@@ -187,9 +197,13 @@ class EventBusCircuitBreaker:
         """Enforce maximum dead letter queue size."""
         if len(self.dead_letter_queue) > self.config.max_dead_letter_size:
             # Remove oldest entries (FIFO)
-            excess_count = len(self.dead_letter_queue) - self.config.max_dead_letter_size
+            excess_count = (
+                len(self.dead_letter_queue) - self.config.max_dead_letter_size
+            )
             self.dead_letter_queue = self.dead_letter_queue[excess_count:]
-            self.logger.warning(f"Dead letter queue size limit exceeded, removed {excess_count} oldest entries")
+            self.logger.warning(
+                f"Dead letter queue size limit exceeded, removed {excess_count} oldest entries",
+            )
 
     async def close(self):
         """Close circuit breaker and cleanup resources."""
@@ -214,20 +228,22 @@ class EventBusCircuitBreaker:
         environment: str | None = None,
     ) -> "EventBusCircuitBreaker":
         """Create circuit breaker with environment-specific configuration.
-        
+
         Args:
             environment_config: Environment configuration model (optional)
             environment: Target environment name (optional, detected from ENV if not provided)
-            
+
         Returns:
             EventBusCircuitBreaker configured for the environment
-            
+
         Raises:
             OnexError: If environment detection or configuration fails
         """
         # Use provided environment config or create default
         if environment_config is None:
-            environment_config = ModelCircuitBreakerEnvironmentConfig.create_default_config()
+            environment_config = (
+                ModelCircuitBreakerEnvironmentConfig.create_default_config()
+            )
 
         # Detect environment from ENV variable if not provided
         if environment is None:
@@ -241,7 +257,9 @@ class EventBusCircuitBreaker:
 
             # Create circuit breaker with environment-specific config
             instance = cls(env_config)
-            instance.logger.info(f"Circuit breaker initialized for environment: {environment}")
+            instance.logger.info(
+                f"Circuit breaker initialized for environment: {environment}",
+            )
             return instance
 
         except Exception as e:
@@ -253,7 +271,7 @@ class EventBusCircuitBreaker:
     @staticmethod
     def _detect_environment() -> str:
         """Detect current deployment environment from environment variables.
-        
+
         Returns:
             Environment name (production, staging, or development)
         """
@@ -284,17 +302,19 @@ class EventBusCircuitBreaker:
         # Default to development if no environment detected
         return "development"
 
-    async def publish_event(self, event: ModelOnexEvent, publisher_func: Callable) -> bool:
+    async def publish_event(
+        self, event: ModelOnexEvent, publisher_func: Callable,
+    ) -> bool:
         """
         Publish event through circuit breaker protection.
-        
+
         Args:
             event: Event to publish
             publisher_func: Async function to publish event
-            
+
         Returns:
             bool: True if published successfully, False if queued or dropped
-            
+
         Raises:
             OnexError: For critical failures that should fail-fast
         """
@@ -309,11 +329,15 @@ class EventBusCircuitBreaker:
             # CLOSED
             return await self._handle_closed_circuit(event, publisher_func)
 
-    async def _handle_closed_circuit(self, event: ModelOnexEvent, publisher_func: Callable) -> bool:
+    async def _handle_closed_circuit(
+        self, event: ModelOnexEvent, publisher_func: Callable,
+    ) -> bool:
         """Handle event publishing when circuit is closed (normal operation)."""
         try:
             # Attempt to publish event with timeout
-            await asyncio.wait_for(publisher_func(event), timeout=self.config.timeout_seconds)
+            await asyncio.wait_for(
+                publisher_func(event), timeout=self.config.timeout_seconds,
+            )
 
             # Success - reset failure count and update metrics
             self.failure_count = 0
@@ -324,25 +348,33 @@ class EventBusCircuitBreaker:
             return True
 
         except TimeoutError:
-            await self._handle_failure(f"Event publishing timeout after {self.config.timeout_seconds}s")
+            await self._handle_failure(
+                f"Event publishing timeout after {self.config.timeout_seconds}s",
+            )
             return await self._queue_or_drop_event(event)
 
         except Exception as e:
             await self._handle_failure(f"Event publishing failed: {e!s}")
             return await self._queue_or_drop_event(event)
 
-    async def _handle_half_open_circuit(self, event: ModelOnexEvent, publisher_func: Callable) -> bool:
+    async def _handle_half_open_circuit(
+        self, event: ModelOnexEvent, publisher_func: Callable,
+    ) -> bool:
         """Handle event publishing when circuit is half-open (testing recovery)."""
         try:
             # Attempt limited publishing to test recovery
-            await asyncio.wait_for(publisher_func(event), timeout=self.config.timeout_seconds)
+            await asyncio.wait_for(
+                publisher_func(event), timeout=self.config.timeout_seconds,
+            )
 
             # Success in half-open state
             self.success_count += 1
             self.metrics.successful_events += 1
             self.metrics.last_success = datetime.now()
 
-            self.logger.info(f"Half-open success {self.success_count}/{self.config.success_threshold}")
+            self.logger.info(
+                f"Half-open success {self.success_count}/{self.config.success_threshold}",
+            )
 
             # Check if we can close the circuit
             if self.success_count >= self.config.success_threshold:
@@ -373,7 +405,9 @@ class EventBusCircuitBreaker:
         self.metrics.last_failure = datetime.now()
         self.last_failure_time = time.time()
 
-        self.logger.warning(f"Event publishing failure {self.failure_count}/{self.config.failure_threshold}: {error_message}")
+        self.logger.warning(
+            f"Event publishing failure {self.failure_count}/{self.config.failure_threshold}: {error_message}",
+        )
 
         # Open circuit if failure threshold reached
         if self.failure_count >= self.config.failure_threshold:
@@ -418,14 +452,19 @@ class EventBusCircuitBreaker:
             raise OnexError(
                 code=CoreErrorCode.INTEGRATION_SERVICE_UNAVAILABLE,
                 message="Event bus circuit breaker open - event publishing failed",
-                details={"circuit_state": self.state.value, "queued_events": len(self.event_queue)},
+                details={
+                    "circuit_state": self.state.value,
+                    "queued_events": len(self.event_queue),
+                },
             )
 
         # Graceful degradation mode - queue if possible
         if len(self.event_queue) < self.config.max_queue_size:
             self.event_queue.append(event)
             self.metrics.queued_events += 1
-            self.logger.info(f"Event queued (circuit {self.state.value}): {event.correlation_id}")
+            self.logger.info(
+                f"Event queued (circuit {self.state.value}): {event.correlation_id}",
+            )
             return False  # Not published, but queued
         # Queue full - move to dead letter queue if enabled
         if self.config.dead_letter_enabled:
@@ -447,7 +486,9 @@ class EventBusCircuitBreaker:
 
         self.dead_letter_queue.append(dead_letter_entry)
         self.metrics.dead_letter_events += 1
-        self.logger.info(f"Event added to dead letter queue: {event.correlation_id} - {reason}")
+        self.logger.info(
+            f"Event added to dead letter queue: {event.correlation_id} - {reason}",
+        )
 
     async def _process_queued_events(self):
         """Process queued events when circuit closes."""
@@ -455,7 +496,9 @@ class EventBusCircuitBreaker:
             return
 
         queued_count = len(self.event_queue)
-        self.logger.info(f"Processing {queued_count} queued events after circuit recovery")
+        self.logger.info(
+            f"Processing {queued_count} queued events after circuit recovery",
+        )
 
         # Process events in background to avoid blocking
         asyncio.create_task(self._process_queue_background())
@@ -479,7 +522,9 @@ class EventBusCircuitBreaker:
                 if failed >= 3:  # Prevent infinite retry loops
                     break
 
-        self.logger.info(f"Queued event processing complete: {processed} processed, {failed} failed")
+        self.logger.info(
+            f"Queued event processing complete: {processed} processed, {failed} failed",
+        )
 
     def get_state(self) -> CircuitBreakerState:
         """Get current circuit breaker state."""
@@ -491,7 +536,10 @@ class EventBusCircuitBreaker:
 
     def is_healthy(self) -> bool:
         """Check if circuit breaker is healthy for event publishing."""
-        return self.state == CircuitBreakerState.CLOSED or self.state == CircuitBreakerState.HALF_OPEN
+        return (
+            self.state == CircuitBreakerState.CLOSED
+            or self.state == CircuitBreakerState.HALF_OPEN
+        )
 
     async def reset_circuit(self):
         """Manually reset circuit breaker (for administrative purposes)."""
@@ -529,22 +577,39 @@ class EventBusCircuitBreaker:
                 "total_events": self.metrics.total_events,
                 "successful_events": self.metrics.successful_events,
                 "failed_events": self.metrics.failed_events,
-                "success_rate": (self.metrics.successful_events / max(self.metrics.total_events, 1)) * 100,
+                "success_rate": (
+                    self.metrics.successful_events / max(self.metrics.total_events, 1)
+                )
+                * 100,
                 "circuit_opens": self.metrics.circuit_opens,
                 "circuit_closes": self.metrics.circuit_closes,
-                "last_failure": self.metrics.last_failure.isoformat() if self.metrics.last_failure else None,
-                "last_success": self.metrics.last_success.isoformat() if self.metrics.last_success else None,
+                "last_failure": (
+                    self.metrics.last_failure.isoformat()
+                    if self.metrics.last_failure
+                    else None
+                ),
+                "last_success": (
+                    self.metrics.last_success.isoformat()
+                    if self.metrics.last_success
+                    else None
+                ),
             },
             "memory_management": {
                 "event_queue_size": len(self.event_queue),
                 "dead_letter_queue_size": len(self.dead_letter_queue),
-                "dead_letter_utilization": (len(self.dead_letter_queue) / self.config.max_dead_letter_size) * 100,
-                "queue_utilization": (len(self.event_queue) / self.config.max_queue_size) * 100,
+                "dead_letter_utilization": (
+                    len(self.dead_letter_queue) / self.config.max_dead_letter_size
+                )
+                * 100,
+                "queue_utilization": (
+                    len(self.event_queue) / self.config.max_queue_size
+                )
+                * 100,
                 "memory_cleanup_enabled": self.config.memory_monitor_enabled,
                 "last_cleanup": time.time() - self._last_memory_cleanup,
                 "cleanup_task_running": (
-                    self._memory_cleanup_task is not None and
-                    not self._memory_cleanup_task.done()
+                    self._memory_cleanup_task is not None
+                    and not self._memory_cleanup_task.done()
                 ),
             },
         }

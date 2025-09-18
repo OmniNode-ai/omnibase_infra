@@ -1,6 +1,5 @@
 """Kafka topic configuration overrides model."""
 
-
 from pydantic import BaseModel, Field
 
 

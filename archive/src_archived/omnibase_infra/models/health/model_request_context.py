@@ -4,7 +4,6 @@ Strongly-typed model for health request context information.
 Replaces Dict[str, Any] usage to maintain ONEX compliance.
 """
 
-
 from pydantic import BaseModel, Field
 
 

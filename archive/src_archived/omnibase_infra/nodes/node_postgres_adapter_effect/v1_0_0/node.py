@@ -46,7 +46,7 @@ from .models.model_postgres_adapter_output import ModelPostgresAdapterOutput
 class PostgresStructuredLogger:
     """
     Structured logger for PostgreSQL adapter operations with correlation ID tracking.
-    
+
     Provides consistent, structured logging across all database operations with:
     - Correlation ID tracking for request tracing
     - Performance metrics logging
@@ -67,10 +67,14 @@ class PostgresStructuredLogger:
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
 
-    def _build_extra(self, correlation_id: UUID | None, operation: str, **kwargs) -> dict:
+    def _build_extra(
+        self, correlation_id: UUID | None, operation: str, **kwargs,
+    ) -> dict:
         """Build extra fields for structured logging."""
         extra = {
-            "correlation_id": str(correlation_id) if correlation_id else "no-correlation",
+            "correlation_id": (
+                str(correlation_id) if correlation_id else "no-correlation"
+            ),
             "operation": operation,
             "component": "postgres_adapter",
             "node_type": "effect",
@@ -78,18 +82,36 @@ class PostgresStructuredLogger:
         extra.update(kwargs)
         return extra
 
-    def info(self, message: str, correlation_id: UUID | None = None, operation: str = "general", **kwargs):
+    def info(
+        self,
+        message: str,
+        correlation_id: UUID | None = None,
+        operation: str = "general",
+        **kwargs,
+    ):
         """Log info level message with structured fields."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         self.logger.info(message, extra=extra)
 
-    def warning(self, message: str, correlation_id: UUID | None = None, operation: str = "general", **kwargs):
+    def warning(
+        self,
+        message: str,
+        correlation_id: UUID | None = None,
+        operation: str = "general",
+        **kwargs,
+    ):
         """Log warning level message with structured fields."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         self.logger.warning(message, extra=extra)
 
-    def error(self, message: str, correlation_id: UUID | None = None, operation: str = "general",
-              exception: Exception | None = None, **kwargs):
+    def error(
+        self,
+        message: str,
+        correlation_id: UUID | None = None,
+        operation: str = "general",
+        exception: Exception | None = None,
+        **kwargs,
+    ):
         """Log error level message with structured fields and exception context."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         if exception:
@@ -97,7 +119,13 @@ class PostgresStructuredLogger:
             extra["exception_message"] = str(exception)
         self.logger.error(message, extra=extra, exc_info=exception is not None)
 
-    def debug(self, message: str, correlation_id: UUID | None = None, operation: str = "general", **kwargs):
+    def debug(
+        self,
+        message: str,
+        correlation_id: UUID | None = None,
+        operation: str = "general",
+        **kwargs,
+    ):
         """Log debug level message with structured fields."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         self.logger.debug(message, extra=extra)
@@ -105,10 +133,10 @@ class PostgresStructuredLogger:
     def _sanitize_query_for_logging(self, query: str) -> str:
         """
         Sanitize query for safe logging by removing sensitive data.
-        
+
         Args:
             query: SQL query to sanitize
-            
+
         Returns:
             Sanitized query safe for logging
         """
@@ -129,6 +157,7 @@ class PostgresStructuredLogger:
         ]
 
         import re
+
         for pattern, replacement in sensitive_patterns:
             sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
 
@@ -143,10 +172,16 @@ class PostgresStructuredLogger:
             operation="query_start",
             query_length=len(query),
             parameters_count=params_count,
-            query_preview=sanitized_query[:100] + "..." if len(sanitized_query) > 100 else sanitized_query,
+            query_preview=(
+                sanitized_query[:100] + "..."
+                if len(sanitized_query) > 100
+                else sanitized_query
+            ),
         )
 
-    def log_query_success(self, correlation_id: UUID, execution_time_ms: float, rows_affected: int):
+    def log_query_success(
+        self, correlation_id: UUID, execution_time_ms: float, rows_affected: int,
+    ):
         """Log successful database query completion."""
         self.info(
             f"Database query completed successfully in {execution_time_ms:.2f}ms (rows: {rows_affected})",
@@ -154,10 +189,16 @@ class PostgresStructuredLogger:
             operation="query_success",
             execution_time_ms=execution_time_ms,
             rows_affected=rows_affected,
-            performance_category="fast" if execution_time_ms < 100 else "slow" if execution_time_ms < 1000 else "very_slow",
+            performance_category=(
+                "fast"
+                if execution_time_ms < 100
+                else "slow" if execution_time_ms < 1000 else "very_slow"
+            ),
         )
 
-    def log_query_error(self, correlation_id: UUID, execution_time_ms: float, exception: Exception):
+    def log_query_error(
+        self, correlation_id: UUID, execution_time_ms: float, exception: Exception,
+    ):
         """Log database query error with context."""
         self.error(
             f"Database query failed after {execution_time_ms:.2f}ms",
@@ -168,7 +209,9 @@ class PostgresStructuredLogger:
             error_category=self._categorize_db_error(exception),
         )
 
-    def log_circuit_breaker_event(self, correlation_id: UUID | None, event: str, state: str, **kwargs):
+    def log_circuit_breaker_event(
+        self, correlation_id: UUID | None, event: str, state: str, **kwargs,
+    ):
         """Log circuit breaker state changes and events."""
         self.warning(
             f"Circuit breaker {event} - state: {state}",
@@ -179,9 +222,15 @@ class PostgresStructuredLogger:
             **kwargs,
         )
 
-    def log_health_check(self, check_name: str, status: str, execution_time_ms: float, **kwargs):
+    def log_health_check(
+        self, check_name: str, status: str, execution_time_ms: float, **kwargs,
+    ):
         """Log health check results."""
-        level_method = self.info if status == "healthy" else self.warning if status == "degraded" else self.error
+        level_method = (
+            self.info
+            if status == "healthy"
+            else self.warning if status == "degraded" else self.error
+        )
         level_method(
             f"Health check '{check_name}' returned {status} in {execution_time_ms:.2f}ms",
             operation="health_check",
@@ -207,23 +256,29 @@ class PostgresStructuredLogger:
 
 class CircuitBreakerState(Enum):
     """Circuit breaker states for database connectivity failures."""
-    CLOSED = "closed"      # Normal operation
-    OPEN = "open"         # Failing, rejecting calls
+
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing, rejecting calls
     HALF_OPEN = "half_open"  # Testing if service recovered
 
 
 class DatabaseCircuitBreaker:
     """
     Circuit breaker implementation for database connectivity failures.
-    
+
     Prevents cascading failures by monitoring database operation failures
     and temporarily blocking requests when failure thresholds are exceeded.
     """
 
-    def __init__(self, failure_threshold: int = 5, timeout_seconds: int = 60, half_open_max_calls: int = 3):
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        timeout_seconds: int = 60,
+        half_open_max_calls: int = 3,
+    ):
         """
         Initialize circuit breaker with configurable thresholds.
-        
+
         Args:
             failure_threshold: Number of failures before opening circuit
             timeout_seconds: Time to wait before attempting recovery
@@ -242,15 +297,15 @@ class DatabaseCircuitBreaker:
     async def call(self, func: Callable, *args, **kwargs):
         """
         Execute function with circuit breaker protection.
-        
+
         Args:
             func: Function to execute
             *args: Function arguments
             **kwargs: Function keyword arguments
-            
+
         Returns:
             Function result
-            
+
         Raises:
             OnexError: If circuit is open or function fails
         """
@@ -319,23 +374,29 @@ class DatabaseCircuitBreaker:
         return {
             "state": self.state.value,
             "failure_count": self.failure_count,
-            "last_failure_time": self.last_failure_time.isoformat() if self.last_failure_time else None,
-            "half_open_calls": self.half_open_calls if self.state == CircuitBreakerState.HALF_OPEN else 0,
+            "last_failure_time": (
+                self.last_failure_time.isoformat() if self.last_failure_time else None
+            ),
+            "half_open_calls": (
+                self.half_open_calls
+                if self.state == CircuitBreakerState.HALF_OPEN
+                else 0
+            ),
         }
 
 
 class NodePostgresAdapterEffect(NodeEffectService):
     """
     Infrastructure PostgreSQL Adapter Node - Message Bus Bridge.
-    
+
     Converts message bus envelopes containing database requests into direct
     PostgreSQL connection manager operations. This follows the ONEX infrastructure
     tool pattern where adapters serve as bridges between the event-driven message
     bus and external service APIs.
-    
+
     Message Flow:
     Event Envelope → PostgreSQL Adapter → PostgreSQL Connection Manager → Database
-    
+
     Integrates with:
     - postgres_event_processing_subcontract: Event bus integration patterns
     - postgres_connection_management_subcontract: Connection pool management
@@ -356,7 +417,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
         # Initialize circuit breaker for database connectivity failures
         self._circuit_breaker = DatabaseCircuitBreaker(
             failure_threshold=5,  # Open circuit after 5 failures
-            timeout_seconds=60,   # Wait 60 seconds before retry
+            timeout_seconds=60,  # Wait 60 seconds before retry
             half_open_max_calls=3,  # Allow 3 test calls in half-open state
         )
 
@@ -374,7 +435,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 message="ProtocolEventBus service not available - event bus integration is REQUIRED for PostgreSQL adapter",
             )
 
-        self._event_publisher = ModelOmniNodeEventPublisher(node_id="postgres_adapter_node")
+        self._event_publisher = ModelOmniNodeEventPublisher(
+            node_id="postgres_adapter_node",
+        )
 
         self._logger.info(
             "Event bus integration initialized successfully",
@@ -402,18 +465,39 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
         self._error_sanitization_patterns = [
             (re.compile(r"password=[^\s&]*", re.IGNORECASE), "password=***"),
-            (re.compile(r"postgresql://[^\s]*@[^\s]*/", re.IGNORECASE), "postgresql://***@***/"),
-            (re.compile(r"eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*"), "***JWT_TOKEN***"),
+            (
+                re.compile(r"postgresql://[^\s]*@[^\s]*/", re.IGNORECASE),
+                "postgresql://***@***/",
+            ),
+            (
+                re.compile(r"eyJ[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*\.[A-Za-z0-9+/=]*"),
+                "***JWT_TOKEN***",
+            ),
             (re.compile(r"ghp_[A-Za-z0-9]{36}"), "***GITHUB_TOKEN***"),
             (re.compile(r"gho_[A-Za-z0-9]{36}"), "***GITHUB_OAUTH_TOKEN***"),
             (re.compile(r"ghu_[A-Za-z0-9]{36}"), "***GITHUB_USER_TOKEN***"),
             (re.compile(r"AKIA[0-9A-Z]{16}"), "***AWS_ACCESS_KEY***"),
             (re.compile(r"[A-Za-z0-9/+=]{40}"), "***AWS_SECRET_KEY***"),
             (re.compile(r"api[_-]?key[_-]*[:=][^\s&]*", re.IGNORECASE), "api_key=***"),
-            (re.compile(r"bearer[\s]+[A-Za-z0-9+/=]{20,}", re.IGNORECASE), "bearer ***"),
-            (re.compile(r"auth[_-]?token[_-]*[:=][^\s&]*", re.IGNORECASE), "auth_token=***"),
-            (re.compile(r"access[_-]?token[_-]*[:=][^\s&]*", re.IGNORECASE), "access_token=***"),
-            (re.compile(r"/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*", re.IGNORECASE), "/***sensitive_path***"),
+            (
+                re.compile(r"bearer[\s]+[A-Za-z0-9+/=]{20,}", re.IGNORECASE),
+                "bearer ***",
+            ),
+            (
+                re.compile(r"auth[_-]?token[_-]*[:=][^\s&]*", re.IGNORECASE),
+                "auth_token=***",
+            ),
+            (
+                re.compile(r"access[_-]?token[_-]*[:=][^\s&]*", re.IGNORECASE),
+                "access_token=***",
+            ),
+            (
+                re.compile(
+                    r"/[\w/.-]*(?:password|secret|key|token|jwt|api)[\w/.-]*",
+                    re.IGNORECASE,
+                ),
+                "/***sensitive_path***",
+            ),
             (re.compile(r'schema "[\w_-]+"'), 'schema "***"'),
             (re.compile(r'table "[\w_-]+"'), 'table "***"'),
             (re.compile(r"[A-Za-z0-9+/=]{32,}"), "***REDACTED_TOKEN***"),
@@ -423,16 +507,12 @@ class NodePostgresAdapterEffect(NodeEffectService):
         self._rows_affected_patterns = [
             # INSERT operations: "INSERT 0 5" -> 5 rows
             (re.compile(r"^INSERT\s+\d+\s+(\d+)$", re.IGNORECASE), 1),
-
             # UPDATE operations: "UPDATE 3" -> 3 rows
             (re.compile(r"^UPDATE\s+(\d+)$", re.IGNORECASE), 1),
-
             # DELETE operations: "DELETE 2" -> 2 rows
             (re.compile(r"^DELETE\s+(\d+)$", re.IGNORECASE), 1),
-
             # COPY operations: "COPY 100" -> 100 rows
             (re.compile(r"^COPY\s+(\d+)$", re.IGNORECASE), 1),
-
             # Generic pattern for any command followed by a number
             (re.compile(r"^[A-Z]+\s+(\d+)$", re.IGNORECASE), 1),
         ]
@@ -445,20 +525,26 @@ class NodePostgresAdapterEffect(NodeEffectService):
             domain=self.domain,
         )
 
-    def _load_configuration(self, container: ModelONEXContainer) -> ModelPostgresAdapterConfig:
+    def _load_configuration(
+        self, container: ModelONEXContainer,
+    ) -> ModelPostgresAdapterConfig:
         """
         Load PostgreSQL adapter configuration from container or environment.
-        
+
         Args:
             container: ONEX container for dependency injection
-            
+
         Returns:
             Configured ModelPostgresAdapterConfig instance
         """
         try:
             # Try to get configuration from container first (ONEX pattern)
             config = container.get_service("postgres_adapter_config")
-            if config and hasattr(config, "postgres_host") and hasattr(config, "postgres_port"):
+            if (
+                config
+                and hasattr(config, "postgres_host")
+                and hasattr(config, "postgres_port")
+            ):
                 return config
         except Exception:
             pass  # Fall back to environment configuration
@@ -470,13 +556,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def _validate_correlation_id(self, correlation_id: UUID | None) -> UUID:
         """
         Validate and normalize correlation ID to prevent injection attacks.
-        
+
         Args:
             correlation_id: Optional correlation ID to validate
-            
+
         Returns:
             Valid UUID correlation ID
-            
+
         Raises:
             OnexError: If correlation ID format is invalid
         """
@@ -484,7 +570,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
             # Generate a new correlation ID if none provided
             return uuid4()
 
-        if hasattr(correlation_id, "replace") and hasattr(correlation_id, "split"):  # String-like
+        if hasattr(correlation_id, "replace") and hasattr(
+            correlation_id, "split",
+        ):  # String-like
             try:
                 # Try to parse string as UUID to validate format
                 correlation_id = UUID(correlation_id)
@@ -513,7 +601,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def connection_manager(self) -> PostgresConnectionManager:
         """
         Get PostgreSQL connection manager instance via registry injection with thread safety.
-        
+
         Note: For async operations, prefer get_connection_manager_async() to avoid mixing sync/async patterns.
         """
         with self._connection_manager_sync_lock:
@@ -522,7 +610,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 self._validate_container_service_interface()
 
                 # Use container injection per ONEX standards
-                self._connection_manager = self.container.get_service("postgres_connection_manager")
+                self._connection_manager = self.container.get_service(
+                    "postgres_connection_manager",
+                )
 
                 # Null check for resolved service
                 if self._connection_manager is None:
@@ -539,10 +629,10 @@ class NodePostgresAdapterEffect(NodeEffectService):
     async def get_connection_manager_async(self) -> PostgresConnectionManager:
         """
         Get PostgreSQL connection manager instance via registry injection with thread safety.
-        
+
         Returns:
             PostgresConnectionManager instance
-            
+
         Raises:
             OnexError: If connection manager cannot be resolved
         """
@@ -552,7 +642,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 self._validate_container_service_interface()
 
                 # Use container injection per ONEX standards
-                self._connection_manager = self.container.get_service("postgres_connection_manager")
+                self._connection_manager = self.container.get_service(
+                    "postgres_connection_manager",
+                )
 
                 # Null check for resolved service
                 if self._connection_manager is None:
@@ -569,7 +661,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     async def _publish_event_to_redpanda(self, envelope: "ModelEventEnvelope") -> None:
         """
         Publish event envelope to RedPanda via proper ProtocolEventBus interface.
-        
+
         Args:
             envelope: ModelEventEnvelope containing OnexEvent payload
         """
@@ -624,10 +716,14 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 },
             ) from e
 
-    def get_health_checks(self) -> list[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
+    def get_health_checks(
+        self,
+    ) -> list[
+        Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]
+    ]:
         """
         Override MixinHealthCheck to provide PostgreSQL-specific health checks.
-        
+
         Returns list of health check functions that validate PostgreSQL connectivity,
         connection pool status, and database accessibility.
         """
@@ -754,7 +850,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
             stats = connection_manager.get_connection_stats()
 
             # Check pool health based on connection stats
-            if stats.failed_connections > stats.total_connections * 0.1:  # More than 10% failures
+            if (
+                stats.failed_connections > stats.total_connections * 0.1
+            ):  # More than 10% failures
                 return ModelHealthStatus(
                     status=EnumHealthStatus.DEGRADED,
                     message=f"High connection failure rate: {stats.failed_connections}/{stats.total_connections}",
@@ -872,10 +970,12 @@ class NodePostgresAdapterEffect(NodeEffectService):
             }
 
             # Test event publishing with timeout
-            test_envelope = self._event_publisher.create_postgres_health_response_envelope(
-                correlation_id=test_correlation_id,
-                health_status="testing_connectivity",
-                health_data=test_data,
+            test_envelope = (
+                self._event_publisher.create_postgres_health_response_envelope(
+                    correlation_id=test_correlation_id,
+                    health_status="testing_connectivity",
+                    health_data=test_data,
+                )
             )
 
             # Use circuit breaker for health check publishing (with timeout)
@@ -959,17 +1059,19 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 timestamp=datetime.utcnow().isoformat(),
             )
 
-    async def process(self, input_data: ModelPostgresAdapterInput) -> ModelPostgresAdapterOutput:
+    async def process(
+        self, input_data: ModelPostgresAdapterInput,
+    ) -> ModelPostgresAdapterOutput:
         """
         Process PostgreSQL adapter request following infrastructure tool pattern.
-        
+
         Routes message envelope to appropriate database operation based on operation_type.
         Handles both query execution and health check operations with proper error handling
         and metrics collection as defined in the event processing subcontract.
-        
+
         Args:
             input_data: Input envelope containing operation type and request data
-            
+
         Returns:
             Output envelope with operation results
         """
@@ -977,7 +1079,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
         try:
             # Validate and normalize correlation ID to prevent injection attacks
-            validated_correlation_id = self._validate_correlation_id(input_data.correlation_id)
+            validated_correlation_id = self._validate_correlation_id(
+                input_data.correlation_id,
+            )
 
             # Update the input data with validated correlation ID if it was modified
             if validated_correlation_id != input_data.correlation_id:
@@ -1018,7 +1122,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     ) -> ModelPostgresAdapterOutput:
         """
         Handle database query operation following connection management patterns.
-        
+
         Implements query execution strategy as defined in postgres_connection_management_subcontract
         with proper timeout handling, retry logic, and performance monitoring.
         """
@@ -1055,7 +1159,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
             )
 
             # Convert result to response format (as defined in event processing subcontract)
-            if hasattr(result, "__iter__") and hasattr(result, "__len__"):  # List-like (SELECT query result)
+            if hasattr(result, "__iter__") and hasattr(
+                result, "__len__",
+            ):  # List-like (SELECT query result)
                 # Create properly typed ModelPostgresQueryRow objects
 
                 query_rows = []
@@ -1077,7 +1183,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
             else:  # Non-SELECT query result (status string)
                 query_result = None
-                status_message = str(result) if result else "Query executed successfully"
+                status_message = (
+                    str(result) if result else "Query executed successfully"
+                )
                 # More robust parsing of rows affected from status string
                 rows_affected = self._parse_rows_affected_from_status(result)
 
@@ -1104,11 +1212,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 "status_message": status_message,
             }
 
-            event_envelope = self._event_publisher.create_postgres_query_completed_envelope(
-                correlation_id=correlation_id,
-                query_data=query_data,
-                execution_time_ms=execution_time_ms,
-                row_count=rows_affected,
+            event_envelope = (
+                self._event_publisher.create_postgres_query_completed_envelope(
+                    correlation_id=correlation_id,
+                    query_data=query_data,
+                    execution_time_ms=execution_time_ms,
+                    row_count=rows_affected,
+                )
             )
 
             # Event publishing is REQUIRED - must not fail
@@ -1121,7 +1231,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 status_message=status_message,
                 rows_affected=rows_affected,
                 execution_time_ms=execution_time_ms,
-                correlation_id=query_request.correlation_id or input_data.correlation_id,
+                correlation_id=query_request.correlation_id
+                or input_data.correlation_id,
                 context=query_request.context,
             )
 
@@ -1165,11 +1276,13 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 "error_type": type(e).__name__,
             }
 
-            event_envelope = self._event_publisher.create_postgres_query_failed_envelope(
-                correlation_id=correlation_id,
-                error_message=sanitized_error,
-                query_data=query_data,
-                execution_time_ms=execution_time_ms,
+            event_envelope = (
+                self._event_publisher.create_postgres_query_failed_envelope(
+                    correlation_id=correlation_id,
+                    error_message=sanitized_error,
+                    query_data=query_data,
+                    execution_time_ms=execution_time_ms,
+                )
             )
 
             # Event publishing is REQUIRED - must not fail
@@ -1191,7 +1304,8 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 data=None,
                 rows_affected=0,
                 execution_time_ms=execution_time_ms,
-                correlation_id=query_request.correlation_id or input_data.correlation_id,
+                correlation_id=query_request.correlation_id
+                or input_data.correlation_id,
                 status_message=sanitized_error,
                 error=postgres_error,  # Use structured error model
                 context=query_request.context,
@@ -1215,7 +1329,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     ) -> ModelPostgresAdapterOutput:
         """
         Handle health check operation for PostgreSQL adapter.
-        
+
         Performs comprehensive health checks including database connectivity,
         connection pool status, and adapter functionality.
         """
@@ -1235,8 +1349,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
             # Determine overall health status
             overall_healthy = all(
-                result.status == EnumHealthStatus.HEALTHY
-                for result in health_results
+                result.status == EnumHealthStatus.HEALTHY for result in health_results
             )
 
             execution_time_ms = (time.perf_counter() - start_time) * 1000
@@ -1264,10 +1377,12 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 )
             health_status = "healthy" if overall_healthy else "unhealthy"
 
-            event_envelope = self._event_publisher.create_postgres_health_response_envelope(
-                correlation_id=correlation_id,
-                health_status=health_status,
-                health_data=health_data,
+            event_envelope = (
+                self._event_publisher.create_postgres_health_response_envelope(
+                    correlation_id=correlation_id,
+                    health_status=health_status,
+                    health_data=health_data,
+                )
             )
 
             # Event publishing is REQUIRED - must not fail
@@ -1291,7 +1406,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
             # Sanitize error message (configurable)
             if self.config.enable_error_sanitization:
-                sanitized_error = self._sanitize_error_message(f"Health check operation failed: {e!s}")
+                sanitized_error = self._sanitize_error_message(
+                    f"Health check operation failed: {e!s}",
+                )
             else:
                 sanitized_error = f"Health check operation failed: {e!s}"
 
@@ -1308,10 +1425,12 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 "execution_time_ms": execution_time_ms,
             }
 
-            event_envelope = self._event_publisher.create_postgres_health_response_envelope(
-                correlation_id=correlation_id,
-                health_status="unhealthy",
-                health_data=failed_health_data,
+            event_envelope = (
+                self._event_publisher.create_postgres_health_response_envelope(
+                    correlation_id=correlation_id,
+                    health_status="unhealthy",
+                    health_data=failed_health_data,
+                )
             )
 
             # Event publishing is REQUIRED - must not fail
@@ -1330,7 +1449,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     async def initialize(self) -> None:
         """
         Initialize the PostgreSQL adapter tool and connection manager.
-        
+
         Follows initialization patterns defined in postgres_connection_management_subcontract
         with proper error handling and resource setup.
         """
@@ -1346,7 +1465,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     async def cleanup(self) -> None:
         """
         Enhanced cleanup with comprehensive resource management and thread safety.
-        
+
         Implements proper resource lifecycle management with concurrent cleanup
         and graceful error handling per ONEX infrastructure patterns.
         """
@@ -1373,7 +1492,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
 
             # Collect any cleanup errors for observability (protocol-based exception detection)
             for i, result in enumerate(results):
-                if hasattr(result, "__traceback__") and hasattr(result, "args"):  # Exception-like protocol
+                if hasattr(result, "__traceback__") and hasattr(
+                    result, "args",
+                ):  # Exception-like protocol
                     cleanup_errors.append(f"Cleanup task {i}: {result!s}")
 
         # Clear all references in thread-safe manner
@@ -1436,7 +1557,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def _validate_query_input(self, query_request) -> None:
         """
         Validate query input for security and performance constraints.
-        
+
         Validates:
         - Query size limits to prevent memory exhaustion
         - Parameter count limits to prevent resource exhaustion
@@ -1467,7 +1588,10 @@ class NodePostgresAdapterEffect(NodeEffectService):
                 )
 
         # Timeout validation
-        if query_request.timeout and query_request.timeout > self.config.max_timeout_seconds:
+        if (
+            query_request.timeout
+            and query_request.timeout > self.config.max_timeout_seconds
+        ):
             raise OnexError(
                 code=CoreErrorCode.VALIDATION_ERROR,
                 message=f"Query timeout exceeds maximum allowed ({self.config.max_timeout_seconds} seconds)",
@@ -1490,7 +1614,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def _validate_query_complexity(self, query: str) -> None:
         """
         Validate query complexity to prevent DoS attacks.
-        
+
         Analyzes SQL query complexity based on:
         - Number of JOIN operations
         - Number of subqueries and nested selects
@@ -1509,7 +1633,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
         complexity_score += join_count * weights["join"]
 
         # Count subqueries and nested selects using pre-compiled pattern
-        select_count = len(self._complexity_patterns["selects"].findall(query_lower)) - 1  # Subtract main SELECT
+        select_count = (
+            len(self._complexity_patterns["selects"].findall(query_lower)) - 1
+        )  # Subtract main SELECT
         complexity_score += select_count * weights["subquery"]
 
         # Count UNION operations using pre-compiled pattern (expensive)
@@ -1517,7 +1643,9 @@ class NodePostgresAdapterEffect(NodeEffectService):
         complexity_score += union_count * weights["union"]
 
         # Check for expensive LIKE operations with leading wildcards using pre-compiled pattern
-        leading_wildcard_count = len(self._complexity_patterns["leading_wildcards"].findall(query_lower))
+        leading_wildcard_count = len(
+            self._complexity_patterns["leading_wildcards"].findall(query_lower),
+        )
         complexity_score += leading_wildcard_count * weights["leading_wildcard"]
 
         # Check for regex operations using pre-compiled pattern (very expensive)
@@ -1525,7 +1653,12 @@ class NodePostgresAdapterEffect(NodeEffectService):
         complexity_score += regex_count * weights["regex"]
 
         # Check for expensive functions
-        expensive_functions = ["array_agg", "string_agg", "generate_series", "recursive"]
+        expensive_functions = [
+            "array_agg",
+            "string_agg",
+            "generate_series",
+            "recursive",
+        ]
         for func in expensive_functions:
             if func in query_lower:
                 complexity_score += weights["expensive_function"]
@@ -1546,7 +1679,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def _validate_container_service_interface(self) -> None:
         """
         Validate container service interface compliance.
-        
+
         Ensures the container follows ONEX standards for service resolution:
         - Has get_service method
         - Supports proper service registration patterns
@@ -1568,7 +1701,7 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def _validate_connection_manager_interface(self, connection_manager) -> None:
         """
         Validate connection manager service interface compliance.
-        
+
         Ensures the resolved connection manager implements required methods:
         - execute_query (async)
         - health_check (async)
@@ -1598,10 +1731,10 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def _sanitize_error_message(self, error_message: str) -> str:
         """
         Sanitize error messages to prevent sensitive information leakage.
-        
+
         Removes or masks sensitive information like:
         - Connection strings and passwords
-        - Database schema details  
+        - Database schema details
         - Internal system paths
         - Stack traces with sensitive info
         """
@@ -1619,22 +1752,24 @@ class NodePostgresAdapterEffect(NodeEffectService):
     def _parse_rows_affected_from_status(self, status_result: str) -> int:
         """
         Parse rows affected from PostgreSQL status strings with robust error handling.
-        
+
         PostgreSQL returns different status formats:
         - INSERT: "INSERT 0 5" (5 rows inserted)
-        - UPDATE: "UPDATE 3" (3 rows updated)  
+        - UPDATE: "UPDATE 3" (3 rows updated)
         - DELETE: "DELETE 2" (2 rows deleted)
         - CREATE: "CREATE TABLE"
         - DROP: "DROP TABLE"
         - Other commands may return various formats
-        
+
         Args:
             status_result: Status string returned by PostgreSQL
-            
+
         Returns:
             Number of rows affected, or 0 if parsing fails
         """
-        if not status_result or not (hasattr(status_result, "strip") and hasattr(status_result, "split")):  # String-like check
+        if not status_result or not (
+            hasattr(status_result, "strip") and hasattr(status_result, "split")
+        ):  # String-like check
             return 0
 
         # Clean the status string

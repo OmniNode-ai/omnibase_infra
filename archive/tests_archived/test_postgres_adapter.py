@@ -65,7 +65,9 @@ class TestPostgresAdapter:
         # For testing purposes, we'll mock the container to avoid service resolution issues
         mock_container = Mock(spec=ModelONEXContainer)
 
-        with patch("omnibase_infra.infrastructure.postgres_connection_manager.PostgresConnectionManager") as mock_manager_class:
+        with patch(
+            "omnibase_infra.infrastructure.postgres_connection_manager.PostgresConnectionManager",
+        ) as mock_manager_class:
             mock_manager_class.return_value = mock_connection_manager
 
             adapter = NodePostgresAdapterEffect(mock_container)
@@ -203,7 +205,9 @@ class TestPostgresAdapter:
         """Test handling of database errors during query execution."""
 
         # Configure mock to raise database error
-        adapter_with_mock.connection_manager.execute_query.side_effect = Exception("Connection timeout")
+        adapter_with_mock.connection_manager.execute_query.side_effect = Exception(
+            "Connection timeout",
+        )
 
         # Create valid query request
         correlation_id = uuid.uuid4()
@@ -380,9 +384,9 @@ class TestPostgresAdapter:
         correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
             query="""
-                INSERT INTO infrastructure.service_registry 
-                (service_name, service_type, hostname, port, status, metadata) 
-                VALUES ($1, $2, $3, $4, $5, $6) 
+                INSERT INTO infrastructure.service_registry
+                (service_name, service_type, hostname, port, status, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING id, service_name, status
             """,
             parameters=[
@@ -422,7 +426,10 @@ class TestPostgresAdapter:
         # Check that all 6 parameters were unpacked
         assert len(call_args[0]) == 7  # query + 6 parameters
         assert call_args[0][1] == "new_service"  # First parameter
-        assert call_args[0][6] == {"version": "1.0.0", "environment": "development"}  # Last parameter
+        assert call_args[0][6] == {
+            "version": "1.0.0",
+            "environment": "development",
+        }  # Last parameter
 
 
 if __name__ == "__main__":

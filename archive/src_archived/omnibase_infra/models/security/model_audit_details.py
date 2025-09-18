@@ -184,6 +184,7 @@ class ModelAuditDetails(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
         json_schema_extra = {
@@ -297,6 +298,7 @@ class ModelAuditMetadata(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
         json_encoders = {

@@ -1,6 +1,5 @@
 """Kafka topic configuration model."""
 
-
 from pydantic import BaseModel, Field
 
 from .model_kafka_topic_overrides import ModelKafkaTopicOverrides
@@ -10,8 +9,12 @@ class ModelKafkaTopicConfig(BaseModel):
     """Kafka topic configuration model."""
 
     topic_name: str = Field(description="Name of the Kafka topic")
-    num_partitions: int = Field(default=1, description="Number of partitions for the topic")
-    replication_factor: int = Field(default=1, description="Replication factor for the topic")
+    num_partitions: int = Field(
+        default=1, description="Number of partitions for the topic",
+    )
+    replication_factor: int = Field(
+        default=1, description="Replication factor for the topic",
+    )
     config_overrides: ModelKafkaTopicOverrides | None = Field(
         default=None,
         description="Topic configuration overrides (e.g., retention.ms, cleanup.policy)",

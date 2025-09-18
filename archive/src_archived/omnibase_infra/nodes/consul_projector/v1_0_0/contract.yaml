@@ -44,7 +44,7 @@ dependencies:
     type: "protocol"
     class_name: "ProtocolEventBus"
     module: "omnibase_spi.protocols.event_bus"
-  
+
   # Shared Consul model dependencies (DRY pattern)
   - name: "model_consul_kv_response"
     type: "model"

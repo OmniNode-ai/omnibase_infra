@@ -101,10 +101,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
     CircuitBreakerMixin
 ):
     """REDUCER node for {DOMAIN} {MICROSERVICE_NAME} data reduction operations.
-    
+
     This node provides high-performance data aggregation and reduction services
     for {DOMAIN} domain operations, focusing on {MICROSERVICE_NAME} data processing.
-    
+
     Key Features:
     - Sub-{PERFORMANCE_TARGET}ms reduction performance
     - Memory-efficient large dataset processing
@@ -112,10 +112,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
     - Pattern detection and statistical analysis
     - Circuit breaker protection
     """
-    
+
     def __init__(self, config: {DomainCamelCase}{MicroserviceCamelCase}ReducerConfig):
         """Initialize the REDUCER node with configuration.
-        
+
         Args:
             config: Configuration for the reduction operations
         """
@@ -126,14 +126,14 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
             recovery_timeout=config.circuit_breaker_timeout,
             expected_exception=Exception
         )
-        
+
         # Initialize reduction components
         self._aggregator = DataAggregator(config.aggregation_config)
         self._stream_processor = StreamProcessor(config.stream_config)
         self._pattern_detector = PatternDetector(config.pattern_config)
         self._memory_optimizer = MemoryOptimizer(config.memory_config)
         self._error_sanitizer = ErrorSanitizer()
-        
+
         # Processing state
         self._active_streams = {}
         self._reduction_metrics = []
@@ -145,14 +145,14 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
         """Track performance metrics for reductions."""
         start_time = time.perf_counter()
         initial_memory = self._memory_optimizer.get_current_usage_mb()
-        
+
         try:
             yield
         finally:
             end_time = time.perf_counter()
             duration_ms = (end_time - start_time) * 1000
             final_memory = self._memory_optimizer.get_current_usage_mb()
-            
+
             self._reduction_metrics.append({
                 "reduction_type": reduction_type,
                 "duration_ms": duration_ms,
@@ -165,16 +165,16 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
         input_data: Model{DomainCamelCase}{MicroserviceCamelCase}ReducerInput
     ) -> Model{DomainCamelCase}{MicroserviceCamelCase}ReducerOutput:
         """Process {DOMAIN} {MICROSERVICE_NAME} reduction with typed interface.
-        
+
         This is the business logic interface that provides type-safe reduction
         processing without ONEX infrastructure concerns.
-        
+
         Args:
             input_data: Validated input data for reduction
-            
+
         Returns:
             Reduced output data with aggregated results
-            
+
         Raises:
             ValidationError: If input validation fails
             ReductionError: If reduction logic fails
@@ -184,19 +184,19 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
             try:
                 # Pre-processing memory optimization
                 await self._memory_optimizer.optimize_for_dataset(input_data.dataset_info)
-                
+
                 # Execute core reduction logic
                 reduction_result = await self._execute_reduction(input_data)
-                
+
                 # Pattern detection on results
                 patterns = await self._pattern_detector.detect_patterns(
                     reduction_result,
                     input_data.pattern_detection_enabled
                 )
-                
+
                 # Post-processing optimization
                 optimized_result = await self._memory_optimizer.optimize_output(reduction_result)
-                
+
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ReducerOutput(
                     reduction_type=input_data.reduction_type,
                     aggregation_strategy=input_data.aggregation_strategy,
@@ -206,7 +206,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                     correlation_id=input_data.correlation_id,
                     timestamp=time.time(),
                     processing_time_ms=(
-                        self._reduction_metrics[-1]["duration_ms"] 
+                        self._reduction_metrics[-1]["duration_ms"]
                         if self._reduction_metrics else 0.0
                     ),
                     input_record_count=len(input_data.data_sources),
@@ -219,7 +219,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                         "compression_ratio": self._calculate_compression_ratio(input_data, optimized_result)
                     }
                 )
-                
+
             except ValidationError as e:
                 sanitized_error = self._error_sanitizer.sanitize_validation_error(str(e))
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ReducerOutput(
@@ -233,7 +233,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                     input_record_count=len(input_data.data_sources) if input_data.data_sources else 0,
                     output_record_count=0
                 )
-            
+
             except MemoryError:
                 await self._memory_optimizer.emergency_cleanup()
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ReducerOutput(
@@ -247,7 +247,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                     input_record_count=len(input_data.data_sources) if input_data.data_sources else 0,
                     output_record_count=0
                 )
-            
+
             except asyncio.TimeoutError:
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ReducerOutput(
                     reduction_type=input_data.reduction_type,
@@ -260,7 +260,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                     input_record_count=len(input_data.data_sources) if input_data.data_sources else 0,
                     output_record_count=0
                 )
-            
+
             except Exception as e:
                 sanitized_error = self._error_sanitizer.sanitize_error(str(e))
                 return Model{DomainCamelCase}{MicroserviceCamelCase}ReducerOutput(
@@ -280,10 +280,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
         input_data: Model{DomainCamelCase}{MicroserviceCamelCase}ReducerInput
     ) -> Any:
         """Execute the core reduction logic.
-        
+
         Args:
             input_data: Input data for reduction
-            
+
         Returns:
             Reduced result data
         """
@@ -295,32 +295,32 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                     input_data.aggregation_strategy,
                     input_data.aggregation_parameters
                 )
-            
+
             elif input_data.reduction_type == Enum{DomainCamelCase}{MicroserviceCamelCase}ReductionType.STATISTICAL:
                 return await self._perform_statistical_reduction(
                     input_data.data_sources,
                     input_data.statistical_operations
                 )
-            
+
             elif input_data.reduction_type == Enum{DomainCamelCase}{MicroserviceCamelCase}ReductionType.WINDOW:
                 return await self._stream_processor.process_window(
                     input_data.data_sources,
                     input_data.window_config
                 )
-            
+
             elif input_data.reduction_type == Enum{DomainCamelCase}{MicroserviceCamelCase}ReductionType.FILTER:
                 return await self._apply_filter_reduction(
                     input_data.data_sources,
                     input_data.filter_criteria
                 )
-            
+
             elif input_data.reduction_type == Enum{DomainCamelCase}{MicroserviceCamelCase}ReductionType.GROUP:
                 return await self._perform_group_reduction(
                     input_data.data_sources,
                     input_data.grouping_keys,
                     input_data.aggregation_strategy
                 )
-            
+
             else:
                 raise ValueError(f"Unsupported reduction type: {input_data.reduction_type}")
 
@@ -334,29 +334,29 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
         for source in data_sources:
             if isinstance(source.get('values'), list):
                 all_values.extend([v for v in source['values'] if isinstance(v, (int, float))])
-        
+
         if not all_values:
             return {"error": "No numerical values found for statistical reduction"}
-        
+
         results = {}
-        
+
         if "mean" in statistical_operations:
             results["mean"] = statistics.mean(all_values)
-        
+
         if "median" in statistical_operations:
             results["median"] = statistics.median(all_values)
-        
+
         if "std_dev" in statistical_operations:
             results["standard_deviation"] = statistics.stdev(all_values) if len(all_values) > 1 else 0.0
-        
+
         if "variance" in statistical_operations:
             results["variance"] = statistics.variance(all_values) if len(all_values) > 1 else 0.0
-        
+
         if "min_max" in statistical_operations:
             results["minimum"] = min(all_values)
             results["maximum"] = max(all_values)
             results["range"] = max(all_values) - min(all_values)
-        
+
         if "percentiles" in statistical_operations:
             sorted_values = sorted(all_values)
             results["percentiles"] = {
@@ -365,10 +365,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                 "p75": statistics.quantiles(sorted_values, n=4)[2] if len(sorted_values) > 1 else sorted_values[0],
                 "p95": statistics.quantiles(sorted_values, n=20)[18] if len(sorted_values) > 1 else sorted_values[0]
             }
-        
+
         results["count"] = len(all_values)
         results["sum"] = sum(all_values)
-        
+
         return results
 
     async def _apply_filter_reduction(
@@ -378,11 +378,11 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
     ) -> List[Dict[str, Any]]:
         """Apply filter criteria to reduce data sources."""
         filtered_results = []
-        
+
         for source in data_sources:
             if self._matches_filter_criteria(source, filter_criteria):
                 filtered_results.append(source)
-        
+
         return filtered_results
 
     def _matches_filter_criteria(
@@ -394,9 +394,9 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
         for key, expected_value in filter_criteria.items():
             if key not in data_item:
                 return False
-            
+
             item_value = data_item[key]
-            
+
             # Handle different filter types
             if isinstance(expected_value, dict):
                 # Range filter: {"min": 10, "max": 100}
@@ -417,7 +417,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                 # Exact match
                 if item_value != expected_value:
                     return False
-        
+
         return True
 
     async def _perform_group_reduction(
@@ -428,20 +428,20 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
     ) -> Dict[str, Any]:
         """Perform group-based reduction."""
         groups = defaultdict(list)
-        
+
         # Group data by keys
         for source in data_sources:
             group_key = tuple(str(source.get(key, "null")) for key in grouping_keys)
             groups[group_key].append(source)
-        
+
         # Apply aggregation to each group
         results = {}
         for group_key, group_data in groups.items():
             group_name = "_".join(group_key)
-            
+
             if aggregation_strategy == Enum{DomainCamelCase}{MicroserviceCamelCase}AggregationStrategy.COUNT:
                 results[group_name] = len(group_data)
-            
+
             elif aggregation_strategy == Enum{DomainCamelCase}{MicroserviceCamelCase}AggregationStrategy.SUM:
                 # Sum numeric fields
                 numeric_sum = {}
@@ -450,7 +450,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                         if isinstance(value, (int, float)):
                             numeric_sum[key] = numeric_sum.get(key, 0) + value
                 results[group_name] = numeric_sum
-            
+
             elif aggregation_strategy == Enum{DomainCamelCase}{MicroserviceCamelCase}AggregationStrategy.AVERAGE:
                 # Average numeric fields
                 numeric_avg = {}
@@ -460,19 +460,19 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                         if isinstance(value, (int, float)):
                             numeric_avg[key] = numeric_avg.get(key, 0) + value
                             field_counts[key] = field_counts.get(key, 0) + 1
-                
+
                 for key in numeric_avg:
                     if field_counts[key] > 0:
                         numeric_avg[key] = numeric_avg[key] / field_counts[key]
-                
+
                 results[group_name] = numeric_avg
-            
+
             elif aggregation_strategy == Enum{DomainCamelCase}{MicroserviceCamelCase}AggregationStrategy.FIRST:
                 results[group_name] = group_data[0] if group_data else None
-            
+
             elif aggregation_strategy == Enum{DomainCamelCase}{MicroserviceCamelCase}AggregationStrategy.LAST:
                 results[group_name] = group_data[-1] if group_data else None
-        
+
         return results
 
     def _get_output_record_count(self, result_data: Any) -> int:
@@ -488,14 +488,14 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
         """Calculate memory efficiency score."""
         if not self._memory_usage_tracker:
             return 1.0
-        
+
         recent_usage = list(self._memory_usage_tracker.values())[-10:]  # Last 10 operations
         if not recent_usage:
             return 1.0
-        
+
         avg_usage = sum(recent_usage) / len(recent_usage)
         memory_limit = self.config.memory_config.max_memory_mb
-        
+
         return max(0.0, 1.0 - (avg_usage / memory_limit))
 
     def _calculate_compression_ratio(
@@ -506,10 +506,10 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
         """Calculate data compression ratio."""
         input_size = len(str(input_data.data_sources)) if input_data.data_sources else 0
         output_size = len(str(output_data))
-        
+
         if input_size == 0:
             return 1.0
-        
+
         return output_size / input_size if output_size < input_size else 1.0
 
     async def get_performance_metrics(self) -> Dict[str, Any]:
@@ -521,11 +521,11 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                 "memory_efficiency": 1.0,
                 "active_streams": 0
             }
-        
+
         total_reductions = len(self._reduction_metrics)
         average_duration = sum(m["duration_ms"] for m in self._reduction_metrics) / total_reductions
         average_memory_delta = sum(m["memory_delta_mb"] for m in self._reduction_metrics) / total_reductions
-        
+
         return {
             "total_reductions": total_reductions,
             "average_duration_ms": round(average_duration, 2),
@@ -546,24 +546,24 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
             stream_processor_healthy = await self._stream_processor.health_check()
             pattern_detector_healthy = await self._pattern_detector.health_check()
             memory_optimizer_healthy = await self._memory_optimizer.health_check()
-            
+
             # Check memory usage
             current_memory_mb = self._memory_optimizer.get_current_usage_mb()
             memory_healthy = current_memory_mb < self.config.memory_config.max_memory_mb * 0.8
-            
+
             # Check performance metrics
             recent_metrics = [
                 m for m in self._reduction_metrics
                 if time.time() - m["timestamp"] < 300  # Last 5 minutes
             ]
-            
+
             avg_performance = (
                 sum(m["duration_ms"] for m in recent_metrics) / len(recent_metrics)
                 if recent_metrics else 0.0
             )
-            
+
             performance_healthy = avg_performance < self.config.performance_threshold_ms
-            
+
             overall_healthy = all([
                 aggregator_healthy,
                 stream_processor_healthy,
@@ -572,7 +572,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                 memory_healthy,
                 performance_healthy
             ])
-            
+
             return {
                 "status": "healthy" if overall_healthy else "degraded",
                 "components": {
@@ -594,7 +594,7 @@ class Node{DomainCamelCase}{MicroserviceCamelCase}Reducer(
                 "circuit_breaker": self.circuit_breaker_status,
                 "active_streams": len(self._active_streams)
             }
-            
+
         except Exception as e:
             sanitized_error = self._error_sanitizer.sanitize_error(str(e))
             return {
@@ -619,7 +619,7 @@ ConfigT = TypeVar('ConfigT', bound='BaseNodeConfig')
 
 class AggregationConfig(BaseModel):
     """Configuration for data aggregation operations."""
-    
+
     max_input_sources: int = Field(default=1000, ge=1, description="Maximum number of input data sources")
     batch_size: int = Field(default=100, ge=1, le=1000, description="Batch size for processing")
     parallel_aggregation: bool = Field(default=True, description="Enable parallel aggregation processing")
@@ -629,7 +629,7 @@ class AggregationConfig(BaseModel):
 
 class StreamConfig(BaseModel):
     """Configuration for stream processing operations."""
-    
+
     window_size_ms: int = Field(default=10000, ge=1000, le=3600000, description="Stream window size in milliseconds")
     max_windows_active: int = Field(default=10, ge=1, le=100, description="Maximum active windows")
     watermark_delay_ms: int = Field(default=5000, ge=0, description="Watermark delay for late data")
@@ -639,7 +639,7 @@ class StreamConfig(BaseModel):
 
 class PatternConfig(BaseModel):
     """Configuration for pattern detection."""
-    
+
     enable_pattern_detection: bool = Field(default=True, description="Enable automatic pattern detection")
     pattern_cache_size: int = Field(default=1000, ge=10, description="Pattern cache size")
     min_pattern_confidence: float = Field(default=0.7, ge=0.0, le=1.0, description="Minimum pattern confidence")
@@ -649,7 +649,7 @@ class PatternConfig(BaseModel):
 
 class MemoryConfig(BaseModel):
     """Configuration for memory optimization."""
-    
+
     max_memory_mb: float = Field(default=1024.0, ge=128.0, le=8192.0, description="Maximum memory usage in MB")
     cleanup_threshold_percent: float = Field(default=80.0, ge=50.0, le=95.0, description="Memory cleanup threshold percentage")
     garbage_collection_frequency: int = Field(default=10, ge=1, le=100, description="GC frequency (every N operations)")
@@ -659,7 +659,7 @@ class MemoryConfig(BaseModel):
 
 class {DomainCamelCase}{MicroserviceCamelCase}ReducerConfig(BaseNodeConfig):
     """Configuration for {DOMAIN} {MICROSERVICE_NAME} REDUCER operations."""
-    
+
     # Core reduction settings
     reduction_timeout_ms: float = Field(
         default=30000.0,
@@ -667,27 +667,27 @@ class {DomainCamelCase}{MicroserviceCamelCase}ReducerConfig(BaseNodeConfig):
         le=300000.0,
         description="Maximum reduction processing time in milliseconds"
     )
-    
+
     performance_threshold_ms: float = Field(
         default=5000.0,
         ge=100.0,
         le=30000.0,
         description="Performance threshold for health checks"
     )
-    
+
     max_concurrent_reductions: int = Field(
         default=20,
         ge=1,
         le=100,
         description="Maximum concurrent reduction operations"
     )
-    
+
     # Component configurations
     aggregation_config: AggregationConfig = Field(default_factory=AggregationConfig)
     stream_config: StreamConfig = Field(default_factory=StreamConfig)
     pattern_config: PatternConfig = Field(default_factory=PatternConfig)
     memory_config: MemoryConfig = Field(default_factory=MemoryConfig)
-    
+
     # Circuit breaker settings
     circuit_breaker_threshold: int = Field(
         default=5,
@@ -695,32 +695,32 @@ class {DomainCamelCase}{MicroserviceCamelCase}ReducerConfig(BaseNodeConfig):
         le=100,
         description="Circuit breaker failure threshold"
     )
-    
+
     circuit_breaker_timeout: int = Field(
         default=60,
         ge=1,
         le=3600,
         description="Circuit breaker recovery timeout in seconds"
     )
-    
+
     # Data processing settings
     enable_data_validation: bool = Field(
         default=True,
         description="Enable input data validation"
     )
-    
+
     enable_result_caching: bool = Field(
         default=True,
         description="Enable reduction result caching"
     )
-    
+
     cache_ttl_seconds: int = Field(
         default=3600,
         ge=60,
         le=86400,
         description="Cache TTL in seconds"
     )
-    
+
     # Domain-specific settings
     domain_specific_config: Dict[str, Any] = Field(
         default_factory=dict,
@@ -756,10 +756,10 @@ class {DomainCamelCase}{MicroserviceCamelCase}ReducerConfig(BaseNodeConfig):
     @classmethod
     def for_environment(cls: Type[ConfigT], environment: str) -> ConfigT:
         """Create environment-specific configuration.
-        
+
         Args:
             environment: Environment name (development, staging, production)
-            
+
         Returns:
             Environment-optimized configuration
         """
@@ -789,7 +789,7 @@ class {DomainCamelCase}{MicroserviceCamelCase}ReducerConfig(BaseNodeConfig):
                 enable_result_caching=True,
                 cache_ttl_seconds=7200
             )
-        
+
         elif environment == "staging":
             return cls(
                 reduction_timeout_ms=30000.0,
@@ -804,7 +804,7 @@ class {DomainCamelCase}{MicroserviceCamelCase}ReducerConfig(BaseNodeConfig):
                     cleanup_threshold_percent=80.0
                 )
             )
-        
+
         else:  # development
             return cls(
                 reduction_timeout_ms=60000.0,

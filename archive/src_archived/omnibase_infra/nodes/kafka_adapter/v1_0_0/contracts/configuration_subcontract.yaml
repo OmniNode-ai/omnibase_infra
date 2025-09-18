@@ -14,7 +14,7 @@ configuration_strategy:
   environment_prefix_required: true
   secret_detection_enabled: true
   hot_reload_supported: false
-  
+
 # === ENVIRONMENT CONFIGURATION ===
 environment_configuration:
   prefix_pattern: "ONEX_INFRA_{NODE_NAME}_"
@@ -40,29 +40,29 @@ validation_patterns:
     pattern: "^[^:,]+:[0-9]+(,[^:,]+:[0-9]+)*$"
     required: true
     sensitive: false
-  
+
   kafka_security_protocol:
     pattern: "^(PLAINTEXT|SSL|SASL_PLAINTEXT|SASL_SSL)$"
     required: false
-    
+
   port_number:
     pattern: "^[1-9][0-9]{0,4}$"
     range: [1, 65535]
     required: true
-    
+
   boolean_flag:
     pattern: "^(true|false|0|1|yes|no)$"
     required: false
-    
+
   timeout_milliseconds:
     pattern: "^[1-9][0-9]*$"
     range: [100, 300000]
     required: false
-    
+
   topic_name:
     pattern: "^[a-zA-Z0-9._-]+$"
     required: true
-    
+
   consumer_group_id:
     pattern: "^[a-zA-Z0-9._-]+$"
     required: false
@@ -108,7 +108,7 @@ models:
     required: ["source_type", "priority"]
 
   ModelEnvironmentConfiguration:
-    type: "object" 
+    type: "object"
     description: "Environment-based configuration loading"
     properties:
       prefix:
@@ -176,16 +176,16 @@ integration_patterns:
     enabled: true
     service_key: "configuration_service"
     fallback_enabled: true
-    
+
   environment_variable_loading:
     enabled: true
     prefix_required: true
     validation_enabled: true
-    
+
   default_value_fallback:
     enabled: true
     log_fallback_usage: true
-    
+
   configuration_caching:
     enabled: true
     cache_duration_seconds: 300
@@ -194,7 +194,7 @@ integration_patterns:
 # === MIXIN CAPABILITIES ===
 mixin_capabilities:
   - "load_configuration_from_container"
-  - "load_configuration_from_environment" 
+  - "load_configuration_from_environment"
   - "validate_configuration_values"
   - "sanitize_sensitive_configuration"
   - "provide_configuration_defaults"

@@ -8,7 +8,6 @@ all existing functionality and avoiding breaking changes.
 
 import re
 from pathlib import Path
-from typing import List, Tuple
 
 
 class PydanticDictMigrator:
@@ -22,7 +21,7 @@ class PydanticDictMigrator:
             "patterns_replaced": 0,
         }
 
-    def get_migration_patterns(self) -> List[Tuple[re.Pattern, str]]:
+    def get_migration_patterns(self) -> list[tuple[re.Pattern, str]]:
         """Get regex patterns for migration."""
         return [
             # Most common pattern: self.dict(exclude_none=True)
@@ -52,7 +51,7 @@ class PydanticDictMigrator:
                     file_modified = True
                     self.migration_stats["patterns_replaced"] += count
                     print(
-                        f"  ✓ Replaced {count} pattern(s) in {file_path.relative_to(self.root_dir.parent)}"
+                        f"  ✓ Replaced {count} pattern(s) in {file_path.relative_to(self.root_dir.parent)}",
                     )
 
             if file_modified:

@@ -17,7 +17,7 @@ io_operations:
     description: "Execute PostgreSQL queries with event publishing"
     input_fields:
       - "operation_type"
-      - "query_request" 
+      - "query_request"
       - "correlation_id"
       - "context"
     output_fields:
@@ -25,7 +25,7 @@ io_operations:
       - "success"
       - "execution_time_ms"
       - "correlation_id"
-      
+
   - name: "health_check_operation"
     description: "Check PostgreSQL adapter and database health"
     input_fields:
@@ -42,38 +42,38 @@ dependencies:
     type: "service"
     description: "PostgreSQL connection pool manager"
     interface: "PostgresConnectionManager"
-    
+
   - name: "protocol_event_bus"
-    type: "protocol" 
+    type: "protocol"
     class_name: "ProtocolEventBus"
     module: "omnibase_spi.protocols.event_bus"
     description: "Event bus for RedPanda integration"
-    
+
   # Shared model dependencies (DRY pattern)
   - name: "model_postgres_query_request"
     type: "model"
-    class_name: "ModelPostgresQueryRequest"  
+    class_name: "ModelPostgresQueryRequest"
     module: "omnibase_infra.models.postgres.model_postgres_query_request"
     description: "PostgreSQL query request model"
-    
+
   - name: "model_postgres_query_response"
     type: "model"
     class_name: "ModelPostgresQueryResponse"
-    module: "omnibase_infra.models.postgres.model_postgres_query_response" 
+    module: "omnibase_infra.models.postgres.model_postgres_query_response"
     description: "PostgreSQL query response model"
-    
+
   - name: "model_postgres_query_result"
     type: "model"
     class_name: "ModelPostgresQueryResult"
     module: "omnibase_infra.models.postgres.model_postgres_query_result"
     description: "PostgreSQL query result data model"
-    
+
   - name: "model_postgres_error"
-    type: "model" 
+    type: "model"
     class_name: "ModelPostgresError"
     module: "omnibase_infra.models.postgres.model_postgres_error"
     description: "PostgreSQL error model"
-    
+
   - name: "model_circuit_breaker_environment_config"
     type: "model"
     class_name: "ModelCircuitBreakerEnvironmentConfig"
@@ -104,9 +104,9 @@ definitions:
         type: "number"
         description: "Request timestamp"
     required: ["operation_type", "correlation_id"]
-    
+
   ModelPostgresAdapterOutput:
-    type: "object" 
+    type: "object"
     description: "PostgreSQL adapter output envelope"
     properties:
       operation_type:
@@ -143,39 +143,39 @@ definitions:
   # Reference shared models (defined as dependencies)
   ModelPostgresQueryRequest:
     $ref: "omnibase_infra.models.postgres.model_postgres_query_request#/ModelPostgresQueryRequest"
-    
-  ModelPostgresQueryResponse: 
+
+  ModelPostgresQueryResponse:
     $ref: "omnibase_infra.models.postgres.model_postgres_query_response#/ModelPostgresQueryResponse"
-    
+
   ModelPostgresQueryResult:
     $ref: "omnibase_infra.models.postgres.model_postgres_query_result#/ModelPostgresQueryResult"
-    
+
   ModelPostgresError:
     $ref: "omnibase_infra.models.postgres.model_postgres_error#/ModelPostgresError"
-    
+
   ModelCircuitBreakerEnvironmentConfig:
     $ref: "omnibase_infra.models.infrastructure.model_circuit_breaker_environment_config#/ModelCircuitBreakerEnvironmentConfig"
 
 metadata:
   infrastructure_type: "database_adapter"
   service_integration: "postgresql"
-  event_bus_integration: "redpanda" 
+  event_bus_integration: "redpanda"
   connection_pooling: true
   circuit_breaker: true
   health_checks: true
   security_features: ["sql_injection_prevention", "query_sanitization", "input_validation"]
   performance_features: ["connection_pooling", "query_metrics", "async_operations"]
-  
+
 tags: ["infrastructure", "database", "postgresql", "event-driven", "message-bus-bridge"]
 
 # Event publishing configuration
 event_bus_config:
   required: true
-  fail_fast_disabled: true  # Graceful event publishing
+  fail_fast_disabled: true # Graceful event publishing
   topic_namespace: "omninode"
   event_types:
     - "core.database.postgres.query_completed"
-    - "core.database.postgres.query_failed" 
+    - "core.database.postgres.query_failed"
     - "core.database.postgres.health_check"
   retry_policy:
     max_attempts: 3

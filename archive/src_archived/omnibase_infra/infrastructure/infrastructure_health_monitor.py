@@ -59,7 +59,7 @@ class InfrastructureHealthMetrics:
 class InfrastructureHealthMonitor:
     """
     Centralized infrastructure health monitoring service.
-    
+
     Provides:
     - Aggregated health status from all infrastructure components
     - Prometheus metrics integration
@@ -70,7 +70,7 @@ class InfrastructureHealthMonitor:
 
     def __init__(self, environment: str | None = None):
         """Initialize infrastructure health monitor.
-        
+
         Args:
             environment: Target environment for configuration (optional, auto-detected if None)
         """
@@ -133,7 +133,7 @@ class InfrastructureHealthMonitor:
 
     async def get_comprehensive_health_status(self) -> InfrastructureHealthMetrics:
         """Get comprehensive infrastructure health status.
-        
+
         Returns:
             Aggregated infrastructure health metrics
         """
@@ -151,36 +151,56 @@ class InfrastructureHealthMonitor:
             circuit_breaker_healthy = circuit_breaker_health.get("is_healthy", False)
 
             # Calculate aggregate metrics
-            total_connections = (
-                postgres_health.get("connection_pool", {}).get("size", 0) +
-                kafka_health.get("pool_stats", {}).get("total_producers", 0)
-            )
+            total_connections = postgres_health.get("connection_pool", {}).get(
+                "size", 0,
+            ) + kafka_health.get("pool_stats", {}).get("total_producers", 0)
 
-            total_messages = (
-                postgres_health.get("performance", {}).get("total_queries", 0) +
-                kafka_health.get("pool_stats", {}).get("total_messages_sent", 0)
-            )
+            total_messages = postgres_health.get("performance", {}).get(
+                "total_queries", 0,
+            ) + kafka_health.get("pool_stats", {}).get("total_messages_sent", 0)
 
             total_queued = circuit_breaker_health.get("queued_events", 0)
 
             # Calculate error rates
-            postgres_errors = postgres_health.get("performance", {}).get("failed_connections", 0)
-            kafka_errors = kafka_health.get("pool_stats", {}).get("total_messages_failed", 0)
-            circuit_breaker_errors = circuit_breaker_health.get("metrics", {}).get("failed_events", 0)
+            postgres_errors = postgres_health.get("performance", {}).get(
+                "failed_connections", 0,
+            )
+            kafka_errors = kafka_health.get("pool_stats", {}).get(
+                "total_messages_failed", 0,
+            )
+            circuit_breaker_errors = circuit_breaker_health.get("metrics", {}).get(
+                "failed_events", 0,
+            )
 
             total_operations = max(
-                total_messages + postgres_errors + kafka_errors + circuit_breaker_errors, 1,
+                total_messages
+                + postgres_errors
+                + kafka_errors
+                + circuit_breaker_errors,
+                1,
             )
-            error_rate = ((postgres_errors + kafka_errors + circuit_breaker_errors) / total_operations) * 100
+            error_rate = (
+                (postgres_errors + kafka_errors + circuit_breaker_errors)
+                / total_operations
+            ) * 100
 
             # Performance indicators
-            avg_db_response = postgres_health.get("performance", {}).get("average_response_time_ms", 0.0)
-            avg_kafka_throughput = kafka_health.get("pool_stats", {}).get("average_throughput_mps", 0.0)
-            circuit_success_rate = circuit_breaker_health.get("metrics", {}).get("success_rate", 100.0)
+            avg_db_response = postgres_health.get("performance", {}).get(
+                "average_response_time_ms", 0.0,
+            )
+            avg_kafka_throughput = kafka_health.get("pool_stats", {}).get(
+                "average_throughput_mps", 0.0,
+            )
+            circuit_success_rate = circuit_breaker_health.get("metrics", {}).get(
+                "success_rate", 100.0,
+            )
 
             # Determine overall health status
             overall_status = self._determine_overall_health(
-                postgres_healthy, kafka_healthy, circuit_breaker_healthy, error_rate,
+                postgres_healthy,
+                kafka_healthy,
+                circuit_breaker_healthy,
+                error_rate,
             )
 
             # Create health metrics
@@ -213,7 +233,9 @@ class InfrastructureHealthMonitor:
 
         except Exception as e:
             self.consecutive_failures += 1
-            self.logger.error(f"Health check failed (consecutive failures: {self.consecutive_failures}): {e}")
+            self.logger.error(
+                f"Health check failed (consecutive failures: {self.consecutive_failures}): {e}",
+            )
 
             # Return degraded health status on failure
             return InfrastructureHealthMetrics(
@@ -266,9 +288,12 @@ class InfrastructureHealthMonitor:
         try:
             if not self._circuit_breaker:
                 # Create environment-specific circuit breaker if not exists
-                env_config = ModelCircuitBreakerEnvironmentConfig.create_default_config()
+                env_config = (
+                    ModelCircuitBreakerEnvironmentConfig.create_default_config()
+                )
                 self._circuit_breaker = EventBusCircuitBreaker.from_environment(
-                    env_config, self.environment,
+                    env_config,
+                    self.environment,
                 )
 
             return self._circuit_breaker.get_health_status()
@@ -307,10 +332,10 @@ class InfrastructureHealthMonitor:
 
     def get_health_trends(self, hours: int = 1) -> dict[str, Any]:
         """Get health trends for the specified time period.
-        
+
         Args:
             hours: Number of hours of history to analyze
-            
+
         Returns:
             Trend analysis including error rates, response times, and availability
         """
@@ -325,13 +350,25 @@ class InfrastructureHealthMonitor:
 
         # Calculate trends
         total_checks = len(recent_metrics)
-        healthy_checks = len([m for m in recent_metrics if m.overall_status == "healthy"])
-        degraded_checks = len([m for m in recent_metrics if m.overall_status == "degraded"])
-        unhealthy_checks = len([m for m in recent_metrics if m.overall_status == "unhealthy"])
+        healthy_checks = len(
+            [m for m in recent_metrics if m.overall_status == "healthy"],
+        )
+        degraded_checks = len(
+            [m for m in recent_metrics if m.overall_status == "degraded"],
+        )
+        unhealthy_checks = len(
+            [m for m in recent_metrics if m.overall_status == "unhealthy"],
+        )
 
-        avg_error_rate = sum(m.error_rate_percent for m in recent_metrics) / total_checks
-        avg_response_time = sum(m.avg_db_response_time_ms for m in recent_metrics) / total_checks
-        avg_throughput = sum(m.avg_kafka_throughput_mps for m in recent_metrics) / total_checks
+        avg_error_rate = (
+            sum(m.error_rate_percent for m in recent_metrics) / total_checks
+        )
+        avg_response_time = (
+            sum(m.avg_db_response_time_ms for m in recent_metrics) / total_checks
+        )
+        avg_throughput = (
+            sum(m.avg_kafka_throughput_mps for m in recent_metrics) / total_checks
+        )
 
         return {
             "period_hours": hours,
@@ -346,12 +383,14 @@ class InfrastructureHealthMonitor:
                 "average_response_time_ms": avg_response_time,
                 "average_throughput_mps": avg_throughput,
             },
-            "current_status": recent_metrics[-1].overall_status if recent_metrics else "unknown",
+            "current_status": (
+                recent_metrics[-1].overall_status if recent_metrics else "unknown"
+            ),
         }
 
     def get_prometheus_metrics(self) -> str:
         """Generate Prometheus metrics format for scraping.
-        
+
         Returns:
             Prometheus metrics in text format
         """
@@ -399,7 +438,9 @@ class InfrastructureHealthMonitor:
             return
 
         self.is_monitoring = True
-        self.logger.info(f"Starting infrastructure health monitoring (interval: {self.monitoring_interval_seconds}s)")
+        self.logger.info(
+            f"Starting infrastructure health monitoring (interval: {self.monitoring_interval_seconds}s)",
+        )
 
         while self.is_monitoring:
             try:

@@ -9,11 +9,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from omnibase_infra.models.core.health.model_component_status import ModelComponentHealthStatus
-from .model_health_alert import ModelHealthAlert
+from omnibase_infra.models.core.health.model_component_status import (
+    ModelComponentHealthStatus,
+)
 from omnibase_infra.models.core.health.model_health_metrics import ModelHealthMetrics
-from .model_health_status import ModelHealthStatus
 from omnibase_infra.models.core.health.model_trend_analysis import ModelTrendAnalysis
+
+from .model_health_alert import ModelHealthAlert
+from .model_health_status import ModelHealthStatus
 
 
 class ModelHealthResponse(BaseModel):

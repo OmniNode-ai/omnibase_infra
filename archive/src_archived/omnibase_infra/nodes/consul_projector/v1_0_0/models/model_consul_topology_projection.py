@@ -9,5 +9,9 @@ from .model_consul_topology_metrics import ModelConsulTopologyMetrics
 class ModelConsulTopologyProjection(BaseModel):
     """Service topology projection result model."""
 
-    topology_graph: ModelConsulTopologyGraph = Field(..., description="Strongly typed topology graph")
-    metrics: ModelConsulTopologyMetrics = Field(..., description="Strongly typed topology metrics")
+    topology_graph: ModelConsulTopologyGraph = Field(
+        ..., description="Strongly typed topology graph",
+    )
+    metrics: ModelConsulTopologyMetrics = Field(
+        ..., description="Strongly typed topology metrics",
+    )

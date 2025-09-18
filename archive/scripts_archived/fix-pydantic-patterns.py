@@ -14,7 +14,6 @@ Usage:
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 
 class PydanticPatternFixer:
@@ -52,7 +51,7 @@ class PydanticPatternFixer:
             (r"\.json\(\s*by_alias\s*=\s*True\s*\)", ".model_dump_json(by_alias=True)"),
         ]
 
-    def fix_file(self, file_path: Path) -> Tuple[int, List[str]]:
+    def fix_file(self, file_path: Path) -> tuple[int, list[str]]:
         """
         Fix Pydantic patterns in a single file.
 
@@ -63,7 +62,7 @@ class PydanticPatternFixer:
             Tuple of (fixes_count, list_of_changes)
         """
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 original_content = f.read()
 
             modified_content = original_content
@@ -88,10 +87,10 @@ class PydanticPatternFixer:
                         if new_line != line:
                             if self._is_likely_pydantic_line(line, file_path):
                                 changes.append(
-                                    f"Line {line_num}: {pattern} -> {replacement}"
+                                    f"Line {line_num}: {pattern} -> {replacement}",
                                 )
                                 modified_content = modified_content.replace(
-                                    original_line, new_line, 1
+                                    original_line, new_line, 1,
                                 )
                                 fixes_in_file += 1
                                 line = (
@@ -140,7 +139,7 @@ class PydanticPatternFixer:
 
         # Check file-level context (read first 20 lines for imports)
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 first_lines = "".join(f.readlines()[:20])
                 if "pydantic" in first_lines.lower() or "BaseModel" in first_lines:
                     return True
@@ -150,7 +149,7 @@ class PydanticPatternFixer:
         # Default to True to be conservative (better to fix non-Pydantic than miss Pydantic)
         return True
 
-    def fix_project(self, src_dir: Path, specific_file: Path = None) -> Dict:
+    def fix_project(self, src_dir: Path, specific_file: Path = None) -> dict:
         """
         Fix Pydantic patterns across project or specific file.
 
@@ -195,20 +194,20 @@ class PydanticPatternFixer:
                 for change in changes:
                     print(f"      🔧 {change}")
         else:
-            print(f"\n✨ No Pydantic pattern fixes needed!")
+            print("\n✨ No Pydantic pattern fixes needed!")
 
         # Summary
-        print(f"\n📊 PATTERN FIX SUMMARY")
+        print("\n📊 PATTERN FIX SUMMARY")
         print("=" * 60)
         print(
-            f"Mode: {'DRY RUN (no changes made)' if self.dry_run else 'FIXES APPLIED'}"
+            f"Mode: {'DRY RUN (no changes made)' if self.dry_run else 'FIXES APPLIED'}",
         )
         print(f"Total fixes: {total_fixes}")
         print(f"Files modified: {len(files_with_fixes)}")
 
         if self.dry_run and total_fixes > 0:
             print(
-                f"\n💡 Run with --fix to apply {total_fixes} changes to {len(files_with_fixes)} files"
+                f"\n💡 Run with --fix to apply {total_fixes} changes to {len(files_with_fixes)} files",
             )
         elif not self.dry_run and total_fixes > 0:
             print(f"\n🎉 Successfully applied {total_fixes} fixes!")
@@ -241,7 +240,7 @@ Examples:
         """,
     )
     parser.add_argument(
-        "--fix", action="store_true", help="Apply fixes (default is dry run)"
+        "--fix", action="store_true", help="Apply fixes (default is dry run)",
     )
     parser.add_argument("--file", type=Path, help="Fix specific file only")
     parser.add_argument(
@@ -266,11 +265,11 @@ Examples:
     results = fixer.fix_project(args.src_dir, args.file)
 
     if not args.fix and results["total_fixes"] > 0:
-        print(f"\n🚀 To apply these fixes, run:")
+        print("\n🚀 To apply these fixes, run:")
         if args.file:
             print(f"   python tools/fix-pydantic-patterns.py --fix --file {args.file}")
         else:
-            print(f"   python tools/fix-pydantic-patterns.py --fix")
+            print("   python tools/fix-pydantic-patterns.py --fix")
 
 
 if __name__ == "__main__":

@@ -19,10 +19,19 @@ from omnibase_infra.models.consul.model_consul_service_response import (
 
 class ModelConsulAdapterOutput(BaseModel):
     """Output model for Consul adapter operation results.
-    
+
     Node-specific model for returning Consul operation results through effect outputs.
     """
 
-    consul_operation_result: ModelConsulServiceResponse | ModelConsulHealthResponse | ModelConsulKvResponse | ModelConsulServiceListResponse | dict[str, str | int | bool] | list[dict[str, str | int | bool]] | str | bool
+    consul_operation_result: (
+        ModelConsulServiceResponse
+        | ModelConsulHealthResponse
+        | ModelConsulKvResponse
+        | ModelConsulServiceListResponse
+        | dict[str, str | int | bool]
+        | list[dict[str, str | int | bool]]
+        | str
+        | bool
+    )
     success: bool
     operation_type: str

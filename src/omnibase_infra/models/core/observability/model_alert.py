@@ -9,15 +9,18 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from omnibase_infra.models.core.observability.model_alert_details import ModelAlertDetails
+from omnibase_infra.models.core.observability.model_alert_details import (
+    ModelAlertDetails,
+)
 
 
 class AlertSeverityEnum(str, Enum):
     """Alert severity levels."""
-    CRITICAL = "critical"        # Service-affecting issues
-    HIGH = "high"               # Performance degradation
-    MEDIUM = "medium"           # Potential issues
-    LOW = "low"                 # Informational
+
+    CRITICAL = "critical"  # Service-affecting issues
+    HIGH = "high"  # Performance degradation
+    MEDIUM = "medium"  # Potential issues
+    LOW = "low"  # Informational
 
 
 class ModelAlert(BaseModel):

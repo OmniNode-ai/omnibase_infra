@@ -170,10 +170,10 @@ environment_config:
 def detect_environment() -> str:
     """Detect deployment environment from multiple sources."""
     env_vars = [
-        "ENVIRONMENT", "ENV", "DEPLOYMENT_ENV", 
+        "ENVIRONMENT", "ENV", "DEPLOYMENT_ENV",
         "NODE_ENV", "OMNIBASE_ENV", "ONEX_ENV"
     ]
-    
+
     for var in env_vars:
         value = os.getenv(var)
         if value:
@@ -185,7 +185,7 @@ def detect_environment() -> str:
                 return "staging"
             elif value in ["dev", "development", "local", "test"]:
                 return "development"
-    
+
     return "development"  # Safe default
 ```
 
@@ -219,7 +219,7 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
     production: ModelCircuitBreakerConfig
     staging: ModelCircuitBreakerConfig
     development: ModelCircuitBreakerConfig
-    
+
     def get_config_for_environment(self, environment: str) -> ModelCircuitBreakerConfig:
         # Returns environment-specific configuration
 ```
@@ -239,7 +239,7 @@ async def health_check(self) -> Dict[str, Any]:
         "status": "healthy",
         "connection_pool": {
             "size": self.pool.get_size(),
-            "min_size": self.pool.get_min_size(), 
+            "min_size": self.pool.get_min_size(),
             "max_size": self.pool.get_max_size(),
             "idle_connections": self.pool.get_idle_size(),
         },
@@ -279,7 +279,7 @@ class ConnectionStats:
 ```python
 class KafkaProducerPool:
     """Enterprise Kafka producer pool with monitoring."""
-    
+
     def get_pool_stats(self) -> ModelKafkaProducerPoolStats:
         """Get comprehensive pool statistics."""
         return ModelKafkaProducerPoolStats(
@@ -301,19 +301,19 @@ class ModelKafkaProducerPoolStats(BaseModel):
     active_producers: int
     idle_producers: int
     failed_producers: int
-    
+
     # Pool configuration
     min_pool_size: int
     max_pool_size: int
     pool_utilization: float
-    
+
     # Aggregate statistics
     total_messages_sent: int
     total_messages_failed: int
     total_bytes_sent: int
     average_throughput_mps: float
     average_response_time_ms: float
-    
+
     # Health indicators
     pool_health: str
     error_rate: float
@@ -327,7 +327,7 @@ class ModelKafkaProducerPoolStats(BaseModel):
 ```python
 class InfrastructureHealthMonitor:
     """Centralized health monitoring for all infrastructure components."""
-    
+
     async def get_comprehensive_health_status(self) -> InfrastructureHealthMetrics:
         """Aggregate health from all components."""
         # Collect from PostgreSQL, Kafka, and Circuit Breaker
@@ -345,13 +345,13 @@ class InfrastructureHealthMetrics:
     postgres_healthy: bool
     kafka_healthy: bool
     circuit_breaker_healthy: bool
-    
+
     # Aggregate statistics
     total_connections: int
     total_messages_processed: int
     total_events_queued: int
     error_rate_percent: float
-    
+
     # Performance indicators
     avg_db_response_time_ms: float
     avg_kafka_throughput_mps: float
@@ -370,7 +370,7 @@ class TracingConfiguration:
         self.environment = environment or self._detect_environment()
         self.service_name = "omnibase_infrastructure"
         self.service_version = "1.0.0"
-        
+
         # Environment-specific sampling rates
         self.trace_sample_rate = self._get_sample_rate()
         # production: 10%, staging: 50%, development: 100%
@@ -384,7 +384,7 @@ async def _initialize_instrumentation(self) -> None:
     # PostgreSQL instrumentation
     if self.config.enable_db_instrumentation:
         AsyncPGInstrumentor().instrument()
-    
+
     # Kafka instrumentation
     if self.config.enable_kafka_instrumentation:
         KafkaInstrumentor().instrument()
@@ -399,14 +399,14 @@ def inject_trace_context(self, event: ModelOnexEvent) -> ModelOnexEvent:
     """Inject trace context into event envelope."""
     carrier = {}
     propagate.inject(carrier)
-    
+
     event.metadata.update({
         "trace_context": carrier,
         "trace_timestamp": datetime.now().isoformat(),
         "trace_service": self.config.service_name,
         "trace_environment": self.config.environment
     })
-    
+
     return event
 
 def extract_trace_context(self, event: ModelOnexEvent) -> Optional[Context]:
@@ -430,7 +430,7 @@ async with tracing_manager.trace_database_operation(
 
 # Kafka operation tracing
 async with tracing_manager.trace_kafka_operation(
-    operation_type="produce", 
+    operation_type="produce",
     topic=topic,
     correlation_id=correlation_id
 ) as span:
@@ -515,10 +515,10 @@ from omnibase_infra.infrastructure import (
 async def initialize_infrastructure():
     # Initialize distributed tracing
     await initialize_distributed_tracing()
-    
+
     # Initialize Kafka producer pool
     await initialize_producer_pool()
-    
+
     # Start health monitoring
     health_monitor = get_health_monitor()
     asyncio.create_task(health_monitor.start_monitoring())
@@ -556,10 +556,10 @@ Integrate circuit breaker and health monitoring:
 class YourNodeService(NodeEffectService):
     def __init__(self, container: ONEXContainer):
         super().__init__(container)
-        
+
         # Initialize environment-aware circuit breaker
         self.circuit_breaker = EventBusCircuitBreaker.from_environment()
-        
+
         # Get health monitor
         self.health_monitor = get_health_monitor()
 ```
@@ -838,7 +838,7 @@ groups:
           severity: critical
         annotations:
           summary: "Infrastructure is unhealthy"
-          
+
       - alert: HighErrorRate
         expr: omnibase_error_rate_percent > 5.0
         for: 5m
@@ -846,7 +846,7 @@ groups:
           severity: warning
         annotations:
           summary: "High error rate detected"
-          
+
       - alert: DatabaseConnectionPoolExhausted
         expr: omnibase_postgres_connections / omnibase_postgres_max_connections > 0.9
         for: 1m
@@ -867,7 +867,7 @@ async def health_check():
     """Standard health check endpoint."""
     health_monitor = get_health_monitor()
     metrics = await health_monitor.get_comprehensive_health_status()
-    
+
     return {
         "status": metrics.overall_status,
         "timestamp": metrics.timestamp,
@@ -893,7 +893,7 @@ async def detailed_health():
     """Detailed health information for debugging."""
     health_monitor = get_health_monitor()
     metrics = await health_monitor.get_comprehensive_health_status()
-    
+
     return {
         "overall": metrics.overall_status,
         "postgres_metrics": metrics.postgres_metrics,
@@ -987,9 +987,9 @@ psql -h $POSTGRES_HOST -c "SELECT count(*) FROM pg_stat_activity WHERE datname =
 2. **Optimize Query Performance:**
    ```sql
    -- Identify slow queries
-   SELECT query, mean_time, calls 
-   FROM pg_stat_statements 
-   ORDER BY mean_time DESC 
+   SELECT query, mean_time, calls
+   FROM pg_stat_statements
+   ORDER BY mean_time DESC
    LIMIT 10;
    ```
 
@@ -1057,7 +1057,7 @@ config = ConnectionConfig(
     max_inactive_connection_lifetime=300.0,  # 5 minutes
     max_queries=50000,            # Recycle connections after 50k queries
     command_timeout=30.0,         # 30 second query timeout
-    
+
     # SSL configuration for production
     ssl_mode="require",
     ssl_cert_file="/path/to/client.crt",
@@ -1080,7 +1080,7 @@ config = ModelKafkaProducerConfig(
     compression_type="snappy",     # Fast compression
     max_request_size=1048576,     # 1MB max message
     enable_idempotence=True,      # Exactly-once semantics
-    
+
     # Performance tuning
     max_in_flight_requests_per_connection=1,  # For idempotent producer
     request_timeout_ms=30000,     # 30 second timeout
@@ -1137,7 +1137,7 @@ development_config = ModelCircuitBreakerConfig(
    ```bash
    # Validate environment variables
    ./scripts/validate-environment.sh
-   
+
    # Check configuration loading
    python -c "
    from omnibase_infra.models.infrastructure.model_circuit_breaker_environment_config import ModelCircuitBreakerEnvironmentConfig
@@ -1153,13 +1153,13 @@ development_config = ModelCircuitBreakerConfig(
    python -c "
    import asyncio
    from omnibase_infra.infrastructure.postgres_connection_manager import get_connection_manager
-   
+
    async def test():
        manager = get_connection_manager()
        await manager.initialize()
        health = await manager.health_check()
        print(f'PostgreSQL health: {health[\"status\"]}')
-   
+
    asyncio.run(test())
    "
    ```
@@ -1170,13 +1170,13 @@ development_config = ModelCircuitBreakerConfig(
    python -c "
    import asyncio
    from omnibase_infra.infrastructure.kafka_producer_pool import get_producer_pool
-   
+
    async def test():
        pool = get_producer_pool()
        await pool.initialize()
        health = await pool.health_check()
        print(f'Kafka health: {health[\"status\"]}')
-   
+
    asyncio.run(test())
    "
    ```
@@ -1187,7 +1187,7 @@ development_config = ModelCircuitBreakerConfig(
    python -c "
    import asyncio
    from omnibase_infra.infrastructure.distributed_tracing import initialize_distributed_tracing
-   
+
    asyncio.run(initialize_distributed_tracing())
    print('Tracing initialized successfully')
    "
@@ -1199,13 +1199,13 @@ development_config = ModelCircuitBreakerConfig(
    ```bash
    # Deploy new version to green environment
    kubectl apply -f k8s/green-deployment.yaml
-   
+
    # Wait for health checks
    kubectl wait --for=condition=ready pod -l app=omnibase-infrastructure-green --timeout=300s
-   
+
    # Switch traffic
    kubectl patch service omnibase-infrastructure -p '{"spec":{"selector":{"version":"green"}}}'
-   
+
    # Monitor for issues
    kubectl logs -l app=omnibase-infrastructure-green -f
    ```
@@ -1214,10 +1214,10 @@ development_config = ModelCircuitBreakerConfig(
    ```bash
    # Update deployment with new image
    kubectl set image deployment/omnibase-infrastructure infrastructure=your-registry/omnibase:new-version
-   
+
    # Monitor rollout
    kubectl rollout status deployment/omnibase-infrastructure --timeout=600s
-   
+
    # Verify health
    kubectl exec -it deployment/omnibase-infrastructure -- curl localhost:8080/health
    ```
@@ -1241,7 +1241,7 @@ development_config = ModelCircuitBreakerConfig(
    ```bash
    # Check response times
    curl -w "@curl-format.txt" -o /dev/null -s http://your-service/health
-   
+
    # Check metrics endpoint
    curl -s http://your-service/metrics | grep omnibase_
    ```
@@ -1250,7 +1250,7 @@ development_config = ModelCircuitBreakerConfig(
    ```bash
    # Generate test trace
    curl -H "X-Trace-Id: test-trace-$(date +%s)" http://your-service/api/test
-   
+
    # Check Jaeger for trace
    # Visit http://jaeger:16686 and search for test-trace
    ```
@@ -1291,7 +1291,7 @@ spec:
         severity: critical
       annotations:
         summary: Infrastructure is completely down
-        
+
     - alert: HighDatabaseConnections
       expr: omnibase_postgres_connections / omnibase_postgres_max_connections > 0.8
       for: 5m
@@ -1311,13 +1311,13 @@ class PostgresConnectionManager:
     async def backup_before_migration(self) -> str:
         """Create backup before major operations."""
         backup_id = f"backup_{int(time.time())}"
-        
+
         async with self.acquire_connection() as conn:
             # Create backup
             await conn.execute(f"SELECT pg_dump('omnibase_backup_{backup_id}')")
-            
+
         return backup_id
-    
+
     async def verify_backup(self, backup_id: str) -> bool:
         """Verify backup integrity."""
         # Implementation depends on backup strategy
@@ -1333,7 +1333,7 @@ class EventBusCircuitBreaker:
         """Recover events from queue after outage."""
         recovered = 0
         failed = 0
-        
+
         while self.event_queue:
             try:
                 event = self.event_queue.pop(0)
@@ -1342,7 +1342,7 @@ class EventBusCircuitBreaker:
                 recovered += 1
             except Exception:
                 failed += 1
-                
+
         return {"recovered": recovered, "failed": failed}
 ```
 
@@ -1358,11 +1358,11 @@ config = ConnectionConfig(
     ssl_cert_file=os.getenv("POSTGRES_SSL_CERT"),
     ssl_key_file=os.getenv("POSTGRES_SSL_KEY"),
     ssl_ca_file=os.getenv("POSTGRES_SSL_CA"),
-    
+
     # Connection limits
     max_connections=50,  # Prevent connection exhaustion attacks
     command_timeout=30.0,  # Prevent long-running queries
-    
+
     # Credential management
     user=os.getenv("POSTGRES_USER"),  # From secure credential store
     password=os.getenv("POSTGRES_PASSWORD")  # From secure credential store
@@ -1391,7 +1391,7 @@ async def log_database_operation(
             "environment": os.getenv("ENVIRONMENT")
         }
     )
-    
+
     await audit_logger.log_event(audit_event)
 ```
 

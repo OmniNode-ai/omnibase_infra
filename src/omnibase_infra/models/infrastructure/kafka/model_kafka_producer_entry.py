@@ -5,14 +5,13 @@ Strongly typed model for tracking individual producers in the pool.
 Replaces Dict[str, Any] usage to maintain ONEX compliance.
 """
 
-
 from pydantic import BaseModel, Field
 
 
 class ModelKafkaProducerEntry(BaseModel):
     """
     Entry for tracking individual producers in the pool.
-    
+
     Replaces Dict[str, Any] for producer tracking data to maintain ONEX zero tolerance for Any types.
     """
 
@@ -58,6 +57,7 @@ class ModelKafkaProducerEntry(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
@@ -65,7 +65,7 @@ class ModelKafkaProducerEntry(BaseModel):
 class ModelKafkaFailureRecord(BaseModel):
     """
     Record for tracking producer failures.
-    
+
     Replaces Dict[str, float] for failure tracking to maintain strong typing.
     """
 
@@ -94,5 +94,6 @@ class ModelKafkaFailureRecord(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"

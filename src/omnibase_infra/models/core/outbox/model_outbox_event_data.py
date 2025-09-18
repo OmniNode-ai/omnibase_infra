@@ -1,6 +1,5 @@
 """Strongly typed models for outbox event data."""
 
-
 from pydantic import BaseModel, Field
 
 
@@ -15,18 +14,30 @@ class ModelOutboxEventData(BaseModel):
 
     # Event payload
     payload_string: str | None = Field(default=None, description="String payload data")
-    payload_number: float | None = Field(default=None, description="Numeric payload data")
-    payload_boolean: bool | None = Field(default=None, description="Boolean payload data")
+    payload_number: float | None = Field(
+        default=None, description="Numeric payload data",
+    )
+    payload_boolean: bool | None = Field(
+        default=None, description="Boolean payload data",
+    )
 
     # Metadata
     timestamp: str = Field(description="ISO timestamp of the event")
-    correlation_id: str | None = Field(default=None, description="Request correlation ID")
-    user_id: str | None = Field(default=None, description="User who triggered the event")
+    correlation_id: str | None = Field(
+        default=None, description="Request correlation ID",
+    )
+    user_id: str | None = Field(
+        default=None, description="User who triggered the event",
+    )
     tenant_id: str | None = Field(default=None, description="Tenant context")
 
     # Additional context
-    tags: list[str] = Field(default_factory=list, description="Event tags for categorization")
-    metadata_flags: list[str] = Field(default_factory=list, description="Metadata flags")
+    tags: list[str] = Field(
+        default_factory=list, description="Event tags for categorization",
+    )
+    metadata_flags: list[str] = Field(
+        default_factory=list, description="Metadata flags",
+    )
 
 
 class ModelOutboxStatistics(BaseModel):
@@ -39,12 +50,18 @@ class ModelOutboxStatistics(BaseModel):
     completed_events: int = Field(description="Number of successfully processed events")
 
     # Performance metrics
-    average_processing_time_ms: float = Field(description="Average processing time in milliseconds")
+    average_processing_time_ms: float = Field(
+        description="Average processing time in milliseconds",
+    )
     events_per_second: float = Field(description="Current processing rate")
-    last_processed_at: str | None = Field(default=None, description="ISO timestamp of last processed event")
+    last_processed_at: str | None = Field(
+        default=None, description="ISO timestamp of last processed event",
+    )
 
     # Health indicators
-    oldest_pending_age_seconds: float | None = Field(default=None, description="Age of oldest pending event")
+    oldest_pending_age_seconds: float | None = Field(
+        default=None, description="Age of oldest pending event",
+    )
     error_rate_percent: float = Field(description="Error rate percentage")
     is_healthy: bool = Field(description="Overall health status")
 
@@ -52,15 +69,31 @@ class ModelOutboxStatistics(BaseModel):
 class ModelOutboxConfiguration(BaseModel):
     """Configuration for outbox processing."""
 
-    batch_size: int = Field(default=100, description="Number of events to process per batch", ge=1, le=1000)
-    processing_timeout_seconds: int = Field(default=300, description="Timeout for processing events", ge=1)
-    max_retry_count: int = Field(default=3, description="Maximum retry attempts for failed events", ge=0)
-    retry_delay_seconds: int = Field(default=60, description="Delay between retry attempts", ge=1)
+    batch_size: int = Field(
+        default=100, description="Number of events to process per batch", ge=1, le=1000,
+    )
+    processing_timeout_seconds: int = Field(
+        default=300, description="Timeout for processing events", ge=1,
+    )
+    max_retry_count: int = Field(
+        default=3, description="Maximum retry attempts for failed events", ge=0,
+    )
+    retry_delay_seconds: int = Field(
+        default=60, description="Delay between retry attempts", ge=1,
+    )
 
     # Cleanup settings
-    retention_days: int = Field(default=30, description="Days to retain completed events", ge=1)
-    cleanup_batch_size: int = Field(default=1000, description="Batch size for cleanup operations", ge=1)
+    retention_days: int = Field(
+        default=30, description="Days to retain completed events", ge=1,
+    )
+    cleanup_batch_size: int = Field(
+        default=1000, description="Batch size for cleanup operations", ge=1,
+    )
 
     # Performance settings
-    polling_interval_seconds: int = Field(default=5, description="Polling interval for new events", ge=1)
-    connection_pool_size: int = Field(default=5, description="Database connection pool size", ge=1, le=50)
+    polling_interval_seconds: int = Field(
+        default=5, description="Polling interval for new events", ge=1,
+    )
+    connection_pool_size: int = Field(
+        default=5, description="Database connection pool size", ge=1, le=50,
+    )

@@ -58,6 +58,7 @@ try:
     from omnibase_infra.nodes.node_postgres_adapter_effect.v1_0_0.node import (
         NodePostgresAdapterEffect,
     )
+
     KAFKA_AVAILABLE = True
     logger.info("✅ All required modules imported successfully")
 except ImportError as e:
@@ -96,16 +97,20 @@ class RedPandaEventConsumer:
             start_time = time.time()
             async for message in self.consumer:
                 event_data = message.value
-                self.consumed_events.append({
-                    "topic": message.topic,
-                    "partition": message.partition,
-                    "offset": message.offset,
-                    "timestamp": message.timestamp,
-                    "key": message.key.decode("utf-8") if message.key else None,
-                    "value": event_data,
-                })
+                self.consumed_events.append(
+                    {
+                        "topic": message.topic,
+                        "partition": message.partition,
+                        "offset": message.offset,
+                        "timestamp": message.timestamp,
+                        "key": message.key.decode("utf-8") if message.key else None,
+                        "value": event_data,
+                    },
+                )
 
-                logger.info(f"📨 Received event: {message.topic} - {event_data.get('event_type', 'unknown')}")
+                logger.info(
+                    f"📨 Received event: {message.topic} - {event_data.get('event_type', 'unknown')}",
+                )
 
                 # Stop if we've been running too long
                 if time.time() - start_time > timeout_seconds:
@@ -180,8 +185,8 @@ class IntegrationTestRunner:
             insert_request = ModelPostgresQueryRequest(
                 correlation_id=self.test_correlation_id,
                 query_text="""
-                    INSERT INTO integration_test_users (name, email) 
-                    VALUES ($1, $2) 
+                    INSERT INTO integration_test_users (name, email)
+                    VALUES ($1, $2)
                     RETURNING id, name, email, created_at
                 """,
                 query_parameters={
@@ -197,7 +202,9 @@ class IntegrationTestRunner:
 
             # Execute INSERT
             result = await self.adapter_node.process_postgres_request(input_model)
-            logger.info(f"✅ INSERT operation result: success={result.success}, rows={result.postgres_response.row_count if result.postgres_response else 0}")
+            logger.info(
+                f"✅ INSERT operation result: success={result.success}, rows={result.postgres_response.row_count if result.postgres_response else 0}",
+            )
 
             return result.success
 
@@ -227,7 +234,9 @@ class IntegrationTestRunner:
 
             # Execute SELECT
             result = await self.adapter_node.process_postgres_request(input_model)
-            logger.info(f"✅ SELECT operation result: success={result.success}, rows={result.postgres_response.row_count if result.postgres_response else 0}")
+            logger.info(
+                f"✅ SELECT operation result: success={result.success}, rows={result.postgres_response.row_count if result.postgres_response else 0}",
+            )
 
             if result.success and result.postgres_response:
                 logger.info(f"📊 Retrieved {result.postgres_response.row_count} rows")
@@ -253,7 +262,7 @@ class IntegrationTestRunner:
             delete_request = ModelPostgresQueryRequest(
                 correlation_id=self.test_correlation_id,
                 query_text="""
-                    DELETE FROM integration_test_users 
+                    DELETE FROM integration_test_users
                     WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '1 minute'
                     RETURNING id
                 """,
@@ -267,7 +276,9 @@ class IntegrationTestRunner:
 
             # Execute DELETE
             result = await self.adapter_node.process_postgres_request(input_model)
-            logger.info(f"✅ DELETE operation result: success={result.success}, rows_affected={result.postgres_response.row_count if result.postgres_response else 0}")
+            logger.info(
+                f"✅ DELETE operation result: success={result.success}, rows_affected={result.postgres_response.row_count if result.postgres_response else 0}",
+            )
 
             return result.success
 
@@ -341,7 +352,9 @@ class IntegrationTestRunner:
                         found_patterns.append(pattern)
 
         success = len(found_patterns) > 0
-        logger.info(f"✅ Event verification: {'PASSED' if success else 'FAILED'} - Found patterns: {found_patterns}")
+        logger.info(
+            f"✅ Event verification: {'PASSED' if success else 'FAILED'} - Found patterns: {found_patterns}",
+        )
 
         return success
 
@@ -384,7 +397,9 @@ class IntegrationTestRunner:
         logger.info(f"📈 Overall Result: {passed}/{total} tests passed")
 
         if passed == total:
-            logger.info("🎉 ALL INTEGRATION TESTS PASSED! PostgreSQL Adapter + RedPanda working correctly!")
+            logger.info(
+                "🎉 ALL INTEGRATION TESTS PASSED! PostgreSQL Adapter + RedPanda working correctly!",
+            )
             return True
         logger.error("💥 Some integration tests failed. Check the logs above.")
         return False

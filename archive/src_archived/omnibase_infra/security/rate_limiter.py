@@ -24,6 +24,7 @@ from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 @dataclass
 class RateLimitRule:
     """Rate limiting rule configuration."""
+
     max_requests: int
     window_seconds: int
     burst_limit: int | None = None
@@ -37,6 +38,7 @@ class RateLimitRule:
 @dataclass
 class ClientRateLimitState:
     """Per-client rate limiting state."""
+
     tokens: float = 0.0
     last_refill: float = field(default_factory=time.time)
     request_times: deque = field(default_factory=deque)
@@ -48,7 +50,7 @@ class ClientRateLimitState:
 class ONEXRateLimiter:
     """
     ONEX rate limiter with token bucket and sliding window algorithms.
-    
+
     Features:
     - Token bucket for smooth rate limiting
     - Sliding window for burst protection
@@ -60,7 +62,9 @@ class ONEXRateLimiter:
     def __init__(self):
         self._logger = logging.getLogger(__name__)
         self._rules: dict[str, RateLimitRule] = {}
-        self._client_states: dict[str, ClientRateLimitState] = defaultdict(ClientRateLimitState)
+        self._client_states: dict[str, ClientRateLimitState] = defaultdict(
+            ClientRateLimitState,
+        )
         self._cleanup_interval = 300.0  # 5 minutes
         self._last_cleanup = time.time()
 
@@ -75,34 +79,34 @@ class ONEXRateLimiter:
 
         # Event publishing limits
         self._rules["event_publish"] = RateLimitRule(
-            max_requests=1000,     # 1000 events per minute
+            max_requests=1000,  # 1000 events per minute
             window_seconds=60,
-            burst_limit=100,       # Allow 100 event burst
-            penalty_seconds=30,     # 30 second penalty for abuse
+            burst_limit=100,  # Allow 100 event burst
+            penalty_seconds=30,  # 30 second penalty for abuse
         )
 
         # Database query limits
         self._rules["database_query"] = RateLimitRule(
-            max_requests=500,      # 500 queries per minute
+            max_requests=500,  # 500 queries per minute
             window_seconds=60,
-            burst_limit=50,        # Allow 50 query burst
-            penalty_seconds=60,     # 1 minute penalty for abuse
+            burst_limit=50,  # Allow 50 query burst
+            penalty_seconds=60,  # 1 minute penalty for abuse
         )
 
         # Health check limits (more permissive)
         self._rules["health_check"] = RateLimitRule(
-            max_requests=120,      # 2 per second average
+            max_requests=120,  # 2 per second average
             window_seconds=60,
-            burst_limit=10,        # Small burst allowance
-            penalty_seconds=5,      # Short penalty
+            burst_limit=10,  # Small burst allowance
+            penalty_seconds=5,  # Short penalty
         )
 
         # Admin operations (restrictive)
         self._rules["admin_operation"] = RateLimitRule(
-            max_requests=10,       # 10 admin ops per minute
+            max_requests=10,  # 10 admin ops per minute
             window_seconds=60,
-            burst_limit=3,         # Very small burst
-            penalty_seconds=300,    # 5 minute penalty
+            burst_limit=3,  # Very small burst
+            penalty_seconds=300,  # 5 minute penalty
         )
 
         self._logger.info(f"Initialized rate limiter with {len(self._rules)} rules")
@@ -110,28 +114,31 @@ class ONEXRateLimiter:
     def configure_rule(self, operation_type: str, rule: RateLimitRule):
         """
         Configure rate limiting rule for operation type.
-        
+
         Args:
             operation_type: Type of operation (e.g., 'event_publish')
             rule: Rate limiting rule configuration
         """
         self._rules[operation_type] = rule
-        self._logger.info(f"Configured rate limit rule for {operation_type}: "
-                         f"{rule.max_requests}/{rule.window_seconds}s")
+        self._logger.info(
+            f"Configured rate limit rule for {operation_type}: "
+            f"{rule.max_requests}/{rule.window_seconds}s",
+        )
 
-    async def check_rate_limit(self, client_id: str, operation_type: str,
-                              request_count: int = 1) -> bool:
+    async def check_rate_limit(
+        self, client_id: str, operation_type: str, request_count: int = 1,
+    ) -> bool:
         """
         Check if client is within rate limits for operation.
-        
+
         Args:
             client_id: Unique client identifier (IP, user ID, etc.)
             operation_type: Type of operation being performed
             request_count: Number of requests (default: 1)
-            
+
         Returns:
             True if request is allowed, False if rate limited
-            
+
         Raises:
             OnexError: If operation type is not configured
         """
@@ -148,8 +155,10 @@ class ONEXRateLimiter:
         # Check if client is currently penalized
         if current_time < state.penalty_until:
             state.blocked_requests += request_count
-            self._logger.warning(f"Client {client_id} blocked due to penalty until "
-                               f"{state.penalty_until - current_time:.1f}s")
+            self._logger.warning(
+                f"Client {client_id} blocked due to penalty until "
+                f"{state.penalty_until - current_time:.1f}s",
+            )
             return False
 
         # Token bucket algorithm
@@ -180,8 +189,10 @@ class ONEXRateLimiter:
                 state.penalty_until = current_time + rule.penalty_seconds
                 state.blocked_requests += request_count
 
-                self._logger.warning(f"Client {client_id} exceeded window limit for {operation_type}: "
-                                   f"{window_requests}/{rule.max_requests}, penalty applied")
+                self._logger.warning(
+                    f"Client {client_id} exceeded window limit for {operation_type}: "
+                    f"{window_requests}/{rule.max_requests}, penalty applied",
+                )
                 return False
 
             # Cleanup client states periodically
@@ -192,17 +203,19 @@ class ONEXRateLimiter:
             return True
 
         state.blocked_requests += request_count
-        self._logger.info(f"Client {client_id} rate limited for {operation_type}: "
-                        f"tokens={state.tokens:.1f}, needed={request_count}")
+        self._logger.info(
+            f"Client {client_id} rate limited for {operation_type}: "
+            f"tokens={state.tokens:.1f}, needed={request_count}",
+        )
         return False
 
     def get_client_stats(self, client_id: str) -> dict[str, Any]:
         """
         Get rate limiting statistics for client.
-        
+
         Args:
             client_id: Client identifier
-            
+
         Returns:
             Dictionary with client statistics
         """
@@ -217,7 +230,8 @@ class ONEXRateLimiter:
             "tokens": round(state.tokens, 2),
             "total_requests": state.total_requests,
             "blocked_requests": state.blocked_requests,
-            "success_rate": (state.total_requests - state.blocked_requests) / max(state.total_requests, 1),
+            "success_rate": (state.total_requests - state.blocked_requests)
+            / max(state.total_requests, 1),
             "penalized": current_time < state.penalty_until,
             "penalty_remaining": max(0, state.penalty_until - current_time),
             "recent_requests": len(state.request_times),
@@ -226,16 +240,21 @@ class ONEXRateLimiter:
     def get_global_stats(self) -> dict[str, Any]:
         """
         Get global rate limiting statistics.
-        
+
         Returns:
             Dictionary with global statistics
         """
         total_clients = len(self._client_states)
-        total_requests = sum(state.total_requests for state in self._client_states.values())
-        total_blocked = sum(state.blocked_requests for state in self._client_states.values())
+        total_requests = sum(
+            state.total_requests for state in self._client_states.values()
+        )
+        total_blocked = sum(
+            state.blocked_requests for state in self._client_states.values()
+        )
 
         penalized_clients = sum(
-            1 for state in self._client_states.values()
+            1
+            for state in self._client_states.values()
             if time.time() < state.penalty_until
         )
 
@@ -243,7 +262,8 @@ class ONEXRateLimiter:
             "total_clients": total_clients,
             "total_requests": total_requests,
             "total_blocked": total_blocked,
-            "global_success_rate": (total_requests - total_blocked) / max(total_requests, 1),
+            "global_success_rate": (total_requests - total_blocked)
+            / max(total_requests, 1),
             "penalized_clients": penalized_clients,
             "configured_rules": list(self._rules.keys()),
         }
@@ -254,21 +274,26 @@ class ONEXRateLimiter:
         inactive_threshold = 3600.0  # 1 hour
 
         inactive_clients = [
-            client_id for client_id, state in self._client_states.items()
-            if (current_time - state.last_refill > inactive_threshold and
-                current_time >= state.penalty_until)
+            client_id
+            for client_id, state in self._client_states.items()
+            if (
+                current_time - state.last_refill > inactive_threshold
+                and current_time >= state.penalty_until
+            )
         ]
 
         for client_id in inactive_clients:
             del self._client_states[client_id]
 
         if inactive_clients:
-            self._logger.info(f"Cleaned up {len(inactive_clients)} inactive client states")
+            self._logger.info(
+                f"Cleaned up {len(inactive_clients)} inactive client states",
+            )
 
     def reset_client(self, client_id: str):
         """
         Reset rate limiting state for client.
-        
+
         Args:
             client_id: Client identifier to reset
         """
@@ -279,7 +304,7 @@ class ONEXRateLimiter:
     def set_penalty(self, client_id: str, penalty_seconds: int):
         """
         Apply manual penalty to client.
-        
+
         Args:
             client_id: Client identifier
             penalty_seconds: Duration of penalty in seconds
@@ -287,20 +312,27 @@ class ONEXRateLimiter:
         state = self._client_states[client_id]
         state.penalty_until = time.time() + penalty_seconds
 
-        self._logger.warning(f"Applied {penalty_seconds}s penalty to client: {client_id}")
+        self._logger.warning(
+            f"Applied {penalty_seconds}s penalty to client: {client_id}",
+        )
 
 
 class RateLimitDecorator:
     """
     Decorator for applying rate limits to functions.
-    
+
     Usage:
         @RateLimitDecorator("event_publish", lambda args: args[0].client_id)
         async def publish_event(self, client_id, event):
             ...
     """
 
-    def __init__(self, operation_type: str, client_id_extractor, rate_limiter: ONEXRateLimiter | None = None):
+    def __init__(
+        self,
+        operation_type: str,
+        client_id_extractor,
+        rate_limiter: ONEXRateLimiter | None = None,
+    ):
         self.operation_type = operation_type
         self.client_id_extractor = client_id_extractor
         self.rate_limiter = rate_limiter or get_rate_limiter()
@@ -311,7 +343,9 @@ class RateLimitDecorator:
             client_id = self.client_id_extractor(args, kwargs)
 
             # Check rate limit
-            allowed = await self.rate_limiter.check_rate_limit(client_id, self.operation_type)
+            allowed = await self.rate_limiter.check_rate_limit(
+                client_id, self.operation_type,
+            )
 
             if not allowed:
                 raise OnexError(
@@ -332,7 +366,7 @@ _rate_limiter: ONEXRateLimiter | None = None
 def get_rate_limiter() -> ONEXRateLimiter:
     """
     Get global rate limiter instance.
-    
+
     Returns:
         ONEXRateLimiter singleton instance
     """

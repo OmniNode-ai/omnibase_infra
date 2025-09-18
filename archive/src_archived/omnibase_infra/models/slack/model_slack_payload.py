@@ -5,7 +5,6 @@ This module provides a Pydantic model for complete Slack webhook payloads
 following ONEX standards for strong typing and data validation.
 """
 
-
 from pydantic import BaseModel, Field
 
 from omnibase_infra.models.slack.model_slack_attachment import ModelSlackAttachment

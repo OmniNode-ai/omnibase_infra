@@ -122,14 +122,18 @@ class TestNotificationModels:
             )
 
         # Basic auth without required fields
-        with pytest.raises(ValueError, match="Basic auth requires 'username' and 'password'"):
+        with pytest.raises(
+            ValueError, match="Basic auth requires 'username' and 'password'",
+        ):
             ModelNotificationAuth(
                 auth_type=EnumAuthType.BASIC,
                 credentials={"username": "test"},
             )
 
         # API key auth without required fields
-        with pytest.raises(ValueError, match="API key auth requires 'header_name' and 'api_key'"):
+        with pytest.raises(
+            ValueError, match="API key auth requires 'header_name' and 'api_key'",
+        ):
             ModelNotificationAuth(
                 auth_type=EnumAuthType.API_KEY_HEADER,
                 credentials={"header_name": "X-API-Key"},
@@ -222,7 +226,9 @@ class TestHookStructuredLogger:
         logger = HookStructuredLogger()
 
         # Test URL with sensitive query parameters
-        sensitive_url = "https://api.example.com/webhook?token=secret123&key=apikey456&normal=value"
+        sensitive_url = (
+            "https://api.example.com/webhook?token=secret123&key=apikey456&normal=value"
+        )
         sanitized = logger._sanitize_url_for_logging(sensitive_url)
 
         assert "token=***" in sanitized
@@ -317,7 +323,9 @@ class TestNodeHookEffect:
         assert len(hook_node._circuit_breakers) == 0
 
     @pytest.mark.asyncio
-    async def test_successful_notification_delivery(self, hook_node, basic_notification_request):
+    async def test_successful_notification_delivery(
+        self, hook_node, basic_notification_request,
+    ):
         """Test successful notification delivery without retries."""
         # Mock successful HTTP response
         mock_response = ProtocolHttpResponse(
@@ -377,7 +385,9 @@ class TestNodeHookEffect:
         assert result.success is True
 
     @pytest.mark.asyncio
-    async def test_retry_policy_exponential_backoff(self, hook_node, basic_notification_request):
+    async def test_retry_policy_exponential_backoff(
+        self, hook_node, basic_notification_request,
+    ):
         """Test retry policy with exponential backoff strategy."""
         retry_policy = ModelNotificationRetryPolicy(
             max_attempts=3,
@@ -411,11 +421,13 @@ class TestNodeHookEffect:
             is_success=True,
         )
 
-        hook_node._http_client.post = AsyncMock(side_effect=[
-            failure_response,  # First attempt fails
-            failure_response,  # Second attempt fails
-            success_response,   # Third attempt succeeds
-        ])
+        hook_node._http_client.post = AsyncMock(
+            side_effect=[
+                failure_response,  # First attempt fails
+                failure_response,  # Second attempt fails
+                success_response,  # Third attempt succeeds
+            ],
+        )
 
         with patch("asyncio.sleep") as mock_sleep:
             input_data = ModelHookNodeInput(notification_request=request)
@@ -500,10 +512,14 @@ class TestNodeHookEffect:
         hook_node._http_client.post.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_error_handling_network_timeout(self, hook_node, basic_notification_request):
+    async def test_error_handling_network_timeout(
+        self, hook_node, basic_notification_request,
+    ):
         """Test error handling for network timeouts."""
         # Mock network timeout exception
-        hook_node._http_client.post = AsyncMock(side_effect=TimeoutError("Request timeout"))
+        hook_node._http_client.post = AsyncMock(
+            side_effect=TimeoutError("Request timeout"),
+        )
 
         input_data = ModelHookNodeInput(notification_request=basic_notification_request)
 
@@ -535,7 +551,9 @@ class TestNodeHookEffect:
         hook_node._failed_notifications = 2
 
         # Add a circuit breaker
-        circuit_breaker = hook_node._get_or_create_circuit_breaker("https://test.com/webhook")
+        circuit_breaker = hook_node._get_or_create_circuit_breaker(
+            "https://test.com/webhook",
+        )
         circuit_breaker.failure_count = 2
 
         health_status = await hook_node.health_check()
@@ -576,7 +594,9 @@ class TestNodeHookEffect:
         assert formatted == payload
 
     @pytest.mark.asyncio
-    async def test_performance_metrics_tracking(self, hook_node, basic_notification_request):
+    async def test_performance_metrics_tracking(
+        self, hook_node, basic_notification_request,
+    ):
         """Test performance metrics are correctly tracked."""
         mock_response = ProtocolHttpResponse(
             status_code=200,
@@ -595,7 +615,9 @@ class TestNodeHookEffect:
 
         # Verify performance tracking
         assert result.total_execution_time_ms > 0
-        assert result.total_execution_time_ms < (end_time - start_time) * 1000 + 100  # Allow some tolerance
+        assert (
+            result.total_execution_time_ms < (end_time - start_time) * 1000 + 100
+        )  # Allow some tolerance
 
         # Verify HTTP execution time is captured
         assert result.notification_result.attempts[0].execution_time_ms == 150.0
@@ -643,8 +665,8 @@ class TestNodeHookEffect:
         linear_delay1 = hook_node._calculate_retry_delay(linear_policy, attempt=1)
         linear_delay2 = hook_node._calculate_retry_delay(linear_policy, attempt=2)
 
-        assert linear_delay1 == 0.5    # 500ms
-        assert linear_delay2 == 1.0    # 500ms * 2 * 1.5 / 1.5 = 1000ms
+        assert linear_delay1 == 0.5  # 500ms
+        assert linear_delay2 == 1.0  # 500ms * 2 * 1.5 / 1.5 = 1000ms
 
         # Test fixed delay
         fixed_policy = ModelNotificationRetryPolicy(

@@ -127,11 +127,11 @@ echo "Checking if PostgreSQL adapter service is available at $LOAD_TEST_HOST..."
 
 if curl -f -s "$LOAD_TEST_HOST/health" > /dev/null; then
     echo -e "${GREEN}✅ Service is available for load testing${NC}"
-    
+
     # Run load tests
     print_section "Load Testing with Locust"
     echo "Running headless load test (5 minutes, 25 users, 5/sec spawn rate)..."
-    
+
     locust -f tests/load_testing/postgres_adapter_load_test.py \
         --host="$LOAD_TEST_HOST" \
         --users 25 \
@@ -140,9 +140,9 @@ if curl -f -s "$LOAD_TEST_HOST/health" > /dev/null; then
         --headless \
         --html="$TEST_RESULTS_DIR/load-test-report.html" \
         --csv="$TEST_RESULTS_DIR/load-test-stats"
-    
+
     check_success "Load testing with Locust"
-    
+
 else
     echo -e "${YELLOW}⚠️  Service not available at $LOAD_TEST_HOST${NC}"
     echo "To run load tests:"
@@ -162,7 +162,7 @@ if [ -f "$TEST_RESULTS_DIR/integration-test-results.xml" ]; then
     tests_total=$(grep -o 'tests="[0-9]*"' "$TEST_RESULTS_DIR/integration-test-results.xml" | grep -o '[0-9]*')
     tests_failures=$(grep -o 'failures="[0-9]*"' "$TEST_RESULTS_DIR/integration-test-results.xml" | grep -o '[0-9]*')
     tests_errors=$(grep -o 'errors="[0-9]*"' "$TEST_RESULTS_DIR/integration-test-results.xml" | grep -o '[0-9]*')
-    
+
     echo -e "Integration Tests: ${GREEN}$tests_total total${NC}, ${RED}$tests_failures failures${NC}, ${RED}$tests_errors errors${NC}"
 fi
 
@@ -181,7 +181,7 @@ echo ""
 echo "Available Reports:"
 echo "=================="
 echo "• Integration Test Results: $TEST_RESULTS_DIR/integration-test-results.xml"
-echo "• HTML Coverage Report: $COVERAGE_DIR/index.html" 
+echo "• HTML Coverage Report: $COVERAGE_DIR/index.html"
 echo "• XML Coverage Report: $TEST_RESULTS_DIR/coverage.xml"
 
 if [ -f "$TEST_RESULTS_DIR/load-test-report.html" ]; then
@@ -190,7 +190,7 @@ fi
 
 print_section "PR Review Requirements Status"
 echo -e "${GREEN}✅ Integration tests with actual RedPanda instance - COMPLETE${NC}"
-echo -e "${GREEN}✅ Performance testing of event publishing overhead - COMPLETE${NC}"  
+echo -e "${GREEN}✅ Performance testing of event publishing overhead - COMPLETE${NC}"
 echo -e "${GREEN}✅ Circuit breaker behavior validation under load - COMPLETE${NC}"
 echo -e "${GREEN}✅ Error handling edge cases - COMPLETE${NC}"
 echo -e "${GREEN}✅ Load testing for event publishing - COMPLETE${NC}"

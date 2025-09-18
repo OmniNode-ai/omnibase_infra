@@ -10,7 +10,9 @@ class ModelConsulTopologyNode(BaseModel):
 
     node_id: UUID = Field(..., description="Unique node identifier")
     node_name: str = Field(..., description="Node name")
-    services: list[str] = Field(..., description="List of services running on this node")
+    services: list[str] = Field(
+        ..., description="List of services running on this node",
+    )
 
 
 class ModelConsulTopologyEdge(BaseModel):
@@ -18,12 +20,20 @@ class ModelConsulTopologyEdge(BaseModel):
 
     source_service: str = Field(..., description="Source service name")
     target_service: str = Field(..., description="Target service name")
-    connection_type: str = Field(..., description="Type of connection (HTTP, gRPC, etc.)")
+    connection_type: str = Field(
+        ..., description="Type of connection (HTTP, gRPC, etc.)",
+    )
 
 
 class ModelConsulTopologyGraph(BaseModel):
     """Service topology graph with strongly typed details."""
 
-    nodes: list[ModelConsulTopologyNode] = Field(..., description="List of topology nodes")
-    edges: list[ModelConsulTopologyEdge] = Field(..., description="List of topology edges")
-    metadata: dict[str, str] = Field(default_factory=dict, description="Additional topology metadata")
+    nodes: list[ModelConsulTopologyNode] = Field(
+        ..., description="List of topology nodes",
+    )
+    edges: list[ModelConsulTopologyEdge] = Field(
+        ..., description="List of topology edges",
+    )
+    metadata: dict[str, str] = Field(
+        default_factory=dict, description="Additional topology metadata",
+    )

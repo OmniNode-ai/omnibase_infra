@@ -30,16 +30,18 @@ class TestRedPandaCircuitBreakerIntegration:
     def event_bus(self):
         """Create RedPanda event bus for testing."""
         # Override environment variables for testing
-        os.environ.update({
-            "REDPANDA_HOST": "localhost",
-            "REDPANDA_PORT": "9092",
-            "CIRCUIT_BREAKER_FAILURE_THRESHOLD": "3",
-            "CIRCUIT_BREAKER_RECOVERY_TIMEOUT": "5",  # Faster for testing
-            "CIRCUIT_BREAKER_SUCCESS_THRESHOLD": "2",
-            "CIRCUIT_BREAKER_TIMEOUT": "10",
-            "CIRCUIT_BREAKER_MAX_QUEUE": "100",
-            "CIRCUIT_BREAKER_GRACEFUL_DEGRADATION": "true",
-        })
+        os.environ.update(
+            {
+                "REDPANDA_HOST": "localhost",
+                "REDPANDA_PORT": "9092",
+                "CIRCUIT_BREAKER_FAILURE_THRESHOLD": "3",
+                "CIRCUIT_BREAKER_RECOVERY_TIMEOUT": "5",  # Faster for testing
+                "CIRCUIT_BREAKER_SUCCESS_THRESHOLD": "2",
+                "CIRCUIT_BREAKER_TIMEOUT": "10",
+                "CIRCUIT_BREAKER_MAX_QUEUE": "100",
+                "CIRCUIT_BREAKER_GRACEFUL_DEGRADATION": "true",
+            },
+        )
 
         bus = RedPandaEventBus()
         yield bus
@@ -205,14 +207,19 @@ class TestRedPandaCircuitBreakerIntegration:
         assert duration < 30  # Should complete within 30 seconds
         throughput = event_count / duration
 
-        print(f"Performance test: {event_count} events in {duration:.2f}s (throughput: {throughput:.1f} events/sec)")
+        print(
+            f"Performance test: {event_count} events in {duration:.2f}s (throughput: {throughput:.1f} events/sec)",
+        )
 
         # Check metrics
         metrics = event_bus._circuit_breaker.get_metrics()
         assert metrics.total_events >= event_count
 
         # Circuit should remain stable under load
-        assert event_bus._circuit_breaker.get_state() in [CircuitBreakerState.CLOSED, CircuitBreakerState.HALF_OPEN]
+        assert event_bus._circuit_breaker.get_state() in [
+            CircuitBreakerState.CLOSED,
+            CircuitBreakerState.HALF_OPEN,
+        ]
 
     @pytest.mark.asyncio
     async def test_graceful_degradation_mode(self, event_bus):
@@ -337,7 +344,11 @@ class TestRedPandaCircuitBreakerIntegration:
 
         # Circuit should remain in consistent state
         state = event_bus._circuit_breaker.get_state()
-        assert state in [CircuitBreakerState.CLOSED, CircuitBreakerState.OPEN, CircuitBreakerState.HALF_OPEN]
+        assert state in [
+            CircuitBreakerState.CLOSED,
+            CircuitBreakerState.OPEN,
+            CircuitBreakerState.HALF_OPEN,
+        ]
 
         # Metrics should be consistent
         metrics = event_bus._circuit_breaker.get_metrics()
@@ -345,6 +356,7 @@ class TestRedPandaCircuitBreakerIntegration:
 
     async def _force_circuit_open(self, event_bus):
         """Helper method to force circuit breaker open."""
+
         # Mock failing publish
         async def mock_failing_publish(event):
             raise Exception("Forced failure for testing")
@@ -377,8 +389,10 @@ class TestRedPandaCircuitBreakerIntegration:
 class TestRedPandaIntegrationWithRealInstance:
     """Integration tests requiring actual RedPanda instance."""
 
-    @pytest.mark.skipif(not os.getenv("REDPANDA_INTEGRATION_TESTS"),
-                       reason="Requires REDPANDA_INTEGRATION_TESTS environment variable")
+    @pytest.mark.skipif(
+        not os.getenv("REDPANDA_INTEGRATION_TESTS"),
+        reason="Requires REDPANDA_INTEGRATION_TESTS environment variable",
+    )
     async def test_real_redpanda_connection(self):
         """Test connection to actual RedPanda instance."""
         event_bus = RedPandaEventBus()
@@ -404,17 +418,21 @@ class TestRedPandaIntegrationWithRealInstance:
         finally:
             await event_bus.close()
 
-    @pytest.mark.skipif(not os.getenv("REDPANDA_INTEGRATION_TESTS"),
-                       reason="Requires REDPANDA_INTEGRATION_TESTS environment variable")
+    @pytest.mark.skipif(
+        not os.getenv("REDPANDA_INTEGRATION_TESTS"),
+        reason="Requires REDPANDA_INTEGRATION_TESTS environment variable",
+    )
     async def test_ssl_tls_connection(self):
         """Test SSL/TLS connection to secured RedPanda."""
         # Override for SSL testing
-        os.environ.update({
-            "KAFKA_SECURITY_PROTOCOL": "SSL",
-            "KAFKA_SSL_CA_LOCATION": "/path/to/ca.pem",
-            "KAFKA_SSL_CERT_LOCATION": "/path/to/cert.pem",
-            "KAFKA_SSL_KEY_LOCATION": "/path/to/key.pem",
-        })
+        os.environ.update(
+            {
+                "KAFKA_SECURITY_PROTOCOL": "SSL",
+                "KAFKA_SSL_CA_LOCATION": "/path/to/ca.pem",
+                "KAFKA_SSL_CERT_LOCATION": "/path/to/cert.pem",
+                "KAFKA_SSL_KEY_LOCATION": "/path/to/key.pem",
+            },
+        )
 
         event_bus = RedPandaEventBus()
 

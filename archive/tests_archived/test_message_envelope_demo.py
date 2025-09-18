@@ -64,9 +64,9 @@ async def demo_service_registration_envelope():
     # Create PostgreSQL query request
     query_request = ModelPostgresQueryRequest(
         query="""
-            INSERT INTO infrastructure.service_registry 
-            (service_name, service_type, hostname, port, status, metadata, health_check_url) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7) 
+            INSERT INTO infrastructure.service_registry
+            (service_name, service_type, hostname, port, status, metadata, health_check_url)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id, service_name, status, registered_at
         """,
         parameters=[
@@ -130,7 +130,9 @@ async def demo_service_registration_envelope():
         if isinstance(db_result, list) and db_result:
             success = True
             registration_result = dict(db_result[0])
-            status_message = f"Service '{service_data['service_name']}' registered successfully"
+            status_message = (
+                f"Service '{service_data['service_name']}' registered successfully"
+            )
         else:
             success = False
             registration_result = None
@@ -156,14 +158,20 @@ async def demo_service_registration_envelope():
 
         logger.info("✅ Success! Database operation completed")
         logger.info(f"   Execution time: {execution_time_ms:.2f}ms")
-        logger.info(f"   Service ID: {registration_result['id'] if registration_result else 'N/A'}")
-        logger.info(f"   Registered at: {registration_result['registered_at'] if registration_result else 'N/A'}")
+        logger.info(
+            f"   Service ID: {registration_result['id'] if registration_result else 'N/A'}",
+        )
+        logger.info(
+            f"   Registered at: {registration_result['registered_at'] if registration_result else 'N/A'}",
+        )
 
         logger.info("📤 Output Event Envelope:")
         logger.info(f"   Success: {output_envelope.success}")
         logger.info(f"   Correlation ID: {output_envelope.correlation_id}")
         logger.info(f"   Execution time: {output_envelope.execution_time_ms:.2f}ms")
-        logger.info(f"   Rows affected: {output_envelope.query_response['rows_affected']}")
+        logger.info(
+            f"   Rows affected: {output_envelope.query_response['rows_affected']}",
+        )
 
         await connection_manager.close()
         return True
@@ -184,19 +192,19 @@ async def demo_service_discovery_envelope():
 
     query_request = ModelPostgresQueryRequest(
         query="""
-            SELECT 
-                service_name, 
-                service_type, 
-                hostname, 
-                port, 
+            SELECT
+                service_name,
+                service_type,
+                hostname,
+                port,
                 status,
                 metadata,
                 last_seen,
                 registered_at
-            FROM infrastructure.service_registry 
-            WHERE service_type = $1 
+            FROM infrastructure.service_registry
+            WHERE service_type = $1
               AND status IN ('healthy', 'degraded')
-            ORDER BY last_seen DESC 
+            ORDER BY last_seen DESC
             LIMIT $2
         """,
         parameters=["microservice", 10],
@@ -241,7 +249,9 @@ async def demo_service_discovery_envelope():
         logger.info(f"🔍 Found {len(services)} active microservices:")
         for service in services:
             service_dict = dict(service)
-            logger.info(f"   • {service_dict['service_name']} ({service_dict['hostname']}:{service_dict['port']}) - {service_dict['status']}")
+            logger.info(
+                f"   • {service_dict['service_name']} ({service_dict['hostname']}:{service_dict['port']}) - {service_dict['status']}",
+            )
 
         logger.info(f"⚡ Query executed in {execution_time_ms:.2f}ms")
 
@@ -283,8 +293,12 @@ async def demo_health_check_envelope():
     )
 
     logger.info("📨 Health Check Request:")
-    logger.info(f"   Include connection stats: {health_request.include_connection_stats}")
-    logger.info(f"   Include performance metrics: {health_request.include_performance_metrics}")
+    logger.info(
+        f"   Include connection stats: {health_request.include_connection_stats}",
+    )
+    logger.info(
+        f"   Include performance metrics: {health_request.include_performance_metrics}",
+    )
 
     try:
         connection_manager = PostgresConnectionManager()
@@ -295,11 +309,15 @@ async def demo_health_check_envelope():
 
         logger.info("💚 Health Check Results:")
         logger.info(f"   Status: {health_data.get('status', 'unknown')}")
-        logger.info(f"   Database: {health_data.get('database_info', {}).get('version', 'unknown')}")
+        logger.info(
+            f"   Database: {health_data.get('database_info', {}).get('version', 'unknown')}",
+        )
 
         if "connection_pool" in health_data:
             pool = health_data["connection_pool"]
-            logger.info(f"   Connection Pool: {pool.get('active', 0)} active, {pool.get('idle', 0)} idle, {pool.get('total', 0)} total")
+            logger.info(
+                f"   Connection Pool: {pool.get('active', 0)} active, {pool.get('idle', 0)} idle, {pool.get('total', 0)} total",
+            )
 
         if health_data.get("errors"):
             logger.warning(f"   ⚠️  Errors: {len(health_data['errors'])}")
@@ -360,7 +378,9 @@ async def main():
     if successful == total:
         logger.info("🎉 All message envelope conversions working correctly!")
     else:
-        logger.warning("⚠️  Some demos failed - check PostgreSQL connection and database setup")
+        logger.warning(
+            "⚠️  Some demos failed - check PostgreSQL connection and database setup",
+        )
 
 
 if __name__ == "__main__":

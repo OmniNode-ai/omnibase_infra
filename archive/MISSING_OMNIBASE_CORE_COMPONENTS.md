@@ -11,7 +11,7 @@ Based on analysis of omnibase_infra imports and dependencies, the following comp
 **Purpose**: Sanitize error messages to prevent sensitive information leakage
 
 ### 2. Circuit Breaker Mixin
-**Expected Location**: `omnibase_core/utils/circuit_breaker.py` 
+**Expected Location**: `omnibase_core/utils/circuit_breaker.py`
 **Referenced in**: REDUCER_NODE_TEMPLATE.md
 **Import**: `from omnibase_core.utils.circuit_breaker import CircuitBreakerMixin`
 **Purpose**: Mixin class for adding circuit breaker functionality to nodes
@@ -50,7 +50,7 @@ Based on analysis of omnibase_infra imports and dependencies, the following comp
 ### 7. Core Error Codes Import Path
 **Current Issue**: Some files import `from omnibase_core.core.core_error_codes import CoreErrorCode`
 **Correct Path**: `from omnibase_core.core.errors.onex_error import CoreErrorCode`
-**Files Affected**: 
+**Files Affected**:
 - `src/omnibase_infra/.serena/memories/configuration_consolidation_specs.md`
 - `tests/test_postgres_adapter.py`
 

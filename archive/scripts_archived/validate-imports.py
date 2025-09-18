@@ -6,18 +6,14 @@ This tool systematically tests all critical imports to ensure
 downstream repositories can reliably depend on omnibase_core.
 """
 
-import importlib
 import sys
-import traceback
-from pathlib import Path
-from typing import Any, Dict, List, Tuple
 
 
 class ImportValidator:
     """Validates omnibase_core imports systematically."""
 
     def __init__(self):
-        self.results: List[Tuple[str, bool, str]] = []
+        self.results: list[tuple[str, bool, str]] = []
 
         # Whitelist of allowed import paths to prevent code injection
         self.allowed_imports = {
@@ -70,51 +66,50 @@ class ImportValidator:
             import omnibase_core
 
             return omnibase_core
-        elif import_path == "omnibase_core.core.model_onex_container":
+        if import_path == "omnibase_core.core.model_onex_container":
             from omnibase_core.core import model_onex_container
 
             return model_onex_container
-        elif import_path == "omnibase_core.core.infrastructure_service_bases":
+        if import_path == "omnibase_core.core.infrastructure_service_bases":
             from omnibase_core.core import infrastructure_service_bases
 
             return infrastructure_service_bases
-        elif import_path == "omnibase_core.models.common.model_typed_value":
+        if import_path == "omnibase_core.models.common.model_typed_value":
             from omnibase_core.models.common import model_typed_value
 
             return model_typed_value
-        elif import_path == "omnibase_core.enums.enum_log_level":
+        if import_path == "omnibase_core.enums.enum_log_level":
             from omnibase_core.enums import enum_log_level
 
             return enum_log_level
-        elif import_path == "omnibase_core.core.errors.core_errors":
+        if import_path == "omnibase_core.core.errors.core_errors":
             from omnibase_core.core.errors import core_errors
 
             return core_errors
-        elif import_path == "omnibase_core.models.core.model_event_envelope":
+        if import_path == "omnibase_core.models.core.model_event_envelope":
             from omnibase_core.models.core import model_event_envelope
 
             return model_event_envelope
-        elif import_path == "omnibase_core.cli.config":
+        if import_path == "omnibase_core.cli.config":
             from omnibase_core.cli import config
 
             return config
-        elif import_path == "omnibase_spi.protocols.core":
+        if import_path == "omnibase_spi.protocols.core":
             from omnibase_spi.protocols import core
 
             return core
-        elif import_path == "omnibase_spi.protocols.types":
+        if import_path == "omnibase_spi.protocols.types":
             from omnibase_spi.protocols import types
 
             return types
-        else:
-            raise ImportError(f"No module named '{import_path}'")
+        raise ImportError(f"No module named '{import_path}'")
 
     def test_import(self, import_path: str, description: str) -> bool:
         """Test a single import and record result."""
         # Security: Use static import mapping instead of dynamic imports
         if import_path not in self.allowed_imports:
             self.results.append(
-                (description, False, f"Import path '{import_path}' not in whitelist")
+                (description, False, f"Import path '{import_path}' not in whitelist"),
             )
             return False
 
@@ -128,13 +123,13 @@ class ImportValidator:
             return False
 
     def test_from_import(
-        self, from_path: str, import_items: str, description: str
+        self, from_path: str, import_items: str, description: str,
     ) -> bool:
         """Test a from...import statement and record result."""
         # Security: Validate import path against whitelist
         if from_path not in self.allowed_imports:
             self.results.append(
-                (description, False, f"Import path '{from_path}' not in whitelist")
+                (description, False, f"Import path '{from_path}' not in whitelist"),
             )
             return False
 
@@ -143,7 +138,7 @@ class ImportValidator:
         for item in items:
             if item not in self.allowed_import_items:
                 self.results.append(
-                    (description, False, f"Import item '{item}' not in whitelist")
+                    (description, False, f"Import item '{item}' not in whitelist"),
                 )
                 return False
 
@@ -193,7 +188,7 @@ class ImportValidator:
 
         # Enum imports
         success &= self.test_from_import(
-            "omnibase_core.enums.enum_log_level", "EnumLogLevel", "Log Level Enum"
+            "omnibase_core.enums.enum_log_level", "EnumLogLevel", "Log Level Enum",
         )
 
         # Error handling imports
@@ -212,7 +207,7 @@ class ImportValidator:
 
         # CLI imports
         success &= self.test_from_import(
-            "omnibase_core.cli.config", "ModelCLIConfig", "CLI Config"
+            "omnibase_core.cli.config", "ModelCLIConfig", "CLI Config",
         )
 
         return success
@@ -225,10 +220,6 @@ class ImportValidator:
 
         # Test SPI protocol imports
         try:
-            from omnibase_spi.protocols.core import (
-                ProtocolCacheService,
-                ProtocolNodeRegistry,
-            )
 
             self.results.append(("SPI Protocol imports", True, "OK"))
         except Exception as e:
@@ -237,7 +228,6 @@ class ImportValidator:
 
         # Test SPI types imports
         try:
-            from omnibase_spi.protocols.types import core_types
 
             self.results.append(("SPI Types imports", True, "OK"))
         except Exception as e:
@@ -261,21 +251,20 @@ class ImportValidator:
 
             # Test that container has expected properties
             if hasattr(container, "base_container") and hasattr(
-                container, "get_service"
+                container, "get_service",
             ):
                 self.results.append(("Container functionality", True, "OK"))
                 return True
-            else:
-                self.results.append(
-                    ("Container functionality", False, "Missing expected methods")
-                )
-                return False
+            self.results.append(
+                ("Container functionality", False, "Missing expected methods"),
+            )
+            return False
 
         except Exception as e:
             self.results.append(("Container functionality", False, str(e)))
             return False
 
-    def print_results(self) -> Tuple[int, int]:
+    def print_results(self) -> tuple[int, int]:
         """Print validation results and return (passed, failed) counts."""
         print("\n📊 Import Validation Results:")
         print("=" * 50)
@@ -315,10 +304,9 @@ def main() -> int:
         print("\n🎉 All imports are working correctly!")
         print("   omnibase_core is ready for downstream development")
         return 0
-    else:
-        print(f"\n🚫 {failed} import issues need to be fixed")
-        print("   Check dependencies and installation")
-        return 1
+    print(f"\n🚫 {failed} import issues need to be fixed")
+    print("   Check dependencies and installation")
+    return 1
 
 
 if __name__ == "__main__":

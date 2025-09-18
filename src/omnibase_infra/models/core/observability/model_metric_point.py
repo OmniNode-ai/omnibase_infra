@@ -12,10 +12,11 @@ from pydantic import BaseModel, Field
 
 class MetricTypeEnum(str, Enum):
     """Types of metrics collected by observability system."""
-    COUNTER = "counter"           # Monotonically increasing values
-    GAUGE = "gauge"              # Point-in-time values
-    HISTOGRAM = "histogram"      # Distribution of values
-    SUMMARY = "summary"          # Summary statistics
+
+    COUNTER = "counter"  # Monotonically increasing values
+    GAUGE = "gauge"  # Point-in-time values
+    HISTOGRAM = "histogram"  # Distribution of values
+    SUMMARY = "summary"  # Summary statistics
 
 
 class ModelMetricPoint(BaseModel):

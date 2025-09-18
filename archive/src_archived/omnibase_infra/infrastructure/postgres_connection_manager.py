@@ -52,6 +52,7 @@ class ConnectionConfig:
         try:
             # Try to use secure credential manager first
             from ..security.credential_manager import get_credential_manager
+
             credential_manager = get_credential_manager()
             db_creds = credential_manager.get_database_credentials()
 
@@ -324,7 +325,9 @@ class PostgresConnectionManager:
         """
         async with self.acquire_connection() as conn:
             async with conn.transaction(
-                isolation=isolation, readonly=readonly, deferrable=deferrable,
+                isolation=isolation,
+                readonly=readonly,
+                deferrable=deferrable,
             ):
                 yield conn
 
@@ -390,7 +393,10 @@ class PostgresConnectionManager:
                 )
 
     async def fetch_one(
-        self, query: str, *args, timeout: float | None = None,
+        self,
+        query: str,
+        *args,
+        timeout: float | None = None,
     ) -> Record | None:
         """
         Fetch a single record from a query.
@@ -413,7 +419,10 @@ class PostgresConnectionManager:
             ) from e
 
     async def fetch_value(
-        self, query: str, *args, timeout: float | None = None,
+        self,
+        query: str,
+        *args,
+        timeout: float | None = None,
     ) -> list[Record] | Record | str | int | float | bool:
         """
         Fetch a single value from a query.

@@ -10,13 +10,13 @@
 
 **Issue**: All `omnibase_core` imports are currently failing because the module doesn't exist.
 
-**Files Affected**: 
+**Files Affected**:
 - `src/omnibase_infra/infrastructure/container.py`
 - `src/omnibase_infra/infrastructure/postgres_connection_manager.py`
 - `src/omnibase_infra/nodes/consul/v1_0_0/node.py`
 - And many others with `omnibase_core` imports
 
-**Breaking Change**: 
+**Breaking Change**:
 ```python
 # These imports FAIL at runtime:
 from omnibase_core.core.onex_container import ModelONEXContainer as ONEXContainer
@@ -27,7 +27,7 @@ from omnibase_core.utils.generation.utility_schema_loader import UtilitySchemaLo
 
 **Error**: `No module named 'omnibase_core'`
 
-**Impact**: 
+**Impact**:
 - **COMPLETE FAILURE** - All infrastructure services will crash on import
 - Docker containers will fail to start
 - All nodes with omnibase_core imports are broken

@@ -1,19 +1,19 @@
 """
 Production Readiness Validation for ONEX Infrastructure
 
-Comprehensive validation suite that verifies all production readiness 
+Comprehensive validation suite that verifies all production readiness
 requirements have been met, including security, performance, and architecture compliance.
 
 This validates the fixes implemented for all 15 medium-high priority deficiencies:
 
 Security Issues (5):
 1. ✅ Hardcoded credentials eliminated - Vault adapter integration
-2. ✅ Missing TLS/SSL configuration - Complete TLS configuration manager 
+2. ✅ Missing TLS/SSL configuration - Complete TLS configuration manager
 3. ✅ No rate limiting - Token bucket rate limiting implemented
 4. ✅ Missing audit logging - Comprehensive tamper-proof audit trails
 5. ✅ No payload encryption - AES-256-GCM encryption for sensitive data
 
-Performance Issues (5): 
+Performance Issues (5):
 6. ✅ Memory leaks in connection pooling - Async connection management with proper cleanup
 7. ✅ Synchronous health checks - Async health checks with non-blocking operations
 8. ✅ Async/await inconsistencies - Proper async patterns throughout
@@ -23,7 +23,7 @@ Performance Issues (5):
 Architecture Issues (5):
 11. ✅ Hardcoded configuration values - Contract-driven configuration via Vault
 12. ✅ Circuit breaker testing - Comprehensive half-open state validation
-13. ✅ Missing Prometheus metrics - Full infrastructure observability 
+13. ✅ Missing Prometheus metrics - Full infrastructure observability
 14. ✅ No outbox pattern - PostgreSQL transactional outbox with CDC/WAL
 15. ✅ Missing performance benchmarks - Complete benchmark suite
 """
@@ -39,6 +39,7 @@ from typing import Any
 
 class ValidationResult(Enum):
     """Validation test results."""
+
     PASS = "PASS"
     FAIL = "FAIL"
     WARN = "WARN"
@@ -48,6 +49,7 @@ class ValidationResult(Enum):
 
 class Priority(Enum):
     """Issue priority levels."""
+
     CRITICAL = "CRITICAL"
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
@@ -57,6 +59,7 @@ class Priority(Enum):
 @dataclass
 class ValidationCheck:
     """Individual validation check definition."""
+
     id: str
     name: str
     description: str
@@ -71,6 +74,7 @@ class ValidationCheck:
 @dataclass
 class CheckResult:
     """Result of individual validation check."""
+
     check_id: str
     result: ValidationResult
     message: str
@@ -83,7 +87,7 @@ class CheckResult:
 class ProductionReadinessValidator:
     """
     Comprehensive production readiness validation for ONEX infrastructure.
-    
+
     Validates that all medium and high priority deficiencies have been addressed
     and the system meets production deployment requirements.
     """
@@ -112,7 +116,7 @@ class ProductionReadinessValidator:
     async def run_full_validation(self) -> dict[str, Any]:
         """
         Run complete production readiness validation suite.
-        
+
         Returns:
             Comprehensive validation report with pass/fail status
         """
@@ -207,7 +211,6 @@ class ProductionReadinessValidator:
                 category="security",
                 check_function="_check_payload_encryption",
             ),
-
             # Performance Validation Checks (Issues 6-10)
             ValidationCheck(
                 id="PERF-001",
@@ -249,7 +252,6 @@ class ProductionReadinessValidator:
                 category="performance",
                 check_function="_check_batch_processing",
             ),
-
             # Architecture Validation Checks (Issues 11-15)
             ValidationCheck(
                 id="ARCH-001",
@@ -362,11 +364,21 @@ class ProductionReadinessValidator:
                     }
 
                 # Verify credential manager integration
-                if "credential_manager" not in str(type(self._kafka_adapter._credential_manager)):
+                if "credential_manager" not in str(
+                    type(self._kafka_adapter._credential_manager),
+                ):
                     return {
                         "result": ValidationResult.WARN,
                         "message": "Credential manager integration not fully verified",
-                        "details": {"credential_manager_type": str(type(getattr(self._kafka_adapter, "_credential_manager", None)))},
+                        "details": {
+                            "credential_manager_type": str(
+                                type(
+                                    getattr(
+                                        self._kafka_adapter, "_credential_manager", None,
+                                    ),
+                                ),
+                            ),
+                        },
                     }
 
                 details["kafka_config_secure"] = True
@@ -412,7 +424,11 @@ class ProductionReadinessValidator:
             }
 
         # Verify TLS configuration methods exist
-        required_methods = ["get_kafka_tls_config", "get_database_tls_config", "get_vault_tls_config"]
+        required_methods = [
+            "get_kafka_tls_config",
+            "get_database_tls_config",
+            "get_vault_tls_config",
+        ]
         missing_methods = []
 
         for method in required_methods:
@@ -458,7 +474,13 @@ class ProductionReadinessValidator:
                 return {
                     "result": ValidationResult.FAIL,
                     "message": "Rate limiter not found in Kafka adapter",
-                    "details": {"kafka_adapter_attributes": [attr for attr in dir(self._kafka_adapter) if not attr.startswith("_")]},
+                    "details": {
+                        "kafka_adapter_attributes": [
+                            attr
+                            for attr in dir(self._kafka_adapter)
+                            if not attr.startswith("_")
+                        ],
+                    },
                 }
         else:
             return {
@@ -524,6 +546,7 @@ class ProductionReadinessValidator:
         # Check if encryption module is available
         try:
             from ..security.payload_encryption import get_payload_encryption
+
             encryption_service = get_payload_encryption()
 
             # Test encryption/decryption capability
@@ -591,7 +614,10 @@ class ProductionReadinessValidator:
             return {
                 "result": ValidationResult.WARN,
                 "message": f"Some connection manager methods missing: {missing_methods}",
-                "details": {"missing_methods": missing_methods, "available_methods": available_methods},
+                "details": {
+                    "missing_methods": missing_methods,
+                    "available_methods": available_methods,
+                },
             }
 
         details["connection_manager_methods"] = available_methods
@@ -649,7 +675,11 @@ class ProductionReadinessValidator:
         # Check that main processing methods are async
         components_to_check = [
             ("kafka_adapter", self._kafka_adapter, ["process"]),
-            ("postgres_outbox", self._postgres_outbox, ["publish_event", "start_processor"]),
+            (
+                "postgres_outbox",
+                self._postgres_outbox,
+                ["publish_event", "start_processor"],
+            ),
         ]
 
         async_methods_found = {}
@@ -698,7 +728,9 @@ class ProductionReadinessValidator:
         # Check circuit breaker
         if self._kafka_adapter and hasattr(self._kafka_adapter, "_circuit_breaker"):
             circuit_breaker = self._kafka_adapter._circuit_breaker
-            if hasattr(circuit_breaker, "call") and hasattr(circuit_breaker, "get_state"):
+            if hasattr(circuit_breaker, "call") and hasattr(
+                circuit_breaker, "get_state",
+            ):
                 details["circuit_breaker"] = True
             else:
                 details["circuit_breaker"] = False
@@ -852,6 +884,7 @@ class ProductionReadinessValidator:
         # Check if circuit breaker testing module exists
         try:
             from ..testing.circuit_breaker_test import CircuitBreakerTestSuite
+
             details["testing_framework"] = True
         except ImportError:
             details["testing_framework"] = False
@@ -894,7 +927,10 @@ class ProductionReadinessValidator:
             return {
                 "result": ValidationResult.WARN,
                 "message": f"Some metrics methods missing: {missing_methods}",
-                "details": {"missing_methods": missing_methods, "available_methods": available_methods},
+                "details": {
+                    "missing_methods": missing_methods,
+                    "available_methods": available_methods,
+                },
             }
 
         # Check if metrics collector is enabled
@@ -967,6 +1003,7 @@ class ProductionReadinessValidator:
             from ..testing.performance_benchmarks import (
                 InfrastructurePerformanceBenchmarks,
             )
+
             details["benchmark_framework"] = True
             details["benchmark_class"] = "InfrastructurePerformanceBenchmarks"
         except ImportError as e:
@@ -1000,11 +1037,31 @@ class ProductionReadinessValidator:
     def _generate_validation_summary(self, total_duration: float) -> dict[str, Any]:
         """Generate high-level validation summary."""
         total_checks = len(self._results)
-        passed_checks = sum(1 for result in self._results.values() if result.result == ValidationResult.PASS)
-        failed_checks = sum(1 for result in self._results.values() if result.result == ValidationResult.FAIL)
-        warned_checks = sum(1 for result in self._results.values() if result.result == ValidationResult.WARN)
-        error_checks = sum(1 for result in self._results.values() if result.result == ValidationResult.ERROR)
-        skipped_checks = sum(1 for result in self._results.values() if result.result == ValidationResult.SKIP)
+        passed_checks = sum(
+            1
+            for result in self._results.values()
+            if result.result == ValidationResult.PASS
+        )
+        failed_checks = sum(
+            1
+            for result in self._results.values()
+            if result.result == ValidationResult.FAIL
+        )
+        warned_checks = sum(
+            1
+            for result in self._results.values()
+            if result.result == ValidationResult.WARN
+        )
+        error_checks = sum(
+            1
+            for result in self._results.values()
+            if result.result == ValidationResult.ERROR
+        )
+        skipped_checks = sum(
+            1
+            for result in self._results.values()
+            if result.result == ValidationResult.SKIP
+        )
 
         return {
             "total_checks": total_checks,
@@ -1013,7 +1070,9 @@ class ProductionReadinessValidator:
             "warnings": warned_checks,
             "errors": error_checks,
             "skipped": skipped_checks,
-            "success_rate": (passed_checks / total_checks * 100) if total_checks > 0 else 0,
+            "success_rate": (
+                (passed_checks / total_checks * 100) if total_checks > 0 else 0
+            ),
             "total_duration_seconds": round(total_duration, 2),
         }
 
@@ -1043,12 +1102,14 @@ class ProductionReadinessValidator:
 
         for result in self._results.values():
             if result.result in [ValidationResult.FAIL, ValidationResult.ERROR]:
-                critical_issues.append({
-                    "check_id": result.check_id,
-                    "result": result.result.value,
-                    "message": result.message,
-                    "error": result.error,
-                })
+                critical_issues.append(
+                    {
+                        "check_id": result.check_id,
+                        "result": result.result.value,
+                        "message": result.message,
+                        "error": result.error,
+                    },
+                )
 
         return critical_issues
 
@@ -1060,7 +1121,14 @@ class ProductionReadinessValidator:
 
         # This would map check IDs to priorities based on the validation checks
         critical_checks = ["SEC-001", "PERF-004", "ARCH-004"]  # Most critical
-        high_checks = ["SEC-002", "SEC-003", "SEC-004", "SEC-005", "PERF-001", "ARCH-001"]
+        high_checks = [
+            "SEC-002",
+            "SEC-003",
+            "SEC-004",
+            "SEC-005",
+            "PERF-001",
+            "ARCH-001",
+        ]
 
         for check_id, result in self._results.items():
             if result.result in [ValidationResult.FAIL, ValidationResult.ERROR]:
@@ -1104,7 +1172,8 @@ class ProductionReadinessValidator:
         # Add general recommendations
         compliance = self._assess_compliance_status()
         if not compliance["ready_for_production"]:
-            recommendations.insert(0,
+            recommendations.insert(
+                0,
                 "DEPLOYMENT BLOCKED: Critical issues must be resolved before production deployment",
             )
 
@@ -1121,34 +1190,70 @@ class ProductionReadinessValidator:
             {
                 "category": "Security",
                 "items": [
-                    {"task": "Verify Vault integration for credential management", "status": "required"},
-                    {"task": "Confirm TLS/SSL certificates are properly configured", "status": "required"},
+                    {
+                        "task": "Verify Vault integration for credential management",
+                        "status": "required",
+                    },
+                    {
+                        "task": "Confirm TLS/SSL certificates are properly configured",
+                        "status": "required",
+                    },
                     {"task": "Test rate limiting under load", "status": "recommended"},
-                    {"task": "Validate audit log retention and monitoring", "status": "required"},
+                    {
+                        "task": "Validate audit log retention and monitoring",
+                        "status": "required",
+                    },
                 ],
             },
             {
                 "category": "Performance",
                 "items": [
-                    {"task": "Run performance benchmarks with production load", "status": "required"},
-                    {"task": "Validate connection pool sizing for expected load", "status": "required"},
-                    {"task": "Test circuit breaker behavior under failure scenarios", "status": "required"},
+                    {
+                        "task": "Run performance benchmarks with production load",
+                        "status": "required",
+                    },
+                    {
+                        "task": "Validate connection pool sizing for expected load",
+                        "status": "required",
+                    },
+                    {
+                        "task": "Test circuit breaker behavior under failure scenarios",
+                        "status": "required",
+                    },
                 ],
             },
             {
                 "category": "Monitoring",
                 "items": [
-                    {"task": "Configure Prometheus metrics collection", "status": "required"},
-                    {"task": "Set up alerting for critical metrics", "status": "required"},
-                    {"task": "Verify audit log monitoring and analysis", "status": "required"},
+                    {
+                        "task": "Configure Prometheus metrics collection",
+                        "status": "required",
+                    },
+                    {
+                        "task": "Set up alerting for critical metrics",
+                        "status": "required",
+                    },
+                    {
+                        "task": "Verify audit log monitoring and analysis",
+                        "status": "required",
+                    },
                 ],
             },
             {
                 "category": "Infrastructure",
                 "items": [
-                    {"task": "Test outbox pattern with database failover", "status": "recommended"},
-                    {"task": "Validate backup and recovery procedures", "status": "required"},
-                    {"task": "Perform disaster recovery testing", "status": "recommended"},
+                    {
+                        "task": "Test outbox pattern with database failover",
+                        "status": "recommended",
+                    },
+                    {
+                        "task": "Validate backup and recovery procedures",
+                        "status": "required",
+                    },
+                    {
+                        "task": "Perform disaster recovery testing",
+                        "status": "recommended",
+                    },
                 ],
             },
         ]
@@ -1174,10 +1279,10 @@ class ProductionReadinessValidator:
 async def validate_production_readiness(**components) -> dict[str, Any]:
     """
     Convenience function to run production readiness validation.
-    
+
     Args:
         **components: Component instances (kafka_adapter, postgres_outbox, etc.)
-        
+
     Returns:
         Comprehensive validation report
     """

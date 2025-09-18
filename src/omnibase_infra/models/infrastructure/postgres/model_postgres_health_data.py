@@ -1,71 +1,9 @@
 """Strongly typed PostgreSQL health data model."""
 
-
 from pydantic import BaseModel, Field
 
-
-class ModelPostgresConnectionPoolHealth(BaseModel):
-    """Connection pool health metrics."""
-
-    total_connections: int = Field(
-        description="Total number of connections in the pool",
-        ge=0,
-    )
-
-    active_connections: int = Field(
-        description="Number of active connections",
-        ge=0,
-    )
-
-    idle_connections: int = Field(
-        description="Number of idle connections",
-        ge=0,
-    )
-
-    max_connections: int = Field(
-        description="Maximum allowed connections",
-        ge=1,
-    )
-
-    connection_utilization_percent: float = Field(
-        description="Connection utilization as percentage",
-        ge=0.0,
-        le=100.0,
-    )
-
-
-class ModelPostgresDatabaseHealth(BaseModel):
-    """Database server health metrics."""
-
-    server_version: str = Field(
-        description="PostgreSQL server version",
-    )
-
-    database_name: str = Field(
-        description="Name of the connected database",
-    )
-
-    is_read_only: bool = Field(
-        description="Whether the database is in read-only mode",
-    )
-
-    uptime_seconds: int | None = Field(
-        default=None,
-        description="Server uptime in seconds",
-        ge=0,
-    )
-
-    total_size_bytes: int | None = Field(
-        default=None,
-        description="Total database size in bytes",
-        ge=0,
-    )
-
-    lock_count: int | None = Field(
-        default=None,
-        description="Number of active locks",
-        ge=0,
-    )
+from .model_postgres_connection_pool_health import ModelPostgresConnectionPoolHealth
+from .model_postgres_database_health import ModelPostgresDatabaseHealth
 
 
 class ModelPostgresHealthData(BaseModel):

@@ -4,7 +4,6 @@ Strongly-typed models for payload encryption to replace Dict[str, Any] usage.
 Maintains ONEX compliance with proper field validation and security measures.
 """
 
-
 from pydantic import BaseModel, Field
 
 
@@ -101,6 +100,7 @@ class ModelEncryptedPayload(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
@@ -163,6 +163,7 @@ class ModelDecryptionRequest(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
@@ -228,6 +229,7 @@ class ModelEncryptionRequest(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
 
@@ -332,5 +334,6 @@ class ModelEncryptionStats(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"

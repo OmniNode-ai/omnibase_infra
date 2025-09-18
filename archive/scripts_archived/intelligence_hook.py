@@ -115,7 +115,8 @@ class ChangeSummary(BaseModel):
     lines_added: int = Field(0, description="Lines added")
     lines_removed: int = Field(0, description="Lines removed")
     security_status: SecurityStatus = Field(
-        SecurityStatus.CLEAN, description="Security scan result",
+        SecurityStatus.CLEAN,
+        description="Security scan result",
     )
 
 
@@ -123,14 +124,17 @@ class ImpactAssessment(BaseModel):
     """Assessment of change impact"""
 
     coordination_required: bool = Field(
-        False, description="Whether coordination is needed",
+        False,
+        description="Whether coordination is needed",
     )
     risk_level: RiskLevel = Field(RiskLevel.LOW, description="Overall risk level")
     affected_systems: list[str] = Field(
-        default_factory=list, description="Systems that may be affected",
+        default_factory=list,
+        description="Systems that may be affected",
     )
     breaking_changes: list[str] = Field(
-        default_factory=list, description="Potential breaking changes",
+        default_factory=list,
+        description="Potential breaking changes",
     )
 
 
@@ -138,17 +142,21 @@ class CrossRepositoryCorrelation(BaseModel):
     """Cross-repository correlation analysis"""
 
     enabled: bool = Field(
-        True, description="Whether correlation analysis was performed",
+        True,
+        description="Whether correlation analysis was performed",
     )
     correlation_id: str = Field(..., description="Unique correlation identifier")
     temporal_correlations: list[dict[str, Any]] = Field(
-        default_factory=list, description="Time-based correlations",
+        default_factory=list,
+        description="Time-based correlations",
     )
     semantic_correlations: list[dict[str, Any]] = Field(
-        default_factory=list, description="Semantic correlations",
+        default_factory=list,
+        description="Semantic correlations",
     )
     breaking_changes: list[dict[str, Any]] = Field(
-        default_factory=list, description="Breaking change correlations",
+        default_factory=list,
+        description="Breaking change correlations",
     )
     impact_assessment: ImpactAssessment = Field(..., description="Impact assessment")
 
@@ -157,16 +165,22 @@ class SecurityAndPrivacy(BaseModel):
     """Security and privacy analysis"""
 
     sensitive_patterns: list[str] = Field(
-        default_factory=list, description="Detected sensitive patterns",
+        default_factory=list,
+        description="Detected sensitive patterns",
     )
     security_score: float = Field(
-        1.0, ge=0.0, le=1.0, description="Security confidence score",
+        1.0,
+        ge=0.0,
+        le=1.0,
+        description="Security confidence score",
     )
     privacy_concerns: list[str] = Field(
-        default_factory=list, description="Privacy-related concerns",
+        default_factory=list,
+        description="Privacy-related concerns",
     )
     recommendations: list[str] = Field(
-        default_factory=list, description="Security recommendations",
+        default_factory=list,
+        description="Security recommendations",
     )
 
 
@@ -178,7 +192,8 @@ class TechnicalAnalysis(BaseModel):
     maintainability: str = Field("good", description="Maintainability assessment")
     test_coverage: float | None = Field(None, description="Test coverage percentage")
     architecture_compliance: dict[str, Any] = Field(
-        default_factory=dict, description="Architecture compliance",
+        default_factory=dict,
+        description="Architecture compliance",
     )
 
 
@@ -189,13 +204,16 @@ class IntelligenceDocumentContent(BaseModel):
     metadata: IntelligenceMetadata = Field(..., description="Document metadata")
     change_summary: ChangeSummary = Field(..., description="Summary of changes")
     cross_repository_correlation: CrossRepositoryCorrelation = Field(
-        ..., description="Correlation analysis",
+        ...,
+        description="Correlation analysis",
     )
     security_and_privacy: SecurityAndPrivacy = Field(
-        ..., description="Security analysis",
+        ...,
+        description="Security analysis",
     )
     technical_analysis: TechnicalAnalysis | None = Field(
-        None, description="Technical analysis",
+        None,
+        description="Technical analysis",
     )
     raw_diff: str | None = Field(None, description="Raw git diff content")
 
@@ -208,7 +226,10 @@ class MCPCreateDocumentRequest(BaseModel):
 
     @classmethod
     def create_intelligence_document(
-        cls, project_id: str, content: IntelligenceDocumentContent, repository_name: str,
+        cls,
+        project_id: str,
+        content: IntelligenceDocumentContent,
+        repository_name: str,
     ) -> "MCPCreateDocumentRequest":
         """Create an MCP request for intelligence document"""
         return cls(
@@ -244,16 +265,20 @@ class IntelligenceServiceRequest(BaseModel):
     content: str = Field(..., description="Raw document content as JSON string")
     source_path: str = Field(..., description="Source path identifier")
     metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata",
+        default_factory=dict,
+        description="Additional metadata",
     )
     store_entities: bool = Field(
-        True, description="Whether to store extracted entities",
+        True,
+        description="Whether to store extracted entities",
     )
     extract_relationships: bool = Field(
-        True, description="Whether to extract relationships",
+        True,
+        description="Whether to extract relationships",
     )
     trigger_freshness_analysis: bool = Field(
-        True, description="Whether to trigger freshness analysis",
+        True,
+        description="Whether to trigger freshness analysis",
     )
 
     @classmethod
@@ -266,7 +291,9 @@ class IntelligenceServiceRequest(BaseModel):
         """Create intelligence service request from document content"""
         return cls(
             content=json.dumps(
-                content.model_dump(), indent=2, default=json_datetime_serializer,
+                content.model_dump(),
+                indent=2,
+                default=json_datetime_serializer,
             ),
             source_path=f"git://{repository_name}/commit/{commit_hash}",
             metadata={
@@ -288,7 +315,11 @@ def validate_intelligence_document(
 
 
 def create_intelligence_metadata(
-    repository: str, branch: str, commit: str, author: str, hook_version: str = "3.1",
+    repository: str,
+    branch: str,
+    commit: str,
+    author: str,
+    hook_version: str = "3.1",
 ) -> IntelligenceMetadata:
     """Create intelligence metadata with current timestamp"""
     return IntelligenceMetadata(
@@ -346,10 +377,12 @@ class IntelligenceHook:
         else:
             # Legacy configuration loading
             archon_endpoint = self.config.get(
-                "archon_mcp_endpoint", "http://localhost:8051/mcp",
+                "archon_mcp_endpoint",
+                "http://localhost:8051/mcp",
             )
             intelligence_api_url = self.config.get("intelligence_api", {}).get(
-                "url", "http://localhost:8053/extract/document",
+                "url",
+                "http://localhost:8053/extract/document",
             )
 
             # Use MCP endpoint for document creation (proper format)
@@ -362,7 +395,8 @@ class IntelligenceHook:
 
         self.api_timeout = self.config.get("intelligence_api", {}).get("timeout", 10)
         self.retry_attempts = self.config.get("intelligence_api", {}).get(
-            "retry_attempts", 2,
+            "retry_attempts",
+            2,
         )
 
         # Project ID for document creation
@@ -370,13 +404,16 @@ class IntelligenceHook:
 
         # Feature flags
         self.correlations_enabled = self.config.get("features", {}).get(
-            "correlations", True,
+            "correlations",
+            True,
         )
         self.file_analysis_enabled = self.config.get("features", {}).get(
-            "file_analysis", True,
+            "file_analysis",
+            True,
         )
         self.commit_analysis_enabled = self.config.get("features", {}).get(
-            "commit_analysis", True,
+            "commit_analysis",
+            True,
         )
 
         # Repository configuration
@@ -432,7 +469,8 @@ class IntelligenceHook:
         """Setup logging configuration."""
         logger = logging.getLogger("intelligence_hook")
         log_level = getattr(
-            logging, self.config.get("logging", {}).get("level", "INFO").upper(),
+            logging,
+            self.config.get("logging", {}).get("level", "INFO").upper(),
         )
         logger.setLevel(log_level)
 
@@ -440,7 +478,8 @@ class IntelligenceHook:
             handler = logging.StreamHandler()
             formatter = logging.Formatter(
                 self.config.get("logging", {}).get(
-                    "format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                    "format",
+                    "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
                 ),
             )
             handler.setFormatter(formatter)
@@ -550,7 +589,8 @@ class IntelligenceHook:
             return {}
 
     def analyze_file_changes(
-        self, file_changes: list[dict[str, Any]],
+        self,
+        file_changes: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Analyze file changes to extract patterns and technologies."""
         self.logger.debug(f"Analyzing {len(file_changes)} file changes")
@@ -606,7 +646,8 @@ class IntelligenceHook:
         return result
 
     def find_cross_repo_correlations(
-        self, commit_info: dict[str, Any],
+        self,
+        commit_info: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """Find correlations with other repositories."""
         self.logger.debug(
@@ -737,7 +778,8 @@ class IntelligenceHook:
 
                     # Search for similar commits in sibling repos
                     matching_commits = self._find_matching_commits_in_repo(
-                        sibling, keywords,
+                        sibling,
+                        keywords,
                     )
 
                     if matching_commits:
@@ -767,7 +809,9 @@ class IntelligenceHook:
         return correlations
 
     def _find_matching_commits_in_repo(
-        self, repo_path: Path, keywords: list[str],
+        self,
+        repo_path: Path,
+        keywords: list[str],
     ) -> list[dict[str, Any]]:
         """Find matching commits in a specific repository."""
         matching_commits = []
@@ -902,7 +946,8 @@ class IntelligenceHook:
         return intelligence_doc
 
     def _detect_architecture_patterns(
-        self, file_changes: list[dict[str, Any]],
+        self,
+        file_changes: list[dict[str, Any]],
     ) -> list[str]:
         """Detect architectural patterns from file changes."""
         patterns = []
@@ -970,7 +1015,8 @@ class IntelligenceHook:
         return f"Mixed development including {', '.join(unique_actions)}"
 
     def _generate_cross_repo_insights(
-        self, correlations: list[dict[str, Any]],
+        self,
+        correlations: list[dict[str, Any]],
     ) -> list[str]:
         """Generate insights from cross-repository correlations."""
         insights = []
@@ -1230,7 +1276,9 @@ class IntelligenceHook:
 
                 serializable_doc = serialize_datetime_objects(doc)
                 content = json.dumps(
-                    serializable_doc, indent=2, default=json_datetime_serializer,
+                    serializable_doc,
+                    indent=2,
+                    default=json_datetime_serializer,
                 )
                 source_path = f"git://{serializable_doc.get('repository_name', 'unknown')}/commit/{serializable_doc.get('commit_hash', 'unknown')}"
 
@@ -1289,7 +1337,8 @@ class IntelligenceHook:
                         response = client.post(
                             self.api_url,
                             data=json.dumps(
-                                jsonrpc_payload, default=json_datetime_serializer,
+                                jsonrpc_payload,
+                                default=json_datetime_serializer,
                             ),
                             headers={
                                 "Content-Type": "application/json",
@@ -1340,7 +1389,8 @@ class IntelligenceHook:
                     response = requests.post(
                         self.api_url,
                         data=json.dumps(
-                            jsonrpc_payload, default=json_datetime_serializer,
+                            jsonrpc_payload,
+                            default=json_datetime_serializer,
                         ),
                         headers={
                             "Content-Type": "application/json",

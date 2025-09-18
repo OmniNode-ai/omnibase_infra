@@ -47,23 +47,39 @@ try:
 
     # Validate HookStructuredLogger
     logger = HookStructuredLogger("test_hook_node")
-    assert hasattr(logger, "_build_extra"), "HookStructuredLogger missing _build_extra method"
-    assert hasattr(logger, "_sanitize_url_for_logging"), "HookStructuredLogger missing URL sanitization"
-    assert hasattr(logger, "log_notification_start"), "HookStructuredLogger missing notification logging"
+    assert hasattr(
+        logger, "_build_extra",
+    ), "HookStructuredLogger missing _build_extra method"
+    assert hasattr(
+        logger, "_sanitize_url_for_logging",
+    ), "HookStructuredLogger missing URL sanitization"
+    assert hasattr(
+        logger, "log_notification_start",
+    ), "HookStructuredLogger missing notification logging"
 
     # Test URL sanitization
     test_url = "https://webhook.com/api?token=secret123&key=apikey456&normal=value"
     sanitized = logger._sanitize_url_for_logging(test_url)
-    assert "secret123" not in sanitized, "URL sanitization failed - sensitive data exposed"
+    assert (
+        "secret123" not in sanitized
+    ), "URL sanitization failed - sensitive data exposed"
     assert "apikey456" not in sanitized, "URL sanitization failed - API key exposed"
-    assert "token=***" in sanitized, "URL sanitization failed - token not masked properly"
+    assert (
+        "token=***" in sanitized
+    ), "URL sanitization failed - token not masked properly"
 
     print("   ✅ HookStructuredLogger implementation: PASSED")
 
     # Validate CircuitBreakerState enum
-    assert hasattr(CircuitBreakerState, "CLOSED"), "CircuitBreakerState missing CLOSED state"
-    assert hasattr(CircuitBreakerState, "OPEN"), "CircuitBreakerState missing OPEN state"
-    assert hasattr(CircuitBreakerState, "HALF_OPEN"), "CircuitBreakerState missing HALF_OPEN state"
+    assert hasattr(
+        CircuitBreakerState, "CLOSED",
+    ), "CircuitBreakerState missing CLOSED state"
+    assert hasattr(
+        CircuitBreakerState, "OPEN",
+    ), "CircuitBreakerState missing OPEN state"
+    assert hasattr(
+        CircuitBreakerState, "HALF_OPEN",
+    ), "CircuitBreakerState missing HALF_OPEN state"
 
     print("   ✅ CircuitBreakerState implementation: PASSED")
 
@@ -90,7 +106,9 @@ try:
     cb.state = CircuitBreakerState.OPEN
     cb.last_failure_time = time.time()
 
-    assert cb.state == CircuitBreakerState.OPEN, "Circuit breaker should open after failures"
+    assert (
+        cb.state == CircuitBreakerState.OPEN
+    ), "Circuit breaker should open after failures"
     assert cb.failure_count >= 5, "Circuit breaker should track failure count"
 
     print("   ✅ Circuit breaker state management: PASSED")
@@ -104,7 +122,9 @@ print("\n3. 🔄 Validating Retry Policy Calculations...")
 
 try:
     # Test exponential backoff calculation
-    def calculate_exponential_delay(base_delay_ms: int, attempt: int, multiplier: float, max_delay_ms: int) -> float:
+    def calculate_exponential_delay(
+        base_delay_ms: int, attempt: int, multiplier: float, max_delay_ms: int,
+    ) -> float:
         """Calculate exponential backoff delay."""
         delay_ms = base_delay_ms * (multiplier ** (attempt - 1))
         return min(delay_ms, max_delay_ms) / 1000  # Convert to seconds
@@ -125,7 +145,9 @@ try:
     print("   ✅ Exponential backoff calculations: PASSED")
 
     # Test linear backoff calculation
-    def calculate_linear_delay(base_delay_ms: int, attempt: int, multiplier: float, max_delay_ms: int) -> float:
+    def calculate_linear_delay(
+        base_delay_ms: int, attempt: int, multiplier: float, max_delay_ms: int,
+    ) -> float:
         """Calculate linear backoff delay."""
         delay_ms = base_delay_ms * attempt * multiplier
         return min(delay_ms, max_delay_ms) / 1000
@@ -151,17 +173,22 @@ try:
         return {"Authorization": f"Bearer {token}"}
 
     bearer_header = generate_bearer_header("test-token-123")
-    assert bearer_header == {"Authorization": "Bearer test-token-123"}, "Bearer token header generation failed"
+    assert bearer_header == {
+        "Authorization": "Bearer test-token-123",
+    }, "Bearer token header generation failed"
 
     # Test Basic authentication
     import base64
+
     def generate_basic_header(username: str, password: str) -> dict[str, str]:
         credentials = f"{username}:{password}"
         encoded = base64.b64encode(credentials.encode()).decode()
         return {"Authorization": f"Basic {encoded}"}
 
     basic_header = generate_basic_header("testuser", "testpass")
-    assert basic_header["Authorization"].startswith("Basic "), "Basic auth header should start with 'Basic '"
+    assert basic_header["Authorization"].startswith(
+        "Basic ",
+    ), "Basic auth header should start with 'Basic '"
 
     # Verify encoding
     encoded_part = basic_header["Authorization"].split(" ")[1]
@@ -173,7 +200,9 @@ try:
         return {header_name: api_key}
 
     api_header = generate_api_key_header("X-API-Key", "api-key-123")
-    assert api_header == {"X-API-Key": "api-key-123"}, "API key header generation failed"
+    assert api_header == {
+        "X-API-Key": "api-key-123",
+    }, "API key header generation failed"
 
     print("   ✅ Authentication header generation: PASSED")
 
@@ -284,7 +313,9 @@ try:
 
     avg_time = tracker.get_average_execution_time()
     expected_avg = (120.5 + 95.2 + 30000.0 + 110.8) / 4
-    assert abs(avg_time - expected_avg) < 0.1, "Average execution time calculation incorrect"
+    assert (
+        abs(avg_time - expected_avg) < 0.1
+    ), "Average execution time calculation incorrect"
 
     print("   ✅ Performance metrics tracking: PASSED")
 
@@ -297,7 +328,9 @@ print("\n7. 📦 Validating Webhook Payload Formatting...")
 
 try:
     # Test Slack payload formatting
-    def format_slack_payload(payload: SlackWebhookPayloadModel) -> dict[str, str | list]:
+    def format_slack_payload(
+        payload: SlackWebhookPayloadModel,
+    ) -> dict[str, str | list]:
         """Format payload for Slack webhook delivery."""
         if not payload.text:
             raise ValueError("Slack payload requires 'text' field")
@@ -323,7 +356,9 @@ try:
     print("   ✅ Slack payload formatting: PASSED")
 
     # Test Discord payload formatting
-    def format_discord_payload(payload: DiscordWebhookPayloadModel) -> dict[str, str | list]:
+    def format_discord_payload(
+        payload: DiscordWebhookPayloadModel,
+    ) -> dict[str, str | list]:
         """Format payload for Discord webhook delivery."""
         # Discord accepts content, embeds, etc.
         return payload.dict(exclude_none=True)  # Discord format is preserved as-is
@@ -334,13 +369,17 @@ try:
     )
 
     formatted_discord = format_discord_payload(discord_payload)
-    assert formatted_discord["content"] == "🔥 **CRITICAL ALERT**", "Discord content formatting failed"
+    assert (
+        formatted_discord["content"] == "🔥 **CRITICAL ALERT**"
+    ), "Discord content formatting failed"
     assert len(formatted_discord["embeds"]) == 1, "Discord embeds formatting failed"
 
     print("   ✅ Discord payload formatting: PASSED")
 
     # Test generic webhook formatting
-    def format_generic_payload(payload: GenericWebhookPayloadModel) -> dict[str, str | dict]:
+    def format_generic_payload(
+        payload: GenericWebhookPayloadModel,
+    ) -> dict[str, str | dict]:
         """Format payload for generic webhook delivery."""
         return payload.dict()  # Generic webhooks preserve original structure
 
@@ -352,8 +391,12 @@ try:
     )
 
     formatted_generic = format_generic_payload(generic_payload)
-    assert formatted_generic["event_type"] == "infrastructure.alert", "Generic event_type formatting failed"
-    assert formatted_generic["source"] == "hook_node_test", "Generic source formatting failed"
+    assert (
+        formatted_generic["event_type"] == "infrastructure.alert"
+    ), "Generic event_type formatting failed"
+    assert (
+        formatted_generic["source"] == "hook_node_test"
+    ), "Generic source formatting failed"
 
     print("   ✅ Generic webhook payload formatting: PASSED")
 
@@ -366,7 +409,9 @@ print("\n8. ⚡ Validating Async Processing Patterns...")
 
 try:
     # Test async timeout handling
-    async def mock_http_request_with_timeout(url: str, timeout: float = 30.0) -> dict[str, int | str | float]:
+    async def mock_http_request_with_timeout(
+        url: str, timeout: float = 30.0,
+    ) -> dict[str, int | str | float]:
         """Mock HTTP request with timeout simulation."""
         try:
             # Simulate network delay
@@ -402,7 +447,9 @@ try:
 
         assert len(results) == 5, "Should process 5 concurrent requests"
         for result in results:
-            assert result["status_code"] == 200, "All concurrent requests should succeed"
+            assert (
+                result["status_code"] == 200
+            ), "All concurrent requests should succeed"
 
         return results
 
@@ -425,11 +472,17 @@ try:
         # This would normally inspect the actual code for type hints
         # For now, we validate the principle with mock type checking
 
-        def typed_function(url: str, headers: dict[str, str], payload: dict[str, str | int | float | bool | list | dict]) -> bool:
+        def typed_function(
+            url: str,
+            headers: dict[str, str],
+            payload: dict[str, str | int | float | bool | list | dict],
+        ) -> bool:
             """Example of proper typing - payload uses Union for webhook flexibility."""
             return isinstance(url, str) and isinstance(headers, dict)
 
-        result = typed_function("https://test.com", {"Content-Type": "application/json"}, {"test": "data"})
+        result = typed_function(
+            "https://test.com", {"Content-Type": "application/json"}, {"test": "data"},
+        )
         assert result is True, "Strong typing validation failed"
 
     validate_strong_typing()
@@ -469,8 +522,12 @@ try:
     container.provide("protocol_http_client", mock_http_client)
     container.provide("protocol_event_bus", mock_event_bus)
 
-    assert container.get("protocol_http_client") is mock_http_client, "Dependency injection failed"
-    assert container.get("protocol_event_bus") is mock_event_bus, "Event bus injection failed"
+    assert (
+        container.get("protocol_http_client") is mock_http_client
+    ), "Dependency injection failed"
+    assert (
+        container.get("protocol_event_bus") is mock_event_bus
+    ), "Event bus injection failed"
 
     print("   ✅ Dependency injection patterns: PASSED")
 
@@ -504,7 +561,9 @@ try:
     shared_models_dir = Path("src/omnibase_infra/models/notification")
     if shared_models_dir.exists():
         shared_files = list(shared_models_dir.glob("*.py"))
-        assert len(shared_files) >= 5, f"Expected at least 5 notification models, found {len(shared_files)}"
+        assert (
+            len(shared_files) >= 5
+        ), f"Expected at least 5 notification models, found {len(shared_files)}"
         print(f"   ✅ Found {len(shared_files)} shared notification models")
     else:
         print("   ⚠️  Warning: Shared notification models directory not found")

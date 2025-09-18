@@ -44,7 +44,8 @@
       "Read(//Volumes/PRO-G40/Code/omnibase_spi/src/omnibase_spi/protocols/**)",
       "Read(//Volumes/PRO-G40/Code/omnibase_spi/src/**)",
       "mcp__serena__onboarding",
-      "Read(//Volumes/PRO-G40/Code/omnibase_spi/**)"
+      "Read(//Volumes/PRO-G40/Code/omnibase_spi/**)",
+      "Read(//Users/jonah/Library/Caches/pypoetry/virtualenvs/omnibase-infra-12tLMu6n-py3.12/lib/python3.12/site-packages/omnibase_core/validation/**)"
     ],
     "deny": [],
     "ask": []

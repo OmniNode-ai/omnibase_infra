@@ -116,7 +116,10 @@ class TestNetworkFailuresAndTimeouts:
 
         # Verify proper error conversion and chaining
         assert exc_info.value.code == CoreErrorCode.NETWORK_ERROR
-        assert "network" in str(exc_info.value).lower() or "connection" in str(exc_info.value).lower()
+        assert (
+            "network" in str(exc_info.value).lower()
+            or "connection" in str(exc_info.value).lower()
+        )
 
         # Verify original exception is chained
         assert exc_info.value.__cause__ is not None
@@ -133,6 +136,7 @@ class TestNetworkFailuresAndTimeouts:
 
         # Mock DNS resolution error
         import socket
+
         hook_node._http_client.post = AsyncMock(
             side_effect=socket.gaierror("Name or service not known"),
         )
@@ -143,7 +147,10 @@ class TestNetworkFailuresAndTimeouts:
             await hook_node.process(input_data)
 
         assert exc_info.value.code == CoreErrorCode.NETWORK_ERROR
-        assert "dns" in str(exc_info.value).lower() or "resolution" in str(exc_info.value).lower()
+        assert (
+            "dns" in str(exc_info.value).lower()
+            or "resolution" in str(exc_info.value).lower()
+        )
 
     @pytest.mark.asyncio
     async def test_ssl_certificate_error_handling(self, hook_node):
@@ -156,8 +163,11 @@ class TestNetworkFailuresAndTimeouts:
 
         # Mock SSL certificate error
         import ssl
+
         hook_node._http_client.post = AsyncMock(
-            side_effect=ssl.SSLError("certificate verify failed: certificate has expired"),
+            side_effect=ssl.SSLError(
+                "certificate verify failed: certificate has expired",
+            ),
         )
 
         input_data = ModelHookNodeInput(notification_request=request)
@@ -166,7 +176,10 @@ class TestNetworkFailuresAndTimeouts:
             await hook_node.process(input_data)
 
         assert exc_info.value.code == CoreErrorCode.SECURITY_ERROR
-        assert "ssl" in str(exc_info.value).lower() or "certificate" in str(exc_info.value).lower()
+        assert (
+            "ssl" in str(exc_info.value).lower()
+            or "certificate" in str(exc_info.value).lower()
+        )
 
     @pytest.mark.asyncio
     async def test_http_error_status_codes(self, hook_node):
@@ -205,7 +218,9 @@ class TestNetworkFailuresAndTimeouts:
                 await hook_node.process(input_data)
 
             # Verify correct error code mapping
-            assert exc_info.value.code == expected_error_code, f"Status {status_code} should map to {expected_error_code}"
+            assert (
+                exc_info.value.code == expected_error_code
+            ), f"Status {status_code} should map to {expected_error_code}"
 
 
 class TestAuthenticationFailures:
@@ -258,7 +273,10 @@ class TestAuthenticationFailures:
             await hook_node.process(input_data)
 
         assert exc_info.value.code == CoreErrorCode.AUTHENTICATION_ERROR
-        assert "authentication" in str(exc_info.value).lower() or "unauthorized" in str(exc_info.value).lower()
+        assert (
+            "authentication" in str(exc_info.value).lower()
+            or "unauthorized" in str(exc_info.value).lower()
+        )
 
     @pytest.mark.asyncio
     async def test_invalid_basic_auth_credentials(self, hook_node):
@@ -334,14 +352,18 @@ class TestAuthenticationFailures:
             )
 
         # Test Basic auth with missing password
-        with pytest.raises(ValueError, match="Basic auth requires 'username' and 'password'"):
+        with pytest.raises(
+            ValueError, match="Basic auth requires 'username' and 'password'",
+        ):
             ModelNotificationAuth(
                 auth_type=EnumAuthType.BASIC,
                 credentials={"username": "testuser"},
             )
 
         # Test API key auth with missing header name
-        with pytest.raises(ValueError, match="API key auth requires 'header_name' and 'api_key'"):
+        with pytest.raises(
+            ValueError, match="API key auth requires 'header_name' and 'api_key'",
+        ):
             ModelNotificationAuth(
                 auth_type=EnumAuthType.API_KEY_HEADER,
                 credentials={"api_key": "test-key"},
@@ -486,7 +508,9 @@ class TestCircuitBreakerProtection:
         assert circuit_breaker.state == CircuitBreakerState.OPEN
 
         # Manually advance time to trigger recovery timeout
-        circuit_breaker.last_failure_time = time.time() - 70  # 70 seconds ago (past 60s recovery timeout)
+        circuit_breaker.last_failure_time = (
+            time.time() - 70
+        )  # 70 seconds ago (past 60s recovery timeout)
 
         # Configure success response for recovery attempt
         success_response = ProtocolHttpResponse(
@@ -503,7 +527,10 @@ class TestCircuitBreakerProtection:
 
         assert result.success is True
         # Circuit breaker should transition to HALF_OPEN then CLOSED
-        assert circuit_breaker.state in [CircuitBreakerState.HALF_OPEN, CircuitBreakerState.CLOSED]
+        assert circuit_breaker.state in [
+            CircuitBreakerState.HALF_OPEN,
+            CircuitBreakerState.CLOSED,
+        ]
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_per_destination_isolation(self, hook_node):
@@ -539,7 +566,9 @@ class TestCircuitBreakerProtection:
                 is_success=True,
             )
 
-        hook_node._http_client.post = lambda url, **kwargs: selective_response(url, **kwargs)
+        hook_node._http_client.post = lambda url, **kwargs: selective_response(
+            url, **kwargs,
+        )
 
         # Trigger circuit breaker for failing service
         failing_input = ModelHookNodeInput(notification_request=failing_request)
@@ -706,6 +735,7 @@ class TestInputValidationAndSecurity:
     @pytest.mark.asyncio
     async def test_json_serialization_errors(self, hook_node):
         """Test handling of JSON serialization errors."""
+
         # Create payload with non-serializable data
         class NonSerializable:
             def __str__(self):
@@ -713,7 +743,9 @@ class TestInputValidationAndSecurity:
 
         # Note: Pydantic should prevent non-serializable objects in payload
         # But test the edge case where serialization fails
-        with patch("json.dumps", side_effect=TypeError("Object is not JSON serializable")):
+        with patch(
+            "json.dumps", side_effect=TypeError("Object is not JSON serializable"),
+        ):
             request = ModelNotificationRequest(
                 url="https://webhook.com/api/test",
                 method=EnumNotificationMethod.POST,
@@ -767,13 +799,38 @@ class TestErrorRecoveryScenarios:
 
         # Configure response sequence: fail, fail, fail, succeed
         responses = [
-            ProtocolHttpResponse(status_code=500, headers={}, body="Error", execution_time_ms=100.0, is_success=False),
-            ProtocolHttpResponse(status_code=502, headers={}, body="Bad Gateway", execution_time_ms=100.0, is_success=False),
-            ProtocolHttpResponse(status_code=503, headers={}, body="Unavailable", execution_time_ms=100.0, is_success=False),
-            ProtocolHttpResponse(status_code=200, headers={}, body="OK", execution_time_ms=50.0, is_success=True),
+            ProtocolHttpResponse(
+                status_code=500,
+                headers={},
+                body="Error",
+                execution_time_ms=100.0,
+                is_success=False,
+            ),
+            ProtocolHttpResponse(
+                status_code=502,
+                headers={},
+                body="Bad Gateway",
+                execution_time_ms=100.0,
+                is_success=False,
+            ),
+            ProtocolHttpResponse(
+                status_code=503,
+                headers={},
+                body="Unavailable",
+                execution_time_ms=100.0,
+                is_success=False,
+            ),
+            ProtocolHttpResponse(
+                status_code=200,
+                headers={},
+                body="OK",
+                execution_time_ms=50.0,
+                is_success=True,
+            ),
         ]
 
         call_count = 0
+
         async def mock_post(*args, **kwargs):
             nonlocal call_count
             response = responses[call_count]
@@ -801,7 +858,9 @@ class TestErrorRecoveryScenarios:
         )
 
         # Mock event bus failure (should not affect notification delivery)
-        hook_node._event_bus.publish = AsyncMock(side_effect=Exception("Event bus failure"))
+        hook_node._event_bus.publish = AsyncMock(
+            side_effect=Exception("Event bus failure"),
+        )
 
         # HTTP client should still work
         success_response = ProtocolHttpResponse(
@@ -839,7 +898,10 @@ class TestErrorRecoveryScenarios:
             await hook_node.process(input_data)
 
         assert exc_info.value.code == CoreErrorCode.SYSTEM_ERROR
-        assert "memory" in str(exc_info.value).lower() or "resource" in str(exc_info.value).lower()
+        assert (
+            "memory" in str(exc_info.value).lower()
+            or "resource" in str(exc_info.value).lower()
+        )
 
     @pytest.mark.asyncio
     async def test_concurrent_error_handling(self, hook_node):
@@ -876,7 +938,9 @@ class TestErrorRecoveryScenarios:
         hook_node._http_client.post = selective_response
 
         # Process all requests concurrently
-        input_data_list = [ModelHookNodeInput(notification_request=req) for req in requests]
+        input_data_list = [
+            ModelHookNodeInput(notification_request=req) for req in requests
+        ]
 
         # Some will succeed, some will fail - test that errors don't interfere
         tasks = [hook_node.process(input_data) for input_data in input_data_list]
@@ -894,7 +958,7 @@ class TestErrorRecoveryScenarios:
         failures = [r for r in results if r[0] == "error"]
 
         assert len(successes) == 5  # Odd IDs should succeed
-        assert len(failures) == 5   # Even IDs should fail
+        assert len(failures) == 5  # Even IDs should fail
 
         # Verify error isolation - failures don't affect successes
         for result_type, result in successes:

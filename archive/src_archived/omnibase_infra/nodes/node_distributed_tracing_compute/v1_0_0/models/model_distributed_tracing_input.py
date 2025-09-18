@@ -14,6 +14,7 @@ from omnibase_infra.models.tracing.model_span_attributes import ModelSpanAttribu
 
 class TracingOperation(str, Enum):
     """Distributed tracing operations."""
+
     INITIALIZE_TRACING = "initialize_tracing"
     TRACE_OPERATION = "trace_operation"
     INJECT_CONTEXT = "inject_context"
@@ -25,6 +26,7 @@ class TracingOperation(str, Enum):
 
 class SpanKind(str, Enum):
     """OpenTelemetry span kinds."""
+
     INTERNAL = "INTERNAL"
     SERVER = "SERVER"
     CLIENT = "CLIENT"

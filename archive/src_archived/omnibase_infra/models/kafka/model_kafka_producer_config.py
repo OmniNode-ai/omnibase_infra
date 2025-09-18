@@ -1,6 +1,5 @@
 """Kafka producer configuration model."""
 
-
 from pydantic import BaseModel, Field
 
 from .model_kafka_security_config import ModelKafkaSecurityConfig
@@ -9,7 +8,9 @@ from .model_kafka_security_config import ModelKafkaSecurityConfig
 class ModelKafkaProducerConfig(BaseModel):
     """Kafka producer configuration model."""
 
-    bootstrap_servers: str = Field(description="Kafka bootstrap servers (comma-separated)")
+    bootstrap_servers: str = Field(
+        description="Kafka bootstrap servers (comma-separated)",
+    )
     client_id: str | None = Field(default=None, description="Producer client ID")
     acks: str = Field(default="1", description="Acknowledgment level (0, 1, all)")
     retries: int = Field(default=3, description="Number of retries on failure")

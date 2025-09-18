@@ -41,7 +41,9 @@ class TestSqlSanitizer:
 
     def test_insert_query_with_values(self):
         """Test sanitization of INSERT query with multiple value types."""
-        query = "INSERT INTO products (name, price, active) VALUES ('Widget', 29.99, true)"
+        query = (
+            "INSERT INTO products (name, price, active) VALUES ('Widget', 29.99, true)"
+        )
         result = SqlSanitizer.sanitize_for_observability(query)
 
         assert "INSERT INTO products" in result
@@ -51,7 +53,9 @@ class TestSqlSanitizer:
 
     def test_update_query_sanitization(self):
         """Test sanitization of UPDATE query with WHERE clause."""
-        query = "UPDATE users SET password = 'secret123' WHERE email = 'user@example.com'"
+        query = (
+            "UPDATE users SET password = 'secret123' WHERE email = 'user@example.com'"
+        )
         result = SqlSanitizer.sanitize_for_observability(query)
 
         assert "UPDATE users" in result
@@ -119,7 +123,9 @@ class TestSqlSanitizer:
         result = SqlSanitizer.sanitize_for_observability(huge_query)
 
         assert "QUERY TOO LARGE" in result
-        assert "15000 chars" in result or "15003 chars" in result  # Allow for slight variation
+        assert (
+            "15000 chars" in result or "15003 chars" in result
+        )  # Allow for slight variation
 
     def test_sql_keywords_preserved(self):
         """Test that SQL keywords are properly preserved."""
@@ -140,7 +146,9 @@ class TestSqlSanitizer:
         assert "SELECT" in result
         # The UPDATE might not be included if sqlparse only processes first statement
 
-    @patch("src.omnibase_infra.nodes.node_distributed_tracing_compute.v1_0_0.utils.sql_sanitizer.sqlparse.parse")
+    @patch(
+        "src.omnibase_infra.nodes.node_distributed_tracing_compute.v1_0_0.utils.sql_sanitizer.sqlparse.parse",
+    )
     def test_sqlparse_failure_handling(self, mock_parse):
         """Test handling when sqlparse fails to parse query."""
         mock_parse.side_effect = Exception("Parse error")
@@ -174,8 +182,17 @@ class TestSqlSanitizer:
 
         # Test a few critical keywords
         expected_keywords = {
-            "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
-            "JOIN", "GROUP", "ORDER", "HAVING", "LIMIT",
+            "SELECT",
+            "FROM",
+            "WHERE",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "JOIN",
+            "GROUP",
+            "ORDER",
+            "HAVING",
+            "LIMIT",
         }
 
         assert expected_keywords.issubset(keywords)

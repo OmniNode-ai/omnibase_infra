@@ -157,7 +157,9 @@ class TestEventBusCircuitBreaker:
         # Should queue event on failure (graceful degradation)
         assert result is False
         assert circuit_breaker.failure_count == 1
-        assert circuit_breaker.get_state() == CircuitBreakerState.CLOSED  # Still closed after 1 failure
+        assert (
+            circuit_breaker.get_state() == CircuitBreakerState.CLOSED
+        )  # Still closed after 1 failure
 
         # Verify metrics
         metrics = circuit_breaker.get_metrics()
@@ -167,7 +169,9 @@ class TestEventBusCircuitBreaker:
         assert metrics.last_failure is not None
 
     @pytest.mark.asyncio
-    async def test_circuit_opens_on_failure_threshold(self, circuit_breaker, sample_event):
+    async def test_circuit_opens_on_failure_threshold(
+        self, circuit_breaker, sample_event,
+    ):
         """Test circuit opens when failure threshold is reached."""
         # Mock failing publisher
         publisher_mock = AsyncMock(side_effect=Exception("Publisher error"))
@@ -188,6 +192,7 @@ class TestEventBusCircuitBreaker:
     @pytest.mark.asyncio
     async def test_timeout_handling(self, circuit_breaker, sample_event):
         """Test timeout handling during event publishing."""
+
         # Mock publisher that times out
         async def timeout_publisher(event):
             await asyncio.sleep(10)  # Longer than timeout_seconds (5)
@@ -270,7 +275,9 @@ class TestEventBusCircuitBreaker:
         assert metrics.circuit_closes >= 1
 
     @pytest.mark.asyncio
-    async def test_half_open_failure_reopens_circuit(self, circuit_breaker, sample_event):
+    async def test_half_open_failure_reopens_circuit(
+        self, circuit_breaker, sample_event,
+    ):
         """Test circuit reopens immediately on failure in half-open state."""
         # Force to half-open state
         await self._force_circuit_half_open(circuit_breaker, sample_event)
@@ -374,8 +381,12 @@ class TestEventBusCircuitBreaker:
 
         # Verify structure
         required_keys = [
-            "circuit_state", "is_healthy", "failure_count",
-            "queued_events", "dead_letter_events", "metrics",
+            "circuit_state",
+            "is_healthy",
+            "failure_count",
+            "queued_events",
+            "dead_letter_events",
+            "metrics",
         ]
         for key in required_keys:
             assert key in health_status
@@ -414,7 +425,11 @@ class TestEventBusCircuitBreaker:
 
         # Circuit should be in consistent state
         state = circuit_breaker.get_state()
-        assert state in [CircuitBreakerState.CLOSED, CircuitBreakerState.OPEN, CircuitBreakerState.HALF_OPEN]
+        assert state in [
+            CircuitBreakerState.CLOSED,
+            CircuitBreakerState.OPEN,
+            CircuitBreakerState.HALF_OPEN,
+        ]
 
         # Metrics should be consistent
         metrics = circuit_breaker.get_metrics()
@@ -443,10 +458,14 @@ class TestEventBusCircuitBreaker:
         assert final_metrics.failed_events == initial_metrics.failed_events + 3
 
         # Success rate calculation
-        expected_success_rate = (final_metrics.successful_events / final_metrics.total_events) * 100
+        expected_success_rate = (
+            final_metrics.successful_events / final_metrics.total_events
+        ) * 100
         health_status = circuit_breaker.get_health_status()
         actual_success_rate = health_status["metrics"]["success_rate"]
-        assert abs(actual_success_rate - expected_success_rate) < 0.01  # Floating point tolerance
+        assert (
+            abs(actual_success_rate - expected_success_rate) < 0.01
+        )  # Floating point tolerance
 
     async def _force_circuit_open(self, circuit_breaker, sample_event):
         """Helper to force circuit breaker open."""

@@ -140,13 +140,19 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
 
             # Create projector output
             projector_output = ModelConsulProjectorOutput(
-                projection_result=result.model_dump() if hasattr(result, "model_dump") else result,
+                projection_result=(
+                    result.model_dump() if hasattr(result, "model_dump") else result
+                ),
                 projection_type=projector_input.projection_type,
                 timestamp=timestamp,
-                metadata={
-                    "cache_used": True,  # TODO: Implement cache usage tracking
-                    "aggregation_window": projector_input.aggregation_window,
-                } if projector_input.include_metadata else None,
+                metadata=(
+                    {
+                        "cache_used": True,  # TODO: Implement cache usage tracking
+                        "aggregation_window": projector_input.aggregation_window,
+                    }
+                    if projector_input.include_metadata
+                    else None
+                ),
             )
 
             # Return the result directly since we override process completely
@@ -177,7 +183,9 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
                 )
 
             # Check cache health and projector state
-            cache_health = len(self._service_cache) + len(self._health_cache) + len(self._kv_cache)
+            cache_health = (
+                len(self._service_cache) + len(self._health_cache) + len(self._kv_cache)
+            )
 
             if cache_health == 0:
                 return ModelHealthStatus(
@@ -197,7 +205,9 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
                 message=f"Consul projector health check failed: {e!s}",
             )
 
-    async def _project_service_state(self, input_data: ModelConsulProjectorInput) -> ModelConsulServiceProjection:
+    async def _project_service_state(
+        self, input_data: ModelConsulProjectorInput,
+    ) -> ModelConsulServiceProjection:
         """Project current service state from Consul data."""
         try:
             # TODO: Integration with Consul adapter to get service data
@@ -226,8 +236,7 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
             target_services = getattr(input_data, "target_services", [])
             if target_services:
                 mock_services = [
-                    s for s in mock_services
-                    if s["service_name"] in target_services
+                    s for s in mock_services if s["service_name"] in target_services
                 ]
 
             services = mock_services
@@ -244,7 +253,9 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
                 error_code=CoreErrorCode.OPERATION_FAILED,
             ) from e
 
-    async def _project_health_state(self, input_data: ModelConsulProjectorInput) -> ModelConsulHealthProjection:
+    async def _project_health_state(
+        self, input_data: ModelConsulProjectorInput,
+    ) -> ModelConsulHealthProjection:
         """Project health state aggregation from Consul data."""
         try:
             # TODO: Integration with Consul adapter to get health data
@@ -286,7 +297,9 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
                 error_code=CoreErrorCode.OPERATION_FAILED,
             ) from e
 
-    async def _project_kv_state(self, input_data: ModelConsulProjectorInput) -> ModelConsulKVProjection:
+    async def _project_kv_state(
+        self, input_data: ModelConsulProjectorInput,
+    ) -> ModelConsulKVProjection:
         """Project KV store state changes from Consul data."""
         try:
             # TODO: Integration with Consul adapter to get KV data
@@ -320,7 +333,9 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
                 error_code=CoreErrorCode.OPERATION_FAILED,
             ) from e
 
-    async def _project_topology(self, input_data: ModelConsulProjectorInput) -> ModelConsulTopologyProjection:
+    async def _project_topology(
+        self, input_data: ModelConsulProjectorInput,
+    ) -> ModelConsulTopologyProjection:
         """Project service topology view from Consul data."""
         try:
             # TODO: Integration with Consul adapter to build topology
@@ -333,8 +348,16 @@ class NodeInfrastructureConsulProjectorEffect(NodeEffectService):
                     {"id": "data-service", "name": "Data Service", "type": "service"},
                 ],
                 "edges": [
-                    {"source": "api-gateway", "target": "user-service", "relationship": "depends_on"},
-                    {"source": "user-service", "target": "data-service", "relationship": "depends_on"},
+                    {
+                        "source": "api-gateway",
+                        "target": "user-service",
+                        "relationship": "depends_on",
+                    },
+                    {
+                        "source": "user-service",
+                        "target": "data-service",
+                        "relationship": "depends_on",
+                    },
                 ],
             }
 

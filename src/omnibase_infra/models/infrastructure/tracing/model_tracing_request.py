@@ -9,9 +9,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from omnibase_infra.models.infrastructure.tracing.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.models.infrastructure.tracing.model_event_envelope import (
+    ModelEventEnvelope,
+)
+from omnibase_infra.models.infrastructure.tracing.model_span_attributes import (
+    ModelSpanAttributes,
+)
+
 from .model_parent_context import ModelParentContext
-from omnibase_infra.models.infrastructure.tracing.model_span_attributes import ModelSpanAttributes
 from .model_trace_context import ModelTraceContext
 
 

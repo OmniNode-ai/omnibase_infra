@@ -5,7 +5,6 @@ Update callers that were using the removed simple to_dict() wrapper methods.
 
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 # Files we know we removed to_dict() methods from, mapped to their replacement
 REMOVED_TO_DICT_METHODS = {
@@ -50,10 +49,10 @@ COMPLEX_TO_DICT_METHODS = [
 ]
 
 
-def find_to_dict_callers(file_path: Path) -> List[Tuple[int, str, str]]:
+def find_to_dict_callers(file_path: Path) -> list[tuple[int, str, str]]:
     """Find .to_dict() calls in a file and return (line_num, full_line, variable_context)."""
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             content = f.read()
 
         lines = content.split("\n")
@@ -96,7 +95,7 @@ def update_caller_line(line: str) -> str:
 def update_file_callers(file_path: Path) -> int:
     """Update .to_dict() callers in a file."""
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             content = f.read()
 
         callers = find_to_dict_callers(file_path)
@@ -117,7 +116,7 @@ def update_file_callers(file_path: Path) -> int:
                     lines[line_index] = new_line
                     updates_made += 1
                     print(
-                        f"    Line {line_num}: {var_context}.to_dict() → {var_context}.model_dump(exclude_none=True)"
+                        f"    Line {line_num}: {var_context}.to_dict() → {var_context}.model_dump(exclude_none=True)",
                     )
 
         if updates_made > 0:
@@ -155,7 +154,7 @@ def main():
             should_update = should_update_call(file_path, line_content, var_context)
             status = "🔄" if should_update else "⏭️ "
             print(
-                f"  {status} Line {line_num}: {var_context}.to_dict() - {line_content[:60]}{'...' if len(line_content) > 60 else ''}"
+                f"  {status} Line {line_num}: {var_context}.to_dict() - {line_content[:60]}{'...' if len(line_content) > 60 else ''}",
             )
 
         # Apply updates
@@ -165,10 +164,10 @@ def main():
             total_updates += updates
             print(f"  ✅ Updated {updates} caller(s)")
 
-    print(f"\n" + "=" * 60)
-    print(f"🎯 Summary:")
+    print("\n" + "=" * 60)
+    print("🎯 Summary:")
     print(
-        f"  📊 Total files processed: {len([f for f in all_files if find_to_dict_callers(f)])}"
+        f"  📊 Total files processed: {len([f for f in all_files if find_to_dict_callers(f)])}",
     )
     print(f"  🔄 Files with updates: {files_with_updates}")
     print(f"  ✅ Total updates made: {total_updates}")

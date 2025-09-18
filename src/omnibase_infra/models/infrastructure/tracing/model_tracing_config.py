@@ -4,7 +4,6 @@ Shared model for distributed tracing configuration settings.
 Used across tracing infrastructure for consistent setup.
 """
 
-
 from pydantic import BaseModel, Field
 
 

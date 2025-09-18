@@ -1,6 +1,5 @@
 """Strongly typed Kafka metadata models."""
 
-
 from pydantic import BaseModel, Field
 
 

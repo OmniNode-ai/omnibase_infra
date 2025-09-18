@@ -59,12 +59,18 @@ class MockWebhookServer:
 
     def __init__(self):
         self.received_requests: list[MockWebhookRequestModel] = []
-        self.response_config: MockWebhookResponseConfigModel = MockWebhookResponseConfigModel()
+        self.response_config: MockWebhookResponseConfigModel = (
+            MockWebhookResponseConfigModel()
+        )
         self.failure_config: MockWebhookFailureConfigModel | None = None
         self.failure_count: int = 0
         self.request_count: int = 0
 
-    def configure_responses(self, success_config: MockWebhookResponseConfigModel | None = None, failure_config: MockWebhookFailureConfigModel | None = None):
+    def configure_responses(
+        self,
+        success_config: MockWebhookResponseConfigModel | None = None,
+        failure_config: MockWebhookFailureConfigModel | None = None,
+    ):
         """Configure mock server responses."""
         if success_config:
             self.response_config = success_config
@@ -76,7 +82,9 @@ class MockWebhookServer:
         self.failure_count = 0
         self.request_count = 0
 
-    async def handle_request(self, method: str, url: str, headers: Dict[str, str], body: str) -> ProtocolHttpResponse:
+    async def handle_request(
+        self, method: str, url: str, headers: Dict[str, str], body: str,
+    ) -> ProtocolHttpResponse:
         """Handle incoming webhook request."""
         self.request_count += 1
 
@@ -369,7 +377,10 @@ class TestDiscordWebhookDelivery:
         last_request = webhook_server.get_last_request()
         received_payload = json.loads(last_request.body)
 
-        assert received_payload["content"] == "🔥 **CRITICAL ALERT**\nDatabase connection has been lost!"
+        assert (
+            received_payload["content"]
+            == "🔥 **CRITICAL ALERT**\nDatabase connection has been lost!"
+        )
         assert received_payload["username"] == "ONEX Infrastructure Bot"
         assert received_payload["avatar_url"] == "https://example.com/bot-avatar.png"
 
@@ -386,7 +397,11 @@ class TestDiscordWebhookDelivery:
                     "fields": [
                         {"name": "Database", "value": "❌ Offline", "inline": True},
                         {"name": "Cache", "value": "✅ Healthy", "inline": True},
-                        {"name": "Load Balancer", "value": "⚠️ Degraded", "inline": True},
+                        {
+                            "name": "Load Balancer",
+                            "value": "⚠️ Degraded",
+                            "inline": True,
+                        },
                     ],
                     "footer": {"text": "ONEX Infrastructure Monitor"},
                     "timestamp": datetime.utcnow().isoformat(),
@@ -519,7 +534,9 @@ class TestGenericWebhookDelivery:
         assert received_payload["event_type"] == "infrastructure.alert"
         assert received_payload["severity"] == "critical"
         assert received_payload["source"]["service"] == "hook_node"
-        assert received_payload["alert"]["title"] == "Database Connection Pool Exhausted"
+        assert (
+            received_payload["alert"]["title"] == "Database Connection Pool Exhausted"
+        )
         assert len(received_payload["alert"]["tags"]) == 3
 
         # Verify custom headers
@@ -527,7 +544,9 @@ class TestGenericWebhookDelivery:
         assert last_request["headers"]["X-Event-Type"] == "infrastructure.alert"
 
     @pytest.mark.asyncio
-    async def test_generic_webhook_api_key_authentication(self, hook_node, webhook_server):
+    async def test_generic_webhook_api_key_authentication(
+        self, hook_node, webhook_server,
+    ):
         """Test generic webhook with API key authentication."""
         auth = ModelNotificationAuth(
             auth_type=EnumAuthType.API_KEY_HEADER,
@@ -559,7 +578,9 @@ class TestGenericWebhookDelivery:
         assert last_request["headers"]["X-API-Key"] == "ak_1234567890abcdef"
 
     @pytest.mark.asyncio
-    async def test_generic_webhook_basic_authentication(self, hook_node, webhook_server):
+    async def test_generic_webhook_basic_authentication(
+        self, hook_node, webhook_server,
+    ):
         """Test generic webhook with Basic authentication."""
         auth = ModelNotificationAuth(
             auth_type=EnumAuthType.BASIC,
@@ -593,6 +614,7 @@ class TestGenericWebhookDelivery:
 
         # Decode and verify credentials
         import base64
+
         encoded_creds = auth_header.split(" ")[1]
         decoded_creds = base64.b64decode(encoded_creds).decode()
         assert decoded_creds == "webhook-user:secure-password-123"
@@ -612,13 +634,15 @@ class TestGenericWebhookDelivery:
         )
 
         # Mock PUT method on HTTP client
-        webhook_server.handle_request = AsyncMock(return_value=ProtocolHttpResponse(
-            status_code=200,
-            headers={"Content-Type": "application/json"},
-            body='{"updated": true}',
-            execution_time_ms=80.0,
-            is_success=True,
-        ))
+        webhook_server.handle_request = AsyncMock(
+            return_value=ProtocolHttpResponse(
+                status_code=200,
+                headers={"Content-Type": "application/json"},
+                body='{"updated": true}',
+                execution_time_ms=80.0,
+                is_success=True,
+            ),
+        )
 
         # Patch the HTTP client to support PUT
         with patch.object(hook_node._http_client, "put", webhook_server.handle_request):
@@ -671,7 +695,9 @@ class TestWebhookCircuitBreakerBehavior:
         )
 
         # Configure server to fail only Slack requests
-        def selective_handler(method: str, url: str, headers: Dict[str, str], body: str) -> ProtocolHttpResponse:
+        def selective_handler(
+            method: str, url: str, headers: Dict[str, str], body: str,
+        ) -> ProtocolHttpResponse:
             if "slack.com" in url:
                 return ProtocolHttpResponse(
                     status_code=500,
@@ -745,7 +771,9 @@ class TestWebhookCircuitBreakerBehavior:
         assert circuit_breaker.state == CircuitBreakerState.OPEN
 
         # Manually advance time to trigger recovery attempt
-        circuit_breaker.last_failure_time = time.time() - 70  # 70 seconds ago (past recovery timeout)
+        circuit_breaker.last_failure_time = (
+            time.time() - 70
+        )  # 70 seconds ago (past recovery timeout)
 
         # Configure server to now succeed
         webhook_server.configure_responses(
@@ -760,4 +788,7 @@ class TestWebhookCircuitBreakerBehavior:
 
         # Circuit breaker should transition to HALF_OPEN then CLOSED
         # Note: Implementation details may vary, but it should eventually close
-        assert circuit_breaker.state in [CircuitBreakerState.HALF_OPEN, CircuitBreakerState.CLOSED]
+        assert circuit_breaker.state in [
+            CircuitBreakerState.HALF_OPEN,
+            CircuitBreakerState.CLOSED,
+        ]

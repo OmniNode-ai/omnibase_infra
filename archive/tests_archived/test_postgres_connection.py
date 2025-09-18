@@ -16,6 +16,7 @@ from omnibase_infra.infrastructure.postgres_connection_manager import (
 # Configure logging following omnibase_3 infrastructure pattern
 logger = logging.getLogger(__name__)
 
+
 async def test_postgres_connection():
     """Test PostgreSQL connection and basic operations."""
     logger.info("Starting PostgreSQL connection test...")
@@ -49,10 +50,12 @@ async def test_postgres_connection():
     except Exception as e:
         logger.error(f"❌ PostgreSQL connection test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
     return True
+
 
 if __name__ == "__main__":
     # Configure logging for test

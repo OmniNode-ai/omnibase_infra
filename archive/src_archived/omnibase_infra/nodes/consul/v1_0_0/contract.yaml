@@ -33,7 +33,7 @@ io_operations:
   - operation_name: "consul_kv_delete"
     operation_type: "delete"
     description: "Delete key from Consul KV store"
-    input_type: "ModelConsulKVRequest" 
+    input_type: "ModelConsulKVRequest"
     output_type: "ModelConsulKVResponse"
   - operation_name: "consul_service_register"
     operation_type: "write"

@@ -4,7 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from omnibase_infra.models.infrastructure.consul.model_consul_service_status import ModelConsulServiceStatus
+from omnibase_infra.models.infrastructure.consul.model_consul_service_status import (
+    ModelConsulServiceStatus,
+)
 
 
 class ModelConsulHealthCheckNode(BaseModel):

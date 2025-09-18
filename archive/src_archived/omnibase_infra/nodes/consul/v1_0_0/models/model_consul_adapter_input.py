@@ -10,7 +10,7 @@ from .model_consul_value_data import ModelConsulValueData
 
 class ModelConsulAdapterInput(BaseModel):
     """Input model for Consul adapter operations from event envelopes.
-    
+
     Node-specific model for processing event envelope payloads into Consul operations.
     """
 

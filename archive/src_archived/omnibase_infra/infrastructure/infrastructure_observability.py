@@ -2,7 +2,7 @@
 
 Comprehensive observability framework for ONEX infrastructure including:
 - Prometheus-style metrics for circuit breakers and event publishing
-- Performance tracking and trend analysis  
+- Performance tracking and trend analysis
 - Health check aggregation and monitoring
 - Alert generation for critical infrastructure issues
 - Dashboard-ready metrics export
@@ -25,23 +25,26 @@ from omnibase_infra.infrastructure.event_bus_circuit_breaker import (
 
 class MetricType(Enum):
     """Types of metrics collected by observability system."""
-    COUNTER = "counter"           # Monotonically increasing values
-    GAUGE = "gauge"              # Point-in-time values
-    HISTOGRAM = "histogram"      # Distribution of values
-    SUMMARY = "summary"          # Summary statistics
+
+    COUNTER = "counter"  # Monotonically increasing values
+    GAUGE = "gauge"  # Point-in-time values
+    HISTOGRAM = "histogram"  # Distribution of values
+    SUMMARY = "summary"  # Summary statistics
 
 
 class AlertSeverity(Enum):
     """Alert severity levels."""
-    CRITICAL = "critical"        # Service-affecting issues
-    HIGH = "high"               # Performance degradation
-    MEDIUM = "medium"           # Potential issues
-    LOW = "low"                 # Informational
+
+    CRITICAL = "critical"  # Service-affecting issues
+    HIGH = "high"  # Performance degradation
+    MEDIUM = "medium"  # Potential issues
+    LOW = "low"  # Informational
 
 
 @dataclass
 class MetricPoint:
     """Single metric data point."""
+
     name: str
     value: float
     timestamp: datetime
@@ -52,6 +55,7 @@ class MetricPoint:
 @dataclass
 class Alert:
     """Infrastructure alert."""
+
     id: str
     name: str
     description: str
@@ -66,6 +70,7 @@ class Alert:
 @dataclass
 class PerformanceSnapshot:
     """Performance snapshot for trend analysis."""
+
     timestamp: datetime
     circuit_breaker_health: dict[str, Any]
     event_publishing_metrics: dict[str, float]
@@ -76,7 +81,7 @@ class PerformanceSnapshot:
 class InfrastructureObservability:
     """
     Comprehensive observability system for ONEX infrastructure.
-    
+
     Provides:
     - Real-time metrics collection and aggregation
     - Performance trend analysis and predictions
@@ -88,7 +93,7 @@ class InfrastructureObservability:
     def __init__(self, retention_hours: int = 24):
         """
         Initialize observability system.
-        
+
         Args:
             retention_hours: How long to retain metrics in memory
         """
@@ -102,15 +107,32 @@ class InfrastructureObservability:
 
         # Performance tracking
         self.event_latencies: deque[float] = deque(maxlen=1000)
-        self.error_rates: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=100))
+        self.error_rates: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=100),
+        )
 
         # Alert thresholds (configurable)
         self.alert_thresholds = {
-            "circuit_breaker_open": {"severity": AlertSeverity.CRITICAL, "threshold": 1},
-            "high_error_rate": {"severity": AlertSeverity.HIGH, "threshold": 0.1},  # 10%
-            "high_latency": {"severity": AlertSeverity.HIGH, "threshold": 5.0},     # 5 seconds
-            "queue_capacity": {"severity": AlertSeverity.MEDIUM, "threshold": 0.8}, # 80% full
-            "dead_letter_growth": {"severity": AlertSeverity.MEDIUM, "threshold": 10}, # 10 events
+            "circuit_breaker_open": {
+                "severity": AlertSeverity.CRITICAL,
+                "threshold": 1,
+            },
+            "high_error_rate": {
+                "severity": AlertSeverity.HIGH,
+                "threshold": 0.1,
+            },  # 10%
+            "high_latency": {
+                "severity": AlertSeverity.HIGH,
+                "threshold": 5.0,
+            },  # 5 seconds
+            "queue_capacity": {
+                "severity": AlertSeverity.MEDIUM,
+                "threshold": 0.8,
+            },  # 80% full
+            "dead_letter_growth": {
+                "severity": AlertSeverity.MEDIUM,
+                "threshold": 10,
+            },  # 10 events
         }
 
         self.logger = logging.getLogger(f"{__name__}.InfrastructureObservability")
@@ -119,13 +141,20 @@ class InfrastructureObservability:
         self._monitoring_task: asyncio.Task | None = None
         self._start_background_monitoring()
 
-    def register_circuit_breaker(self, name: str, circuit_breaker: EventBusCircuitBreaker):
+    def register_circuit_breaker(
+        self, name: str, circuit_breaker: EventBusCircuitBreaker,
+    ):
         """Register circuit breaker for monitoring."""
         self.circuit_breakers[name] = circuit_breaker
         self.logger.info(f"Registered circuit breaker for monitoring: {name}")
 
-    def record_metric(self, name: str, value: float, labels: dict[str, str] | None = None,
-                     metric_type: MetricType = MetricType.GAUGE):
+    def record_metric(
+        self,
+        name: str,
+        value: float,
+        labels: dict[str, str] | None = None,
+        metric_type: MetricType = MetricType.GAUGE,
+    ):
         """Record a metric data point."""
         metric = MetricPoint(
             name=name,
@@ -201,9 +230,21 @@ class InfrastructureObservability:
 
         # Performance metrics
         performance_metrics = {
-            "avg_latency": sum(self.event_latencies) / len(self.event_latencies) if self.event_latencies else 0,
-            "p95_latency": self._calculate_percentile(list(self.event_latencies), 95) if self.event_latencies else 0,
-            "p99_latency": self._calculate_percentile(list(self.event_latencies), 99) if self.event_latencies else 0,
+            "avg_latency": (
+                sum(self.event_latencies) / len(self.event_latencies)
+                if self.event_latencies
+                else 0
+            ),
+            "p95_latency": (
+                self._calculate_percentile(list(self.event_latencies), 95)
+                if self.event_latencies
+                else 0
+            ),
+            "p99_latency": (
+                self._calculate_percentile(list(self.event_latencies), 99)
+                if self.event_latencies
+                else 0
+            ),
         }
 
         # Error rate metrics
@@ -235,11 +276,19 @@ class InfrastructureObservability:
                 healthy_circuits += 1
 
         # Calculate overall health score
-        circuit_health_score = (healthy_circuits / total_circuits * 100) if total_circuits > 0 else 100
+        circuit_health_score = (
+            (healthy_circuits / total_circuits * 100) if total_circuits > 0 else 100
+        )
 
         # Performance health score based on latency
-        avg_latency = sum(self.event_latencies) / len(self.event_latencies) if self.event_latencies else 0
-        performance_health_score = max(0, 100 - (avg_latency / 0.1 * 10))  # Penalize high latency
+        avg_latency = (
+            sum(self.event_latencies) / len(self.event_latencies)
+            if self.event_latencies
+            else 0
+        )
+        performance_health_score = max(
+            0, 100 - (avg_latency / 0.1 * 10),
+        )  # Penalize high latency
 
         # Error rate health score
         recent_error_rates = []
@@ -247,14 +296,20 @@ class InfrastructureObservability:
             if rates:
                 recent_error_rates.append(rates[-1])
 
-        avg_error_rate = sum(recent_error_rates) / len(recent_error_rates) if recent_error_rates else 0
-        error_health_score = max(0, 100 - (avg_error_rate * 1000))  # Penalize error rates
+        avg_error_rate = (
+            sum(recent_error_rates) / len(recent_error_rates)
+            if recent_error_rates
+            else 0
+        )
+        error_health_score = max(
+            0, 100 - (avg_error_rate * 1000),
+        )  # Penalize error rates
 
         # Overall health score (weighted average)
         overall_health_score = (
-            circuit_health_score * 0.4 +
-            performance_health_score * 0.3 +
-            error_health_score * 0.3
+            circuit_health_score * 0.4
+            + performance_health_score * 0.3
+            + error_health_score * 0.3
         )
 
         # Determine health status
@@ -290,12 +345,15 @@ class InfrastructureObservability:
 
         # Filter recent snapshots
         recent_snapshots = [
-            snapshot for snapshot in self.performance_snapshots
+            snapshot
+            for snapshot in self.performance_snapshots
             if snapshot.timestamp >= cutoff_time
         ]
 
         if not recent_snapshots:
-            return {"message": "No performance data available for specified time period"}
+            return {
+                "message": "No performance data available for specified time period",
+            }
 
         # Calculate trends
         latency_trend = []
@@ -304,8 +362,12 @@ class InfrastructureObservability:
 
         for snapshot in recent_snapshots:
             latency_trend.append(snapshot.performance_indicators.get("avg_latency", 0))
-            error_rate_trend.append(snapshot.performance_indicators.get("error_rate", 0))
-            health_score_trend.append(snapshot.performance_indicators.get("health_score", 100))
+            error_rate_trend.append(
+                snapshot.performance_indicators.get("error_rate", 0),
+            )
+            health_score_trend.append(
+                snapshot.performance_indicators.get("health_score", 100),
+            )
 
         # Trend analysis
         latency_direction = self._calculate_trend_direction(latency_trend)
@@ -318,24 +380,35 @@ class InfrastructureObservability:
             "latency_trend": {
                 "direction": latency_direction,
                 "current": latency_trend[-1] if latency_trend else 0,
-                "average": sum(latency_trend) / len(latency_trend) if latency_trend else 0,
+                "average": (
+                    sum(latency_trend) / len(latency_trend) if latency_trend else 0
+                ),
                 "min": min(latency_trend) if latency_trend else 0,
                 "max": max(latency_trend) if latency_trend else 0,
             },
             "error_rate_trend": {
                 "direction": error_rate_direction,
                 "current": error_rate_trend[-1] if error_rate_trend else 0,
-                "average": sum(error_rate_trend) / len(error_rate_trend) if error_rate_trend else 0,
+                "average": (
+                    sum(error_rate_trend) / len(error_rate_trend)
+                    if error_rate_trend
+                    else 0
+                ),
             },
             "health_trend": {
                 "direction": health_direction,
                 "current": health_score_trend[-1] if health_score_trend else 100,
-                "average": sum(health_score_trend) / len(health_score_trend) if health_score_trend else 100,
+                "average": (
+                    sum(health_score_trend) / len(health_score_trend)
+                    if health_score_trend
+                    else 100
+                ),
             },
         }
 
-    def get_alerts(self, severity: AlertSeverity | None = None,
-                  active_only: bool = True) -> list[dict[str, Any]]:
+    def get_alerts(
+        self, severity: AlertSeverity | None = None, active_only: bool = True,
+    ) -> list[dict[str, Any]]:
         """Get alerts with optional filtering."""
         filtered_alerts = self.alerts
 
@@ -343,7 +416,9 @@ class InfrastructureObservability:
             filtered_alerts = [alert for alert in filtered_alerts if not alert.resolved]
 
         if severity:
-            filtered_alerts = [alert for alert in filtered_alerts if alert.severity == severity]
+            filtered_alerts = [
+                alert for alert in filtered_alerts if alert.severity == severity
+            ]
 
         return [
             {
@@ -355,7 +430,11 @@ class InfrastructureObservability:
                 "source": alert.source,
                 "details": alert.details,
                 "resolved": alert.resolved,
-                "resolution_timestamp": alert.resolution_timestamp.isoformat() if alert.resolution_timestamp else None,
+                "resolution_timestamp": (
+                    alert.resolution_timestamp.isoformat()
+                    if alert.resolution_timestamp
+                    else None
+                ),
             }
             for alert in filtered_alerts
         ]
@@ -425,14 +504,34 @@ class InfrastructureObservability:
         for name, cb in self.circuit_breakers.items():
             metrics = cb.get_metrics()
 
-            self.record_metric("circuit_breaker_total_events", metrics.total_events, {"circuit": name})
-            self.record_metric("circuit_breaker_successful_events", metrics.successful_events, {"circuit": name})
-            self.record_metric("circuit_breaker_failed_events", metrics.failed_events, {"circuit": name})
-            self.record_metric("circuit_breaker_queued_events", metrics.queued_events, {"circuit": name})
-            self.record_metric("circuit_breaker_dead_letter_events", metrics.dead_letter_events, {"circuit": name})
+            self.record_metric(
+                "circuit_breaker_total_events", metrics.total_events, {"circuit": name},
+            )
+            self.record_metric(
+                "circuit_breaker_successful_events",
+                metrics.successful_events,
+                {"circuit": name},
+            )
+            self.record_metric(
+                "circuit_breaker_failed_events",
+                metrics.failed_events,
+                {"circuit": name},
+            )
+            self.record_metric(
+                "circuit_breaker_queued_events",
+                metrics.queued_events,
+                {"circuit": name},
+            )
+            self.record_metric(
+                "circuit_breaker_dead_letter_events",
+                metrics.dead_letter_events,
+                {"circuit": name},
+            )
 
             # Circuit breaker state as numeric
-            state_value = {"closed": 0, "half_open": 1, "open": 2}.get(cb.get_state().value, -1)
+            state_value = {"closed": 0, "half_open": 1, "open": 2}.get(
+                cb.get_state().value, -1,
+            )
             self.record_metric("circuit_breaker_state", state_value, {"circuit": name})
 
     async def _check_alert_conditions(self):
@@ -453,21 +552,33 @@ class InfrastructureObservability:
             metrics = cb.get_metrics()
             if metrics.queued_events > 0:
                 queue_utilization = metrics.queued_events / cb.config.max_queue_size
-                if queue_utilization > self.alert_thresholds["queue_capacity"]["threshold"]:
+                if (
+                    queue_utilization
+                    > self.alert_thresholds["queue_capacity"]["threshold"]
+                ):
                     self._create_alert(
                         f"queue_capacity_{name}",
                         f"Queue capacity high for {name}: {queue_utilization:.1%}",
                         AlertSeverity.MEDIUM,
-                        details={"circuit_breaker": name, "utilization": queue_utilization},
+                        details={
+                            "circuit_breaker": name,
+                            "utilization": queue_utilization,
+                        },
                     )
 
             # Dead letter growth alert
-            if metrics.dead_letter_events > self.alert_thresholds["dead_letter_growth"]["threshold"]:
+            if (
+                metrics.dead_letter_events
+                > self.alert_thresholds["dead_letter_growth"]["threshold"]
+            ):
                 self._create_alert(
                     f"dead_letter_growth_{name}",
                     f"Dead letter queue growth for {name}: {metrics.dead_letter_events} events",
                     AlertSeverity.MEDIUM,
-                    details={"circuit_breaker": name, "dead_letter_events": metrics.dead_letter_events},
+                    details={
+                        "circuit_breaker": name,
+                        "dead_letter_events": metrics.dead_letter_events,
+                    },
                 )
 
     async def _take_performance_snapshot(self):
@@ -482,7 +593,12 @@ class InfrastructureObservability:
             infrastructure_health=health_summary,
             performance_indicators={
                 "avg_latency": current_metrics["performance"]["avg_latency"],
-                "error_rate": sum(rates[-1] for rates in self.error_rates.values() if rates) / len(self.error_rates) if self.error_rates else 0,
+                "error_rate": (
+                    sum(rates[-1] for rates in self.error_rates.values() if rates)
+                    / len(self.error_rates)
+                    if self.error_rates
+                    else 0
+                ),
                 "health_score": health_summary["overall_health_score"],
             },
         )
@@ -491,11 +607,19 @@ class InfrastructureObservability:
 
         # Clean old snapshots
         cutoff_time = datetime.now() - timedelta(hours=self.retention_hours)
-        while self.performance_snapshots and self.performance_snapshots[0].timestamp < cutoff_time:
+        while (
+            self.performance_snapshots
+            and self.performance_snapshots[0].timestamp < cutoff_time
+        ):
             self.performance_snapshots.popleft()
 
-    def _create_alert(self, name: str, description: str, severity: AlertSeverity,
-                     details: dict[str, Any] | None = None):
+    def _create_alert(
+        self,
+        name: str,
+        description: str,
+        severity: AlertSeverity,
+        details: dict[str, Any] | None = None,
+    ):
         """Create new alert if not already exists."""
         # Check for existing unresolved alert with same name
         for alert in self.alerts:

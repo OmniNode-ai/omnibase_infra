@@ -4,7 +4,6 @@ Strongly-typed model for PostgreSQL component health metrics.
 Replaces Dict[str, Any] usage to maintain ONEX compliance.
 """
 
-
 from pydantic import BaseModel, Field
 
 

@@ -92,17 +92,17 @@ from .enums.enum_{MICROSERVICE_NAME}_operation_type import Enum{MICROSERVICE_NAM
 class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
     """
     {DOMAIN} {MICROSERVICE_NAME} Effect Node - ONEX 4-Node Architecture Implementation.
-    
+
     {BUSINESS_DESCRIPTION}
-    
+
     Integrates with:
     - {MICROSERVICE_NAME}_processing_subcontract: Core operation patterns
     - {MICROSERVICE_NAME}_management_subcontract: Resource management patterns
     """
-    
+
     # Configuration loaded from container or environment
     config: Model{MICROSERVICE_NAME_PASCAL}Config
-    
+
     # Pre-compiled security patterns for performance
     _SENSITIVE_DATA_PATTERNS: List[tuple[Pattern, str]] = [
         (re.compile(r'password=[^\s&]*', re.IGNORECASE), 'password=***'),
@@ -110,7 +110,7 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
         (re.compile(r'api[_-]?key[_-]*[:=][^\s&]*', re.IGNORECASE), 'api_key=***'),
         # Add domain-specific patterns here
     ]
-    
+
     def __init__(self, container: ONEXContainer):
         """Initialize {MICROSERVICE_NAME} effect node with container injection."""
         super().__init__(container)
@@ -118,15 +118,15 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
         self.domain = "{DOMAIN}"
         self._resource_manager = None
         self._resource_manager_lock = asyncio.Lock()
-        
+
         # Initialize configuration from container or environment
         self.config = self._load_configuration(container)
-        
+
         # Performance tracking
         self.operation_count = 0
         self.success_count = 0
         self.error_count = 0
-        
+
         # Circuit breaker for external system resilience
         self.circuit_breaker = {
             "failure_count": 0,
@@ -145,33 +145,33 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
                 return config
         except Exception:
             pass
-        
+
         # Fallback to environment-based configuration
         import os
         environment = os.getenv("DEPLOYMENT_ENVIRONMENT", "development")
         return Model{MICROSERVICE_NAME_PASCAL}Config.for_environment(environment)
 
     # === ONEX Compliance Interface ===
-    
+
     async def effect(self, effect_input: ModelEffectInput) -> ModelEffectOutput:
         """
         ONEX-compliant effect interface wrapper.
-        
+
         Delegates to typed process() method for business logic.
         """
         start_time = time.perf_counter()
         correlation_id = str(uuid4())
-        
+
         try:
             # Convert generic input to typed input
             typed_input = Model{MICROSERVICE_NAME_PASCAL}Input.model_validate(effect_input.data)
             typed_input.correlation_id = UUID(correlation_id)
-            
+
             # Execute typed business logic
             result = await self.process(typed_input)
-            
+
             execution_time = (time.perf_counter() - start_time) * 1000
-            
+
             return ModelEffectOutput(
                 result=result.model_dump(),
                 operation_id=correlation_id,
@@ -186,11 +186,11 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
                     "operation_type": result.operation_type.value,
                 },
             )
-            
+
         except Exception as e:
             execution_time = (time.perf_counter() - start_time) * 1000
             error_message = self._sanitize_error_message(str(e))
-            
+
             return ModelEffectOutput(
                 result={"error": error_message},
                 operation_id=correlation_id,
@@ -200,37 +200,37 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
                 resources_consumed={"operations": 0},
                 metadata={
                     "node_type": "effect",
-                    "domain": "{DOMAIN}", 
+                    "domain": "{DOMAIN}",
                     "error": True,
                     "error_type": type(e).__name__,
                 },
             )
 
     # === Primary Business Interface ===
-    
+
     async def process(self, input_data: Model{MICROSERVICE_NAME_PASCAL}Input) -> Model{MICROSERVICE_NAME_PASCAL}Output:
         """
         Main business logic interface with typed models.
-        
+
         Routes operations based on operation_type and executes with proper
         error handling, metrics collection, and circuit breaker patterns.
         """
         start_time = time.perf_counter()
-        
+
         try:
             self.operation_count += 1
-            
+
             # Validate correlation ID
             validated_correlation_id = self._validate_correlation_id(input_data.correlation_id)
             input_data.correlation_id = validated_correlation_id
-            
+
             # Check circuit breaker
             if self._is_circuit_breaker_open():
                 raise OnexError(
                     code=CoreErrorCode.CIRCUIT_BREAKER_OPEN,
                     message=f"{MICROSERVICE_NAME} circuit breaker is open"
                 )
-            
+
             # Route based on operation type
             if input_data.operation_type == Enum{MICROSERVICE_NAME_PASCAL}OperationType.OPERATION_1:
                 return await self._handle_operation_1(input_data, start_time)
@@ -243,16 +243,16 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
                     code=CoreErrorCode.VALIDATION_ERROR,
                     message=f"Unsupported operation type: {input_data.operation_type}",
                 )
-                
+
         except Exception as e:
             self.error_count += 1
             execution_time_ms = (time.perf_counter() - start_time) * 1000
-            
+
             # Update circuit breaker on failure
             self._record_failure()
-            
+
             error_message = self._sanitize_error_message(str(e))
-            
+
             return Model{MICROSERVICE_NAME_PASCAL}Output(
                 operation_type=input_data.operation_type,
                 success=False,
@@ -264,18 +264,18 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
             )
 
     # === Operation Handlers ===
-    
+
     async def _handle_operation_1(
-        self, 
-        input_data: Model{MICROSERVICE_NAME_PASCAL}Input, 
+        self,
+        input_data: Model{MICROSERVICE_NAME_PASCAL}Input,
         start_time: float
     ) -> Model{MICROSERVICE_NAME_PASCAL}Output:
         """Handle operation 1 - customize implementation."""
         # TODO: Implement operation 1 logic
         await asyncio.sleep(0.01)  # Simulate work
-        
+
         execution_time_ms = (time.perf_counter() - start_time) * 1000
-        
+
         return Model{MICROSERVICE_NAME_PASCAL}Output(
             operation_type=input_data.operation_type,
             success=True,
@@ -284,18 +284,18 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
             timestamp=time.time(),
             execution_time_ms=execution_time_ms,
         )
-    
+
     async def _handle_operation_2(
-        self, 
-        input_data: Model{MICROSERVICE_NAME_PASCAL}Input, 
+        self,
+        input_data: Model{MICROSERVICE_NAME_PASCAL}Input,
         start_time: float
     ) -> Model{MICROSERVICE_NAME_PASCAL}Output:
         """Handle operation 2 - customize implementation."""
         # TODO: Implement operation 2 logic
         await asyncio.sleep(0.01)  # Simulate work
-        
+
         execution_time_ms = (time.perf_counter() - start_time) * 1000
-        
+
         return Model{MICROSERVICE_NAME_PASCAL}Output(
             operation_type=input_data.operation_type,
             success=True,
@@ -306,20 +306,20 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
         )
 
     async def _handle_health_check_operation(
-        self, 
-        input_data: Model{MICROSERVICE_NAME_PASCAL}Input, 
+        self,
+        input_data: Model{MICROSERVICE_NAME_PASCAL}Input,
         start_time: float
     ) -> Model{MICROSERVICE_NAME_PASCAL}Output:
         """Handle health check operation."""
         try:
             # Perform health checks
             health_results = []
-            
+
             # Add domain-specific health checks here
             overall_healthy = True  # Customize based on actual checks
-            
+
             execution_time_ms = (time.perf_counter() - start_time) * 1000
-            
+
             return Model{MICROSERVICE_NAME_PASCAL}Output(
                 operation_type=input_data.operation_type,
                 success=overall_healthy,
@@ -334,11 +334,11 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
                 timestamp=time.time(),
                 execution_time_ms=execution_time_ms,
             )
-            
+
         except Exception as e:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
             error_message = self._sanitize_error_message(f"Health check failed: {str(e)}")
-            
+
             return Model{MICROSERVICE_NAME_PASCAL}Output(
                 operation_type=input_data.operation_type,
                 success=False,
@@ -349,12 +349,12 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
             )
 
     # === Utility Methods ===
-    
+
     def _validate_correlation_id(self, correlation_id: Optional[UUID]) -> UUID:
         """Validate and normalize correlation ID."""
         if correlation_id is None:
             return uuid4()
-            
+
         if isinstance(correlation_id, str):
             try:
                 correlation_id = UUID(correlation_id)
@@ -363,55 +363,55 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
                     code=CoreErrorCode.VALIDATION_ERROR,
                     message="Invalid correlation ID format - must be valid UUID"
                 )
-                
+
         if not isinstance(correlation_id, UUID):
             raise OnexError(
                 code=CoreErrorCode.VALIDATION_ERROR,
                 message="Correlation ID must be UUID type"
             )
-            
+
         return correlation_id
-    
+
     def _is_circuit_breaker_open(self) -> bool:
         """Check if circuit breaker is open."""
         circuit_breaker = self.circuit_breaker
-        
+
         if circuit_breaker["state"] == "open":
             if time.time() - circuit_breaker["last_failure_time"] > circuit_breaker["recovery_timeout"]:
                 circuit_breaker["state"] = "half_open"
                 return False
             return True
-        
+
         return False
-    
+
     def _record_failure(self) -> None:
         """Record failure for circuit breaker."""
         circuit_breaker = self.circuit_breaker
         circuit_breaker["failure_count"] += 1
         circuit_breaker["last_failure_time"] = time.time()
-        
+
         if circuit_breaker["failure_count"] >= circuit_breaker["failure_threshold"]:
             circuit_breaker["state"] = "open"
-    
+
     def _reset_circuit_breaker(self) -> None:
         """Reset circuit breaker after successful operation."""
         if self.circuit_breaker["state"] in ["half_open", "open"]:
             self.circuit_breaker["state"] = "closed"
             self.circuit_breaker["failure_count"] = 0
-    
+
     def _sanitize_error_message(self, error_message: str) -> str:
         """Sanitize error messages to prevent sensitive information leakage."""
         if not self.config.enable_error_sanitization:
             return error_message
-            
+
         sanitized = error_message
         for pattern, replacement in self._SENSITIVE_DATA_PATTERNS:
             sanitized = pattern.sub(replacement, sanitized)
-        
+
         return sanitized
 
     # === Health Check Interface ===
-    
+
     async def get_health_status(self) -> ModelHealthStatus:
         """Get health status of the effect node."""
         status = EnumHealthStatus.HEALTHY
@@ -425,20 +425,20 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
             "success_rate": self.success_count / max(1, self.operation_count),
             "circuit_breaker_state": self.circuit_breaker["state"],
         }
-        
+
         # Determine status based on circuit breaker and error rate
         if self.circuit_breaker["state"] != "closed":
             status = EnumHealthStatus.DEGRADED
-        
+
         min_ops = 10
         error_threshold = 0.1
-        
+
         if (
             self.operation_count > min_ops
             and (self.error_count / self.operation_count) > error_threshold
         ):
             status = EnumHealthStatus.DEGRADED
-        
+
         return ModelHealthStatus(
             status=status,
             timestamp=datetime.now(),
@@ -451,10 +451,10 @@ class Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(NodeEffectService):
 async def main():
     """Main entry point for {MICROSERVICE_NAME} Effect - runs in service mode."""
     from {REPOSITORY_NAME}.core.container import create_{DOMAIN}_container
-    
+
     container = create_{DOMAIN}_container()
     effect_node = Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect(container)
-    
+
     await effect_node.initialize()
     await effect_node.start_service_mode()
 
@@ -481,32 +481,32 @@ from ..enums.enum_{MICROSERVICE_NAME}_operation_type import Enum{MICROSERVICE_NA
 
 class Model{MICROSERVICE_NAME_PASCAL}Input(BaseModel):
     """Input envelope for {MICROSERVICE_NAME} operations."""
-    
+
     operation_type: Enum{MICROSERVICE_NAME_PASCAL}OperationType = Field(
         description="Type of operation to perform"
     )
-    
+
     # Typed operation-specific requests (add as needed)
     operation_1_request: Optional[Dict[str, Any]] = Field(
         default=None, description="Operation 1 request data"
     )
-    
+
     operation_2_request: Optional[Dict[str, Any]] = Field(
         default=None, description="Operation 2 request data"
     )
-    
+
     correlation_id: UUID = Field(description="Request correlation ID for tracing")
-    
+
     timestamp: float = Field(description="Request timestamp as Unix timestamp", ge=0)
-    
+
     timeout_seconds: Optional[float] = Field(
         default=30.0, description="Operation timeout in seconds", gt=0
     )
-    
+
     context: Optional[Dict[str, Any]] = Field(
         default=None, description="Additional request context"
     )
-    
+
     # Add domain-specific fields here
 ```
 
@@ -527,33 +527,33 @@ from ..enums.enum_{MICROSERVICE_NAME}_operation_type import Enum{MICROSERVICE_NA
 
 class Model{MICROSERVICE_NAME_PASCAL}Output(BaseModel):
     """Output envelope for {MICROSERVICE_NAME} operations."""
-    
+
     operation_type: Enum{MICROSERVICE_NAME_PASCAL}OperationType = Field(
         description="Type of operation that was executed"
     )
-    
+
     success: bool = Field(description="Whether the operation was successful")
-    
+
     data: Optional[Dict[str, Any]] = Field(
         default=None, description="Operation result data"
     )
-    
+
     error_message: Optional[str] = Field(
         default=None, description="Error message if operation failed"
     )
-    
+
     correlation_id: UUID = Field(description="Request correlation ID for tracing")
-    
+
     timestamp: float = Field(description="Response timestamp as Unix timestamp", ge=0)
-    
+
     execution_time_ms: float = Field(
         description="Total operation execution time in milliseconds", ge=0
     )
-    
+
     context: Optional[Dict[str, Any]] = Field(
         default=None, description="Additional response context"
     )
-    
+
     # Add domain-specific response fields here
 ```
 
@@ -570,21 +570,21 @@ from pydantic import BaseModel, Field
 
 class Model{MICROSERVICE_NAME_PASCAL}Config(BaseModel):
     """Configuration for {MICROSERVICE_NAME} effect node."""
-    
+
     # Core configuration
     max_timeout_seconds: float = Field(default=30.0, gt=0)
     enable_error_sanitization: bool = Field(default=True)
-    
+
     # Circuit breaker configuration
     circuit_breaker_failure_threshold: int = Field(default=5, gt=0)
     circuit_breaker_recovery_timeout: float = Field(default=60.0, gt=0)
-    
+
     # Performance configuration
     max_concurrent_operations: int = Field(default=100, gt=0)
     operation_queue_size: int = Field(default=1000, gt=0)
-    
+
     # Add domain-specific configuration fields here
-    
+
     @classmethod
     def for_environment(cls, environment: str) -> "Model{MICROSERVICE_NAME_PASCAL}Config":
         """Load environment-specific configuration."""
@@ -592,7 +592,7 @@ class Model{MICROSERVICE_NAME_PASCAL}Config(BaseModel):
             "max_timeout_seconds": 30.0,
             "enable_error_sanitization": True,
         }
-        
+
         if environment == "production":
             return cls(
                 **base_config,
@@ -628,11 +628,11 @@ from enum import Enum
 
 class Enum{MICROSERVICE_NAME_PASCAL}OperationType(str, Enum):
     """Enumeration of supported {MICROSERVICE_NAME} operation types."""
-    
+
     OPERATION_1 = "operation_1"
     OPERATION_2 = "operation_2"
     HEALTH_CHECK = "health_check"
-    
+
     # Add domain-specific operation types here
 ```
 
@@ -653,7 +653,7 @@ from .v1_0_0 import (
 
 __all__ = [
     "Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect",
-    "Model{MICROSERVICE_NAME_PASCAL}Input", 
+    "Model{MICROSERVICE_NAME_PASCAL}Input",
     "Model{MICROSERVICE_NAME_PASCAL}Output",
     "Model{MICROSERVICE_NAME_PASCAL}Config",
     "Enum{MICROSERVICE_NAME_PASCAL}OperationType",
@@ -674,7 +674,7 @@ from .enums.enum_{MICROSERVICE_NAME}_operation_type import Enum{MICROSERVICE_NAM
 __all__ = [
     "Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect",
     "Model{MICROSERVICE_NAME_PASCAL}Input",
-    "Model{MICROSERVICE_NAME_PASCAL}Output", 
+    "Model{MICROSERVICE_NAME_PASCAL}Output",
     "Model{MICROSERVICE_NAME_PASCAL}Config",
     "Enum{MICROSERVICE_NAME_PASCAL}OperationType",
 ]
@@ -697,12 +697,12 @@ metadata:
   version: 1.0.0
   domain: {DOMAIN}
   microservice: {MICROSERVICE_NAME}
-  
+
 spec:
   description: |
     Core processing patterns for {MICROSERVICE_NAME} operations including
     operation routing, business logic execution, and result formatting.
-    
+
   operations:
     - name: operation_1
       description: "First operation - customize description"
@@ -717,7 +717,7 @@ spec:
             format: uuid
             description: "Request correlation ID"
         required: [correlation_id]
-      
+
       output_schema:
         type: object
         properties:
@@ -729,7 +729,7 @@ spec:
             type: number
             minimum: 0
         required: [success, execution_time_ms]
-      
+
       error_handling:
         - code: VALIDATION_ERROR
           message: "Input validation failed"
@@ -737,11 +737,11 @@ spec:
         - code: TIMEOUT_ERROR  
           message: "Operation timeout exceeded"
           recovery: "Abort operation and return timeout error"
-    
+
     - name: operation_2
       description: "Second operation - customize description"
       # Add operation 2 specification
-      
+
     - name: health_check
       description: "Health check operation"
       input_schema:
@@ -751,7 +751,7 @@ spec:
             type: string
             format: uuid
         required: [correlation_id]
-      
+
       output_schema:
         type: object
         properties:
@@ -764,17 +764,17 @@ spec:
                 type: string
                 enum: [healthy, degraded, unhealthy]
         required: [success, data]
-  
+
   circuit_breaker:
     failure_threshold: 5
     recovery_timeout_seconds: 60
     supported_states: [closed, open, half_open]
-  
+
   performance_requirements:
     max_response_time_ms: 1000
     max_concurrent_operations: 100
     target_success_rate: 99.5
-  
+
   monitoring:
     metrics:
       - operation_count
@@ -782,7 +782,7 @@ spec:
       - error_rate
       - circuit_breaker_state
       - execution_time_percentiles
-    
+
     health_indicators:
       - circuit_breaker_state
       - resource_availability
@@ -818,12 +818,12 @@ spec:
         - initialize_external_connections
         - warm_up_caches
         - register_health_checks
-      
+
       failure_handling:
         - retry_count: 3
         - retry_delay_seconds: 5
         - fallback: "graceful_degradation"
-    
+
     shutdown:
       description: "Graceful shutdown of {MICROSERVICE_NAME}"
       steps:
@@ -831,7 +831,7 @@ spec:
         - complete_pending_operations
         - close_external_connections
         - cleanup_resources
-      
+
       timeout_seconds: 30
       force_shutdown: true
 
@@ -843,17 +843,17 @@ spec:
           min_connections: 5
           max_connections: 20
           connection_timeout_seconds: 10
-        
+
         health_check:
           method: "ping|query|status_endpoint"
           interval_seconds: 30
           timeout_seconds: 5
           failure_threshold: 3
-    
+
     memory_management:
       max_memory_mb: 512
       gc_policy: "aggressive|normal|conservative"
-      
+
     concurrency:
       max_concurrent_operations: 100
       queue_size: 1000
@@ -865,18 +865,18 @@ spec:
         description: "Path to configuration file"
         required: false
         default: "/etc/{MICROSERVICE_NAME}/config.yaml"
-      
+
       - name: "{MICROSERVICE_NAME_UPPER}_LOG_LEVEL"
         description: "Logging level"
         required: false
         default: "INFO"
         enum: [DEBUG, INFO, WARN, ERROR]
-    
+
     container_services:
       - service_name: "{MICROSERVICE_NAME}_config"
         interface: "Model{MICROSERVICE_NAME_PASCAL}Config"
         lifecycle: "singleton"
-        
+
       - service_name: "{EXTERNAL_SYSTEM}_connection_manager"  
         interface: "{EXTERNAL_SYSTEM_PASCAL}ConnectionManager"
         lifecycle: "singleton"
@@ -886,24 +886,24 @@ spec:
       - path: "/health"
         method: "GET"
         response_codes: [200, 503]
-        
+
       - path: "/health/detailed"
-        method: "GET" 
+        method: "GET"
         response_codes: [200, 503]
         includes: [dependencies, metrics, circuit_breaker]
-    
+
     metrics:
       - name: "{MICROSERVICE_NAME}_operations_total"
         type: "counter"
         description: "Total number of operations processed"
         labels: [operation_type, status]
-        
+
       - name: "{MICROSERVICE_NAME}_duration_seconds"
         type: "histogram"
         description: "Operation duration in seconds"
         labels: [operation_type]
         buckets: [0.001, 0.01, 0.1, 1, 10]
-        
+
       - name: "{MICROSERVICE_NAME}_circuit_breaker_state"
         type: "gauge"
         description: "Circuit breaker state (0=closed, 1=open, 2=half_open)"
@@ -913,7 +913,7 @@ spec:
       - error_sanitization: true
       - input_validation: true
       - correlation_id_validation: true
-      
+
     onex_standards:
       - node_type: "effect"
       - architecture_version: "4.0"
@@ -938,7 +938,7 @@ metadata:
   version: 1.0.0
   domain: {DOMAIN}
   repository: {REPOSITORY_NAME}
-  
+
 spec:
   node_info:
     name: Node{DOMAIN_PASCAL}{MICROSERVICE_NAME_PASCAL}Effect
@@ -946,48 +946,48 @@ spec:
     architecture: onex-4-node
     domain: {DOMAIN}
     microservice: {MICROSERVICE_NAME}
-    
+
   version_info:
     version: 1.0.0
     release_date: "2024-01-01"
     stability: "stable"  # alpha|beta|stable|deprecated
-    
+
   dependencies:
     core:
       omnibase_core: ">=4.0.0,<5.0.0"
       pydantic: ">=2.0.0,<3.0.0"
-      
+
     optional:
       # Add optional dependencies here
-      
+
   compatibility:
     python_versions: ["3.11", "3.12"]
     onex_architecture: "4.0"
-    
+
     compatible_nodes:
       - type: "compute"
         versions: ["1.0.0", "1.1.0"]
-      - type: "reducer" 
+      - type: "reducer"
         versions: ["1.0.0"]
       - type: "orchestrator"
         versions: ["1.0.0"]
-        
+
   deployment:
     container:
       base_image: "python:3.11-slim"
       ports: [8080]
       health_check: "/health"
-      
+
     resource_requirements:
       cpu: "0.5"
       memory: "512Mi"
       storage: "1Gi"
-      
+
     environment_variables:
       - name: DEPLOYMENT_ENVIRONMENT
         required: true
         values: ["development", "staging", "production"]
-        
+
   testing:
     test_coverage: 95.0
     test_suites:
@@ -995,7 +995,7 @@ spec:
       - integration_tests
       - contract_tests
       - security_tests
-      
+
   documentation:
     readme: README.md
     api_docs: docs/api.md
@@ -1016,45 +1016,45 @@ kind: CompatibilityMatrix
 metadata:
   name: {MICROSERVICE_NAME}-compatibility-matrix
   domain: {DOMAIN}
-  
+
 spec:
   current_version: 1.0.0
-  
+
   version_compatibility:
     "1.0.0":
       status: current
       supported_until: "2025-12-31"
       breaking_changes: []
       migration_required: false
-      
+
     # Add future versions here
-    
+
   interface_compatibility:
     input_models:
       Model{MICROSERVICE_NAME_PASCAL}Input:
         "1.0.0": "fully_compatible"
-        
+
     output_models:
       Model{MICROSERVICE_NAME_PASCAL}Output:
         "1.0.0": "fully_compatible"
-        
+
     operation_types:
       Enum{MICROSERVICE_NAME_PASCAL}OperationType:
         "1.0.0": "fully_compatible"
-        
+
   dependency_compatibility:
     omnibase_core:
       "4.0.0": "fully_compatible"
       "4.1.0": "fully_compatible"
       "5.0.0": "breaking_changes"
-      
+
   migration_paths:
     # Define migration paths for future versions
     # "1.0.0->1.1.0":
     #   automated: true
     #   steps: []
     #   data_migration: false
-      
+
   deprecation_policy:
     notice_period_months: 6
     support_period_months: 12
@@ -1196,7 +1196,7 @@ To use this template:
 
 1. **Replace all placeholders** with actual values:
    - `{REPOSITORY_NAME}` → `omniplan`
-   - `{DOMAIN}` → `rsd` 
+   - `{DOMAIN}` → `rsd`
    - `{MICROSERVICE_NAME}` → `priority_storage`
    - `{BUSINESS_DESCRIPTION}` → actual description
    - etc.

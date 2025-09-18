@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 class CircuitBreakerOperation(str, Enum):
     """Circuit breaker operations."""
+
     PUBLISH_EVENT = "publish_event"
     GET_STATE = "get_state"
     GET_METRICS = "get_metrics"

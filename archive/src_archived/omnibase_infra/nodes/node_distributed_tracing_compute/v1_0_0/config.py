@@ -58,7 +58,9 @@ class TracingConfig(BaseModel):
         # Ensure only HTTP/HTTPS schemes are allowed
         allowed_schemes = {"http", "https"}
         if v.scheme not in allowed_schemes:
-            raise ValueError(f"OTLP endpoint must use HTTP or HTTPS scheme, got: {v.scheme}")
+            raise ValueError(
+                f"OTLP endpoint must use HTTP or HTTPS scheme, got: {v.scheme}",
+            )
 
         # Validate network location is present
         if not v.host:
@@ -69,7 +71,16 @@ class TracingConfig(BaseModel):
     @validator("environment")
     def validate_environment(cls, v):
         """Validate environment name against known deployment environments."""
-        allowed_environments = {"development", "dev", "staging", "stage", "production", "prod", "test", "testing"}
+        allowed_environments = {
+            "development",
+            "dev",
+            "staging",
+            "stage",
+            "production",
+            "prod",
+            "test",
+            "testing",
+        }
         if v.lower() not in allowed_environments:
             # Log warning but don't fail - allow custom environments
             pass
@@ -101,7 +112,9 @@ def load_tracing_config() -> TracingConfig:
             try:
                 config_data["trace_sample_rate"] = float(sample_rate)
             except ValueError:
-                raise ValueError(f"Invalid trace sample rate: {sample_rate}. Must be a float between 0.0 and 1.0")
+                raise ValueError(
+                    f"Invalid trace sample rate: {sample_rate}. Must be a float between 0.0 and 1.0",
+                )
 
         # Load service information
         if service_name := os.getenv("OTEL_SERVICE_NAME"):

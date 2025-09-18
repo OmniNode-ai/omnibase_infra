@@ -1,6 +1,5 @@
 """PostgreSQL query parameter model."""
 
-
 from pydantic import BaseModel, Field
 
 
@@ -8,11 +7,19 @@ class ModelPostgresQueryParameter(BaseModel):
     """Strongly typed PostgreSQL query parameter."""
 
     value_string: str | None = Field(default=None, description="String parameter value")
-    value_integer: int | None = Field(default=None, description="Integer parameter value")
+    value_integer: int | None = Field(
+        default=None, description="Integer parameter value",
+    )
     value_float: float | None = Field(default=None, description="Float parameter value")
-    value_boolean: bool | None = Field(default=None, description="Boolean parameter value")
-    value_null: bool | None = Field(default=None, description="Null parameter value flag")
-    parameter_type: str = Field(description="Parameter type (string, integer, float, boolean, null)")
+    value_boolean: bool | None = Field(
+        default=None, description="Boolean parameter value",
+    )
+    value_null: bool | None = Field(
+        default=None, description="Null parameter value flag",
+    )
+    parameter_type: str = Field(
+        description="Parameter type (string, integer, float, boolean, null)",
+    )
     parameter_index: int = Field(description="Parameter position in query (0-based)")
 
     def get_value(self) -> object | None:
@@ -34,16 +41,47 @@ class ModelPostgresQueryParameter(BaseModel):
         """Create parameter from raw value using protocol-based duck typing (ONEX compliance)."""
         if value is None:
             return cls(parameter_type="null", parameter_index=index, value_null=True)
-        if hasattr(value, "encode") and hasattr(value, "strip") and hasattr(value, "split"):  # String-like protocol
-            return cls(parameter_type="string", parameter_index=index, value_string=str(value))
-        if hasattr(value, "__add__") and hasattr(value, "__mod__") and not hasattr(value, "split") and not hasattr(value, "__truediv__"):  # Integer-like protocol
-            return cls(parameter_type="integer", parameter_index=index, value_integer=int(value))
-        if hasattr(value, "__add__") and hasattr(value, "__truediv__") and hasattr(value, "is_integer"):  # Float-like protocol
-            return cls(parameter_type="float", parameter_index=index, value_float=float(value))
-        if hasattr(value, "__bool__") and hasattr(value, "__invert__") and not hasattr(value, "__add__"):  # Boolean-like protocol
-            return cls(parameter_type="boolean", parameter_index=index, value_boolean=bool(value))
+        if (
+            hasattr(value, "encode")
+            and hasattr(value, "strip")
+            and hasattr(value, "split")
+        ):  # String-like protocol
+            return cls(
+                parameter_type="string", parameter_index=index, value_string=str(value),
+            )
+        if (
+            hasattr(value, "__add__")
+            and hasattr(value, "__mod__")
+            and not hasattr(value, "split")
+            and not hasattr(value, "__truediv__")
+        ):  # Integer-like protocol
+            return cls(
+                parameter_type="integer",
+                parameter_index=index,
+                value_integer=int(value),
+            )
+        if (
+            hasattr(value, "__add__")
+            and hasattr(value, "__truediv__")
+            and hasattr(value, "is_integer")
+        ):  # Float-like protocol
+            return cls(
+                parameter_type="float", parameter_index=index, value_float=float(value),
+            )
+        if (
+            hasattr(value, "__bool__")
+            and hasattr(value, "__invert__")
+            and not hasattr(value, "__add__")
+        ):  # Boolean-like protocol
+            return cls(
+                parameter_type="boolean",
+                parameter_index=index,
+                value_boolean=bool(value),
+            )
         # Convert unknown types to string (fallback pattern)
-        return cls(parameter_type="string", parameter_index=index, value_string=str(value))
+        return cls(
+            parameter_type="string", parameter_index=index, value_string=str(value),
+        )
 
 
 class ModelPostgresQueryParameters(BaseModel):

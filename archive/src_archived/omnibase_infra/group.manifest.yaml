@@ -29,35 +29,35 @@ nodes:
     current_version: {major: 1, minor: 0, patch: 0}
     status: "active"
     service_integration: "postgresql"
-    
+
   - node_name: "consul_adapter"
     node_type: "EFFECT"
     description: "Consul service discovery and KV store adapter"
     current_version: {major: 1, minor: 0, patch: 0}
     status: "planned"
     service_integration: "consul"
-    
+
   - node_name: "kafka_adapter"
     node_type: "EFFECT"
     description: "Kafka/RedPanda event streaming adapter"
     current_version: {major: 1, minor: 0, patch: 0}
     status: "planned"
     service_integration: "redpanda"
-    
+
   - node_name: "vault_adapter"
     node_type: "EFFECT"
     description: "HashiCorp Vault secret management adapter"
     current_version: {major: 1, minor: 0, patch: 0}
     status: "planned"
     service_integration: "vault"
-    
+
   - node_name: "infrastructure_reducer"
     node_type: "REDUCER"
     description: "Infrastructure state consolidation and decision making"
     current_version: {major: 1, minor: 0, patch: 0}
     status: "planned"
     service_integration: "internal"
-    
+
   - node_name: "infrastructure_orchestrator"
     node_type: "ORCHESTRATOR"
     description: "Infrastructure workflow coordination and service orchestration"
@@ -72,19 +72,19 @@ external_services:
     required: true
     default_port: 5432
     health_check: "SELECT 1"
-    
+
   redpanda:
     description: "RedPanda event streaming platform"
     required: true
     default_port: 9092
     health_check: "kafka_admin"
-    
+
   consul:
     description: "HashiCorp Consul for service discovery"
     required: false
     default_port: 8500
     health_check: "/v1/status/leader"
-    
+
   vault:
     description: "HashiCorp Vault for secret management"
     required: false
@@ -100,7 +100,7 @@ event_bus:
     - "*.omnibase.onex.evt.consul-*"
     - "*.omnibase.onex.cmd.infrastructure-*"
     - "*.omnibase.onex.qrs.service-discovery-*"
-    
+
   publishing_patterns:
     - node_type: "EFFECT"
       publishes: ["evt.*", "aud.*"]
@@ -118,7 +118,7 @@ deployment:
     total_memory_mb: 1024
     total_cpu_cores: 2
     shared_storage_mb: 500
-    
+
   environment_requirements:
     - name: "OMNINODE_ENV"
       description: "Environment namespace for OmniNode topics"
@@ -137,26 +137,26 @@ dependencies:
       type: "framework"
       version: ">=1.0.0"
       description: "Core ONEX framework components"
-      
+
     - name: "event_bus_container"
       type: "container_service"
       version: ">=1.0.0"
       description: "Event bus container with RedPanda integration"
-      
+
   external_packages:
     - name: "asyncpg"
       version: ">=0.29.0"
       description: "Async PostgreSQL adapter"
-      
+
     - name: "aiokafka"
       version: ">=0.10.0"
       description: "Async Kafka/RedPanda client"
-      
+
     - name: "consul"
       version: ">=1.1.0"
       description: "Consul Python client"
       optional: true
-      
+
     - name: "hvac"
       version: ">=2.1.0"
       description: "HashiCorp Vault client"
@@ -168,7 +168,7 @@ coordination:
   service_discovery: "automatic"
   load_balancing: "round_robin"
   health_monitoring: "comprehensive"
-  
+
   scaling_strategy:
     min_instances: 1
     max_instances: 5
@@ -182,14 +182,14 @@ quality:
     latency_p95: "100ms"
     error_rate_max: "0.1%"
     test_coverage_min: 85
-    
+
   security_requirements:
     authentication: "required"
     authorization: "rbac"
     audit_logging: "comprehensive"
     encryption_at_rest: "required"
     encryption_in_transit: "required"
-    
+
   monitoring_requirements:
     metrics_collection: "mandatory"
     log_aggregation: "structured"

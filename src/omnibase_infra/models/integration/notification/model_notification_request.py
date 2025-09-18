@@ -79,7 +79,9 @@ class ModelNotificationRequest(BaseModel):
             sensitive_header_patterns = ["password", "secret", "key", "token"]
             for header_name in self.headers.keys():
                 header_lower = header_name.lower()
-                if any(pattern in header_lower for pattern in sensitive_header_patterns):
+                if any(
+                    pattern in header_lower for pattern in sensitive_header_patterns
+                ):
                     # Log warning but don't fail - headers might legitimately contain these words
                     pass
 

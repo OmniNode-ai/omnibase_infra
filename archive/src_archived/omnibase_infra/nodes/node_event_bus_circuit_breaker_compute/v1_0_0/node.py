@@ -42,10 +42,14 @@ from .models.model_event_bus_circuit_breaker_output import (
 )
 
 
-class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitBreakerInput, ModelEventBusCircuitBreakerOutput]):
+class NodeEventBusCircuitBreakerCompute(
+    NodeComputeService[
+        ModelEventBusCircuitBreakerInput, ModelEventBusCircuitBreakerOutput,
+    ],
+):
     """
     Event Bus Circuit Breaker Compute Node.
-    
+
     Provides:
     - Circuit breaker pattern implementation for RedPanda event publishing
     - Automatic failure detection and circuit opening/closing
@@ -57,7 +61,7 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
 
     def __init__(self, container: ModelONEXContainer):
         """Initialize the circuit breaker compute node.
-        
+
         Args:
             container: ONEX container for dependency injection
         """
@@ -106,12 +110,14 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
                 message=f"Failed to initialize circuit breaker compute node: {e!s}",
             ) from e
 
-    async def compute(self, input_data: ModelEventBusCircuitBreakerInput) -> ModelEventBusCircuitBreakerOutput:
+    async def compute(
+        self, input_data: ModelEventBusCircuitBreakerInput,
+    ) -> ModelEventBusCircuitBreakerOutput:
         """Execute circuit breaker operations.
-        
+
         Args:
             input_data: Input containing operation type and parameters
-            
+
         Returns:
             Output with operation result and current circuit breaker status
         """
@@ -138,7 +144,8 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             # Update performance metrics
             processing_time = time.time() - start_time
             self._metrics.average_response_time_ms = (
-                self._metrics.average_response_time_ms * 0.9 + processing_time * 1000 * 0.1
+                self._metrics.average_response_time_ms * 0.9
+                + processing_time * 1000 * 0.1
             )
 
             return ModelEventBusCircuitBreakerOutput(
@@ -161,7 +168,9 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
                 message=f"Circuit breaker operation failed: {e!s}",
             ) from e
 
-    async def _handle_publish_event(self, input_data: ModelEventBusCircuitBreakerInput) -> ModelPublishEventResult:
+    async def _handle_publish_event(
+        self, input_data: ModelEventBusCircuitBreakerInput,
+    ) -> ModelPublishEventResult:
         """Handle event publishing through circuit breaker."""
         if not input_data.event:
             raise OnexError(
@@ -176,25 +185,35 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             if self._state == EnumCircuitBreakerState.OPEN:
                 return await self._handle_open_circuit(input_data.event)
             if self._state == EnumCircuitBreakerState.HALF_OPEN:
-                return await self._handle_half_open_circuit(input_data.event, input_data.publisher_function)
+                return await self._handle_half_open_circuit(
+                    input_data.event, input_data.publisher_function,
+                )
             # CLOSED
-            return await self._handle_closed_circuit(input_data.event, input_data.publisher_function)
+            return await self._handle_closed_circuit(
+                input_data.event, input_data.publisher_function,
+            )
 
-    async def _handle_closed_circuit(self, event: ModelOnexEvent, publisher_function: str | None) -> ModelPublishEventResult:
+    async def _handle_closed_circuit(
+        self, event: ModelOnexEvent, publisher_function: str | None,
+    ) -> ModelPublishEventResult:
         """Handle event publishing when circuit is closed (normal operation)."""
         try:
             # Get publisher function
             publisher_func = await self._get_publisher_function(publisher_function)
 
             # Attempt to publish event with timeout
-            await asyncio.wait_for(publisher_func(event), timeout=self._config.timeout_seconds)
+            await asyncio.wait_for(
+                publisher_func(event), timeout=self._config.timeout_seconds,
+            )
 
             # Success - reset failure count and update metrics
             self._failure_count = 0
             self._metrics.successful_events += 1
             self._metrics.last_success = datetime.now()
             self._metrics.success_rate_percent = (
-                self._metrics.successful_events / max(self._metrics.total_events, 1) * 100
+                self._metrics.successful_events
+                / max(self._metrics.total_events, 1)
+                * 100
             )
 
             self.logger.debug(f"Event published successfully: {event.correlation_id}")
@@ -206,28 +225,36 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             )
 
         except TimeoutError:
-            await self._handle_failure(f"Event publishing timeout after {self._config.timeout_seconds}s")
+            await self._handle_failure(
+                f"Event publishing timeout after {self._config.timeout_seconds}s",
+            )
             return await self._queue_or_drop_event(event)
 
         except Exception as e:
             await self._handle_failure(f"Event publishing failed: {e!s}")
             return await self._queue_or_drop_event(event)
 
-    async def _handle_half_open_circuit(self, event: ModelOnexEvent, publisher_function: str | None) -> ModelPublishEventResult:
+    async def _handle_half_open_circuit(
+        self, event: ModelOnexEvent, publisher_function: str | None,
+    ) -> ModelPublishEventResult:
         """Handle event publishing when circuit is half-open (testing recovery)."""
         try:
             # Get publisher function
             publisher_func = await self._get_publisher_function(publisher_function)
 
             # Attempt limited publishing to test recovery
-            await asyncio.wait_for(publisher_func(event), timeout=self._config.timeout_seconds)
+            await asyncio.wait_for(
+                publisher_func(event), timeout=self._config.timeout_seconds,
+            )
 
             # Success in half-open state
             self._success_count += 1
             self._metrics.successful_events += 1
             self._metrics.last_success = datetime.now()
 
-            self.logger.info(f"Half-open success {self._success_count}/{self._config.success_threshold}")
+            self.logger.info(
+                f"Half-open success {self._success_count}/{self._config.success_threshold}",
+            )
 
             # Check if we can close the circuit
             if self._success_count >= self._config.success_threshold:
@@ -245,7 +272,9 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             await self._open_circuit(f"Half-open test failed: {e!s}")
             return await self._queue_or_drop_event(event)
 
-    async def _handle_open_circuit(self, event: ModelOnexEvent) -> ModelPublishEventResult:
+    async def _handle_open_circuit(
+        self, event: ModelOnexEvent,
+    ) -> ModelPublishEventResult:
         """Handle event when circuit is open (failure state)."""
         # Check if we should transition to half-open for recovery testing
         if self._should_attempt_reset():
@@ -268,7 +297,9 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             self._metrics.successful_events / max(self._metrics.total_events, 1) * 100
         )
 
-        self.logger.warning(f"Event publishing failure {self._failure_count}/{self._config.failure_threshold}: {error_message}")
+        self.logger.warning(
+            f"Event publishing failure {self._failure_count}/{self._config.failure_threshold}: {error_message}",
+        )
 
         # Open circuit if failure threshold reached
         if self._failure_count >= self._config.failure_threshold:
@@ -309,21 +340,28 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
         time_since_failure = time.time() - self._last_failure_time
         return time_since_failure >= self._config.recovery_timeout
 
-    async def _queue_or_drop_event(self, event: ModelOnexEvent) -> ModelPublishEventResult:
+    async def _queue_or_drop_event(
+        self, event: ModelOnexEvent,
+    ) -> ModelPublishEventResult:
         """Queue event or drop it based on queue capacity and configuration."""
         if not self._config.graceful_degradation:
             # Fail-fast mode - raise error for critical operations
             raise OnexError(
                 code=CoreErrorCode.INTEGRATION_SERVICE_UNAVAILABLE,
                 message="Event bus circuit breaker open - event publishing failed",
-                details={"circuit_state": self._state.value, "queued_events": len(self._event_queue)},
+                details={
+                    "circuit_state": self._state.value,
+                    "queued_events": len(self._event_queue),
+                },
             )
 
         # Graceful degradation mode - queue if possible
         if len(self._event_queue) < self._config.max_queue_size:
             self._event_queue.append(event)
             self._metrics.queued_events += 1
-            self.logger.info(f"Event queued (circuit {self._state.value}): {event.correlation_id}")
+            self.logger.info(
+                f"Event queued (circuit {self._state.value}): {event.correlation_id}",
+            )
 
             return ModelPublishEventResult(
                 published=False,
@@ -358,7 +396,9 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
 
         self._dead_letter_queue.append(dead_letter_entry)
         self._metrics.dead_letter_events += 1
-        self.logger.info(f"Event added to dead letter queue: {event.correlation_id} - {reason}")
+        self.logger.info(
+            f"Event added to dead letter queue: {event.correlation_id} - {reason}",
+        )
 
     async def _process_queued_events(self):
         """Process queued events when circuit closes."""
@@ -366,7 +406,9 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             return
 
         queued_count = len(self._event_queue)
-        self.logger.info(f"Processing {queued_count} queued events after circuit recovery")
+        self.logger.info(
+            f"Processing {queued_count} queued events after circuit recovery",
+        )
 
         # Process events in background to avoid blocking
         asyncio.create_task(self._process_queue_background())
@@ -379,7 +421,10 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
         while True:
             # Check state and queue with proper locking
             async with self._lock:
-                if not self._event_queue or self._state != EnumCircuitBreakerState.CLOSED:
+                if (
+                    not self._event_queue
+                    or self._state != EnumCircuitBreakerState.CLOSED
+                ):
                     break
 
                 try:
@@ -401,9 +446,13 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
                 if failed >= 3:  # Prevent infinite retry loops
                     break
 
-        self.logger.info(f"Queued event processing complete: {processed} processed, {failed} failed")
+        self.logger.info(
+            f"Queued event processing complete: {processed} processed, {failed} failed",
+        )
 
-    async def _handle_get_state(self, input_data: ModelEventBusCircuitBreakerInput) -> ModelStateResult:
+    async def _handle_get_state(
+        self, input_data: ModelEventBusCircuitBreakerInput,
+    ) -> ModelStateResult:
         """Handle get circuit breaker state operation."""
         state_info = ModelCircuitBreakerState(
             state=self._state,
@@ -419,11 +468,15 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             state=state_info.model_dump(),
         )
 
-    async def _handle_get_metrics(self, input_data: ModelEventBusCircuitBreakerInput) -> ModelCircuitBreakerMetrics:
+    async def _handle_get_metrics(
+        self, input_data: ModelEventBusCircuitBreakerInput,
+    ) -> ModelCircuitBreakerMetrics:
         """Handle get circuit breaker metrics operation."""
         return self._metrics
 
-    async def _handle_reset_circuit(self, input_data: ModelEventBusCircuitBreakerInput) -> ModelResetResult:
+    async def _handle_reset_circuit(
+        self, input_data: ModelEventBusCircuitBreakerInput,
+    ) -> ModelResetResult:
         """Handle manual circuit reset operation."""
         async with self._lock:
             self._state = EnumCircuitBreakerState.CLOSED
@@ -438,7 +491,9 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             new_state=self._state.value,
         )
 
-    async def _handle_get_health_status(self, input_data: ModelEventBusCircuitBreakerInput) -> ModelHealthStatusResult:
+    async def _handle_get_health_status(
+        self, input_data: ModelEventBusCircuitBreakerInput,
+    ) -> ModelHealthStatusResult:
         """Handle get health status operation."""
         return ModelHealthStatusResult(
             circuit_state=self._state.value,
@@ -452,7 +507,10 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
 
     def _is_healthy(self) -> bool:
         """Check if circuit breaker is healthy for event publishing."""
-        return self._state == EnumCircuitBreakerState.CLOSED or self._state == EnumCircuitBreakerState.HALF_OPEN
+        return (
+            self._state == EnumCircuitBreakerState.CLOSED
+            or self._state == EnumCircuitBreakerState.HALF_OPEN
+        )
 
     async def _load_configuration(self) -> ModelCircuitBreakerConfig:
         """Load circuit breaker configuration from container or defaults."""
@@ -462,7 +520,13 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             # For now, detect environment and use appropriate defaults
 
             # Environment detection (similar to distributed tracing)
-            env_vars = ["ENVIRONMENT", "ENV", "DEPLOYMENT_ENV", "NODE_ENV", "OMNIBASE_ENV"]
+            env_vars = [
+                "ENVIRONMENT",
+                "ENV",
+                "DEPLOYMENT_ENV",
+                "NODE_ENV",
+                "OMNIBASE_ENV",
+            ]
             environment = "development"  # default
             for var in env_vars:
                 value = os.getenv(var)
@@ -479,11 +543,15 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
                 default_environment="development",
             )
 
-            self.logger.info(f"Loaded circuit breaker configuration for environment: {environment}")
+            self.logger.info(
+                f"Loaded circuit breaker configuration for environment: {environment}",
+            )
             return config
 
         except Exception as e:
-            self.logger.warning(f"Failed to load configuration from container, using development defaults: {e}")
+            self.logger.warning(
+                f"Failed to load configuration from container, using development defaults: {e}",
+            )
             # Fallback to development defaults
             return ModelCircuitBreakerConfig(
                 failure_threshold=2,
@@ -506,13 +574,17 @@ class NodeEventBusCircuitBreakerCompute(NodeComputeService[ModelEventBusCircuitB
             # Production safety check
             environment = os.getenv("ENVIRONMENT", "").lower()
             if environment in ("production", "prod"):
-                self.logger.error("CRITICAL: Mock publisher used in production environment!")
+                self.logger.error(
+                    "CRITICAL: Mock publisher used in production environment!",
+                )
                 raise OnexError(
                     message="Mock publisher cannot be used in production environment",
                     error_code=CoreErrorCode.CONFIGURATION_ERROR,
                 )
 
-            self.logger.warning(f"Using mock publisher for event: {event.correlation_id} (environment: {environment or 'unknown'})")
+            self.logger.warning(
+                f"Using mock publisher for event: {event.correlation_id} (environment: {environment or 'unknown'})",
+            )
             # Simulate some processing time
             await asyncio.sleep(0.01)
 

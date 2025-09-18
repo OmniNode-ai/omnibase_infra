@@ -4,7 +4,7 @@ Test script for PostgreSQL RedPanda integration with OmniNode event publishing.
 
 Tests the complete flow:
 1. PostgreSQL Adapter processes database operations
-2. Events published to RedPanda via OmniNode topic specifications  
+2. Events published to RedPanda via OmniNode topic specifications
 3. Event consumption and validation from RedPanda topics
 
 Usage:
@@ -46,15 +46,23 @@ try:
         def __init__(self):
             self.published_events: list[dict[str, Any]] = []
 
-        async def publish(self, topic: str, event_data: dict[str, Any], correlation_id: str, partition_key: str):
+        async def publish(
+            self,
+            topic: str,
+            event_data: dict[str, Any],
+            correlation_id: str,
+            partition_key: str,
+        ):
             """Mock publish that captures events."""
-            self.published_events.append({
-                "topic": topic,
-                "event_data": event_data,
-                "correlation_id": correlation_id,
-                "partition_key": partition_key,
-                "timestamp": time.time(),
-            })
+            self.published_events.append(
+                {
+                    "topic": topic,
+                    "event_data": event_data,
+                    "correlation_id": correlation_id,
+                    "partition_key": partition_key,
+                    "timestamp": time.time(),
+                },
+            )
             print(f"✅ Mock published event to topic: {topic}")
 
         def get_events_for_topic(self, topic: str) -> list[dict[str, Any]]:
@@ -69,7 +77,9 @@ try:
 
 except ImportError as e:
     print(f"⚠️  Integration modules not available: {e}")
-    print("This test requires the full PostgreSQL adapter infrastructure to be available.")
+    print(
+        "This test requires the full PostgreSQL adapter infrastructure to be available.",
+    )
     INTEGRATION_AVAILABLE = False
     MockEventBus = None
 
@@ -92,7 +102,9 @@ class PostgresRedPandaIntegrationTest:
     async def setup(self):
         """Setup test environment with mock services."""
         if not INTEGRATION_AVAILABLE:
-            self.logger.warning("Integration testing not available - missing dependencies")
+            self.logger.warning(
+                "Integration testing not available - missing dependencies",
+            )
             return False
 
         try:
@@ -142,7 +154,9 @@ class PostgresRedPandaIntegrationTest:
             original_connection_manager = self.adapter._connection_manager
 
             class MockConnectionManager:
-                async def execute_query(self, query, *params, timeout=None, record_metrics=None):
+                async def execute_query(
+                    self, query, *params, timeout=None, record_metrics=None,
+                ):
                     # Return mock successful query result
                     return "SELECT 1"  # Non-SELECT result format
 
@@ -167,20 +181,24 @@ class PostgresRedPandaIntegrationTest:
             assert published_event["correlation_id"] == str(correlation_id)
             assert published_event["partition_key"] == str(correlation_id)
 
-            self.test_results.append({
-                "test": test_name,
-                "status": "PASSED",
-                "message": "Successfully published postgres-query-completed event",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "PASSED",
+                    "message": "Successfully published postgres-query-completed event",
+                },
+            )
 
             self.logger.info(f"✅ {test_name} - PASSED")
 
         except Exception as e:
-            self.test_results.append({
-                "test": test_name,
-                "status": "FAILED",
-                "message": f"Test failed: {e!s}",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "FAILED",
+                    "message": f"Test failed: {e!s}",
+                },
+            )
             self.logger.error(f"❌ {test_name} - FAILED: {e}")
 
     async def test_query_failure_event_publishing(self):
@@ -213,7 +231,9 @@ class PostgresRedPandaIntegrationTest:
             original_connection_manager = self.adapter._connection_manager
 
             class MockFailingConnectionManager:
-                async def execute_query(self, query, *params, timeout=None, record_metrics=None):
+                async def execute_query(
+                    self, query, *params, timeout=None, record_metrics=None,
+                ):
                     # Simulate database error
                     raise Exception("Table 'non_existent_table' doesn't exist")
 
@@ -239,20 +259,24 @@ class PostgresRedPandaIntegrationTest:
             assert published_event["correlation_id"] == str(correlation_id)
             assert published_event["partition_key"] == str(correlation_id)
 
-            self.test_results.append({
-                "test": test_name,
-                "status": "PASSED",
-                "message": "Successfully published postgres-query-failed event",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "PASSED",
+                    "message": "Successfully published postgres-query-failed event",
+                },
+            )
 
             self.logger.info(f"✅ {test_name} - PASSED")
 
         except Exception as e:
-            self.test_results.append({
-                "test": test_name,
-                "status": "FAILED",
-                "message": f"Test failed: {e!s}",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "FAILED",
+                    "message": f"Test failed: {e!s}",
+                },
+            )
             self.logger.error(f"❌ {test_name} - FAILED: {e}")
 
     async def test_health_check_event_publishing(self):
@@ -287,20 +311,24 @@ class PostgresRedPandaIntegrationTest:
             assert published_event["correlation_id"] == str(correlation_id)
             assert published_event["partition_key"] == str(correlation_id)
 
-            self.test_results.append({
-                "test": test_name,
-                "status": "PASSED",
-                "message": "Successfully published postgres-health-response event",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "PASSED",
+                    "message": "Successfully published postgres-health-response event",
+                },
+            )
 
             self.logger.info(f"✅ {test_name} - PASSED")
 
         except Exception as e:
-            self.test_results.append({
-                "test": test_name,
-                "status": "FAILED",
-                "message": f"Test failed: {e!s}",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "FAILED",
+                    "message": f"Test failed: {e!s}",
+                },
+            )
             self.logger.error(f"❌ {test_name} - FAILED: {e}")
 
     async def test_omninode_topic_specifications(self):
@@ -311,32 +339,42 @@ class PostgresRedPandaIntegrationTest:
             # Test postgres-query-completed topic
             topic_spec = ModelOmniNodeTopicSpec.for_postgres_query_completed()
             expected_topic = "dev.omnibase.onex.evt.postgres-query-completed.v1"
-            assert topic_spec.to_topic_string() == expected_topic, f"Expected {expected_topic}, got {topic_spec.to_topic_string()}"
+            assert (
+                topic_spec.to_topic_string() == expected_topic
+            ), f"Expected {expected_topic}, got {topic_spec.to_topic_string()}"
 
             # Test postgres-query-failed topic
             topic_spec = ModelOmniNodeTopicSpec.for_postgres_query_failed()
             expected_topic = "dev.omnibase.onex.evt.postgres-query-failed.v1"
-            assert topic_spec.to_topic_string() == expected_topic, f"Expected {expected_topic}, got {topic_spec.to_topic_string()}"
+            assert (
+                topic_spec.to_topic_string() == expected_topic
+            ), f"Expected {expected_topic}, got {topic_spec.to_topic_string()}"
 
             # Test postgres-health-response topic
             topic_spec = ModelOmniNodeTopicSpec.for_postgres_health_check()
             expected_topic = "dev.omnibase.onex.qrs.postgres-health-response.v1"
-            assert topic_spec.to_topic_string() == expected_topic, f"Expected {expected_topic}, got {topic_spec.to_topic_string()}"
+            assert (
+                topic_spec.to_topic_string() == expected_topic
+            ), f"Expected {expected_topic}, got {topic_spec.to_topic_string()}"
 
-            self.test_results.append({
-                "test": test_name,
-                "status": "PASSED",
-                "message": "All OmniNode topic specifications generate correct topic names",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "PASSED",
+                    "message": "All OmniNode topic specifications generate correct topic names",
+                },
+            )
 
             self.logger.info(f"✅ {test_name} - PASSED")
 
         except Exception as e:
-            self.test_results.append({
-                "test": test_name,
-                "status": "FAILED",
-                "message": f"Test failed: {e!s}",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "FAILED",
+                    "message": f"Test failed: {e!s}",
+                },
+            )
             self.logger.error(f"❌ {test_name} - FAILED: {e}")
 
     async def test_fire_and_forget_behavior(self):
@@ -346,7 +384,9 @@ class PostgresRedPandaIntegrationTest:
         try:
             # Create failing event bus
             class FailingEventBus:
-                async def publish(self, topic, event_data, correlation_id, partition_key):
+                async def publish(
+                    self, topic, event_data, correlation_id, partition_key,
+                ):
                     raise Exception("Event bus connection failed")
 
             # Replace with failing event bus
@@ -373,7 +413,9 @@ class PostgresRedPandaIntegrationTest:
 
             # Mock successful database execution
             class MockConnectionManager:
-                async def execute_query(self, query, *params, timeout=None, record_metrics=None):
+                async def execute_query(
+                    self, query, *params, timeout=None, record_metrics=None,
+                ):
                     return "SELECT 1"
 
             original_connection_manager = self.adapter._connection_manager
@@ -387,22 +429,28 @@ class PostgresRedPandaIntegrationTest:
             self.adapter._connection_manager = original_connection_manager
 
             # Verify operation succeeded despite event publishing failure
-            assert result.success, f"Main operation should succeed despite event publishing failure: {result.error_message}"
+            assert (
+                result.success
+            ), f"Main operation should succeed despite event publishing failure: {result.error_message}"
 
-            self.test_results.append({
-                "test": test_name,
-                "status": "PASSED",
-                "message": "Main operations continue successfully despite event publishing failures",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "PASSED",
+                    "message": "Main operations continue successfully despite event publishing failures",
+                },
+            )
 
             self.logger.info(f"✅ {test_name} - PASSED")
 
         except Exception as e:
-            self.test_results.append({
-                "test": test_name,
-                "status": "FAILED",
-                "message": f"Test failed: {e!s}",
-            })
+            self.test_results.append(
+                {
+                    "test": test_name,
+                    "status": "FAILED",
+                    "message": f"Test failed: {e!s}",
+                },
+            )
             self.logger.error(f"❌ {test_name} - FAILED: {e}")
 
     async def run_all_tests(self):
@@ -430,9 +478,9 @@ class PostgresRedPandaIntegrationTest:
 
     def print_test_summary(self):
         """Print comprehensive test results summary."""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("📊 POSTGRESQL REDPANDA INTEGRATION TEST SUMMARY")
-        print("="*60)
+        print("=" * 60)
 
         passed = sum(1 for result in self.test_results if result["status"] == "PASSED")
         failed = sum(1 for result in self.test_results if result["status"] == "FAILED")
@@ -453,11 +501,13 @@ class PostgresRedPandaIntegrationTest:
             print()
 
         if failed == 0:
-            print("🎉 ALL TESTS PASSED - PostgreSQL RedPanda integration is working correctly!")
+            print(
+                "🎉 ALL TESTS PASSED - PostgreSQL RedPanda integration is working correctly!",
+            )
         else:
             print(f"⚠️  {failed} test(s) failed - please review the issues above")
 
-        print("="*60)
+        print("=" * 60)
 
 
 async def main():

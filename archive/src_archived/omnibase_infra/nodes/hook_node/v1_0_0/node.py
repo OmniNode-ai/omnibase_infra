@@ -82,8 +82,9 @@ from .models.model_hook_node_output import ModelHookNodeOutput
 
 class CircuitBreakerState(Enum):
     """Circuit breaker states for notification destinations."""
-    CLOSED = "closed"       # Normal operation - notifications sent directly
-    OPEN = "open"          # Failure state - notifications blocked
+
+    CLOSED = "closed"  # Normal operation - notifications sent directly
+    OPEN = "open"  # Failure state - notifications blocked
     HALF_OPEN = "half_open"  # Testing state - limited notifications to test recovery
 
 
@@ -97,36 +98,46 @@ class SecurityConfig:
         # SSRF Protection - RFC 1918 private networks and special addresses
         self.blocked_ip_ranges = [
             # RFC 1918 private networks
-            "10.0.0.0/8",      # Class A private network
-            "172.16.0.0/12",   # Class B private network
+            "10.0.0.0/8",  # Class A private network
+            "172.16.0.0/12",  # Class B private network
             "192.168.0.0/16",  # Class C private network
             # Localhost and loopback
-            "127.0.0.0/8",     # IPv4 loopback
-            "::1/128",         # IPv6 loopback
+            "127.0.0.0/8",  # IPv4 loopback
+            "::1/128",  # IPv6 loopback
             # Link-local addresses
             "169.254.0.0/16",  # IPv4 link-local (including cloud metadata)
-            "fe80::/10",       # IPv6 link-local
+            "fe80::/10",  # IPv6 link-local
             # Multicast
-            "224.0.0.0/4",     # IPv4 multicast
-            "ff00::/8",        # IPv6 multicast
+            "224.0.0.0/4",  # IPv4 multicast
+            "ff00::/8",  # IPv6 multicast
         ]
 
         # Cloud metadata service addresses (critical for SSRF prevention)
         self.blocked_metadata_addresses = [
             "169.254.169.254",  # AWS/GCP/Azure metadata service
-            "fd00:ec2::254",    # AWS IPv6 metadata service
+            "fd00:ec2::254",  # AWS IPv6 metadata service
         ]
 
         # Payload size limits - load from contract configuration
-        self.max_payload_size_bytes = security_config.get("max_payload_size_bytes", 1048576)  # 1MB default
+        self.max_payload_size_bytes = security_config.get(
+            "max_payload_size_bytes", 1048576,
+        )  # 1MB default
 
         # Rate limiting configuration - load from contract configuration
-        self.rate_limit_requests_per_minute = security_config.get("rate_limit_requests_per_minute", 60)
-        self.rate_limit_window_seconds = security_config.get("rate_limit_window_seconds", 60)
+        self.rate_limit_requests_per_minute = security_config.get(
+            "rate_limit_requests_per_minute", 60,
+        )
+        self.rate_limit_window_seconds = security_config.get(
+            "rate_limit_window_seconds", 60,
+        )
 
         # Enable/disable flags - load from contract configuration
-        self.ssrf_protection_enabled = security_config.get("ssrf_protection_enabled", True)
-        self.url_validation_enabled = security_config.get("url_validation_enabled", True)
+        self.ssrf_protection_enabled = security_config.get(
+            "ssrf_protection_enabled", True,
+        )
+        self.url_validation_enabled = security_config.get(
+            "url_validation_enabled", True,
+        )
 
 
 class UrlSecurityValidator:
@@ -140,12 +151,15 @@ class UrlSecurityValidator:
     def _compile_ip_ranges(self):
         """Pre-compile IP ranges for efficient validation."""
         from ipaddress import ip_network
+
         for range_str in self.config.blocked_ip_ranges:
             try:
                 self._compiled_ip_ranges.append(ip_network(range_str, strict=False))
             except Exception as e:
                 # Log but don't fail initialization for invalid ranges
-                logging.warning(f"Invalid IP range in security config: {range_str}: {e}")
+                logging.warning(
+                    f"Invalid IP range in security config: {range_str}: {e}",
+                )
 
     def validate_url(self, url) -> None:
         """
@@ -191,12 +205,14 @@ class UrlSecurityValidator:
                 )
 
             # Skip IP validation for test URLs to avoid DNS resolution issues in tests
-            if ("integration-test" in parsed.hostname or
-                "test" in parsed.hostname or
-                "slack.com" in parsed.hostname or
-                "webhook.com" in parsed.hostname or
-                "circuit-breaker-test.com" in parsed.hostname or
-                "timeout-test.webhook.com" in parsed.hostname):
+            if (
+                "integration-test" in parsed.hostname
+                or "test" in parsed.hostname
+                or "slack.com" in parsed.hostname
+                or "webhook.com" in parsed.hostname
+                or "circuit-breaker-test.com" in parsed.hostname
+                or "timeout-test.webhook.com" in parsed.hostname
+            ):
                 # Allow test URLs without IP validation
                 pass
             else:
@@ -207,21 +223,26 @@ class UrlSecurityValidator:
                 except AddressValueError:
                     # Hostname is not an IP address, resolve it
                     import socket
+
                     try:
                         # Get all IP addresses for the hostname
-                        addr_info = socket.getaddrinfo(parsed.hostname, parsed.port, family=socket.AF_UNSPEC)
+                        addr_info = socket.getaddrinfo(
+                            parsed.hostname, parsed.port, family=socket.AF_UNSPEC,
+                        )
                         for family, type_, proto, canonname, sockaddr in addr_info:
                             ip_str = sockaddr[0]
                             try:
                                 ip_addr = ip_address(ip_str)
-                                self._validate_ip_address(ip_addr, f"{parsed.hostname} -> {ip_str}")
+                                self._validate_ip_address(
+                                    ip_addr, f"{parsed.hostname} -> {ip_str}",
+                                )
                             except AddressValueError:
                                 continue  # Skip invalid IP addresses
                     except socket.gaierror as e:
                         raise OnexError(
                             code=CoreErrorCode.INVALID_INPUT,
-                        message=f"Cannot resolve hostname {parsed.hostname}: {e}",
-                    )
+                            message=f"Cannot resolve hostname {parsed.hostname}: {e}",
+                        )
 
             # Additional hostname validation
             self._validate_hostname(parsed.hostname)
@@ -234,7 +255,9 @@ class UrlSecurityValidator:
                 message=f"URL validation failed: {e}",
             ) from e
 
-    def _validate_ip_address(self, ip_addr: IPv4Address | IPv6Address, display_name: str) -> None:
+    def _validate_ip_address(
+        self, ip_addr: IPv4Address | IPv6Address, display_name: str,
+    ) -> None:
         """Validate IP address against blocked ranges."""
         for blocked_range in self._compiled_ip_ranges:
             if ip_addr in blocked_range:
@@ -247,7 +270,11 @@ class UrlSecurityValidator:
         """Additional hostname validation."""
         # Check for localhost variants
         localhost_patterns = [
-            "localhost", "0.0.0.0", "0", "local", "localdomain",
+            "localhost",
+            "0.0.0.0",
+            "0",
+            "local",
+            "localdomain",
         ]
         if hostname.lower() in localhost_patterns:
             raise OnexError(
@@ -282,7 +309,8 @@ class RateLimiter:
             if destination_url in self._requests:
                 cutoff_time = current_time - self.window_seconds
                 self._requests[destination_url] = [
-                    req_time for req_time in self._requests[destination_url]
+                    req_time
+                    for req_time in self._requests[destination_url]
                     if req_time > cutoff_time
                 ]
             else:
@@ -296,7 +324,9 @@ class RateLimiter:
             self._requests[destination_url].append(current_time)
             return True
 
-    async def get_rate_limit_status(self, destination_url: str) -> dict[str, int | float]:
+    async def get_rate_limit_status(
+        self, destination_url: str,
+    ) -> dict[str, int | float]:
         """Get current rate limit status for a destination."""
         current_time = time.time()
 
@@ -312,7 +342,8 @@ class RateLimiter:
             # Clean up old requests
             cutoff_time = current_time - self.window_seconds
             active_requests = [
-                req_time for req_time in self._requests[destination_url]
+                req_time
+                for req_time in self._requests[destination_url]
                 if req_time > cutoff_time
             ]
 
@@ -340,7 +371,9 @@ class HookStructuredLogger:
         self.logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.INFO)
 
-    def _build_extra(self, correlation_id: str | None, operation: str, **kwargs) -> dict:
+    def _build_extra(
+        self, correlation_id: str | None, operation: str, **kwargs,
+    ) -> dict:
         """Build extra context for structured logging."""
         extra = {
             "correlation_id": correlation_id,
@@ -350,16 +383,38 @@ class HookStructuredLogger:
         extra.update(kwargs)
         return extra
 
-    def info(self, message: str, correlation_id: str | None = None, operation: str = "notification", **kwargs):
+    def info(
+        self,
+        message: str,
+        correlation_id: str | None = None,
+        operation: str = "notification",
+        **kwargs,
+    ):
         """Log info level message with structured context."""
-        self.logger.info(message, extra=self._build_extra(correlation_id, operation, **kwargs))
+        self.logger.info(
+            message, extra=self._build_extra(correlation_id, operation, **kwargs),
+        )
 
-    def warning(self, message: str, correlation_id: str | None = None, operation: str = "notification", **kwargs):
+    def warning(
+        self,
+        message: str,
+        correlation_id: str | None = None,
+        operation: str = "notification",
+        **kwargs,
+    ):
         """Log warning level message with structured context."""
-        self.logger.warning(message, extra=self._build_extra(correlation_id, operation, **kwargs))
+        self.logger.warning(
+            message, extra=self._build_extra(correlation_id, operation, **kwargs),
+        )
 
-    def error(self, message: str, correlation_id: str | None = None, operation: str = "notification",
-              exception: Exception | None = None, **kwargs):
+    def error(
+        self,
+        message: str,
+        correlation_id: str | None = None,
+        operation: str = "notification",
+        exception: Exception | None = None,
+        **kwargs,
+    ):
         """Log error level message with structured context and exception details."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         if exception:
@@ -367,9 +422,17 @@ class HookStructuredLogger:
             extra["exception_message"] = str(exception)
         self.logger.error(message, extra=extra)
 
-    def debug(self, message: str, correlation_id: str | None = None, operation: str = "notification", **kwargs):
+    def debug(
+        self,
+        message: str,
+        correlation_id: str | None = None,
+        operation: str = "notification",
+        **kwargs,
+    ):
         """Log debug level message with structured context."""
-        self.logger.debug(message, extra=self._build_extra(correlation_id, operation, **kwargs))
+        self.logger.debug(
+            message, extra=self._build_extra(correlation_id, operation, **kwargs),
+        )
 
     def _sanitize_url_for_logging(self, url: str) -> str:
         """Sanitize webhook URL for safe logging (remove sensitive parameters)."""
@@ -378,15 +441,21 @@ class HookStructuredLogger:
             url_str = str(url)
             # Remove potential tokens, keys, or secrets from query parameters
             import re
+
             # Remove query parameters that might contain sensitive data
-            sanitized = re.sub(r"[?&](token|key|secret|auth|api_key)=[^&]*",
-                             lambda m: m.group(0).split("=")[0] + "=***", url_str)
+            sanitized = re.sub(
+                r"[?&](token|key|secret|auth|api_key)=[^&]*",
+                lambda m: m.group(0).split("=")[0] + "=***",
+                url_str,
+            )
             return sanitized
         except Exception:
             url_str = str(url)
             return url_str[:50] + "..." if len(url_str) > 50 else url_str
 
-    def log_notification_start(self, correlation_id: str, url: str, method: str, retry_attempt: int = 1):
+    def log_notification_start(
+        self, correlation_id: str, url: str, method: str, retry_attempt: int = 1,
+    ):
         """Log start of notification attempt with sanitized URL."""
         sanitized_url = self._sanitize_url_for_logging(url)
         self.info(
@@ -398,8 +467,13 @@ class HookStructuredLogger:
             retry_attempt=retry_attempt,
         )
 
-    def log_notification_success(self, correlation_id: str, execution_time_ms: float,
-                               status_code: int, retry_attempt: int = 1):
+    def log_notification_success(
+        self,
+        correlation_id: str,
+        execution_time_ms: float,
+        status_code: int,
+        retry_attempt: int = 1,
+    ):
         """Log successful notification delivery."""
         self.info(
             f"Notification attempt {retry_attempt} succeeded: {status_code} ({execution_time_ms:.2f}ms)",
@@ -410,8 +484,13 @@ class HookStructuredLogger:
             retry_attempt=retry_attempt,
         )
 
-    def log_notification_error(self, correlation_id: str, execution_time_ms: float,
-                             exception: Exception, retry_attempt: int = 1):
+    def log_notification_error(
+        self,
+        correlation_id: str,
+        execution_time_ms: float,
+        exception: Exception,
+        retry_attempt: int = 1,
+    ):
         """Log failed notification attempt."""
         self.error(
             f"Notification attempt {retry_attempt} failed ({execution_time_ms:.2f}ms): {exception!s}",
@@ -433,8 +512,12 @@ class NotificationCircuitBreaker:
     Thread-safe with async locking to prevent race conditions in concurrent environments.
     """
 
-    def __init__(self, failure_threshold: int = 5, timeout_seconds: int = 60,
-                 half_open_max_calls: int = 3):
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        timeout_seconds: int = 60,
+        half_open_max_calls: int = 3,
+    ):
         """Initialize circuit breaker with configurable failure tracking parameters."""
         self.failure_threshold = failure_threshold
         self.timeout_seconds = timeout_seconds
@@ -464,7 +547,9 @@ class NotificationCircuitBreaker:
 
             return False
 
-    async def record_success(self) -> tuple[bool, CircuitBreakerState, CircuitBreakerState, int]:
+    async def record_success(
+        self,
+    ) -> tuple[bool, CircuitBreakerState, CircuitBreakerState, int]:
         """
         Record successful notification delivery.
 
@@ -479,7 +564,9 @@ class NotificationCircuitBreaker:
             new_state = self._state
             return (old_state != new_state, old_state, new_state, self._failure_count)
 
-    async def record_failure(self) -> tuple[bool, CircuitBreakerState, CircuitBreakerState, int]:
+    async def record_failure(
+        self,
+    ) -> tuple[bool, CircuitBreakerState, CircuitBreakerState, int]:
         """
         Record failed notification delivery.
 
@@ -491,10 +578,15 @@ class NotificationCircuitBreaker:
             self._failure_count += 1
             self._last_failure_time = time.time()
 
-            if self._state == CircuitBreakerState.HALF_OPEN or (self._state == CircuitBreakerState.CLOSED and self._failure_count >= self.failure_threshold):
+            if self._state == CircuitBreakerState.HALF_OPEN or (
+                self._state == CircuitBreakerState.CLOSED
+                and self._failure_count >= self.failure_threshold
+            ):
                 self._state = CircuitBreakerState.OPEN
 
-            self._half_open_calls += 1 if self._state == CircuitBreakerState.HALF_OPEN else 0
+            self._half_open_calls += (
+                1 if self._state == CircuitBreakerState.HALF_OPEN else 0
+            )
             new_state = self._state
             return (old_state != new_state, old_state, new_state, self._failure_count)
 
@@ -589,7 +681,9 @@ class NodeHookEffect(NodeEffectService):
         self._config = self._load_contract_configuration()
 
         # Initialize HTTP client for webhook delivery (REQUIRED - NO FALLBACKS)
-        self._http_client: ProtocolHttpClient = self.container.get_service("ProtocolHttpClient")
+        self._http_client: ProtocolHttpClient = self.container.get_service(
+            "ProtocolHttpClient",
+        )
         if self._http_client is None:
             raise OnexError(
                 code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
@@ -597,7 +691,9 @@ class NodeHookEffect(NodeEffectService):
             )
 
         # Initialize event bus for infrastructure event integration (REQUIRED - NO FALLBACKS)
-        self._event_bus: ProtocolEventBus = self.container.get_service("ProtocolEventBus")
+        self._event_bus: ProtocolEventBus = self.container.get_service(
+            "ProtocolEventBus",
+        )
         if self._event_bus is None:
             raise OnexError(
                 code=CoreErrorCode.DEPENDENCY_RESOLUTION_ERROR,
@@ -617,10 +713,18 @@ class NodeHookEffect(NodeEffectService):
 
         # Load circuit breaker configuration from contract
         circuit_breaker_config = self._config.get("circuit_breaker", {})
-        self._circuit_breaker_failure_threshold = circuit_breaker_config.get("failure_threshold", 5)
-        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get("timeout_seconds", 60)
-        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get("half_open_max_calls", 3)
-        self._max_circuit_breakers = circuit_breaker_config.get("max_circuit_breakers", 1000)
+        self._circuit_breaker_failure_threshold = circuit_breaker_config.get(
+            "failure_threshold", 5,
+        )
+        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get(
+            "timeout_seconds", 60,
+        )
+        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get(
+            "half_open_max_calls", 3,
+        )
+        self._max_circuit_breakers = circuit_breaker_config.get(
+            "max_circuit_breakers", 1000,
+        )
 
         # Load HTTP configuration from contract
         http_config = self._config.get("http", {})
@@ -628,8 +732,12 @@ class NodeHookEffect(NodeEffectService):
 
         # Initialize bounded circuit breakers for notification destinations (per-URL tracking)
         self._circuit_breakers: dict[str, NotificationCircuitBreaker] = {}
-        self._circuit_breaker_access_order: list[str] = []  # LRU tracking for bounded storage
-        self._circuit_breaker_lock = asyncio.Lock()  # Global lock for circuit breaker dict management
+        self._circuit_breaker_access_order: list[str] = (
+            []
+        )  # LRU tracking for bounded storage
+        self._circuit_breaker_lock = (
+            asyncio.Lock()
+        )  # Global lock for circuit breaker dict management
 
         # Performance metrics tracking
         self._total_notifications = 0
@@ -640,7 +748,8 @@ class NodeHookEffect(NodeEffectService):
             "Hook Node initialized successfully with security protections",
             operation="initialization",
             security_config={
-                "max_payload_size_mb": self._security_config.max_payload_size_bytes / (1024 * 1024),
+                "max_payload_size_mb": self._security_config.max_payload_size_bytes
+                / (1024 * 1024),
                 "rate_limit_per_minute": self._security_config.rate_limit_requests_per_minute,
                 "blocked_ip_ranges_count": len(self._security_config.blocked_ip_ranges),
                 "ssrf_protection_enabled": True,
@@ -682,8 +791,9 @@ class NodeHookEffect(NodeEffectService):
             self._circuit_breaker_access_order.append(url)
             return self._circuit_breakers[url]
 
-    def _build_http_headers(self, base_headers: dict[str, str] | None,
-                          auth: ModelNotificationAuth | None) -> dict[str, str]:
+    def _build_http_headers(
+        self, base_headers: dict[str, str] | None, auth: ModelNotificationAuth | None,
+    ) -> dict[str, str]:
         """Build HTTP headers including authentication."""
         headers = base_headers.copy() if base_headers else {}
 
@@ -695,12 +805,23 @@ class NodeHookEffect(NodeEffectService):
         if auth:
             if auth.auth_type == EnumAuthType.BEARER and auth.credentials.get("token"):
                 headers["Authorization"] = f"Bearer {auth.credentials['token']}"
-            elif auth.auth_type == EnumAuthType.BASIC and auth.credentials.get("username") and auth.credentials.get("password"):
+            elif (
+                auth.auth_type == EnumAuthType.BASIC
+                and auth.credentials.get("username")
+                and auth.credentials.get("password")
+            ):
                 import base64
-                credentials = f"{auth.credentials['username']}:{auth.credentials['password']}"
+
+                credentials = (
+                    f"{auth.credentials['username']}:{auth.credentials['password']}"
+                )
                 encoded_credentials = base64.b64encode(credentials.encode()).decode()
                 headers["Authorization"] = f"Basic {encoded_credentials}"
-            elif auth.auth_type == EnumAuthType.API_KEY_HEADER and auth.credentials.get("header_name") and auth.credentials.get("api_key"):
+            elif (
+                auth.auth_type == EnumAuthType.API_KEY_HEADER
+                and auth.credentials.get("header_name")
+                and auth.credentials.get("api_key")
+            ):
                 headers[auth.credentials["header_name"]] = auth.credentials["api_key"]
 
         return headers
@@ -724,8 +845,8 @@ class NodeHookEffect(NodeEffectService):
                 raise OnexError(
                     code=CoreErrorCode.INVALID_INPUT,
                     message=f"Payload size {payload_size} bytes exceeds maximum allowed "
-                           f"{self._security_config.max_payload_size_bytes} bytes "
-                           f"({self._security_config.max_payload_size_bytes / (1024*1024):.1f}MB)",
+                    f"{self._security_config.max_payload_size_bytes} bytes "
+                    f"({self._security_config.max_payload_size_bytes / (1024*1024):.1f}MB)",
                 )
 
             self._logger.debug(
@@ -743,7 +864,9 @@ class NodeHookEffect(NodeEffectService):
                 message=f"Payload size validation failed: {e}",
             ) from e
 
-    def _calculate_retry_delay(self, attempt: int, retry_policy: ModelNotificationRetryPolicy) -> float:
+    def _calculate_retry_delay(
+        self, attempt: int, retry_policy: ModelNotificationRetryPolicy,
+    ) -> float:
         """Calculate delay before retry attempt based on backoff strategy."""
         base_delay = retry_policy.delay_seconds
 
@@ -757,7 +880,9 @@ class NodeHookEffect(NodeEffectService):
         # fixed or unknown - default to fixed
         return base_delay
 
-    def _is_retryable_status(self, status_code: int, retry_policy: ModelNotificationRetryPolicy) -> bool:
+    def _is_retryable_status(
+        self, status_code: int, retry_policy: ModelNotificationRetryPolicy,
+    ) -> bool:
         """Check if HTTP status code should trigger a retry."""
         return status_code in retry_policy.retryable_status_codes
 
@@ -801,7 +926,9 @@ class NodeHookEffect(NodeEffectService):
                 value=json.dumps(event_data).encode(),
                 headers={
                     "content_type": "application/json",
-                    "correlation_id": UUID(correlation_id) if correlation_id else uuid4(),
+                    "correlation_id": (
+                        UUID(correlation_id) if correlation_id else uuid4()
+                    ),
                     "message_id": uuid4(),
                     "timestamp": event.timestamp,
                     "source": "hook_node",
@@ -856,7 +983,9 @@ class NodeHookEffect(NodeEffectService):
                 value=json.dumps(event_data).encode(),
                 headers={
                     "content_type": "application/json",
-                    "correlation_id": UUID(correlation_id) if correlation_id else uuid4(),
+                    "correlation_id": (
+                        UUID(correlation_id) if correlation_id else uuid4()
+                    ),
                     "message_id": uuid4(),
                     "timestamp": event.timestamp,
                     "source": "hook_node",
@@ -913,7 +1042,9 @@ class NodeHookEffect(NodeEffectService):
                 value=json.dumps(event_data).encode(),
                 headers={
                     "content_type": "application/json",
-                    "correlation_id": UUID(correlation_id) if correlation_id else uuid4(),
+                    "correlation_id": (
+                        UUID(correlation_id) if correlation_id else uuid4()
+                    ),
                     "message_id": uuid4(),
                     "timestamp": event.timestamp,
                     "source": "hook_node",
@@ -989,7 +1120,9 @@ class NodeHookEffect(NodeEffectService):
 
         # CRITICAL SECURITY VALIDATION - Rate Limiting
         if not await self._rate_limiter.check_rate_limit(request.url):
-            rate_limit_status = await self._rate_limiter.get_rate_limit_status(request.url)
+            rate_limit_status = await self._rate_limiter.get_rate_limit_status(
+                request.url,
+            )
             self._logger.warning(
                 f"Rate limit exceeded for destination: {request.url}",
                 correlation_id=correlation_id,
@@ -1045,7 +1178,9 @@ class NodeHookEffect(NodeEffectService):
             max_attempts=retry_defaults.get("max_attempts", 3),
             backoff_strategy=retry_defaults.get("backoff_strategy", "exponential"),
             delay_seconds=retry_defaults.get("delay_seconds", 5.0),
-            retryable_status_codes=retry_defaults.get("retryable_status_codes", [408, 429, 500, 502, 503, 504]),
+            retryable_status_codes=retry_defaults.get(
+                "retryable_status_codes", [408, 429, 500, 502, 503, 504],
+            ),
         )
 
         headers = self._build_http_headers(request.headers, request.auth)
@@ -1096,7 +1231,9 @@ class NodeHookEffect(NodeEffectService):
                     )
 
                     # FIXED RACE CONDITION - Atomic circuit breaker state reporting
-                    state_changed, old_state, new_state, failure_count = await circuit_breaker.record_success()
+                    state_changed, old_state, new_state, failure_count = (
+                        await circuit_breaker.record_success()
+                    )
 
                     # Publish circuit breaker success event
                     await self._publish_circuit_breaker_success_event(
@@ -1170,10 +1307,16 @@ class NodeHookEffect(NodeEffectService):
                     await asyncio.sleep(retry_delay)
 
         # All attempts failed - FIXED RACE CONDITION - Atomic circuit breaker state reporting
-        state_changed, old_state, new_state, failure_count = await circuit_breaker.record_failure()
+        state_changed, old_state, new_state, failure_count = (
+            await circuit_breaker.record_failure()
+        )
 
         # Publish circuit breaker failure event
-        error_message = attempts[-1].error if attempts and attempts[-1].error else "All attempts failed"
+        error_message = (
+            attempts[-1].error
+            if attempts and attempts[-1].error
+            else "All attempts failed"
+        )
         await self._publish_circuit_breaker_failure_event(
             correlation_id=correlation_id,
             destination_url=str(request.url),
@@ -1282,7 +1425,11 @@ class NodeHookEffect(NodeEffectService):
             return ModelHookNodeOutput(
                 notification_result=notification_result,
                 success=notification_result.is_success,
-                error_message=None if notification_result.is_success else "Notification delivery failed after all retry attempts",
+                error_message=(
+                    None
+                    if notification_result.is_success
+                    else "Notification delivery failed after all retry attempts"
+                ),
                 correlation_id=input_data.correlation_id,
                 timestamp=time.time(),
                 total_execution_time_ms=total_execution_time_ms,
@@ -1341,21 +1488,32 @@ class NodeHookEffect(NodeEffectService):
                     "failed_notifications": self._failed_notifications,
                     "success_rate": (
                         self._successful_notifications / self._total_notifications
-                        if self._total_notifications > 0 else 1.0
+                        if self._total_notifications > 0
+                        else 1.0
                     ),
                     "circuit_breakers": circuit_breaker_info,
                     "circuit_breaker_storage": {
                         "current_count": len(circuit_breaker_info),
                         "max_capacity": self._max_circuit_breakers,
-                        "utilization_percentage": round(len(circuit_breaker_info) / self._max_circuit_breakers * 100, 2),
+                        "utilization_percentage": round(
+                            len(circuit_breaker_info)
+                            / self._max_circuit_breakers
+                            * 100,
+                            2,
+                        ),
                     },
                 },
                 "security": {
                     "ssrf_protection_enabled": True,
-                    "max_payload_size_mb": self._security_config.max_payload_size_bytes / (1024 * 1024),
+                    "max_payload_size_mb": self._security_config.max_payload_size_bytes
+                    / (1024 * 1024),
                     "rate_limit_requests_per_minute": self._security_config.rate_limit_requests_per_minute,
-                    "blocked_ip_ranges_count": len(self._security_config.blocked_ip_ranges),
-                    "blocked_metadata_addresses_count": len(self._security_config.blocked_metadata_addresses),
+                    "blocked_ip_ranges_count": len(
+                        self._security_config.blocked_ip_ranges,
+                    ),
+                    "blocked_metadata_addresses_count": len(
+                        self._security_config.blocked_metadata_addresses,
+                    ),
                     "url_validation_enabled": True,
                 },
             }
@@ -1377,7 +1535,9 @@ class NodeHookEffect(NodeEffectService):
                 )
 
             # All checks passed
-            self._logger.debug("Health check completed successfully", operation="health_check")
+            self._logger.debug(
+                "Health check completed successfully", operation="health_check",
+            )
 
             return ModelHealthStatus(
                 status=EnumHealthStatus.HEALTHY,
@@ -1411,9 +1571,16 @@ class NodeHookEffect(NodeEffectService):
         # Mock configuration
         self.config = {
             "security": {"max_payload_size_bytes": 1048576},
-            "circuit_breaker": {"failure_threshold": 5, "timeout_seconds": 60, "max_circuit_breakers": 1000},
+            "circuit_breaker": {
+                "failure_threshold": 5,
+                "timeout_seconds": 60,
+                "max_circuit_breakers": 1000,
+            },
             "http": {"request_timeout_seconds": 30.0},
-            "retry_policy_defaults": {"max_attempts": 3, "backoff_strategy": "EXPONENTIAL"},
+            "retry_policy_defaults": {
+                "max_attempts": 3,
+                "backoff_strategy": "EXPONENTIAL",
+            },
         }
         self._config = self.config  # Some parts of code expect _config
 
@@ -1427,10 +1594,18 @@ class NodeHookEffect(NodeEffectService):
 
         # Initialize circuit breaker configuration
         circuit_breaker_config = self.config.get("circuit_breaker", {})
-        self._circuit_breaker_failure_threshold = circuit_breaker_config.get("failure_threshold", 5)
-        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get("timeout_seconds", 60)
-        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get("half_open_max_calls", 3)
-        self._circuit_breaker_access_order: list[str] = []  # LRU tracking for bounded storage
+        self._circuit_breaker_failure_threshold = circuit_breaker_config.get(
+            "failure_threshold", 5,
+        )
+        self._circuit_breaker_timeout_seconds = circuit_breaker_config.get(
+            "timeout_seconds", 60,
+        )
+        self._circuit_breaker_half_open_max_calls = circuit_breaker_config.get(
+            "half_open_max_calls", 3,
+        )
+        self._circuit_breaker_access_order: list[str] = (
+            []
+        )  # LRU tracking for bounded storage
 
         # Initialize security components (for testing)
         self._security_config = SecurityConfig(self.config)

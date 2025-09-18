@@ -55,7 +55,10 @@ async def test_container_event_bus_integration():
 
         # Step 5: Verify adapter has event bus
         print("\n5. Verifying adapter has event bus access...")
-        if hasattr(postgres_adapter, "_event_bus") and postgres_adapter._event_bus is not None:
+        if (
+            hasattr(postgres_adapter, "_event_bus")
+            and postgres_adapter._event_bus is not None
+        ):
             print("✅ PostgreSQL adapter successfully injected event bus")
             print(f"   Event bus type: {type(postgres_adapter._event_bus).__name__}")
         else:
@@ -63,7 +66,10 @@ async def test_container_event_bus_integration():
 
         # Step 6: Test event publisher functionality
         print("\n6. Testing event publisher functionality...")
-        if hasattr(postgres_adapter, "_event_publisher") and postgres_adapter._event_publisher is not None:
+        if (
+            hasattr(postgres_adapter, "_event_publisher")
+            and postgres_adapter._event_publisher is not None
+        ):
             print("✅ PostgreSQL adapter has event publisher")
 
             # Test creating an event envelope
@@ -151,6 +157,7 @@ async def test_redpanda_connection_mock():
 
 
 if __name__ == "__main__":
+
     async def main():
         print("🚀 Starting Infrastructure Integration Tests")
 

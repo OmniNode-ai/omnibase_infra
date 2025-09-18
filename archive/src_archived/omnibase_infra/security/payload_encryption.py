@@ -28,6 +28,7 @@ from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 @dataclass
 class EncryptionMetadata:
     """Metadata for encrypted payload."""
+
     algorithm: str
     key_id: str
     iv: str | None = None
@@ -39,6 +40,7 @@ class EncryptionMetadata:
 @dataclass
 class EncryptedPayload:
     """Container for encrypted payload and metadata."""
+
     encrypted_data: str
     metadata: EncryptionMetadata
 
@@ -76,7 +78,7 @@ class EncryptedPayload:
 class ONEXPayloadEncryption:
     """
     ONEX payload encryption service for sensitive data protection.
-    
+
     Features:
     - AES-256-GCM encryption with authenticated encryption
     - Key rotation and management
@@ -90,7 +92,7 @@ class ONEXPayloadEncryption:
         # Encryption configuration
         self._algorithm = "AES-256-GCM"
         self._key_size = 32  # 256 bits
-        self._iv_size = 12   # 96 bits for GCM
+        self._iv_size = 12  # 96 bits for GCM
 
         # Key management
         self._current_key_id = self._get_current_key_id()
@@ -114,17 +116,19 @@ class ONEXPayloadEncryption:
         else:
             # Generate new key for development
             key_bytes = self._generate_key()
-            self._logger.warning("Using generated encryption key - not suitable for production")
+            self._logger.warning(
+                "Using generated encryption key - not suitable for production",
+            )
 
         self._keys[self._current_key_id] = key_bytes
 
     def _derive_key_from_material(self, key_material: str) -> bytes:
         """
         Derive encryption key from key material using PBKDF2.
-        
+
         Args:
             key_material: Base key material (password/passphrase)
-            
+
         Returns:
             Derived encryption key
         """
@@ -146,20 +150,23 @@ class ONEXPayloadEncryption:
         """Generate new encryption key."""
         return os.urandom(self._key_size)
 
-    def encrypt_payload(self, payload: dict[str, Any] | str,
-                       key_id: str | None = None,
-                       compress: bool = True) -> EncryptedPayload:
+    def encrypt_payload(
+        self,
+        payload: dict[str, Any] | str,
+        key_id: str | None = None,
+        compress: bool = True,
+    ) -> EncryptedPayload:
         """
         Encrypt payload data.
-        
+
         Args:
             payload: Data to encrypt (dict or string)
             key_id: Encryption key ID (uses current if not specified)
             compress: Whether to compress payload before encryption
-            
+
         Returns:
             EncryptedPayload with encrypted data and metadata
-            
+
         Raises:
             OnexError: If encryption fails
         """
@@ -185,6 +192,7 @@ class ONEXPayloadEncryption:
             # Compress if requested
             if compress:
                 import gzip
+
                 payload_data = gzip.compress(payload_data)
 
             # Generate random IV
@@ -196,7 +204,7 @@ class ONEXPayloadEncryption:
 
             # Split encrypted data and authentication tag
             ciphertext = encrypted_data[:-16]  # All but last 16 bytes
-            tag = encrypted_data[-16:]         # Last 16 bytes (GCM tag)
+            tag = encrypted_data[-16:]  # Last 16 bytes (GCM tag)
 
             # Create metadata
             metadata = EncryptionMetadata(
@@ -223,18 +231,19 @@ class ONEXPayloadEncryption:
                 CoreErrorCode.ENCRYPTION_ERROR,
             ) from e
 
-    def decrypt_payload(self, encrypted_payload: EncryptedPayload,
-                       return_dict: bool = True) -> dict[str, Any] | str:
+    def decrypt_payload(
+        self, encrypted_payload: EncryptedPayload, return_dict: bool = True,
+    ) -> dict[str, Any] | str:
         """
         Decrypt payload data.
-        
+
         Args:
             encrypted_payload: Encrypted payload container
             return_dict: Whether to return dict (True) or string (False)
-            
+
         Returns:
             Decrypted payload data
-            
+
         Raises:
             OnexError: If decryption fails
         """
@@ -256,7 +265,9 @@ class ONEXPayloadEncryption:
                 )
 
             # Decode components
-            ciphertext = base64.b64decode(encrypted_payload.encrypted_data.encode("ascii"))
+            ciphertext = base64.b64decode(
+                encrypted_payload.encrypted_data.encode("ascii"),
+            )
             iv = base64.b64decode(metadata.iv.encode("ascii"))
             tag = base64.b64decode(metadata.tag.encode("ascii"))
 
@@ -270,6 +281,7 @@ class ONEXPayloadEncryption:
             # Decompress if needed (detect gzip magic bytes)
             if decrypted_data.startswith(b"\x1f\x8b"):
                 import gzip
+
                 decrypted_data = gzip.decompress(decrypted_data)
 
             # Convert to string
@@ -296,7 +308,7 @@ class ONEXPayloadEncryption:
     def add_encryption_key(self, key_id: str, key_material: str):
         """
         Add new encryption key for key rotation.
-        
+
         Args:
             key_id: Unique identifier for the key
             key_material: Key material to derive encryption key from
@@ -309,7 +321,7 @@ class ONEXPayloadEncryption:
     def rotate_key(self, new_key_id: str, new_key_material: str):
         """
         Rotate to new encryption key.
-        
+
         Args:
             new_key_id: New key identifier
             new_key_material: New key material
@@ -322,7 +334,7 @@ class ONEXPayloadEncryption:
     def remove_encryption_key(self, key_id: str):
         """
         Remove encryption key (for key cleanup after rotation).
-        
+
         Args:
             key_id: Key identifier to remove
         """
@@ -339,7 +351,7 @@ class ONEXPayloadEncryption:
     def get_available_keys(self) -> list[str]:
         """
         Get list of available key IDs.
-        
+
         Returns:
             List of available key identifiers
         """
@@ -348,10 +360,10 @@ class ONEXPayloadEncryption:
     def is_payload_encrypted(self, data: str | dict[str, Any]) -> bool:
         """
         Check if data appears to be an encrypted payload.
-        
+
         Args:
             data: Data to check
-            
+
         Returns:
             True if data appears to be encrypted payload
         """
@@ -361,31 +373,42 @@ class ONEXPayloadEncryption:
                 data = json.loads(data)
 
             # Check if data is dict-like and has required keys
-            return (hasattr(data, "keys") and hasattr(data, "get") and
-                   "encrypted_data" in data and
-                   "metadata" in data and
-                   "algorithm" in data.get("metadata", {}))
+            return (
+                hasattr(data, "keys")
+                and hasattr(data, "get")
+                and "encrypted_data" in data
+                and "metadata" in data
+                and "algorithm" in data.get("metadata", {})
+            )
 
         except (json.JSONDecodeError, KeyError, TypeError):
             return False
 
-    def encrypt_if_sensitive(self, data: dict[str, Any],
-                           sensitive_fields: list[str] | None = None) -> dict[str, Any]:
+    def encrypt_if_sensitive(
+        self, data: dict[str, Any], sensitive_fields: list[str] | None = None,
+    ) -> dict[str, Any]:
         """
         Conditionally encrypt sensitive fields in a dictionary.
-        
+
         Args:
             data: Data dictionary to process
             sensitive_fields: List of field names to encrypt (if None, use defaults)
-            
+
         Returns:
             Dictionary with sensitive fields encrypted
         """
         if sensitive_fields is None:
             # Default sensitive field patterns
             sensitive_fields = [
-                "password", "secret", "token", "key", "credential",
-                "ssn", "credit_card", "account_number", "personal_data",
+                "password",
+                "secret",
+                "token",
+                "key",
+                "credential",
+                "ssn",
+                "credit_card",
+                "account_number",
+                "personal_data",
             ]
 
         result = {}
@@ -396,8 +419,8 @@ class ONEXPayloadEncryption:
 
             # Check if value should be encrypted using duck typing
             should_encrypt_value = should_encrypt and (
-                (hasattr(value, "strip") and hasattr(value, "replace")) or  # String-like
-                (hasattr(value, "keys") and hasattr(value, "items"))       # Dict-like
+                (hasattr(value, "strip") and hasattr(value, "replace"))  # String-like
+                or (hasattr(value, "keys") and hasattr(value, "items"))  # Dict-like
             )
 
             if should_encrypt_value:
@@ -420,7 +443,7 @@ _payload_encryption: ONEXPayloadEncryption | None = None
 def get_payload_encryption() -> ONEXPayloadEncryption:
     """
     Get global payload encryption instance.
-    
+
     Returns:
         ONEXPayloadEncryption singleton instance
     """

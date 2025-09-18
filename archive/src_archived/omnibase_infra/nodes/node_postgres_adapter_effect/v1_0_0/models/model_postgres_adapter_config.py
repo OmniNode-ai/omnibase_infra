@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, validator
 class ModelPostgresAdapterConfig(BaseModel):
     """
     Configuration model for PostgreSQL adapter validation limits and security settings.
-    
+
     Supports environment-based configuration for different deployment environments.
     """
 
@@ -77,13 +77,15 @@ class ModelPostgresAdapterConfig(BaseModel):
         """Validate environment is a known value."""
         allowed_environments = {"development", "staging", "production"}
         if v not in allowed_environments:
-            raise ValueError(f"Environment must be one of: {', '.join(allowed_environments)}")
+            raise ValueError(
+                f"Environment must be one of: {', '.join(allowed_environments)}",
+            )
         return v
 
     def validate_security_config(self) -> None:
         """
         Validate security configuration for production environments.
-        
+
         Raises:
             OnexError: If production security requirements are not met
         """
@@ -102,19 +104,23 @@ class ModelPostgresAdapterConfig(BaseModel):
 
             # Production should have stricter limits
             if self.max_query_size > 50000:
-                logging.warning("Large query size limit in production may impact performance")
+                logging.warning(
+                    "Large query size limit in production may impact performance",
+                )
 
             if self.max_complexity_score > 20:
-                logging.warning("High complexity score threshold in production may allow expensive queries")
+                logging.warning(
+                    "High complexity score threshold in production may allow expensive queries",
+                )
 
     @classmethod
     def from_environment(cls, secure_mode: bool = True) -> "ModelPostgresAdapterConfig":
         """
         Create configuration from environment variables with security considerations.
-        
+
         Args:
             secure_mode: If True, avoids logging configuration values that might contain sensitive data
-        
+
         Environment variable mapping:
         - POSTGRES_ADAPTER_MAX_QUERY_SIZE
         - POSTGRES_ADAPTER_MAX_PARAMETER_COUNT
@@ -125,11 +131,14 @@ class ModelPostgresAdapterConfig(BaseModel):
         - POSTGRES_ADAPTER_ENABLE_INJECTION_DETECTION
         - POSTGRES_ADAPTER_ENABLE_ERROR_SANITIZATION
         - POSTGRES_ADAPTER_ENVIRONMENT
-        
+
         Returns:
             Configured ModelPostgresAdapterConfig instance
         """
-        def safe_int_env(key: str, default: str, secure_mode: bool = secure_mode) -> int:
+
+        def safe_int_env(
+            key: str, default: str, secure_mode: bool = secure_mode,
+        ) -> int:
             """Safely get integer from environment with optional logging suppression."""
             value = os.getenv(key, default)
             try:
@@ -139,10 +148,14 @@ class ModelPostgresAdapterConfig(BaseModel):
                 return result
             except ValueError:
                 if not secure_mode:
-                    logging.warning(f"Invalid {key} value '{value}', using default {default}")
+                    logging.warning(
+                        f"Invalid {key} value '{value}', using default {default}",
+                    )
                 return int(default)
 
-        def safe_bool_env(key: str, default: str, secure_mode: bool = secure_mode) -> bool:
+        def safe_bool_env(
+            key: str, default: str, secure_mode: bool = secure_mode,
+        ) -> bool:
             """Safely get boolean from environment with optional logging suppression."""
             value = os.getenv(key, default).lower()
             result = value == "true"
@@ -155,13 +168,27 @@ class ModelPostgresAdapterConfig(BaseModel):
         try:
             config = cls(
                 max_query_size=safe_int_env("POSTGRES_ADAPTER_MAX_QUERY_SIZE", "50000"),
-                max_parameter_count=safe_int_env("POSTGRES_ADAPTER_MAX_PARAMETER_COUNT", "100"),
-                max_parameter_size=safe_int_env("POSTGRES_ADAPTER_MAX_PARAMETER_SIZE", "10000"),
-                max_timeout_seconds=safe_int_env("POSTGRES_ADAPTER_MAX_TIMEOUT_SECONDS", "300"),
-                max_complexity_score=safe_int_env("POSTGRES_ADAPTER_MAX_COMPLEXITY_SCORE", "20"),
-                enable_query_complexity_validation=safe_bool_env("POSTGRES_ADAPTER_ENABLE_COMPLEXITY_VALIDATION", "true"),
-                enable_sql_injection_detection=safe_bool_env("POSTGRES_ADAPTER_ENABLE_INJECTION_DETECTION", "true"),
-                enable_error_sanitization=safe_bool_env("POSTGRES_ADAPTER_ENABLE_ERROR_SANITIZATION", "true"),
+                max_parameter_count=safe_int_env(
+                    "POSTGRES_ADAPTER_MAX_PARAMETER_COUNT", "100",
+                ),
+                max_parameter_size=safe_int_env(
+                    "POSTGRES_ADAPTER_MAX_PARAMETER_SIZE", "10000",
+                ),
+                max_timeout_seconds=safe_int_env(
+                    "POSTGRES_ADAPTER_MAX_TIMEOUT_SECONDS", "300",
+                ),
+                max_complexity_score=safe_int_env(
+                    "POSTGRES_ADAPTER_MAX_COMPLEXITY_SCORE", "20",
+                ),
+                enable_query_complexity_validation=safe_bool_env(
+                    "POSTGRES_ADAPTER_ENABLE_COMPLEXITY_VALIDATION", "true",
+                ),
+                enable_sql_injection_detection=safe_bool_env(
+                    "POSTGRES_ADAPTER_ENABLE_INJECTION_DETECTION", "true",
+                ),
+                enable_error_sanitization=safe_bool_env(
+                    "POSTGRES_ADAPTER_ENABLE_ERROR_SANITIZATION", "true",
+                ),
                 environment=environment,
             )
 
@@ -169,7 +196,9 @@ class ModelPostgresAdapterConfig(BaseModel):
             config.validate_security_config()
 
             if not secure_mode:
-                logging.info(f"PostgreSQL adapter configuration loaded for environment: {environment}")
+                logging.info(
+                    f"PostgreSQL adapter configuration loaded for environment: {environment}",
+                )
 
             return config
 
@@ -183,10 +212,10 @@ class ModelPostgresAdapterConfig(BaseModel):
     def for_environment(cls, environment: str) -> "ModelPostgresAdapterConfig":
         """
         Create environment-specific configuration with appropriate defaults.
-        
+
         Args:
             environment: Target environment (development, staging, production)
-            
+
         Returns:
             Environment-optimized configuration
         """
@@ -195,10 +224,16 @@ class ModelPostgresAdapterConfig(BaseModel):
 
         if environment == "production":
             # Production: More restrictive limits
-            base_config.max_query_size = min(base_config.max_query_size, 25000)  # 25KB max
+            base_config.max_query_size = min(
+                base_config.max_query_size, 25000,
+            )  # 25KB max
             base_config.max_parameter_count = min(base_config.max_parameter_count, 50)
-            base_config.max_parameter_size = min(base_config.max_parameter_size, 5000)  # 5KB max
-            base_config.max_timeout_seconds = min(base_config.max_timeout_seconds, 180)  # 3 minutes max
+            base_config.max_parameter_size = min(
+                base_config.max_parameter_size, 5000,
+            )  # 5KB max
+            base_config.max_timeout_seconds = min(
+                base_config.max_timeout_seconds, 180,
+            )  # 3 minutes max
             base_config.max_complexity_score = min(base_config.max_complexity_score, 15)
 
         elif environment == "development":
@@ -214,7 +249,7 @@ class ModelPostgresAdapterConfig(BaseModel):
     def get_complexity_weights(self) -> dict:
         """
         Get complexity scoring weights based on environment.
-        
+
         Returns:
             Dictionary of operation types to complexity weights
         """

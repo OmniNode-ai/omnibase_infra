@@ -18,7 +18,9 @@ class ModelWebhookAttachment(BaseModel):
 
     title: str = Field(..., description="Attachment title")
     text: str = Field(..., description="Attachment content")
-    color: str | None = Field(default=None, description="Color indicator (hex or semantic)")
+    color: str | None = Field(
+        default=None, description="Color indicator (hex or semantic)",
+    )
     timestamp: datetime | None = Field(default=None, description="Attachment timestamp")
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -27,12 +29,16 @@ class ModelWebhookAttachment(BaseModel):
 class ModelSlackWebhookPayload(BaseModel):
     """Slack-specific webhook payload with strict typing."""
 
-    webhook_type: Literal["slack"] = Field(default="slack", description="Webhook type discriminator")
+    webhook_type: Literal["slack"] = Field(
+        default="slack", description="Webhook type discriminator",
+    )
     text: str = Field(..., description="Primary message text")
     channel: str | None = Field(default=None, description="Target Slack channel")
     username: str | None = Field(default=None, description="Bot username override")
     icon_emoji: str | None = Field(default=None, description="Bot emoji icon")
-    attachments: list[ModelWebhookAttachment] | None = Field(default=None, description="Message attachments")
+    attachments: list[ModelWebhookAttachment] | None = Field(
+        default=None, description="Message attachments",
+    )
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -40,11 +46,15 @@ class ModelSlackWebhookPayload(BaseModel):
 class ModelDiscordWebhookPayload(BaseModel):
     """Discord-specific webhook payload with strict typing."""
 
-    webhook_type: Literal["discord"] = Field(default="discord", description="Webhook type discriminator")
+    webhook_type: Literal["discord"] = Field(
+        default="discord", description="Webhook type discriminator",
+    )
     content: str = Field(..., description="Primary message content")
     username: str | None = Field(default=None, description="Bot username override")
     avatar_url: str | None = Field(default=None, description="Bot avatar URL")
-    embeds: list[ModelWebhookAttachment] | None = Field(default=None, description="Discord embeds")
+    embeds: list[ModelWebhookAttachment] | None = Field(
+        default=None, description="Discord embeds",
+    )
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -52,7 +62,9 @@ class ModelDiscordWebhookPayload(BaseModel):
 class ModelTeamsWebhookPayload(BaseModel):
     """Microsoft Teams webhook payload with strict typing."""
 
-    webhook_type: Literal["teams"] = Field(default="teams", description="Webhook type discriminator")
+    webhook_type: Literal["teams"] = Field(
+        default="teams", description="Webhook type discriminator",
+    )
     summary: str = Field(..., description="Message summary")
     text: str = Field(..., description="Message content")
     title: str | None = Field(default=None, description="Message title")
@@ -64,16 +76,22 @@ class ModelTeamsWebhookPayload(BaseModel):
 class ModelInfrastructureAlertPayload(BaseModel):
     """Infrastructure alert payload for ONEX systems."""
 
-    webhook_type: Literal["infrastructure_alert"] = Field(default="infrastructure_alert", description="Webhook type discriminator")
+    webhook_type: Literal["infrastructure_alert"] = Field(
+        default="infrastructure_alert", description="Webhook type discriminator",
+    )
 
     # Required alert fields
-    alert_level: Literal["info", "warning", "critical"] = Field(..., description="Alert severity level")
+    alert_level: Literal["info", "warning", "critical"] = Field(
+        ..., description="Alert severity level",
+    )
     service_name: str = Field(..., description="Service generating the alert")
     alert_message: str = Field(..., description="Primary alert message")
 
     # Optional context
     node_id: str | None = Field(default=None, description="ONEX node identifier")
-    correlation_id: str | None = Field(default=None, description="Request correlation ID")
+    correlation_id: str | None = Field(
+        default=None, description="Request correlation ID",
+    )
     timestamp: datetime | None = Field(default=None, description="Alert timestamp")
     metrics: list[str] | None = Field(default=None, description="Related metrics")
 
@@ -97,10 +115,14 @@ class ModelWebhookPayloadWrapper(BaseModel):
     compile-time safety for agent-generated webhooks.
     """
 
-    payload: ModelWebhookPayloadUnion = Field(..., description="Strongly-typed webhook payload")
-    target_platform: Literal["slack", "discord", "teams", "infrastructure_alert"] = Field(
-        ...,
-        description="Target webhook platform",
+    payload: ModelWebhookPayloadUnion = Field(
+        ..., description="Strongly-typed webhook payload",
+    )
+    target_platform: Literal["slack", "discord", "teams", "infrastructure_alert"] = (
+        Field(
+            ...,
+            description="Target webhook platform",
+        )
     )
 
     model_config = ConfigDict(frozen=True, extra="forbid")

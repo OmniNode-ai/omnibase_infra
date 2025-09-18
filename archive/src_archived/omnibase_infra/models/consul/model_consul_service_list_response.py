@@ -16,7 +16,7 @@ class ModelConsulServiceInfo(BaseModel):
 
 class ModelConsulServiceListResponse(BaseModel):
     """Response for Consul service list operations.
-    
+
     Shared model used across Consul infrastructure nodes for service listing responses.
     """
 

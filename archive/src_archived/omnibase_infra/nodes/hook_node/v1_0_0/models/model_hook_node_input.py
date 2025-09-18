@@ -43,7 +43,18 @@ class ModelHookNodeInput(BaseModel):
         description="Unix timestamp when the request was created",
     )
 
-    context: dict[str, str | int | float | bool | list[str | int | float | bool] | dict[str, str | int | float | bool]] | None = Field(
+    context: (
+        dict[
+            str,
+            str
+            | int
+            | float
+            | bool
+            | list[str | int | float | bool]
+            | dict[str, str | int | float | bool],
+        ]
+        | None
+    ) = Field(
         default=None,
         description="Additional request context and metadata with strongly typed values",
     )

@@ -16,7 +16,7 @@ from .model_omninode_topic_spec import ModelOmniNodeTopicSpec
 class ModelOmniNodeEventPublisher(BaseModel):
     """
     Publisher for OmniNode events using ModelEventEnvelope from omnibase_core.
-    
+
     Wraps PostgreSQL adapter operations in proper ModelEventEnvelope structure
     for publishing to RedPanda topics following OmniNode topic namespace design.
     """
@@ -35,13 +35,13 @@ class ModelOmniNodeEventPublisher(BaseModel):
     ) -> ModelEventEnvelope:
         """
         Create event envelope for PostgreSQL query completed.
-        
+
         Args:
             correlation_id: Request correlation ID
             query_data: Query execution details
             execution_time_ms: Query execution time
             row_count: Number of rows affected/returned
-            
+
         Returns:
             ModelEventEnvelope with PostgreSQL query completion event
         """
@@ -64,7 +64,9 @@ class ModelOmniNodeEventPublisher(BaseModel):
         )
 
         # Create topic spec for routing
-        topic_spec = ModelOmniNodeTopicSpec.for_postgres_query_completed(str(correlation_id))
+        topic_spec = ModelOmniNodeTopicSpec.for_postgres_query_completed(
+            str(correlation_id),
+        )
 
         # Create direct route to the topic
         route_spec = ModelRouteSpec.create_direct_route(topic_spec.to_topic_string())
@@ -96,13 +98,13 @@ class ModelOmniNodeEventPublisher(BaseModel):
     ) -> ModelEventEnvelope:
         """
         Create event envelope for PostgreSQL query failure.
-        
+
         Args:
             correlation_id: Request correlation ID
             error_message: Error description
             query_data: Query execution details
             execution_time_ms: Query execution time
-            
+
         Returns:
             ModelEventEnvelope with PostgreSQL query failure event
         """
@@ -125,7 +127,9 @@ class ModelOmniNodeEventPublisher(BaseModel):
         )
 
         # Create topic spec for routing
-        topic_spec = ModelOmniNodeTopicSpec.for_postgres_query_failed(str(correlation_id))
+        topic_spec = ModelOmniNodeTopicSpec.for_postgres_query_failed(
+            str(correlation_id),
+        )
 
         # Create direct route to the topic
         route_spec = ModelRouteSpec.create_direct_route(topic_spec.to_topic_string())
@@ -156,12 +160,12 @@ class ModelOmniNodeEventPublisher(BaseModel):
     ) -> ModelEventEnvelope:
         """
         Create event envelope for PostgreSQL health check response.
-        
+
         Args:
             correlation_id: Request correlation ID
             health_status: Health check status
             health_data: Health check details
-            
+
         Returns:
             ModelEventEnvelope with PostgreSQL health response event
         """

@@ -4,7 +4,7 @@ Simple Integration Test for PostgreSQL + RedPanda Infrastructure
 
 Tests the basic infrastructure setup:
 1. PostgreSQL database connectivity and operations (INSERT, SELECT, DELETE)
-2. RedPanda event streaming connectivity 
+2. RedPanda event streaming connectivity
 3. Direct database operations without complex adapter layer
 
 Usage:
@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 try:
     import aiokafka
     from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
     KAFKA_AVAILABLE = True
     logger.info("✅ Kafka/RedPanda libraries available")
 except ImportError as e:
@@ -100,14 +101,16 @@ class SimpleInfrastructureTest:
 
         try:
             # Create test table
-            await self.postgres_connection.execute("""
+            await self.postgres_connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS simple_test_users (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(100) NOT NULL,
                     email VARCHAR(255) UNIQUE NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """)
+            """,
+            )
             logger.info("✅ Test table created/verified")
 
             # Test INSERT
@@ -116,25 +119,29 @@ class SimpleInfrastructureTest:
 
             insert_result = await self.postgres_connection.fetchrow(
                 """
-                INSERT INTO simple_test_users (name, email) 
-                VALUES ($1, $2) 
+                INSERT INTO simple_test_users (name, email)
+                VALUES ($1, $2)
                 RETURNING id, name, email, created_at
                 """,
-                test_name, test_email,
+                test_name,
+                test_email,
             )
 
             logger.info(f"✅ INSERT successful: User ID {insert_result['id']}")
 
             # Publish INSERT event to RedPanda
-            await self._publish_event("postgres-query-completed", {
-                "event_type": "core.database.query_completed",
-                "operation": "INSERT",
-                "table": "simple_test_users",
-                "correlation_id": self.test_correlation_id,
-                "timestamp": datetime.now().isoformat(),
-                "user_id": insert_result["id"],
-                "success": True,
-            })
+            await self._publish_event(
+                "postgres-query-completed",
+                {
+                    "event_type": "core.database.query_completed",
+                    "operation": "INSERT",
+                    "table": "simple_test_users",
+                    "correlation_id": self.test_correlation_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "user_id": insert_result["id"],
+                    "success": True,
+                },
+            )
 
             # Test SELECT
             select_results = await self.postgres_connection.fetch(
@@ -143,20 +150,23 @@ class SimpleInfrastructureTest:
             logger.info(f"✅ SELECT successful: Retrieved {len(select_results)} rows")
 
             # Publish SELECT event to RedPanda
-            await self._publish_event("postgres-query-completed", {
-                "event_type": "core.database.query_completed",
-                "operation": "SELECT",
-                "table": "simple_test_users",
-                "correlation_id": self.test_correlation_id,
-                "timestamp": datetime.now().isoformat(),
-                "row_count": len(select_results),
-                "success": True,
-            })
+            await self._publish_event(
+                "postgres-query-completed",
+                {
+                    "event_type": "core.database.query_completed",
+                    "operation": "SELECT",
+                    "table": "simple_test_users",
+                    "correlation_id": self.test_correlation_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "row_count": len(select_results),
+                    "success": True,
+                },
+            )
 
             # Test DELETE
             delete_result = await self.postgres_connection.fetchval(
                 """
-                DELETE FROM simple_test_users 
+                DELETE FROM simple_test_users
                 WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '1 minute'
                 RETURNING id
                 """,
@@ -166,15 +176,18 @@ class SimpleInfrastructureTest:
             logger.info(f"✅ DELETE successful: Deleted {deleted_count} rows")
 
             # Publish DELETE event to RedPanda
-            await self._publish_event("postgres-query-completed", {
-                "event_type": "core.database.query_completed",
-                "operation": "DELETE",
-                "table": "simple_test_users",
-                "correlation_id": self.test_correlation_id,
-                "timestamp": datetime.now().isoformat(),
-                "rows_affected": deleted_count,
-                "success": True,
-            })
+            await self._publish_event(
+                "postgres-query-completed",
+                {
+                    "event_type": "core.database.query_completed",
+                    "operation": "DELETE",
+                    "table": "simple_test_users",
+                    "correlation_id": self.test_correlation_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "rows_affected": deleted_count,
+                    "success": True,
+                },
+            )
 
             return True
 
@@ -182,13 +195,16 @@ class SimpleInfrastructureTest:
             logger.error(f"❌ PostgreSQL operations failed: {e}")
 
             # Publish failure event
-            await self._publish_event("postgres-query-failed", {
-                "event_type": "core.database.query_failed",
-                "correlation_id": self.test_correlation_id,
-                "timestamp": datetime.now().isoformat(),
-                "error": str(e),
-                "success": False,
-            })
+            await self._publish_event(
+                "postgres-query-failed",
+                {
+                    "event_type": "core.database.query_failed",
+                    "correlation_id": self.test_correlation_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "error": str(e),
+                    "success": False,
+                },
+            )
             return False
 
     async def test_postgres_health(self):
@@ -204,14 +220,17 @@ class SimpleInfrastructureTest:
             logger.info("✅ PostgreSQL health check passed")
 
             # Publish health check event
-            await self._publish_event("postgres-health-response", {
-                "event_type": "core.database.health_check_response",
-                "correlation_id": self.test_correlation_id,
-                "timestamp": datetime.now().isoformat(),
-                "status": "healthy",
-                "response_time_ms": 5.0,
-                "success": True,
-            })
+            await self._publish_event(
+                "postgres-health-response",
+                {
+                    "event_type": "core.database.health_check_response",
+                    "correlation_id": self.test_correlation_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "healthy",
+                    "response_time_ms": 5.0,
+                    "success": True,
+                },
+            )
 
             return True
 
@@ -222,7 +241,9 @@ class SimpleInfrastructureTest:
     async def _publish_event(self, topic_suffix: str, event_data: dict[str, Any]):
         """Publish event to RedPanda topic."""
         if not KAFKA_AVAILABLE or not self.kafka_producer:
-            logger.info(f"📄 Mock event publish to {topic_suffix}: {event_data['event_type']}")
+            logger.info(
+                f"📄 Mock event publish to {topic_suffix}: {event_data['event_type']}",
+            )
             return
 
         try:
@@ -269,13 +290,17 @@ class SimpleInfrastructureTest:
             events_received = []
             async for message in consumer:
                 event_data = message.value
-                events_received.append({
-                    "topic": message.topic,
-                    "event_type": event_data.get("event_type", "unknown"),
-                    "operation": event_data.get("operation", "unknown"),
-                })
+                events_received.append(
+                    {
+                        "topic": message.topic,
+                        "event_type": event_data.get("event_type", "unknown"),
+                        "operation": event_data.get("operation", "unknown"),
+                    },
+                )
 
-                logger.info(f"📨 Received event: {message.topic} -> {event_data.get('event_type')}")
+                logger.info(
+                    f"📨 Received event: {message.topic} -> {event_data.get('event_type')}",
+                )
 
                 # Stop after receiving a few events or timeout
                 if len(events_received) >= 3:
@@ -283,11 +308,15 @@ class SimpleInfrastructureTest:
 
             await consumer.stop()
 
-            logger.info(f"✅ RedPanda event test completed: {len(events_received)} events received")
+            logger.info(
+                f"✅ RedPanda event test completed: {len(events_received)} events received",
+            )
 
             # Log event summary
             for event in events_received:
-                logger.info(f"   - {event['topic']}: {event['event_type']} ({event['operation']})")
+                logger.info(
+                    f"   - {event['topic']}: {event['event_type']} ({event['operation']})",
+                )
 
             return len(events_received) > 0
 
@@ -335,7 +364,9 @@ class SimpleInfrastructureTest:
         logger.info(f"📈 Overall Result: {passed}/{total} tests passed")
 
         if passed == total:
-            logger.info("🎉 ALL INFRASTRUCTURE TESTS PASSED! PostgreSQL + RedPanda working correctly!")
+            logger.info(
+                "🎉 ALL INFRASTRUCTURE TESTS PASSED! PostgreSQL + RedPanda working correctly!",
+            )
             return True
         logger.error("💥 Some infrastructure tests failed. Check the logs above.")
         return False

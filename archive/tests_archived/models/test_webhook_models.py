@@ -5,7 +5,6 @@ These models provide strong typing for test fixtures and webhook server response
 eliminating the need for Dict[str, Any] in test files.
 """
 
-
 from pydantic import BaseModel, Field
 
 
@@ -35,13 +34,19 @@ class MockWebhookFailureConfigModel(BaseModel):
     """Configuration model for mock webhook server failure scenarios."""
 
     status_code: int = Field(description="HTTP error status code")
-    body: str = Field(default='{"error": "server error"}', description="Error response body")
+    body: str = Field(
+        default='{"error": "server error"}', description="Error response body",
+    )
     headers: dict[str, str] = Field(
         default_factory=lambda: {"Content-Type": "application/json"},
         description="Error response headers",
     )
-    delay_ms: int = Field(default=100, description="Error response delay in milliseconds")
-    fail_count: int = Field(default=1, description="Number of requests to fail before succeeding")
+    delay_ms: int = Field(
+        default=100, description="Error response delay in milliseconds",
+    )
+    fail_count: int = Field(
+        default=1, description="Number of requests to fail before succeeding",
+    )
 
 
 class SlackWebhookPayloadModel(BaseModel):
@@ -51,7 +56,9 @@ class SlackWebhookPayloadModel(BaseModel):
     username: str | None = Field(default=None, description="Bot username")
     icon_emoji: str | None = Field(default=None, description="Bot emoji icon")
     channel: str | None = Field(default=None, description="Target channel")
-    attachments: list[dict[str, str]] | None = Field(default=None, description="Message attachments")
+    attachments: list[dict[str, str]] | None = Field(
+        default=None, description="Message attachments",
+    )
 
 
 class DiscordWebhookPayloadModel(BaseModel):
@@ -60,7 +67,9 @@ class DiscordWebhookPayloadModel(BaseModel):
     content: str = Field(description="Message content")
     username: str | None = Field(default=None, description="Bot username")
     avatar_url: str | None = Field(default=None, description="Bot avatar URL")
-    embeds: list[dict[str, str]] | None = Field(default=None, description="Message embeds")
+    embeds: list[dict[str, str]] | None = Field(
+        default=None, description="Message embeds",
+    )
 
 
 class GenericWebhookPayloadModel(BaseModel):

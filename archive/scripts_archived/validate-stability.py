@@ -15,7 +15,6 @@ development by running all validation checks:
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
 
 
 def run_import_validation() -> bool:
@@ -27,17 +26,16 @@ def run_import_validation() -> bool:
             [sys.executable, "tools/validate-imports.py"],
             capture_output=True,
             text=True,
-            cwd=Path.cwd(),
+            cwd=Path.cwd(), check=False,
         )
 
         if result.returncode == 0:
             print("  ✅ Import validation: PASS")
             return True
-        else:
-            print("  ❌ Import validation: FAIL")
-            print(f"     {result.stdout}")
-            print(f"     {result.stderr}")
-            return False
+        print("  ❌ Import validation: FAIL")
+        print(f"     {result.stdout}")
+        print(f"     {result.stderr}")
+        return False
 
     except Exception as e:
         print(f"  ❌ Import validation error: {e}")
@@ -53,17 +51,16 @@ def run_downstream_validation() -> bool:
             [sys.executable, "tools/validate-downstream.py"],
             capture_output=True,
             text=True,
-            cwd=Path.cwd(),
+            cwd=Path.cwd(), check=False,
         )
 
         if result.returncode == 0:
             print("  ✅ Downstream validation: PASS")
             return True
-        else:
-            print("  ❌ Downstream validation: FAIL")
-            print(f"     {result.stdout}")
-            print(f"     {result.stderr}")
-            return False
+        print("  ❌ Downstream validation: FAIL")
+        print(f"     {result.stdout}")
+        print(f"     {result.stderr}")
+        return False
 
     except Exception as e:
         print(f"  ❌ Downstream validation error: {e}")
@@ -79,22 +76,21 @@ def validate_type_checking() -> bool:
             ["poetry", "run", "mypy", "src/omnibase_core/", "--ignore-missing-imports"],
             capture_output=True,
             text=True,
-            cwd=Path.cwd(),
+            cwd=Path.cwd(), check=False,
         )
 
         if result.returncode == 0:
             print("  ✅ Type checking: PASS")
             return True
-        else:
-            print("  ❌ Type checking: FAIL")
-            # Only show first few lines to avoid flooding
-            lines = result.stdout.split("\n")[:10]
-            for line in lines:
-                if line.strip():
-                    print(f"     {line}")
-            if len(result.stdout.split("\n")) > 10:
-                print("     ... (additional errors truncated)")
-            return False
+        print("  ❌ Type checking: FAIL")
+        # Only show first few lines to avoid flooding
+        lines = result.stdout.split("\n")[:10]
+        for line in lines:
+            if line.strip():
+                print(f"     {line}")
+        if len(result.stdout.split("\n")) > 10:
+            print("     ... (additional errors truncated)")
+        return False
 
     except Exception as e:
         print(f"  ❌ Type checking error: {e}")
@@ -110,20 +106,19 @@ def validate_linting() -> bool:
             ["poetry", "run", "ruff", "check", "src/omnibase_core/"],
             capture_output=True,
             text=True,
-            cwd=Path.cwd(),
+            cwd=Path.cwd(), check=False,
         )
 
         if result.returncode == 0:
             print("  ✅ Code linting: PASS")
             return True
-        else:
-            print("  ❌ Code linting: FAIL")
-            # Only show first few lines
-            lines = result.stdout.split("\n")[:10]
-            for line in lines:
-                if line.strip():
-                    print(f"     {line}")
-            return False
+        print("  ❌ Code linting: FAIL")
+        # Only show first few lines
+        lines = result.stdout.split("\n")[:10]
+        for line in lines:
+            if line.strip():
+                print(f"     {line}")
+        return False
 
     except Exception as e:
         print(f"  ❌ Code linting error: {e}")
@@ -139,20 +134,19 @@ def validate_tests() -> bool:
             ["poetry", "run", "pytest", "tests/", "-v", "--tb=short"],
             capture_output=True,
             text=True,
-            cwd=Path.cwd(),
+            cwd=Path.cwd(), check=False,
         )
 
         if result.returncode == 0:
             print("  ✅ Test suite: PASS")
             return True
-        else:
-            print("  ❌ Test suite: FAIL")
-            # Show test summary
-            lines = result.stdout.split("\n")
-            for line in lines:
-                if "FAILED" in line or "ERROR" in line or "passed" in line:
-                    print(f"     {line}")
-            return False
+        print("  ❌ Test suite: FAIL")
+        # Show test summary
+        lines = result.stdout.split("\n")
+        for line in lines:
+            if "FAILED" in line or "ERROR" in line or "passed" in line:
+                print(f"     {line}")
+        return False
 
     except Exception as e:
         print(f"  ❌ Test suite error: {e}")
@@ -182,11 +176,10 @@ def validate_package_structure() -> bool:
     if not missing:
         print("  ✅ Package structure: PASS")
         return True
-    else:
-        print("  ❌ Package structure: FAIL")
-        for path in missing:
-            print(f"     Missing: {path}")
-        return False
+    print("  ❌ Package structure: FAIL")
+    for path in missing:
+        print(f"     Missing: {path}")
+    return False
 
 
 def main() -> int:
@@ -226,10 +219,9 @@ def main() -> int:
         print("   All validation checks passed successfully")
         print("   Ready for production downstream repositories")
         return 0
-    else:
-        print(f"\n🚫 omnibase_core requires {failed} fixes before full stability")
-        print("   Address the failed checks above")
-        return 1
+    print(f"\n🚫 omnibase_core requires {failed} fixes before full stability")
+    print("   Address the failed checks above")
+    return 1
 
 
 if __name__ == "__main__":

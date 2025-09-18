@@ -3,7 +3,7 @@ Enhanced Integration Tests for PostgreSQL Adapter with RedPanda Event Bus Integr
 
 Addresses PR review requirements with comprehensive test coverage including:
 - Integration tests with actual RedPanda instance
-- Performance testing of event publishing overhead  
+- Performance testing of event publishing overhead
 - Circuit breaker behavior validation under load
 - Error handling edge cases
 - Load testing for event publishing
@@ -136,9 +136,21 @@ class RedPandaTestFixture:
         )
 
         test_topics = [
-            NewTopic("dev.omnibase.onex.evt.postgres-query-completed.v1", num_partitions=3, replication_factor=1),
-            NewTopic("dev.omnibase.onex.evt.postgres-query-failed.v1", num_partitions=3, replication_factor=1),
-            NewTopic("dev.omnibase.onex.qrs.postgres-health-response.v1", num_partitions=3, replication_factor=1),
+            NewTopic(
+                "dev.omnibase.onex.evt.postgres-query-completed.v1",
+                num_partitions=3,
+                replication_factor=1,
+            ),
+            NewTopic(
+                "dev.omnibase.onex.evt.postgres-query-failed.v1",
+                num_partitions=3,
+                replication_factor=1,
+            ),
+            NewTopic(
+                "dev.omnibase.onex.qrs.postgres-health-response.v1",
+                num_partitions=3,
+                replication_factor=1,
+            ),
             NewTopic("test.postgres.events", num_partitions=1, replication_factor=1),
         ]
 
@@ -167,7 +179,9 @@ class RedPandaTestFixture:
         self.consumers[f"{topic}_{group_id}"] = consumer
         return consumer
 
-    async def wait_for_messages(self, topic: str, expected_count: int, timeout_seconds: int = 10) -> list[dict]:
+    async def wait_for_messages(
+        self, topic: str, expected_count: int, timeout_seconds: int = 10,
+    ) -> list[dict]:
         """Wait for expected number of messages on a topic."""
         consumer = self.create_consumer(topic)
         messages = []
@@ -239,7 +253,9 @@ async def mock_container(redpanda_fixture: RedPandaTestFixture) -> ModelONEXCont
 
 
 @pytest.fixture
-async def postgres_adapter(mock_container: MockONEXContainer) -> NodePostgresAdapterEffect:
+async def postgres_adapter(
+    mock_container: MockONEXContainer,
+) -> NodePostgresAdapterEffect:
     """Create PostgreSQL adapter with mocked dependencies."""
     adapter = NodePostgresAdapterEffect(mock_container)
     await adapter.initialize()
@@ -273,10 +289,14 @@ class TestPostgresAdapterRedPandaIntegration:
         )
 
         # Mock successful database execution
-        postgres_adapter.connection_manager.execute_query.return_value = [{"test_value": 1}]
+        postgres_adapter.connection_manager.execute_query.return_value = [
+            {"test_value": 1},
+        ]
 
         # Create consumer to listen for events
-        consumer = redpanda_fixture.create_consumer("dev.omnibase.onex.evt.postgres-query-completed.v1")
+        consumer = redpanda_fixture.create_consumer(
+            "dev.omnibase.onex.evt.postgres-query-completed.v1",
+        )
 
         # Execute adapter operation
         start_time = time.time()
@@ -307,10 +327,14 @@ class TestPostgresAdapterRedPandaIntegration:
         assert "execution_time_ms" in event_message["data"]
 
         # Verify event bus was called
-        postgres_adapter.container.get_service("ProtocolEventBus").publish_async.assert_called_once()
+        postgres_adapter.container.get_service(
+            "ProtocolEventBus",
+        ).publish_async.assert_called_once()
 
         execution_time = time.time() - start_time
-        logger.info(f"Event publishing integration test completed in {execution_time:.3f}s")
+        logger.info(
+            f"Event publishing integration test completed in {execution_time:.3f}s",
+        )
 
     @pytest.mark.asyncio
     async def test_event_publishing_integration_failure(
@@ -339,7 +363,9 @@ class TestPostgresAdapterRedPandaIntegration:
         postgres_adapter.connection_manager.execute_query.side_effect = database_error
 
         # Create consumer for failure events
-        consumer = redpanda_fixture.create_consumer("dev.omnibase.onex.evt.postgres-query-failed.v1")
+        consumer = redpanda_fixture.create_consumer(
+            "dev.omnibase.onex.evt.postgres-query-failed.v1",
+        )
 
         # Execute adapter operation (should handle error gracefully)
         result = await postgres_adapter.process(input_data)
@@ -407,7 +433,9 @@ class TestPostgresAdapterRedPandaIntegration:
             assert result.success is True
 
         # Calculate performance metrics
-        avg_execution_time = sum(performance_measurements) / len(performance_measurements)
+        avg_execution_time = sum(performance_measurements) / len(
+            performance_measurements,
+        )
         max_execution_time = max(performance_measurements)
         min_execution_time = min(performance_measurements)
 
@@ -422,9 +450,11 @@ class TestPostgresAdapterRedPandaIntegration:
         event_overhead = avg_execution_time - expected_db_time
         assert event_overhead < 50.0  # Event overhead under 50ms
 
-        logger.info(f"Performance metrics - Avg: {avg_execution_time:.2f}ms, "
-                   f"Min: {min_execution_time:.2f}ms, Max: {max_execution_time:.2f}ms, "
-                   f"Event Overhead: {event_overhead:.2f}ms")
+        logger.info(
+            f"Performance metrics - Avg: {avg_execution_time:.2f}ms, "
+            f"Min: {min_execution_time:.2f}ms, Max: {max_execution_time:.2f}ms, "
+            f"Event Overhead: {event_overhead:.2f}ms",
+        )
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_behavior_under_load(
@@ -436,7 +466,7 @@ class TestPostgresAdapterRedPandaIntegration:
         # Reset circuit breaker to known state
         postgres_adapter._circuit_breaker = DatabaseCircuitBreaker(
             failure_threshold=3,  # Lower threshold for testing
-            timeout_seconds=2,    # Shorter timeout for testing
+            timeout_seconds=2,  # Shorter timeout for testing
             half_open_max_calls=2,
         )
 
@@ -478,7 +508,9 @@ class TestPostgresAdapterRedPandaIntegration:
 
         # Reset to successful responses
         postgres_adapter.connection_manager.execute_query.side_effect = None
-        postgres_adapter.connection_manager.execute_query.return_value = [{"test": "success"}]
+        postgres_adapter.connection_manager.execute_query.return_value = [
+            {"test": "success"},
+        ]
 
         # Test half-open behavior (should allow limited calls)
         result = await postgres_adapter.process(input_data)
@@ -500,15 +532,19 @@ class TestPostgresAdapterRedPandaIntegration:
 
         # Test Case 1: Invalid correlation ID
         with pytest.raises(OnexError) as exc_info:
-            await postgres_adapter.process(ModelPostgresAdapterInput(
-                operation_type="query",
-                query_request=ModelPostgresQueryRequest(
-                    query="SELECT 1",
-                    parameters=[],
-                    correlation_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),  # Empty UUID
+            await postgres_adapter.process(
+                ModelPostgresAdapterInput(
+                    operation_type="query",
+                    query_request=ModelPostgresQueryRequest(
+                        query="SELECT 1",
+                        parameters=[],
+                        correlation_id=uuid.UUID(
+                            "00000000-0000-0000-0000-000000000000",
+                        ),  # Empty UUID
+                    ),
+                    correlation_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
                 ),
-                correlation_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
-            ))
+            )
 
         assert exc_info.value.code == CoreErrorCode.VALIDATION_ERROR
 
@@ -597,18 +633,30 @@ class TestPostgresAdapterRedPandaIntegration:
         total_time = (time.perf_counter() - start_time) * 1000
 
         # Analyze results
-        successful_operations = [r for r in results if isinstance(r, dict) and r.get("success")]
-        failed_operations = [r for r in results if not (isinstance(r, dict) and r.get("success"))]
+        successful_operations = [
+            r for r in results if isinstance(r, dict) and r.get("success")
+        ]
+        failed_operations = [
+            r for r in results if not (isinstance(r, dict) and r.get("success"))
+        ]
 
         # Performance assertions
-        assert len(successful_operations) >= concurrent_operations * 0.95  # 95% success rate
-        assert len(failed_operations) <= concurrent_operations * 0.05     # Max 5% failures
-        assert total_time < concurrent_operations * 50  # Average under 50ms per operation
+        assert (
+            len(successful_operations) >= concurrent_operations * 0.95
+        )  # 95% success rate
+        assert len(failed_operations) <= concurrent_operations * 0.05  # Max 5% failures
+        assert (
+            total_time < concurrent_operations * 50
+        )  # Average under 50ms per operation
 
         # Check for memory leaks or resource exhaustion
         if successful_operations:
-            avg_execution_time = sum(r["execution_time_ms"] for r in successful_operations) / len(successful_operations)
-            max_execution_time = max(r["execution_time_ms"] for r in successful_operations)
+            avg_execution_time = sum(
+                r["execution_time_ms"] for r in successful_operations
+            ) / len(successful_operations)
+            max_execution_time = max(
+                r["execution_time_ms"] for r in successful_operations
+            )
 
             assert avg_execution_time < 100  # Average under 100ms
             assert max_execution_time < 1000  # No operation over 1 second
@@ -616,14 +664,18 @@ class TestPostgresAdapterRedPandaIntegration:
         # Verify event publishing handled concurrent load
         success_events = await redpanda_fixture.wait_for_messages(
             "dev.omnibase.onex.evt.postgres-query-completed.v1",
-            expected_count=min(len(successful_operations), 10),  # Check at least some events
+            expected_count=min(
+                len(successful_operations), 10,
+            ),  # Check at least some events
             timeout_seconds=15,
         )
 
         assert len(success_events) >= min(len(successful_operations), 10)
 
-        logger.info(f"Concurrent load test completed - {len(successful_operations)} successful operations "
-                   f"in {total_time:.2f}ms (avg: {avg_execution_time:.2f}ms per operation)")
+        logger.info(
+            f"Concurrent load test completed - {len(successful_operations)} successful operations "
+            f"in {total_time:.2f}ms (avg: {avg_execution_time:.2f}ms per operation)",
+        )
 
     @pytest.mark.asyncio
     async def test_security_validation_comprehensive(
@@ -673,19 +725,25 @@ class TestPostgresAdapterRedPandaIntegration:
         # Verify sensitive data was sanitized
         assert not result.success
         assert "secret123" not in result.error_message
-        assert "password='***'" in result.error_message or "password" not in result.error_message
+        assert (
+            "password='***'" in result.error_message
+            or "password" not in result.error_message
+        )
 
         # Test Case 3: Query complexity validation (DoS prevention)
-        complex_query = """
-        SELECT u.*, p.*, s.* FROM users u 
-        JOIN profiles p ON u.id = p.user_id 
-        JOIN sessions s ON u.id = s.user_id 
+        complex_query = (
+            """
+        SELECT u.*, p.*, s.* FROM users u
+        JOIN profiles p ON u.id = p.user_id
+        JOIN sessions s ON u.id = s.user_id
         WHERE u.name LIKE '%test%' AND p.bio LIKE '%test%'
         UNION ALL
-        SELECT u2.*, p2.*, s2.* FROM users u2 
-        JOIN profiles p2 ON u2.id = p2.user_id 
+        SELECT u2.*, p2.*, s2.* FROM users u2
+        JOIN profiles p2 ON u2.id = p2.user_id
         JOIN sessions s2 ON u2.id = s2.user_id
-        """ * 10  # Make it very complex
+        """
+            * 10
+        )  # Make it very complex
 
         query_request = ModelPostgresQueryRequest(
             query=complex_query,
@@ -698,8 +756,10 @@ class TestPostgresAdapterRedPandaIntegration:
 
         # Should be rejected for complexity
         assert not result.success
-        assert ("complexity score" in result.error_message or
-                "maximum allowed" in result.error_message)
+        assert (
+            "complexity score" in result.error_message
+            or "maximum allowed" in result.error_message
+        )
 
         # Test Case 4: Parameter size validation
         large_parameter = "x" * (1024 * 1024)  # 1MB parameter
@@ -714,7 +774,10 @@ class TestPostgresAdapterRedPandaIntegration:
 
         # Should be rejected for parameter size
         assert not result.success
-        assert "Parameter" in result.error_message and "size exceeds" in result.error_message
+        assert (
+            "Parameter" in result.error_message
+            and "size exceeds" in result.error_message
+        )
 
         logger.info("Security validation tests completed successfully")
 
@@ -741,7 +804,9 @@ class TestPostgresAdapterRedPandaIntegration:
         }
 
         # Create consumer for health response events
-        consumer = redpanda_fixture.create_consumer("dev.omnibase.onex.qrs.postgres-health-response.v1")
+        consumer = redpanda_fixture.create_consumer(
+            "dev.omnibase.onex.qrs.postgres-health-response.v1",
+        )
 
         # Execute health check
         result = await postgres_adapter.process(input_data)

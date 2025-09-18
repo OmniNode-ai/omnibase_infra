@@ -50,8 +50,12 @@ class ModelKafkaAdapterOutput(BaseModel):
 
     # Envelope metadata
     correlation_id: UUID = Field(description="Request correlation ID for tracing")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
-    execution_time_ms: float = Field(description="Total operation execution time in milliseconds")
+    timestamp: datetime = Field(
+        default_factory=datetime.utcnow, description="Response timestamp",
+    )
+    execution_time_ms: float = Field(
+        description="Total operation execution time in milliseconds",
+    )
 
     # Operation metrics
     record_count: int = Field(default=0, description="Number of records processed")

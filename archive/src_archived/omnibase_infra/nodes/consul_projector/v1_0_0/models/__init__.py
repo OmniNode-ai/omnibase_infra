@@ -21,21 +21,19 @@ from .model_consul_service_projection import ModelConsulServiceProjection
 from .model_consul_topology_projection import ModelConsulTopologyProjection
 
 __all__ = [
+    "ModelConsulHealthCacheEntry",
+    "ModelConsulHealthProjection",
+    "ModelConsulHealthResponse",
+    "ModelConsulKVCacheEntry",
+    "ModelConsulKVProjection",
+    # Shared models (re-exported for convenience)
+    "ModelConsulKVResponse",
     # Node-specific models
     "ModelConsulProjectorInput",
     "ModelConsulProjectorOutput",
-    "ModelConsulServiceProjection",
-    "ModelConsulHealthProjection",
-    "ModelConsulKVProjection",
-    "ModelConsulTopologyProjection",
-
     # Cache models
     "ModelConsulServiceCacheEntry",
-    "ModelConsulHealthCacheEntry",
-    "ModelConsulKVCacheEntry",
-
-    # Shared models (re-exported for convenience)
-    "ModelConsulKVResponse",
     "ModelConsulServiceListResponse",
-    "ModelConsulHealthResponse",
+    "ModelConsulServiceProjection",
+    "ModelConsulTopologyProjection",
 ]

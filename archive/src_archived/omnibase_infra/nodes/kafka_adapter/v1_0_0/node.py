@@ -39,10 +39,11 @@ from ....models.kafka.model_kafka_message import ModelKafkaMessage
 from .models.model_kafka_adapter_input import ModelKafkaAdapterInput
 from .models.model_kafka_adapter_output import ModelKafkaAdapterOutput
 
+
 class KafkaStructuredLogger:
     """
     Structured logger for Kafka adapter operations with correlation ID tracking.
-    
+
     Provides consistent, structured logging across all streaming operations with:
     - Correlation ID tracking for request tracing
     - Performance metrics logging
@@ -63,10 +64,14 @@ class KafkaStructuredLogger:
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
 
-    def _build_extra(self, correlation_id: UUID | None, operation: str, **kwargs) -> dict:
+    def _build_extra(
+        self, correlation_id: UUID | None, operation: str, **kwargs,
+    ) -> dict:
         """Build extra fields for structured logging."""
         extra = {
-            "correlation_id": str(correlation_id) if correlation_id else "no-correlation",
+            "correlation_id": (
+                str(correlation_id) if correlation_id else "no-correlation"
+            ),
             "operation": operation,
             "component": "kafka_adapter",
             "node_type": "effect",
@@ -74,18 +79,36 @@ class KafkaStructuredLogger:
         extra.update(kwargs)
         return extra
 
-    def info(self, message: str, correlation_id: UUID | None = None, operation: str = "general", **kwargs):
+    def info(
+        self,
+        message: str,
+        correlation_id: UUID | None = None,
+        operation: str = "general",
+        **kwargs,
+    ):
         """Log info level message with structured fields."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         self.logger.info(message, extra=extra)
 
-    def warning(self, message: str, correlation_id: UUID | None = None, operation: str = "general", **kwargs):
+    def warning(
+        self,
+        message: str,
+        correlation_id: UUID | None = None,
+        operation: str = "general",
+        **kwargs,
+    ):
         """Log warning level message with structured fields."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         self.logger.warning(message, extra=extra)
 
-    def error(self, message: str, correlation_id: UUID | None = None, operation: str = "general",
-              exception: Exception | None = None, **kwargs):
+    def error(
+        self,
+        message: str,
+        correlation_id: UUID | None = None,
+        operation: str = "general",
+        exception: Exception | None = None,
+        **kwargs,
+    ):
         """Log error level message with structured fields and exception context."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         if exception:
@@ -93,7 +116,13 @@ class KafkaStructuredLogger:
             extra["exception_message"] = str(exception)
         self.logger.error(message, extra=extra, exc_info=exception is not None)
 
-    def debug(self, message: str, correlation_id: UUID | None = None, operation: str = "general", **kwargs):
+    def debug(
+        self,
+        message: str,
+        correlation_id: UUID | None = None,
+        operation: str = "general",
+        **kwargs,
+    ):
         """Log debug level message with structured fields."""
         extra = self._build_extra(correlation_id, operation, **kwargs)
         self.logger.debug(message, extra=extra)
@@ -108,7 +137,14 @@ class KafkaStructuredLogger:
             message_size=message_size,
         )
 
-    def log_produce_success(self, correlation_id: UUID, topic: str, partition: int, offset: int, execution_time_ms: float):
+    def log_produce_success(
+        self,
+        correlation_id: UUID,
+        topic: str,
+        partition: int,
+        offset: int,
+        execution_time_ms: float,
+    ):
         """Log successful message produce completion."""
         self.info(
             f"Message produced successfully to {topic}:{partition} at offset {offset} in {execution_time_ms:.2f}ms",
@@ -118,10 +154,16 @@ class KafkaStructuredLogger:
             partition=partition,
             offset=offset,
             execution_time_ms=execution_time_ms,
-            performance_category="fast" if execution_time_ms < 50 else "slow" if execution_time_ms < 200 else "very_slow",
+            performance_category=(
+                "fast"
+                if execution_time_ms < 50
+                else "slow" if execution_time_ms < 200 else "very_slow"
+            ),
         )
 
-    def log_consume_start(self, correlation_id: UUID, topics: list[str], consumer_group: str):
+    def log_consume_start(
+        self, correlation_id: UUID, topics: list[str], consumer_group: str,
+    ):
         """Log start of message consume operation."""
         self.info(
             f"Starting message consume from topics {topics} with group '{consumer_group}'",
@@ -131,7 +173,9 @@ class KafkaStructuredLogger:
             consumer_group=consumer_group,
         )
 
-    def log_consume_success(self, correlation_id: UUID, record_count: int, execution_time_ms: float):
+    def log_consume_success(
+        self, correlation_id: UUID, record_count: int, execution_time_ms: float,
+    ):
         """Log successful message consume completion."""
         self.info(
             f"Consumed {record_count} messages in {execution_time_ms:.2f}ms",
@@ -139,10 +183,18 @@ class KafkaStructuredLogger:
             operation="consume_success",
             record_count=record_count,
             execution_time_ms=execution_time_ms,
-            throughput_msgs_per_sec=record_count * 1000 / execution_time_ms if execution_time_ms > 0 else 0,
+            throughput_msgs_per_sec=(
+                record_count * 1000 / execution_time_ms if execution_time_ms > 0 else 0
+            ),
         )
 
-    def log_streaming_error(self, correlation_id: UUID, operation: str, execution_time_ms: float, exception: Exception):
+    def log_streaming_error(
+        self,
+        correlation_id: UUID,
+        operation: str,
+        execution_time_ms: float,
+        exception: Exception,
+    ):
         """Log streaming operation error with context."""
         self.error(
             f"Kafka {operation} failed after {execution_time_ms:.2f}ms",
@@ -158,7 +210,11 @@ class KafkaStructuredLogger:
         error_str = str(exception).lower()
         if "connection" in error_str or "timeout" in error_str or "broker" in error_str:
             return "connectivity"
-        if "authorization" in error_str or "permission" in error_str or "acl" in error_str:
+        if (
+            "authorization" in error_str
+            or "permission" in error_str
+            or "acl" in error_str
+        ):
             return "authorization"
         if "serialization" in error_str or "deserialization" in error_str:
             return "serialization"
@@ -171,23 +227,29 @@ class KafkaStructuredLogger:
 
 class CircuitBreakerState(Enum):
     """Circuit breaker states for Kafka connectivity failures."""
-    CLOSED = "closed"      # Normal operation
-    OPEN = "open"         # Failing, rejecting calls
+
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing, rejecting calls
     HALF_OPEN = "half_open"  # Testing if service recovered
 
 
 class KafkaCircuitBreaker:
     """
     Circuit breaker implementation for Kafka connectivity failures.
-    
+
     Prevents cascading failures by monitoring Kafka operation failures
     and temporarily blocking requests when failure thresholds are exceeded.
     """
 
-    def __init__(self, failure_threshold: int = 5, timeout_seconds: int = 60, half_open_max_calls: int = 3):
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        timeout_seconds: int = 60,
+        half_open_max_calls: int = 3,
+    ):
         """
         Initialize circuit breaker with configurable thresholds.
-        
+
         Args:
             failure_threshold: Number of failures before opening circuit
             timeout_seconds: Time to wait before attempting recovery
@@ -206,15 +268,15 @@ class KafkaCircuitBreaker:
     async def call(self, func: Callable, *args, **kwargs):
         """
         Execute function with circuit breaker protection.
-        
+
         Args:
             func: Function to execute
             *args: Function arguments
             **kwargs: Function keyword arguments
-            
+
         Returns:
             Function result
-            
+
         Raises:
             OnexError: If circuit is open or function fails
         """
@@ -283,23 +345,29 @@ class KafkaCircuitBreaker:
         return {
             "state": self.state.value,
             "failure_count": self.failure_count,
-            "last_failure_time": self.last_failure_time.isoformat() if self.last_failure_time else None,
-            "half_open_calls": self.half_open_calls if self.state == CircuitBreakerState.HALF_OPEN else 0,
+            "last_failure_time": (
+                self.last_failure_time.isoformat() if self.last_failure_time else None
+            ),
+            "half_open_calls": (
+                self.half_open_calls
+                if self.state == CircuitBreakerState.HALF_OPEN
+                else 0
+            ),
         }
 
 
 class Node(NodeEffectService):
     """
     Infrastructure Kafka Adapter Node - Message Bus Bridge.
-    
+
     Converts message bus envelopes containing streaming requests into direct
-    Kafka client operations. This follows the ONEX infrastructure tool pattern 
-    where adapters serve as bridges between the event-driven message bus and 
+    Kafka client operations. This follows the ONEX infrastructure tool pattern
+    where adapters serve as bridges between the event-driven message bus and
     external service APIs.
-    
+
     Message Flow:
     Event Envelope → Kafka Adapter → Kafka Client Manager → Kafka Cluster
-    
+
     Integrates with:
     - kafka_event_processing_subcontract: Event bus integration patterns
     - kafka_connection_management_subcontract: Broker connection management
@@ -310,14 +378,16 @@ class Node(NodeEffectService):
         super().__init__(container)
         self.node_type = "effect"
         self.domain = "infrastructure"
-        self._kafka_client: ProtocolKafkaClient | None = None  # Will be resolved from container
+        self._kafka_client: ProtocolKafkaClient | None = (
+            None  # Will be resolved from container
+        )
         self._kafka_client_lock = asyncio.Lock()
         self._kafka_client_sync_lock = threading.Lock()
 
         # Initialize circuit breaker for Kafka connectivity failures
         self._circuit_breaker = KafkaCircuitBreaker(
             failure_threshold=5,  # Open circuit after 5 failures
-            timeout_seconds=60,   # Wait 60 seconds before retry
+            timeout_seconds=60,  # Wait 60 seconds before retry
             half_open_max_calls=3,  # Allow 3 test calls in half-open state
         )
 
@@ -327,6 +397,7 @@ class Node(NodeEffectService):
         # Initialize Prometheus metrics collector
         try:
             from ....observability.prometheus_metrics import get_metrics_collector
+
             self._metrics = get_metrics_collector()
         except ImportError:
             self._metrics = None
@@ -343,13 +414,15 @@ class Node(NodeEffectService):
             domain=self.domain,
         )
 
-    def _load_configuration(self, container: ModelONEXContainer) -> ModelKafkaConfiguration:
+    def _load_configuration(
+        self, container: ModelONEXContainer,
+    ) -> ModelKafkaConfiguration:
         """
         Load Kafka adapter configuration from container or environment with secure credential management.
-        
+
         Args:
             container: ONEX container for dependency injection
-            
+
         Returns:
             Dictionary with configuration values using secure credential management
         """
@@ -364,15 +437,23 @@ class Node(NodeEffectService):
         # Use secure credential manager instead of hardcoded localhost
         try:
             from ....security.credential_manager import get_credential_manager
+
             credential_manager = get_credential_manager()
             event_bus_creds = credential_manager.get_event_bus_credentials()
 
             return {
                 "bootstrap_servers": ",".join(event_bus_creds.bootstrap_servers),
                 "client_id": os.getenv("KAFKA_CLIENT_ID", "kafka-adapter"),
-                "max_message_size": int(os.getenv("KAFKA_MAX_MESSAGE_SIZE", "1048576")),  # 1MB
-                "request_timeout_ms": int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000")),  # 30s
-                "enable_idempotence": os.getenv("KAFKA_ENABLE_IDEMPOTENCE", "true").lower() == "true",
+                "max_message_size": int(
+                    os.getenv("KAFKA_MAX_MESSAGE_SIZE", "1048576"),
+                ),  # 1MB
+                "request_timeout_ms": int(
+                    os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000"),
+                ),  # 30s
+                "enable_idempotence": os.getenv(
+                    "KAFKA_ENABLE_IDEMPOTENCE", "true",
+                ).lower()
+                == "true",
                 "security_protocol": event_bus_creds.security_protocol,
                 "sasl_mechanism": event_bus_creds.sasl_mechanism,
                 "sasl_username": event_bus_creds.sasl_username,
@@ -381,7 +462,10 @@ class Node(NodeEffectService):
                 "ssl_cert_location": event_bus_creds.ssl_cert_location,
                 "ssl_key_location": event_bus_creds.ssl_key_location,
                 "ssl_key_password": event_bus_creds.ssl_key_password,
-                "enable_error_sanitization": os.getenv("KAFKA_ENABLE_ERROR_SANITIZATION", "true").lower() == "true",
+                "enable_error_sanitization": os.getenv(
+                    "KAFKA_ENABLE_ERROR_SANITIZATION", "true",
+                ).lower()
+                == "true",
             }
         except Exception as e:
             # Log error but provide safe fallback to environment variables (no hardcoded localhost)
@@ -390,26 +474,38 @@ class Node(NodeEffectService):
                 operation="configuration_load",
             )
             return {
-                "bootstrap_servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS",
-                                               os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "redpanda:9092")),
+                "bootstrap_servers": os.getenv(
+                    "KAFKA_BOOTSTRAP_SERVERS",
+                    os.getenv("REDPANDA_BOOTSTRAP_SERVERS", "redpanda:9092"),
+                ),
                 "client_id": os.getenv("KAFKA_CLIENT_ID", "kafka-adapter"),
-                "max_message_size": int(os.getenv("KAFKA_MAX_MESSAGE_SIZE", "1048576")),  # 1MB
-                "request_timeout_ms": int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000")),  # 30s
-                "enable_idempotence": os.getenv("KAFKA_ENABLE_IDEMPOTENCE", "true").lower() == "true",
+                "max_message_size": int(
+                    os.getenv("KAFKA_MAX_MESSAGE_SIZE", "1048576"),
+                ),  # 1MB
+                "request_timeout_ms": int(
+                    os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000"),
+                ),  # 30s
+                "enable_idempotence": os.getenv(
+                    "KAFKA_ENABLE_IDEMPOTENCE", "true",
+                ).lower()
+                == "true",
                 "security_protocol": os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"),
-                "enable_error_sanitization": os.getenv("KAFKA_ENABLE_ERROR_SANITIZATION", "true").lower() == "true",
+                "enable_error_sanitization": os.getenv(
+                    "KAFKA_ENABLE_ERROR_SANITIZATION", "true",
+                ).lower()
+                == "true",
             }
 
     def _validate_correlation_id(self, correlation_id: UUID | None) -> UUID:
         """
         Validate and normalize correlation ID to prevent injection attacks.
-        
+
         Args:
             correlation_id: Optional correlation ID to validate
-            
+
         Returns:
             Valid UUID correlation ID
-            
+
         Raises:
             OnexError: If correlation ID format is invalid
         """
@@ -417,7 +513,9 @@ class Node(NodeEffectService):
             # Generate a new correlation ID if none provided
             return uuid4()
 
-        if hasattr(correlation_id, "replace") and hasattr(correlation_id, "split"):  # String-like
+        if hasattr(correlation_id, "replace") and hasattr(
+            correlation_id, "split",
+        ):  # String-like
             try:
                 # Try to parse string as UUID to validate format
                 correlation_id = UUID(correlation_id)
@@ -445,10 +543,10 @@ class Node(NodeEffectService):
     async def get_kafka_client_async(self) -> ProtocolKafkaClient:
         """
         Get Kafka client instance via registry injection with thread safety.
-        
+
         Returns:
             Kafka client instance
-            
+
         Raises:
             OnexError: If Kafka client cannot be resolved
         """
@@ -465,10 +563,14 @@ class Node(NodeEffectService):
 
             return self._kafka_client
 
-    def get_health_checks(self) -> list[Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]]:
+    def get_health_checks(
+        self,
+    ) -> list[
+        Callable[[], Union[ModelHealthStatus, "asyncio.Future[ModelHealthStatus]"]]
+    ]:
         """
         Override MixinHealthCheck to provide Kafka-specific async health checks.
-        
+
         Returns list of health check functions that validate Kafka connectivity,
         broker status, and adapter functionality.
         """
@@ -656,7 +758,9 @@ class Node(NodeEffectService):
 
             # In a real implementation, this would check broker metadata
             # For now, we assume brokers are healthy if client is operational
-            bootstrap_servers = getattr(kafka_client, "bootstrap_servers", lambda: ["unknown"])()
+            bootstrap_servers = getattr(
+                kafka_client, "bootstrap_servers", lambda: ["unknown"],
+            )()
 
             return ModelHealthStatus(
                 status=EnumHealthStatus.HEALTHY,
@@ -709,17 +813,19 @@ class Node(NodeEffectService):
                 timestamp=datetime.utcnow().isoformat(),
             )
 
-    async def process(self, input_data: ModelKafkaAdapterInput) -> ModelKafkaAdapterOutput:
+    async def process(
+        self, input_data: ModelKafkaAdapterInput,
+    ) -> ModelKafkaAdapterOutput:
         """
         Process Kafka adapter request following infrastructure tool pattern.
-        
+
         Routes message envelope to appropriate streaming operation based on operation_type.
-        Handles produce, consume, topic management, and health check operations with proper 
+        Handles produce, consume, topic management, and health check operations with proper
         error handling and metrics collection as defined in the event processing subcontract.
-        
+
         Args:
             input_data: Input envelope containing operation type and request data
-            
+
         Returns:
             Output envelope with operation results
         """
@@ -727,7 +833,9 @@ class Node(NodeEffectService):
 
         try:
             # Validate and normalize correlation ID to prevent injection attacks
-            validated_correlation_id = self._validate_correlation_id(input_data.correlation_id)
+            validated_correlation_id = self._validate_correlation_id(
+                input_data.correlation_id,
+            )
 
             # Update the input data with validated correlation ID if it was modified
             if validated_correlation_id != input_data.correlation_id:
@@ -774,7 +882,7 @@ class Node(NodeEffectService):
     ) -> ModelKafkaAdapterOutput:
         """
         Handle message produce operation following connection management patterns.
-        
+
         Implements message production strategy as defined in kafka_connection_management_subcontract
         with proper timeout handling, retry logic, and performance monitoring.
         """
@@ -799,7 +907,9 @@ class Node(NodeEffectService):
         self._validate_message_input(message)
 
         # Encrypt sensitive payload data if configured
-        processed_message = await self._process_message_security(message, correlation_id)
+        processed_message = await self._process_message_security(
+            message, correlation_id,
+        )
 
         try:
             # Get Kafka client
@@ -1083,7 +1193,7 @@ class Node(NodeEffectService):
                 is_healthy=True,
                 broker_count=1,  # Mock value
                 broker_ids=[1],  # Mock value
-                topic_count=0,   # Mock value
+                topic_count=0,  # Mock value
                 partition_count=0,  # Mock value
                 under_replicated_partitions=0,
                 offline_partitions=0,
@@ -1203,8 +1313,14 @@ class Node(NodeEffectService):
         sanitization_patterns = [
             (re.compile(r"password=[^\s&]*", re.IGNORECASE), "password=***"),
             (re.compile(r"sasl\.password=[^\s&]*", re.IGNORECASE), "sasl.password=***"),
-            (re.compile(r"ssl\.keystore\.password=[^\s&]*", re.IGNORECASE), "ssl.keystore.password=***"),
-            (re.compile(r"ssl\.truststore\.password=[^\s&]*", re.IGNORECASE), "ssl.truststore.password=***"),
+            (
+                re.compile(r"ssl\.keystore\.password=[^\s&]*", re.IGNORECASE),
+                "ssl.keystore.password=***",
+            ),
+            (
+                re.compile(r"ssl\.truststore\.password=[^\s&]*", re.IGNORECASE),
+                "ssl.truststore.password=***",
+            ),
             (re.compile(r"api[_-]?key[_-]*[:=][^\s&]*", re.IGNORECASE), "api_key=***"),
         ]
 
@@ -1214,17 +1330,19 @@ class Node(NodeEffectService):
 
         return sanitized
 
-    async def _process_message_security(self, message: ModelKafkaMessage, correlation_id: UUID) -> ModelKafkaMessage:
+    async def _process_message_security(
+        self, message: ModelKafkaMessage, correlation_id: UUID,
+    ) -> ModelKafkaMessage:
         """
         Process message security including payload encryption and rate limiting.
-        
+
         Args:
             message: Original Kafka message
             correlation_id: Request correlation ID for tracking
-            
+
         Returns:
             Processed message with security applied
-            
+
         Raises:
             OnexError: If security processing fails or rate limit exceeded
         """
@@ -1235,7 +1353,9 @@ class Node(NodeEffectService):
             # Payload encryption for sensitive data
             processed_value = message.value
             if self._should_encrypt_payload(message):
-                processed_value = await self._encrypt_message_payload(message.value, correlation_id)
+                processed_value = await self._encrypt_message_payload(
+                    message.value, correlation_id,
+                )
 
                 self._logger.info(
                     "Encrypted sensitive payload for message",
@@ -1268,16 +1388,21 @@ class Node(NodeEffectService):
     def _should_encrypt_payload(self, message: ModelKafkaMessage) -> bool:
         """
         Determine if message payload should be encrypted based on topic and content.
-        
+
         Args:
             message: Kafka message to evaluate
-            
+
         Returns:
             True if payload should be encrypted
         """
         # Encrypt sensitive topics by default
         sensitive_topic_patterns = [
-            "user-", "auth-", "payment-", "personal-", "credential-", "secret-",
+            "user-",
+            "auth-",
+            "payment-",
+            "personal-",
+            "credential-",
+            "secret-",
         ]
 
         topic_lower = message.topic.lower()
@@ -1287,7 +1412,14 @@ class Node(NodeEffectService):
         # Check for sensitive content in payload using duck typing
         if hasattr(message.value, "lower") and hasattr(message.value, "replace"):
             value_lower = message.value.lower()
-            sensitive_patterns = ["password", "secret", "token", "key", "credential", "ssn"]
+            sensitive_patterns = [
+                "password",
+                "secret",
+                "token",
+                "key",
+                "credential",
+                "ssn",
+            ]
             if any(pattern in value_lower for pattern in sensitive_patterns):
                 return True
 
@@ -1298,16 +1430,17 @@ class Node(NodeEffectService):
     async def _encrypt_message_payload(self, payload: str, correlation_id: UUID) -> str:
         """
         Encrypt message payload using ONEX payload encryption.
-        
+
         Args:
             payload: Original payload to encrypt
             correlation_id: Request correlation ID
-            
+
         Returns:
             Encrypted payload as JSON string
         """
         try:
             from ....security.payload_encryption import get_payload_encryption
+
             encryption_service = get_payload_encryption()
 
             # Encrypt the payload
@@ -1330,10 +1463,10 @@ class Node(NodeEffectService):
     async def _check_rate_limit(self, correlation_id: UUID):
         """
         Check rate limiting for event publishing operations.
-        
+
         Args:
             correlation_id: Request correlation ID
-            
+
         Raises:
             OnexError: If rate limit is exceeded
         """
@@ -1346,7 +1479,9 @@ class Node(NodeEffectService):
 
         current_time = time.time()
         window_size = int(os.getenv("KAFKA_RATE_LIMIT_WINDOW", "60"))  # 60 seconds
-        max_requests = int(os.getenv("KAFKA_RATE_LIMIT_MAX", "100"))  # 100 requests per window
+        max_requests = int(
+            os.getenv("KAFKA_RATE_LIMIT_MAX", "100"),
+        )  # 100 requests per window
 
         # Use a simple key based on client/topic (in production, use more sophisticated keys)
         rate_key = f"kafka_adapter_{correlation_id}"
@@ -1354,7 +1489,8 @@ class Node(NodeEffectService):
         # Clean old requests outside the window
         cutoff_time = current_time - window_size
         self._rate_limiter[rate_key] = [
-            req_time for req_time in self._rate_limiter[rate_key]
+            req_time
+            for req_time in self._rate_limiter[rate_key]
             if req_time > cutoff_time
         ]
 
@@ -1371,6 +1507,7 @@ class Node(NodeEffectService):
             # Audit log rate limiting violation
             try:
                 from ....security.audit_logger import get_audit_logger
+
                 audit_logger = get_audit_logger()
                 audit_logger.log_security_violation(
                     client_id=f"kafka_adapter_{correlation_id}",
@@ -1397,16 +1534,18 @@ class Node(NodeEffectService):
         # Add current request
         self._rate_limiter[rate_key].append(current_time)
 
-    async def _audit_log_event_publish(self,
-                                      correlation_id: UUID,
-                                      topic: str,
-                                      outcome: str,
-                                      execution_time_ms: float,
-                                      error_message: str | None = None,
-                                      rate_limited: bool = False):
+    async def _audit_log_event_publish(
+        self,
+        correlation_id: UUID,
+        topic: str,
+        outcome: str,
+        execution_time_ms: float,
+        error_message: str | None = None,
+        rate_limited: bool = False,
+    ):
         """
         Audit log event publishing activity for security monitoring.
-        
+
         Args:
             correlation_id: Request correlation ID
             topic: Kafka topic
@@ -1417,6 +1556,7 @@ class Node(NodeEffectService):
         """
         try:
             from ....security.audit_logger import get_audit_logger
+
             audit_logger = get_audit_logger()
 
             audit_logger.log_event_publish(
@@ -1438,7 +1578,9 @@ class Node(NodeEffectService):
             )
 
     # Mock methods for demonstration (replace with actual Kafka client integration)
-    async def _mock_produce_message(self, kafka_client, message: ModelKafkaMessage, timeout_seconds: float) -> dict:
+    async def _mock_produce_message(
+        self, kafka_client, message: ModelKafkaMessage, timeout_seconds: float,
+    ) -> dict:
         """Mock message produce operation."""
         await asyncio.sleep(0.01)  # Simulate network delay
         return {
@@ -1448,7 +1590,12 @@ class Node(NodeEffectService):
             "timestamp": time.time(),
         }
 
-    async def _mock_consume_messages(self, kafka_client, consumer_config: ModelKafkaConsumerConfig, timeout_seconds: float) -> dict:
+    async def _mock_consume_messages(
+        self,
+        kafka_client,
+        consumer_config: ModelKafkaConsumerConfig,
+        timeout_seconds: float,
+    ) -> dict:
         """Mock message consume operation."""
         await asyncio.sleep(0.05)  # Simulate polling delay
 
@@ -1456,7 +1603,11 @@ class Node(NodeEffectService):
         mock_messages = []
         for i in range(3):  # Mock 3 messages
             mock_message = ModelKafkaMessage(
-                topic=consumer_config.topics[0] if consumer_config.topics else "test-topic",
+                topic=(
+                    consumer_config.topics[0]
+                    if consumer_config.topics
+                    else "test-topic"
+                ),
                 key=f"key-{i}",
                 value=f"mock-message-{i}",
                 headers={},

@@ -18,7 +18,15 @@ class ModelPostgresQueryRequest(BaseModel):
         description="Query parameters with strongly typed structure",
     )
     timeout: float | None = Field(default=None, description="Query timeout in seconds")
-    record_metrics: bool = Field(default=True, description="Whether to record query metrics")
-    query_type: EnumPostgresQueryType = Field(default=EnumPostgresQueryType.GENERAL, description="Type of query")
-    correlation_id: UUID | None = Field(default=None, description="Request correlation ID")
-    context: ModelPostgresContext | None = Field(default=None, description="Additional request context")
+    record_metrics: bool = Field(
+        default=True, description="Whether to record query metrics",
+    )
+    query_type: EnumPostgresQueryType = Field(
+        default=EnumPostgresQueryType.GENERAL, description="Type of query",
+    )
+    correlation_id: UUID | None = Field(
+        default=None, description="Request correlation ID",
+    )
+    context: ModelPostgresContext | None = Field(
+        default=None, description="Additional request context",
+    )

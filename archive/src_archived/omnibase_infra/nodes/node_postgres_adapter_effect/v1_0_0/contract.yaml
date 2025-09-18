@@ -57,31 +57,31 @@ shared_model_dependencies:
     class_name: "ModelPostgresQueryRequest"
     module: "omnibase_infra.models.postgres.model_postgres_query_request"
     description: "Shared PostgreSQL query request model"
-  
+
   - name: "model_postgres_query_response"
     type: "model"
     class_name: "ModelPostgresQueryResponse"
     module: "omnibase_infra.models.postgres.model_postgres_query_response"
     description: "Shared PostgreSQL query response model"
-  
+
   - name: "model_postgres_health_request"
     type: "model"
     class_name: "ModelPostgresHealthRequest"
     module: "omnibase_infra.models.postgres.model_postgres_health_request"
     description: "Shared PostgreSQL health check request model"
-  
+
   - name: "model_postgres_health_response"
     type: "model"
     class_name: "ModelPostgresHealthResponse"
     module: "omnibase_infra.models.postgres.model_postgres_health_response"
     description: "Shared PostgreSQL health check response model"
-  
+
   - name: "model_postgres_connection_config"
     type: "model"
     class_name: "ModelPostgresConnectionConfig"
     module: "omnibase_infra.models.postgres.model_postgres_connection_config"
     description: "Shared PostgreSQL connection configuration model"
-    
+
   - name: "model_configuration_subcontract"
     type: "model"
     class_name: "ModelConfigurationSubcontract"
@@ -108,26 +108,26 @@ input_state:
       property_type: "string"
       enum: ["query", "health_check"]
       description: "Type of PostgreSQL operation to perform"
-    
+
     query_request:
       property_type: "object"
       description: "Query request payload (when operation_type is 'query')"
       reference: "ModelPostgresQueryRequest"
-    
+
     health_request:
       property_type: "object"
       description: "Health check request payload (when operation_type is 'health_check')"
       reference: "ModelPostgresHealthRequest"
-    
+
     correlation_id:
       property_type: "string"
       description: "Request correlation ID for tracing"
       format: "uuid"
-    
+
     timestamp:
       property_type: "number"
       description: "Request timestamp"
-    
+
     context:
       property_type: "object"
       description: "Additional request context"
@@ -139,34 +139,34 @@ output_state:
       property_type: "string"
       description: "Type of operation that was executed"
       enum: ["query", "health_check"]
-    
+
     query_response:
       property_type: "object"
       description: "Query response payload (when operation_type is 'query')"
       reference: "ModelPostgresQueryResponse"
-    
+
     health_response:
       property_type: "object"
       description: "Health check response payload (when operation_type is 'health_check')"
       reference: "ModelPostgresHealthResponse"
-    
+
     success:
       property_type: "boolean"
       description: "Whether the operation was successful"
-    
+
     error_message:
       property_type: "string"
       description: "Error message if operation failed"
-    
+
     correlation_id:
       property_type: "string"
       description: "Request correlation ID for tracing"
       format: "uuid"
-    
+
     timestamp:
       property_type: "number"
       description: "Response timestamp"
-    
+
     execution_time_ms:
       property_type: "number"
       description: "Total operation execution time in milliseconds"
@@ -181,7 +181,7 @@ io_operations:
     buffer_size: 8192
     timeout_seconds: 30
     validation_enabled: true
-  
+
   - operation_type: "postgres_transaction_execution"
     atomic: true
     backup_enabled: true
@@ -190,7 +190,7 @@ io_operations:
     buffer_size: 16384
     timeout_seconds: 60
     validation_enabled: true
-  
+
   - operation_type: "postgres_health_check"
     atomic: false
     backup_enabled: false
@@ -199,7 +199,7 @@ io_operations:
     buffer_size: 4096
     timeout_seconds: 5
     validation_enabled: true
-  
+
   - operation_type: "postgres_connection_management"
     atomic: false
     backup_enabled: false
@@ -215,12 +215,12 @@ subcontracts:
     path: "./contracts/configuration_subcontract.yaml"
     description: "Standardized configuration management for infrastructure nodes"
     integration_type: "mixin"
-    
+
   - name: "postgres_event_processing_subcontract"
     path: "./contracts/postgres_event_processing_subcontract.yaml"
     description: "Event bus integration patterns for PostgreSQL operations"
     integration_type: "mixin"
-    
+
   - name: "postgres_connection_management_subcontract"
     path: "./contracts/postgres_connection_management_subcontract.yaml"
     description: "Connection pool and database management patterns"
@@ -277,7 +277,7 @@ definitions:
       required: ["operation_type", "success", "correlation_id", "timestamp", "execution_time_ms"]
 
   schemas: {}
-  
+
   responses: {}
 
 # === SHARED MODEL REFERENCES ===
@@ -285,15 +285,15 @@ shared_models:
   ModelPostgresQueryRequest:
     module: "omnibase_infra.models.postgres.model_postgres_query_request"
     class_name: "ModelPostgresQueryRequest"
-  
+
   ModelPostgresQueryResponse:
     module: "omnibase_infra.models.postgres.model_postgres_query_response"
     class_name: "ModelPostgresQueryResponse"
-  
+
   ModelPostgresHealthRequest:
     module: "omnibase_infra.models.postgres.model_postgres_health_request"
     class_name: "ModelPostgresHealthRequest"
-  
+
   ModelPostgresHealthResponse:
     module: "omnibase_infra.models.postgres.model_postgres_health_response"
     class_name: "ModelPostgresHealthResponse"

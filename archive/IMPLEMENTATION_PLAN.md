@@ -38,7 +38,7 @@ Our **PostgreSQL Adapter EFFECT Node** serves as the proven reference implementa
   - Typer-based CLI with subcommands
   - Version and doctor commands for system health
   - Integration with existing project structure
-  
+
 - [ ] **Implement generate command** (`cli/commands/generate.py`)  
   - `omnibase-infra generate effect` command
   - Parameter validation and template configuration

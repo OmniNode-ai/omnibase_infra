@@ -18,16 +18,7 @@ services:
       CONSUL_BIND_INTERFACE: eth0
       CONSUL_CLIENT_INTERFACE: eth0
     command: >
-      consul agent
-      -server
-      -bootstrap-expect=1
-      -datacenter=omnibase-infra
-      -data-dir=/consul/data
-      -config-dir=/consul/config
-      -ui
-      -client=0.0.0.0
-      -bind=0.0.0.0
-      -log-level=${CONSUL_LOG_LEVEL}
+      consul agent -server -bootstrap-expect=1 -datacenter=omnibase-infra -data-dir=/consul/data -config-dir=/consul/config -ui -client=0.0.0.0 -bind=0.0.0.0 -log-level=${CONSUL_LOG_LEVEL}
     volumes:
       - consul_data:/consul/data
       - consul_config:/consul/config
@@ -67,10 +58,10 @@ services:
     networks:
       - omnibase-network
     ports:
-      - "${REDPANDA_PORT}:9092"           # Kafka API
+      - "${REDPANDA_PORT}:9092" # Kafka API
       - "${REDPANDA_EXTERNAL_PORT}:29092" # External Kafka API
-      - "${REDPANDA_ADMIN_PORT}:9644"     # Admin API
-      - "${REDPANDA_PROXY_PORT}:8082"     # HTTP Proxy API
+      - "${REDPANDA_ADMIN_PORT}:9644" # Admin API
+      - "${REDPANDA_PROXY_PORT}:8082" # HTTP Proxy API
     command:
       - redpanda
       - start
@@ -111,42 +102,42 @@ services:
       redpanda:
         condition: service_healthy
     entrypoint: ["/bin/sh"]
-    command: 
+    command:
       - -c
       - |
         echo 'Waiting for RedPanda to be ready...'
         rpk cluster info --brokers omnibase-infra-redpanda:9092
         echo 'Creating OmniNode infrastructure topics (dev.omnibase.onex)...'
-        
+
         echo 'PostgreSQL Command Topics...'
         rpk topic create dev.omnibase.onex.cmd.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         rpk topic create dev.omnibase.onex.cmd.postgres-health-check.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
-        
+
         echo 'PostgreSQL Event Topics...'
         rpk topic create dev.omnibase.onex.evt.postgres-query-completed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         rpk topic create dev.omnibase.onex.evt.postgres-query-failed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         rpk topic create dev.omnibase.onex.evt.postgres-connection-established.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         rpk topic create dev.omnibase.onex.evt.postgres-connection-failed.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
-        
+
         echo 'PostgreSQL Query-Response Topics...'
         rpk topic create dev.omnibase.onex.qrs.postgres-health-requests.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         rpk topic create dev.omnibase.onex.qrs.postgres-health-replies.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         rpk topic create dev.omnibase.onex.qrs.postgres-health-response.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
-        
+
         echo 'PostgreSQL CDC Topics...'
         rpk topic create dev.omnibase.onex.cdc.postgres-schema-changes.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
-        
+
         echo 'PostgreSQL Retry/DLT Topics...'
         rpk topic create dev.omnibase.onex.rty.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         rpk topic create dev.omnibase.onex.dlt.postgres-execute-query.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
-        
+
         echo 'Infrastructure Audit/Metrics Topics...'
         rpk topic create dev.omnibase.onex.aud.postgres-operations.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
         rpk topic create dev.omnibase.onex.met.postgres-performance.v1 --brokers omnibase-infra-redpanda:9092 --partitions 3 --replicas 1 || true
-        
+
         echo 'OmniNode infrastructure topic creation completed'
         echo 'Starting persistent topic monitoring service...'
-        
+
         # Keep container running with topic monitoring
         while true; do
           sleep 30
@@ -187,7 +178,7 @@ services:
 
   # PostgreSQL Adapter Node
   postgres-adapter:
-    build: 
+    build:
       context: .
       secrets:
         - github_token
@@ -223,7 +214,7 @@ services:
 
   # Consul Adapter Node
   consul-adapter:
-    build: 
+    build:
       context: .
       secrets:
         - github_token

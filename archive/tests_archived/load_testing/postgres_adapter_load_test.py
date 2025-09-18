@@ -37,9 +37,15 @@ class PostgresAdapterLoadTestUser(HttpUser):
         try:
             response = self.client.get("/health", timeout=10)
             if response.status_code != 200:
-                raise InterruptTaskSet(exception=Exception(f"Service health check failed: {response.status_code}"))
+                raise InterruptTaskSet(
+                    exception=Exception(
+                        f"Service health check failed: {response.status_code}",
+                    ),
+                )
         except Exception as e:
-            raise InterruptTaskSet(exception=Exception(f"Cannot connect to service: {e}"))
+            raise InterruptTaskSet(
+                exception=Exception(f"Cannot connect to service: {e}"),
+            )
 
     def _generate_test_scenarios(self) -> list[dict[str, Any]]:
         """Generate diverse test scenarios for load testing."""
@@ -47,27 +53,32 @@ class PostgresAdapterLoadTestUser(HttpUser):
 
         # Scenario 1: Simple SELECT queries
         for i in range(10):
-            scenarios.append({
-                "name": f"simple_select_{i}",
-                "query": f"SELECT {i} as test_value, NOW() as timestamp",
-                "parameters": [],
-                "expected_load": "low",
-            })
+            scenarios.append(
+                {
+                    "name": f"simple_select_{i}",
+                    "query": f"SELECT {i} as test_value, NOW() as timestamp",
+                    "parameters": [],
+                    "expected_load": "low",
+                },
+            )
 
         # Scenario 2: Parameterized queries
         for i in range(10):
-            scenarios.append({
-                "name": f"parameterized_query_{i}",
-                "query": "SELECT $1 as user_id, $2 as action, $3 as timestamp",
-                "parameters": [random.randint(1, 1000), f"action_{i}", time.time()],
-                "expected_load": "medium",
-            })
+            scenarios.append(
+                {
+                    "name": f"parameterized_query_{i}",
+                    "query": "SELECT $1 as user_id, $2 as action, $3 as timestamp",
+                    "parameters": [random.randint(1, 1000), f"action_{i}", time.time()],
+                    "expected_load": "medium",
+                },
+            )
 
         # Scenario 3: Complex analytical queries
         for i in range(5):
-            scenarios.append({
-                "name": f"analytical_query_{i}",
-                "query": """
+            scenarios.append(
+                {
+                    "name": f"analytical_query_{i}",
+                    "query": """
                     WITH RECURSIVE series AS (
                         SELECT 1 as n
                         UNION ALL
@@ -75,22 +86,31 @@ class PostgresAdapterLoadTestUser(HttpUser):
                     )
                     SELECT COUNT(*) as total, AVG(n) as average FROM series
                 """,
-                "parameters": [random.randint(10, 100)],
-                "expected_load": "high",
-            })
+                    "parameters": [random.randint(10, 100)],
+                    "expected_load": "high",
+                },
+            )
 
         # Scenario 4: JSON operations
         for i in range(5):
-            scenarios.append({
-                "name": f"json_query_{i}",
-                "query": "SELECT $1::jsonb as metadata, jsonb_array_length($1::jsonb->'items') as item_count",
-                "parameters": [json.dumps({
-                    "items": [f"item_{j}" for j in range(random.randint(1, 20))],
-                    "user_id": random.randint(1, 1000),
-                    "timestamp": time.time(),
-                })],
-                "expected_load": "medium",
-            })
+            scenarios.append(
+                {
+                    "name": f"json_query_{i}",
+                    "query": "SELECT $1::jsonb as metadata, jsonb_array_length($1::jsonb->'items') as item_count",
+                    "parameters": [
+                        json.dumps(
+                            {
+                                "items": [
+                                    f"item_{j}" for j in range(random.randint(1, 20))
+                                ],
+                                "user_id": random.randint(1, 1000),
+                                "timestamp": time.time(),
+                            },
+                        ),
+                    ],
+                    "expected_load": "medium",
+                },
+            )
 
         return scenarios
 
@@ -125,7 +145,9 @@ class PostgresAdapterLoadTestUser(HttpUser):
     @task(weight=10)
     def execute_simple_query(self):
         """Execute simple SELECT queries (most common operation)."""
-        scenario = random.choice([s for s in self.test_scenarios if s["expected_load"] == "low"])
+        scenario = random.choice(
+            [s for s in self.test_scenarios if s["expected_load"] == "low"],
+        )
         request_data = self._create_query_request(scenario)
 
         with self.client.post(
@@ -140,7 +162,9 @@ class PostgresAdapterLoadTestUser(HttpUser):
     @task(weight=5)
     def execute_parameterized_query(self):
         """Execute parameterized queries (medium complexity)."""
-        scenario = random.choice([s for s in self.test_scenarios if s["expected_load"] == "medium"])
+        scenario = random.choice(
+            [s for s in self.test_scenarios if s["expected_load"] == "medium"],
+        )
         request_data = self._create_query_request(scenario)
 
         with self.client.post(
@@ -155,7 +179,9 @@ class PostgresAdapterLoadTestUser(HttpUser):
     @task(weight=2)
     def execute_analytical_query(self):
         """Execute analytical queries (high complexity)."""
-        scenario = random.choice([s for s in self.test_scenarios if s["expected_load"] == "high"])
+        scenario = random.choice(
+            [s for s in self.test_scenarios if s["expected_load"] == "high"],
+        )
         request_data = self._create_query_request(scenario)
 
         with self.client.post(
@@ -170,7 +196,9 @@ class PostgresAdapterLoadTestUser(HttpUser):
     @task(weight=3)
     def execute_json_query(self):
         """Execute JSON-based queries (medium complexity)."""
-        scenario = random.choice([s for s in self.test_scenarios if "json" in s["name"]])
+        scenario = random.choice(
+            [s for s in self.test_scenarios if "json" in s["name"]],
+        )
         request_data = self._create_query_request(scenario)
 
         with self.client.post(
@@ -204,7 +232,9 @@ class PostgresAdapterLoadTestUser(HttpUser):
         ) as response:
             self._validate_health_response(response, correlation_id)
 
-    def _validate_response(self, response, scenario: dict[str, Any], operation_name: str):
+    def _validate_response(
+        self, response, scenario: dict[str, Any], operation_name: str,
+    ):
         """Validate adapter response and record metrics."""
         try:
             if response.status_code == 200:
@@ -212,7 +242,9 @@ class PostgresAdapterLoadTestUser(HttpUser):
 
                 # Validate response structure
                 if not result.get("success"):
-                    response.failure(f"Query failed: {result.get('error_message', 'Unknown error')}")
+                    response.failure(
+                        f"Query failed: {result.get('error_message', 'Unknown error')}",
+                    )
                     return
 
                 # Validate correlation ID
@@ -225,23 +257,27 @@ class PostgresAdapterLoadTestUser(HttpUser):
 
                 # Performance thresholds based on expected load
                 max_execution_times = {
-                    "low": 100,     # Simple queries under 100ms
+                    "low": 100,  # Simple queries under 100ms
                     "medium": 500,  # Medium queries under 500ms
-                    "high": 2000,    # Complex queries under 2s
+                    "high": 2000,  # Complex queries under 2s
                 }
 
                 expected_load = scenario.get("expected_load", "medium")
                 max_time = max_execution_times.get(expected_load, 500)
 
                 if execution_time > max_time:
-                    response.failure(f"Query too slow: {execution_time}ms > {max_time}ms")
+                    response.failure(
+                        f"Query too slow: {execution_time}ms > {max_time}ms",
+                    )
                     return
 
                 # Validate that event publishing was attempted
                 if "query_response" in result:
                     query_response = result["query_response"]
                     if not query_response.get("success"):
-                        response.failure(f"Database query failed: {query_response.get('error_message')}")
+                        response.failure(
+                            f"Database query failed: {query_response.get('error_message')}",
+                        )
                         return
 
                 response.success()
@@ -279,7 +315,9 @@ class PostgresAdapterLoadTestUser(HttpUser):
 
                 response.success()
             else:
-                response.failure(f"Health check failed with status: {response.status_code}")
+                response.failure(
+                    f"Health check failed with status: {response.status_code}",
+                )
 
         except Exception as e:
             response.failure(f"Health check validation error: {e}")
@@ -355,12 +393,12 @@ class PostgresAdapterLoadTest(locust.LoadTestShape):
     """Custom load test shape for PostgreSQL adapter testing."""
 
     stages = [
-        {"duration": 60, "users": 1, "spawn_rate": 1},      # Warm up: 1 user for 60s
-        {"duration": 180, "users": 10, "spawn_rate": 3},    # Ramp up: 10 users for 3 min
-        {"duration": 300, "users": 25, "spawn_rate": 5},    # Steady: 25 users for 5 min
-        {"duration": 420, "users": 50, "spawn_rate": 10},   # Peak: 50 users for 7 min
+        {"duration": 60, "users": 1, "spawn_rate": 1},  # Warm up: 1 user for 60s
+        {"duration": 180, "users": 10, "spawn_rate": 3},  # Ramp up: 10 users for 3 min
+        {"duration": 300, "users": 25, "spawn_rate": 5},  # Steady: 25 users for 5 min
+        {"duration": 420, "users": 50, "spawn_rate": 10},  # Peak: 50 users for 7 min
         {"duration": 480, "users": 10, "spawn_rate": -10},  # Ramp down: 10 users
-        {"duration": 540, "users": 0, "spawn_rate": -5},    # Stop: 0 users
+        {"duration": 540, "users": 0, "spawn_rate": -5},  # Stop: 0 users
     ]
 
     def tick(self):

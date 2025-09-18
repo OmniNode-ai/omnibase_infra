@@ -1,6 +1,6 @@
 """Circuit Breaker Environment Configuration Model.
 
-Environment-specific circuit breaker configuration model for PostgreSQL-RedPanda 
+Environment-specific circuit breaker configuration model for PostgreSQL-RedPanda
 event bus integration. Provides strongly typed configuration overrides for different
 deployment environments (production, staging, development).
 
@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, validator
 
 class EnvironmentType(str, Enum):
     """Supported deployment environments."""
+
     PRODUCTION = "production"
     STAGING = "staging"
     DEVELOPMENT = "development"
@@ -86,6 +87,7 @@ class ModelCircuitBreakerConfig(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
         schema_extra = {
@@ -103,18 +105,18 @@ class ModelCircuitBreakerConfig(BaseModel):
 
 class ModelCircuitBreakerEnvironmentConfig(BaseModel):
     """Environment-specific circuit breaker configuration model.
-    
+
     Provides contract-driven environment configuration overrides for circuit breaker
     behavior in different deployment environments. Enables production-ready configuration
     management without hardcoded values.
-    
+
     Usage:
         config = ModelCircuitBreakerEnvironmentConfig(
             production=ModelCircuitBreakerConfig(failure_threshold=5, ...),
             staging=ModelCircuitBreakerConfig(failure_threshold=3, ...),
             development=ModelCircuitBreakerConfig(failure_threshold=2, ...)
         )
-        
+
         prod_config = config.get_config_for_environment("production")
     """
 
@@ -137,14 +139,14 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
         default_environment: str | None = None,
     ) -> ModelCircuitBreakerConfig:
         """Get circuit breaker configuration for specified environment.
-        
+
         Args:
             environment: Target environment name
             default_environment: Fallback environment if target not found
-            
+
         Returns:
             Circuit breaker configuration for the environment
-            
+
         Raises:
             OnexError: If environment not found and no default provided
         """
@@ -216,6 +218,7 @@ class ModelCircuitBreakerEnvironmentConfig(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
         schema_extra = {

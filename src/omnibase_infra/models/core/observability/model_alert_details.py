@@ -4,7 +4,6 @@ Strongly-typed model for infrastructure alert details and context.
 Replaces Dict[str, Any] usage to maintain ONEX compliance.
 """
 
-
 from pydantic import BaseModel, Field
 
 

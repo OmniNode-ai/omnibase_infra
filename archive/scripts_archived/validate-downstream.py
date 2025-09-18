@@ -45,7 +45,7 @@ def validate_union_count() -> bool:
             ["grep", "-r", "|", "src/omnibase_core/", "--include=*.py"],
             capture_output=True,
             text=True,
-            cwd=Path.cwd(),
+            cwd=Path.cwd(), check=False,
         )
 
         if result.returncode != 0:
@@ -58,9 +58,8 @@ def validate_union_count() -> bool:
         if union_count <= 7000:
             print(f"  ✅ Union count: PASS ({union_count} ≤ 7000)")
             return True
-        else:
-            print(f"  ❌ Union count: FAIL ({union_count} > 7000)")
-            return False
+        print(f"  ❌ Union count: FAIL ({union_count} > 7000)")
+        return False
 
     except Exception as e:
         print(f"  ❌ Union count check error: {e}")
@@ -157,13 +156,13 @@ def validate_architectural_compliance() -> bool:
                 "--include=*.py",
             ],
             capture_output=True,
-            text=True,
+            text=True, check=False,
         )
 
         if result.returncode == 0 and result.stdout.strip():
             lines = result.stdout.strip().split("\n")
             anti_patterns.extend(
-                [f"dict[str, Any] found: {line}" for line in lines[:3]]
+                [f"dict[str, Any] found: {line}" for line in lines[:3]],
             )
 
         # Check for string path patterns
@@ -176,7 +175,7 @@ def validate_architectural_compliance() -> bool:
                 "--include=*.py",
             ],
             capture_output=True,
-            text=True,
+            text=True, check=False,
         )
 
         if result.returncode == 0 and result.stdout.strip():
@@ -189,9 +188,8 @@ def validate_architectural_compliance() -> bool:
             for pattern in anti_patterns:
                 print(f"    - {pattern}")
             return True  # Warnings don't fail validation
-        else:
-            print("  ✅ Architectural compliance: PASS")
-            return True
+        print("  ✅ Architectural compliance: PASS")
+        return True
 
     except Exception as e:
         print(f"  ❌ Architectural compliance check error: {e}")
@@ -235,12 +233,11 @@ def main() -> int:
         print("   Ready to create new repositories based on omnibase_core")
         print("   See DOWNSTREAM_DEVELOPMENT.md for setup guide")
         return 0
-    else:
-        print(
-            f"\n🚫 omnibase_core requires {failed} fixes before downstream development"
-        )
-        print("   Check error messages above and fix issues")
-        return 1
+    print(
+        f"\n🚫 omnibase_core requires {failed} fixes before downstream development",
+    )
+    print("   Check error messages above and fix issues")
+    return 1
 
 
 if __name__ == "__main__":

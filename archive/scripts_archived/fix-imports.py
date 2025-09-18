@@ -8,7 +8,6 @@ omnibase_spi package instead of the old omnibase references.
 
 import re
 from pathlib import Path
-from typing import List, Tuple
 
 
 class ImportFixer:
@@ -21,7 +20,7 @@ class ImportFixer:
     def fix_file_imports(self, file_path: Path) -> bool:
         """Fix imports in a single file."""
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 content = f.read()
 
             original_content = content
@@ -48,7 +47,7 @@ class ImportFixer:
 
                 self.fixes_applied += file_fixes
                 print(
-                    f"  📝 Fixed {file_fixes} imports in {file_path.relative_to(Path.cwd())}"
+                    f"  📝 Fixed {file_fixes} imports in {file_path.relative_to(Path.cwd())}",
                 )
                 return True
 
@@ -78,7 +77,7 @@ class ImportFixer:
             if self.fix_file_imports(file_path):
                 files_changed += 1
 
-        print(f"\n📊 Summary:")
+        print("\n📊 Summary:")
         print(f"   Files processed: {self.files_processed}")
         print(f"   Files changed: {files_changed}")
         print(f"   Total imports fixed: {self.fixes_applied}")

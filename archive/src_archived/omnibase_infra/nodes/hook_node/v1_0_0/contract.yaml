@@ -140,20 +140,20 @@ io_operations:
 # === CONFIGURATION ===
 configuration:
   security:
-    max_payload_size_bytes: 1048576  # 1MB (1024 * 1024)
+    max_payload_size_bytes: 1048576 # 1MB (1024 * 1024)
     rate_limit_requests_per_minute: 60
     rate_limit_window_seconds: 60
     ssrf_protection_enabled: true
     url_validation_enabled: true
 
   circuit_breaker:
-    failure_threshold: 5  # Open circuit after 5 failures
-    timeout_seconds: 60   # Wait 60 seconds before retry
-    half_open_max_calls: 3  # Allow 3 test calls in half-open state
-    max_circuit_breakers: 1000  # Maximum number of circuit breakers to store
+    failure_threshold: 5 # Open circuit after 5 failures
+    timeout_seconds: 60 # Wait 60 seconds before retry
+    half_open_max_calls: 3 # Allow 3 test calls in half-open state
+    max_circuit_breakers: 1000 # Maximum number of circuit breakers to store
 
   http:
-    request_timeout_seconds: 30.0  # 30 second timeout for HTTP requests
+    request_timeout_seconds: 30.0 # 30 second timeout for HTTP requests
 
   retry_policy_defaults:
     max_attempts: 3
