@@ -14,9 +14,8 @@ class ModelAuditDetails(BaseModel):
     """Model for audit event details with comprehensive typing."""
 
     # Request/Response information
-    request_id: str | None = Field(
+    request_id: UUID | None = Field(
         default=None,
-        max_length=100,
         description="Request identifier",
     )
 
@@ -53,15 +52,13 @@ class ModelAuditDetails(BaseModel):
     )
 
     # Authentication/Authorization information
-    user_id: str | None = Field(
+    user_id: UUID | None = Field(
         default=None,
-        max_length=100,
         description="User identifier (non-sensitive)",
     )
 
-    session_id: str | None = Field(
+    session_id: UUID | None = Field(
         default=None,
-        max_length=100,
         description="Session identifier (hashed)",
     )
 
@@ -184,6 +181,7 @@ class ModelAuditDetails(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
         json_schema_extra = {
@@ -297,6 +295,7 @@ class ModelAuditMetadata(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
         json_encoders = {
