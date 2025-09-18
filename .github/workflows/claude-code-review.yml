@@ -29,7 +29,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
 
       - name: Run Claude Code Review
         id: claude-review
