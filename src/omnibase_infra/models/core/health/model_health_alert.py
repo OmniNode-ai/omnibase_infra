@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+# Note: Using string temporarily until alert severity enum is migrated to core
+
 
 class ModelHealthAlert(BaseModel):
     """Model for health monitoring alerts."""
@@ -27,7 +29,6 @@ class ModelHealthAlert(BaseModel):
     )
 
     severity: str = Field(
-        pattern="^(low|medium|high|critical)$",
         description="Alert severity level",
     )
 

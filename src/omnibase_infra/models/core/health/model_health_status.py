@@ -5,25 +5,18 @@ Used across health monitoring nodes and status reporting.
 """
 
 from datetime import datetime
-from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from omnibase_core.enums.enum_environment_type import EnumEnvironmentType
+# Note: Using string temporarily until health status enum is migrated to core
 from omnibase_infra.models.core.health.model_health_details import ModelHealthDetails
-
-
-class HealthStatusEnum(str, Enum):
-    """Infrastructure health status levels."""
-
-    HEALTHY = "healthy"  # All systems operational
-    DEGRADED = "degraded"  # Some issues but service available
-    UNHEALTHY = "unhealthy"  # Critical issues affecting service
 
 
 class ModelHealthStatus(BaseModel):
     """Model for infrastructure health status."""
 
-    overall_status: HealthStatusEnum = Field(
+    overall_status: str = Field(
         description="Overall infrastructure health status",
     )
 
@@ -31,7 +24,7 @@ class ModelHealthStatus(BaseModel):
         description="Health check timestamp",
     )
 
-    environment: str = Field(
+    environment: EnumEnvironmentType = Field(
         description="Environment where health check was performed",
     )
 

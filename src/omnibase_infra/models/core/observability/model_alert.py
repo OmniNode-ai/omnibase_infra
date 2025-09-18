@@ -5,28 +5,20 @@ Used across observability infrastructure for alert management.
 """
 
 from datetime import datetime
-from enum import Enum
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from omnibase_core.enums.enum_environment_type import EnumEnvironmentType
 from omnibase_infra.models.core.observability.model_alert_details import (
     ModelAlertDetails,
 )
 
 
-class AlertSeverityEnum(str, Enum):
-    """Alert severity levels."""
-
-    CRITICAL = "critical"  # Service-affecting issues
-    HIGH = "high"  # Performance degradation
-    MEDIUM = "medium"  # Potential issues
-    LOW = "low"  # Informational
-
-
 class ModelAlert(BaseModel):
     """Model for infrastructure alerts."""
 
-    id: str = Field(
+    id: UUID = Field(
         description="Unique alert identifier",
     )
 
@@ -38,7 +30,7 @@ class ModelAlert(BaseModel):
         description="Detailed alert description",
     )
 
-    severity: AlertSeverityEnum = Field(
+    severity: str = Field(
         description="Alert severity level",
     )
 
@@ -65,7 +57,7 @@ class ModelAlert(BaseModel):
         description="Additional alert details and context",
     )
 
-    environment: str | None = Field(
+    environment: EnumEnvironmentType | None = Field(
         default=None,
         description="Environment where alert was generated",
     )
@@ -88,4 +80,5 @@ class ModelAlert(BaseModel):
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat(),
+            UUID: lambda v: str(v),
         }

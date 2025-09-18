@@ -4,6 +4,8 @@ from datetime import datetime
 from uuid import UUID
 
 from omnibase_core.models.model_base import ModelBase
+from omnibase_core.enums.enum_priority import EnumPriority
+from omnibase_core.enums.enum_environment_type import EnumEnvironmentType
 from pydantic import Field, field_validator, ConfigDict
 
 from .model_workflow_execution_context import ModelWorkflowExecutionContext
@@ -28,8 +30,8 @@ class ModelWorkflowExecutionRequest(ModelBase):
     agent_coordination_required: bool = Field(
         default=True, description="Whether multi-agent coordination is required",
     )
-    priority: str = Field(
-        default="normal", description="Execution priority (low, normal, high, critical)",
+    priority: EnumPriority = Field(
+        default=EnumPriority.NORMAL, description="Execution priority",
     )
     timeout_seconds: int = Field(
         default=300, description="Timeout for workflow execution in seconds",
@@ -37,7 +39,7 @@ class ModelWorkflowExecutionRequest(ModelBase):
     retry_count: int = Field(
         default=3, description="Number of retries allowed for failed steps",
     )
-    environment: str = Field(default="development", description="Execution environment")
+    environment: EnumEnvironmentType = Field(default=EnumEnvironmentType.DEVELOPMENT, description="Execution environment")
     background_execution: bool = Field(
         default=False, description="Whether to execute in background",
     )

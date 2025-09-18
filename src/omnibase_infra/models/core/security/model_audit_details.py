@@ -9,6 +9,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+# Note: Using string temporarily until core enums are migrated
+# from omnibase_core.enums.enum_data_classification import EnumDataClassification
+# from omnibase_core.enums.enum_threat_level import EnumThreatLevel
+
 
 class ModelAuditDetails(BaseModel):
     """Model for audit event details with comprehensive typing."""
@@ -131,7 +135,6 @@ class ModelAuditDetails(BaseModel):
 
     threat_level: str | None = Field(
         default=None,
-        pattern="^(low|medium|high|critical)$",
         description="Assessed threat level",
     )
 
@@ -144,7 +147,6 @@ class ModelAuditDetails(BaseModel):
 
     data_classification: str | None = Field(
         default=None,
-        pattern="^(public|internal|confidential|restricted)$",
         description="Classification of data accessed",
     )
 

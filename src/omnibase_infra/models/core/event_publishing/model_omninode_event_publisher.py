@@ -26,7 +26,7 @@ class ModelOmniNodeEventPublisher(BaseModel):
 
     node_id: str = Field(
         default="postgres_adapter_node",
-        description="Node identifier for envelope source",
+        description="Node identifier for envelope source (external system ID)",
     )
 
     def create_postgres_query_completed_envelope(

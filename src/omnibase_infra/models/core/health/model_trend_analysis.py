@@ -8,6 +8,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+# Note: Using string temporarily until trend direction enum is migrated to core
+
 
 class ModelTrendDataPoint(BaseModel):
     """Model for individual trend data points."""
@@ -39,7 +41,6 @@ class ModelTrendAnalysis(BaseModel):
 
     # Trend indicators
     overall_trend: str = Field(
-        pattern="^(improving|stable|degrading|unknown)$",
         description="Overall health trend direction",
     )
 
