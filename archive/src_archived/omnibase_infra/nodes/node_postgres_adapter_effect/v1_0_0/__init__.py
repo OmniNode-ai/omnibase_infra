@@ -1,0 +1,1 @@
+"""PostgreSQL adapter infrastructure tool v1.0.0."""
