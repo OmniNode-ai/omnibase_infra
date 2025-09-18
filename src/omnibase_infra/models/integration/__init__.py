@@ -1,0 +1,1 @@
+"""Integration domain models."""
