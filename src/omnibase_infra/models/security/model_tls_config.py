@@ -5,7 +5,7 @@ Maintains ONEX compliance with proper field validation.
 """
 
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr, field_validator, field_serializer
 
 
 class ModelKafkaProducerConfig(BaseModel):
@@ -35,10 +35,9 @@ class ModelKafkaProducerConfig(BaseModel):
         description="Path to client private key file",
     )
 
-    ssl_key_password: str | None = Field(
+    ssl_key_password: SecretStr | None = Field(
         default=None,
-        max_length=200,
-        description="Private key password",
+        description="Private key password (securely stored)",
     )
 
     ssl_verify_hostname: bool = Field(
@@ -114,10 +113,34 @@ class ModelKafkaProducerConfig(BaseModel):
         description="Delivery timeout in milliseconds",
     )
 
+    @field_validator("ssl_key_password", mode="before")
+    @classmethod
+    def validate_ssl_key_password(cls, v):
+        """Validate SSL key password without logging sensitive data."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            # Convert string to SecretStr without logging the value
+            if len(v) > 200:
+                raise ValueError("SSL key password too long (max 200 characters)")
+            return SecretStr(v)
+        return v
+
+    @field_serializer("ssl_key_password", when_used="unless-none")
+    def serialize_ssl_key_password(self, value: SecretStr | None) -> str:
+        """Serialize SSL key password securely - excludes actual value."""
+        if value is None:
+            return None
+        return "***REDACTED***"
+
     class Config:
         """Pydantic model configuration."""
         validate_assignment = True
         extra = "forbid"
+        # Security: Never include sensitive fields in string representation
+        json_encoders = {
+            SecretStr: lambda v: "***REDACTED***" if v else None
+        }
 
 
 class ModelSecurityPolicy(BaseModel):

@@ -1,7 +1,6 @@
 """Workflow step details model for ONEX workflow coordination."""
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from omnibase_core.models.model_base import ModelBase
@@ -49,11 +48,11 @@ class ModelWorkflowStepDetails(ModelBase):
     )
     
     # Timing information
-    started_at: Optional[datetime] = Field(
+    started_at: datetime | None = Field(
         None,
         description="Timestamp when step execution started"
     )
-    completed_at: Optional[datetime] = Field(
+    completed_at: datetime | None = Field(
         None,
         description="Timestamp when step execution completed"
     )
