@@ -1,0 +1,342 @@
+# ONEX Infrastructure Node Contract: Consul Projector Effect
+# Provides state projection and aggregation of Consul service discovery data
+
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+version: {major: 1, minor: 0, patch: 0}
+
+# Node identity and classification
+node_name: "node_infrastructure_consul_projector_effect"
+contract_name: "consul_projector_effect_contract"
+name: "consul_projector"
+
+# ONEX 4-node architecture classification
+node_type: "EFFECT"
+description: "State projector for Consul service discovery data aggregation and monitoring"
+
+# Strongly typed I/O models
+input_model: "ModelConsulProjectorInput"
+output_model: "ModelConsulProjectorOutput"
+
+# External effect operations for Consul state projection
+io_operations:
+  - operation_name: "project_service_state"
+    description: "Project current service state from Consul"
+    input_type: "ModelConsulServiceProjectionRequest"
+    output_type: "ModelConsulServiceProjection"
+  - operation_name: "project_health_state"
+    description: "Project health state aggregation from Consul"
+    input_type: "ModelConsulHealthProjectionRequest"
+    output_type: "ModelConsulHealthProjection"
+  - operation_name: "project_kv_state"
+    description: "Project KV store state changes from Consul"
+    input_type: "ModelConsulKVProjectionRequest"
+    output_type: "ModelConsulKVProjection"
+  - operation_name: "get_service_topology"
+    description: "Get service topology view"
+    input_type: "ModelConsulTopologyRequest"
+    output_type: "ModelConsulTopologyProjection"
+
+# Protocol and shared model dependencies
+dependencies:
+  # Protocol dependencies
+  - name: "protocol_event_bus"
+    type: "protocol"
+    class_name: "ProtocolEventBus"
+    module: "omnibase_spi.protocols.event_bus"
+
+  # Shared Consul model dependencies (DRY pattern)
+  - name: "model_consul_kv_response"
+    type: "model"
+    class_name: "ModelConsulKVResponse"
+    module: "omnibase_infra.models.consul.model_consul_kv_response"
+  - name: "model_consul_service_list_response"
+    type: "model"
+    class_name: "ModelConsulServiceListResponse"
+    module: "omnibase_infra.models.consul.model_consul_service_list_response"
+  - name: "model_consul_health_response"
+    type: "model"
+    class_name: "ModelConsulHealthResponse"
+    module: "omnibase_infra.models.consul.model_consul_health_response"
+
+# Model definitions following ONEX shared model pattern
+definitions:
+  # Node-specific projector models (node-local only)
+  ModelConsulProjectorInput:
+    type: "object"
+    description: "Input model for Consul projector operations from event envelopes"
+    properties:
+      projection_type:
+        type: "string"
+        description: "Type of projection to perform"
+        enum: ["service_state", "health_state", "kv_state", "topology"]
+      target_services:
+        type: "array"
+        description: "Specific services to project (optional)"
+        required: false
+        items:
+          type: "string"
+      include_metadata:
+        type: "boolean"
+        description: "Include projection metadata"
+        required: false
+        default: true
+      aggregation_window:
+        type: "integer"
+        description: "Aggregation time window in seconds"
+        required: false
+        default: 300
+    required: ["projection_type"]
+
+  ModelConsulProjectorOutput:
+    type: "object"
+    description: "Output model for Consul projector operation results"
+    properties:
+      projection_result:
+        type: "object"
+        description: "Result of the projection operation"
+      projection_type:
+        type: "string"
+        description: "Type of projection performed"
+      timestamp:
+        type: "string"
+        description: "Projection timestamp"
+        format: "date-time"
+      metadata:
+        type: "object"
+        description: "Projection metadata"
+        required: false
+    required: ["projection_result", "projection_type", "timestamp"]
+
+  # Projection-specific request models
+  ModelConsulServiceProjectionRequest:
+    type: "object"
+    description: "Request for service state projection"
+    properties:
+      services_filter:
+        type: "array"
+        description: "Services to include in projection"
+        required: false
+        items:
+          type: "string"
+      include_health:
+        type: "boolean"
+        description: "Include health status in projection"
+        required: false
+        default: true
+    required: []
+
+  ModelConsulHealthProjectionRequest:
+    type: "object"
+    description: "Request for health state projection"
+    properties:
+      services_filter:
+        type: "array"
+        description: "Services to include in health projection"
+        required: false
+        items:
+          type: "string"
+      health_states:
+        type: "array"
+        description: "Health states to include"
+        required: false
+        items:
+          type: "string"
+          enum: ["passing", "warning", "critical"]
+    required: []
+
+  ModelConsulKVProjectionRequest:
+    type: "object"
+    description: "Request for KV state projection"
+    properties:
+      key_prefixes:
+        type: "array"
+        description: "Key prefixes to include in projection"
+        required: false
+        items:
+          type: "string"
+      include_values:
+        type: "boolean"
+        description: "Include key values in projection"
+        required: false
+        default: false
+    required: []
+
+  ModelConsulTopologyRequest:
+    type: "object"
+    description: "Request for service topology projection"
+    properties:
+      depth:
+        type: "integer"
+        description: "Topology depth to project"
+        required: false
+        default: 2
+      include_dependencies:
+        type: "boolean"
+        description: "Include service dependencies"
+        required: false
+        default: true
+    required: []
+
+  # Projection output models
+  ModelConsulServiceProjection:
+    type: "object"
+    description: "Service state projection result"
+    properties:
+      services:
+        type: "array"
+        description: "Projected service states"
+        items:
+          type: "object"
+          properties:
+            service_id:
+              type: "string"
+              description: "Service ID"
+            service_name:
+              type: "string"
+              description: "Service name"
+            instances:
+              type: "integer"
+              description: "Number of service instances"
+            health_status:
+              type: "string"
+              description: "Overall health status"
+            last_updated:
+              type: "string"
+              description: "Last update timestamp"
+              format: "date-time"
+          required: ["service_id", "service_name", "instances", "health_status", "last_updated"]
+      total_services:
+        type: "integer"
+        description: "Total number of services"
+    required: ["services", "total_services"]
+
+  ModelConsulHealthProjection:
+    type: "object"
+    description: "Health state projection result"
+    properties:
+      health_summary:
+        type: "object"
+        description: "Health status summary"
+        properties:
+          healthy:
+            type: "integer"
+            description: "Number of healthy services"
+          warning:
+            type: "integer"
+            description: "Number of services in warning state"
+          critical:
+            type: "integer"
+            description: "Number of critical services"
+        required: ["healthy", "warning", "critical"]
+      service_health:
+        type: "array"
+        description: "Per-service health details"
+        items:
+          type: "object"
+          properties:
+            service_name:
+              type: "string"
+              description: "Service name"
+            status:
+              type: "string"
+              description: "Health status"
+            check_count:
+              type: "integer"
+              description: "Number of health checks"
+          required: ["service_name", "status", "check_count"]
+    required: ["health_summary", "service_health"]
+
+  ModelConsulKVProjection:
+    type: "object"
+    description: "KV state projection result"
+    properties:
+      key_summary:
+        type: "object"
+        description: "KV key summary"
+        properties:
+          total_keys:
+            type: "integer"
+            description: "Total number of keys"
+          prefixes:
+            type: "array"
+            description: "Key prefixes found"
+            items:
+              type: "string"
+        required: ["total_keys", "prefixes"]
+      key_details:
+        type: "array"
+        description: "Key details if requested"
+        required: false
+        items:
+          type: "object"
+          properties:
+            key:
+              type: "string"
+              description: "Key name"
+            value:
+              type: "string"
+              description: "Key value"
+              required: false
+            modify_index:
+              type: "integer"
+              description: "Modify index"
+          required: ["key", "modify_index"]
+    required: ["key_summary"]
+
+  ModelConsulTopologyProjection:
+    type: "object"
+    description: "Service topology projection result"
+    properties:
+      topology_graph:
+        type: "object"
+        description: "Service topology graph"
+        properties:
+          nodes:
+            type: "array"
+            description: "Service nodes"
+            items:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+                  description: "Node ID"
+                name:
+                  type: "string"
+                  description: "Service name"
+                type:
+                  type: "string"
+                  description: "Node type"
+              required: ["id", "name", "type"]
+          edges:
+            type: "array"
+            description: "Service connections"
+            items:
+              type: "object"
+              properties:
+                source:
+                  type: "string"
+                  description: "Source service ID"
+                target:
+                  type: "string"
+                  description: "Target service ID"
+                relationship:
+                  type: "string"
+                  description: "Relationship type"
+              required: ["source", "target", "relationship"]
+        required: ["nodes", "edges"]
+      metrics:
+        type: "object"
+        description: "Topology metrics"
+        properties:
+          node_count:
+            type: "integer"
+            description: "Number of nodes"
+          edge_count:
+            type: "integer"
+            description: "Number of edges"
+          depth:
+            type: "integer"
+            description: "Topology depth"
+        required: ["node_count", "edge_count", "depth"]
+    required: ["topology_graph", "metrics"]

@@ -1,0 +1,249 @@
+# PostgreSQL Event Processing Subcontract - Event Bus Integration Pattern
+# This subcontract defines event handling patterns for PostgreSQL adapter integration with ONEX event bus
+
+contract_type: "postgres_event_processing_subcontract"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+metadata:
+  name: "PostgresEventProcessingSubcontract"
+  description: "Event bus integration pattern for PostgreSQL adapter with ONEX message envelope handling"
+  author: "ONEX Framework Team"
+  created: "2025-09-11"
+  purpose: "Define event processing patterns for bi-directional PostgreSQL-ONEX event communication"
+
+business_logic:
+  pattern: "event_bus_integration"
+  ai_agent:
+    capabilities: ["event_envelope_processing", "postgres_event_translation", "async_event_handling"]
+    coordination_patterns: ["event_bus_subscriber", "event_bus_publisher"]
+    performance_targets:
+      event_processing_latency: "<10ms"
+      event_throughput: "1000 events/sec"
+      envelope_parsing_time: "<1ms"
+
+# Event Bus Integration Strategy
+event_bus_integration:
+  name: "PostgresEventBusIntegration"
+  description: "Bi-directional event processing between ONEX event bus and PostgreSQL operations"
+
+  # Event subscription patterns
+  subscription_patterns:
+    inbound_events:
+      - event_type: "postgres_query_request"
+        handler: "handle_query_event"
+        envelope_validation: true
+        async_processing: true
+
+      - event_type: "postgres_transaction_request"
+        handler: "handle_transaction_event"
+        envelope_validation: true
+        async_processing: true
+
+      - event_type: "postgres_health_check_request"
+        handler: "handle_health_check_event"
+        envelope_validation: true
+        async_processing: false
+
+      - event_type: "postgres_connection_management_request"
+        handler: "handle_connection_event"
+        envelope_validation: true
+        async_processing: true
+
+  # Event publishing patterns
+  publishing_patterns:
+    outbound_events:
+      - event_type: "postgres_query_completed"
+        trigger: "query_execution_complete"
+        envelope_format: "standard_onex_envelope"
+        metadata_inclusion: ["query_hash", "execution_time", "rows_affected", "timestamp"]
+
+      - event_type: "postgres_transaction_completed"
+        trigger: "transaction_success"
+        envelope_format: "standard_onex_envelope"
+        metadata_inclusion: ["transaction_id", "isolation_level", "timestamp"]
+
+      - event_type: "postgres_health_status_changed"
+        trigger: "health_check_result"
+        envelope_format: "standard_onex_envelope"
+        metadata_inclusion: ["connection_pool_status", "database_status", "timestamp"]
+
+      - event_type: "postgres_operation_failed"
+        trigger: "operation_error"
+        envelope_format: "error_onex_envelope"
+        metadata_inclusion: ["operation_type", "error_code", "error_message", "timestamp"]
+
+# Event Envelope Handling
+envelope_processing:
+  inbound_envelope_handling:
+    validation_steps:
+      - "validate_envelope_structure"
+      - "verify_message_signature"
+      - "check_correlation_id"
+      - "validate_payload_schema"
+
+    parsing_steps:
+      - "extract_operation_type"
+      - "parse_postgres_parameters"
+      - "resolve_connection_pool"
+      - "prepare_database_operation"
+
+    error_handling:
+      - "malformed_envelope": "reject_with_error_response"
+      - "invalid_signature": "reject_with_security_alert"
+      - "schema_validation_failed": "reject_with_validation_error"
+      - "missing_correlation_id": "assign_new_correlation_id"
+
+  outbound_envelope_creation:
+    envelope_structure:
+      - "correlation_id": "preserve_from_inbound_or_generate"
+      - "source_service": "postgres_adapter"
+      - "target_service": "extracted_from_routing_info"
+      - "event_type": "determined_by_operation_result"
+      - "payload": "postgres_operation_result_or_error"
+      - "metadata": "operation_context_and_timing"
+
+    signing_strategy:
+      - "sign_envelope_with_service_key"
+      - "include_timestamp_for_replay_protection"
+      - "add_service_identity_claims"
+
+# Async Processing Patterns
+async_processing:
+  async_handlers:
+    query_operations:
+      pattern: "request_response_async"
+      timeout_ms: 5000
+      retry_attempts: 3
+      error_strategy: "emit_failure_event"
+
+    transaction_operations:
+      pattern: "fire_and_forget_with_callback"
+      timeout_ms: 10000
+      retry_attempts: 2
+      error_strategy: "emit_failure_event_with_rollback"
+
+    connection_management:
+      pattern: "async_with_circuit_breaker"
+      timeout_ms: 3000
+      retry_attempts: 3
+      error_strategy: "emit_connection_failure_alert"
+
+  # Synchronous processing for health checks
+  sync_processing:
+    health_checks:
+      pattern: "immediate_response"
+      timeout_ms: 1000
+      retry_attempts: 0
+      error_strategy: "return_error_status"
+
+# Event Routing and Filtering
+event_routing:
+  routing_strategy: "content_based_routing"
+
+  routing_rules:
+    - condition: "event_type.startswith('postgres_query_')"
+      target_handler: "query_management_handler"
+      priority: "high"
+
+    - condition: "event_type.startswith('postgres_transaction_')"
+      target_handler: "transaction_management_handler"
+      priority: "critical"
+
+    - condition: "event_type.startswith('postgres_health_')"
+      target_handler: "health_management_handler"
+      priority: "medium"
+
+    - condition: "event_type.startswith('postgres_connection_')"
+      target_handler: "connection_management_handler"
+      priority: "high"
+
+  filtering_rules:
+    - filter: "validate_database_permissions"
+      action: "reject_if_unauthorized_schema"
+
+    - filter: "check_connection_pool_limits"
+      action: "defer_if_pool_exhausted"
+
+    - filter: "validate_query_safety"
+      action: "reject_if_dangerous_operation"
+
+# Error Handling and Recovery
+error_handling:
+  error_categories:
+    - "envelope_processing_errors"
+    - "database_connection_errors"
+    - "query_execution_errors"
+    - "transaction_errors"
+    - "timeout_errors"
+
+  recovery_strategies:
+    envelope_processing_errors:
+      - "emit_validation_error_event"
+      - "log_malformed_envelope_details"
+      - "increment_error_metrics"
+
+    database_connection_errors:
+      - "retry_with_exponential_backoff"
+      - "emit_database_error_event"
+      - "trigger_connection_pool_refresh"
+
+    query_execution_errors:
+      - "rollback_if_in_transaction"
+      - "emit_query_error_event"
+      - "release_connection_resources"
+
+# Performance Optimization
+performance_optimization:
+  event_batching:
+    enabled: true
+    batch_size: 25
+    batch_timeout_ms: 50
+    applicable_operations: ["query_operations", "health_checks"]
+
+  connection_pooling:
+    postgres_connections: 10
+    connection_reuse: true
+    keepalive_interval: 30000
+
+  caching:
+    event_handler_cache: true
+    query_plan_cache: true
+    envelope_validation_cache: true
+
+# Observability and Monitoring
+observability:
+  metrics:
+    - "postgres.events_processed"
+    - "postgres.events_published"
+    - "postgres.envelope_validation_failures"
+    - "postgres.async_processing_latency"
+    - "postgres.database_error_rate"
+
+  events_for_monitoring:
+    - "event_processing_started"
+    - "event_processing_completed"
+    - "envelope_validation_failed"
+    - "database_error_occurred"
+    - "async_timeout_exceeded"
+
+# Code Generation Targets
+generation_targets:
+  python_runtime:
+    event_handlers: true
+    envelope_processors: true
+    async_task_managers: true
+    error_recovery_logic: true
+
+  database_schema_validation:
+    query_validation_rules: true
+    transaction_safety_checks: true
+    envelope_validation_rules: true
+
+# Integration with Main Contract
+integration:
+  main_contract_field: "event_processing_configuration"
+  mapping_strategy: "event_handler_embedding"
+  backward_compatibility: true
