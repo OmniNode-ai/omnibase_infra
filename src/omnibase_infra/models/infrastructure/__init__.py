@@ -1,1 +1,1 @@
-"""Infrastructure shared models for ONEX infrastructure nodes."""
+"""Infrastructure domain models."""
