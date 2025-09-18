@@ -1,27 +1,26 @@
 """Security Policy Configuration Model.
 
-Strongly-typed model for security policy configuration.
+Strongly-typed model for security policy configuration to replace Dict[str, Any] usage.
 Maintains ONEX compliance with proper field validation.
 """
 
 from pydantic import BaseModel, Field
 
-from .enum_compliance_level import EnumComplianceLevel
+from omnibase_infra.enums.enum_compliance_level import EnumComplianceLevel
+from omnibase_infra.enums.enum_tls_version import EnumTlsVersion
 
 
 class ModelSecurityPolicy(BaseModel):
     """Model for security policy configuration."""
 
     # TLS Requirements
-    tls_version_min: str = Field(
-        default="1.2",
-        pattern="^(1\\.2|1\\.3)$",
+    tls_version_min: EnumTlsVersion = Field(
+        default=EnumTlsVersion.TLS_1_2,
         description="Minimum required TLS version",
     )
 
-    tls_version_max: str = Field(
-        default="1.3",
-        pattern="^(1\\.2|1\\.3)$",
+    tls_version_max: EnumTlsVersion = Field(
+        default=EnumTlsVersion.TLS_1_3,
         description="Maximum allowed TLS version",
     )
 
@@ -103,5 +102,6 @@ class ModelSecurityPolicy(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"

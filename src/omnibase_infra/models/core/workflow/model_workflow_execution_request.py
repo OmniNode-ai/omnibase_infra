@@ -3,15 +3,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from omnibase_core.models.model_base import ModelBase
-from omnibase_core.enums.enum_priority import EnumPriority
 from omnibase_core.enums.enum_environment_type import EnumEnvironmentType
-from pydantic import Field, field_validator, ConfigDict
+from omnibase_core.enums.enum_priority import EnumPriority
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .model_workflow_execution_context import ModelWorkflowExecutionContext
 
 
-class ModelWorkflowExecutionRequest(ModelBase):
+class ModelWorkflowExecutionRequest(BaseModel):
     """Model for workflow execution requests in the ONEX workflow coordinator."""
 
     model_config = ConfigDict(extra="forbid")
@@ -53,13 +52,12 @@ class ModelWorkflowExecutionRequest(ModelBase):
         default_factory=datetime.utcnow, description="Request creation timestamp",
     )
 
-    @field_validator('execution_context', mode='before')
+    @field_validator("execution_context", mode="before")
     @classmethod
     def convert_execution_context(cls, v: dict | ModelWorkflowExecutionContext) -> ModelWorkflowExecutionContext:
         """Convert dict to ModelWorkflowExecutionContext with strict typing."""
         if isinstance(v, dict):
             return ModelWorkflowExecutionContext(**v)
-        elif isinstance(v, ModelWorkflowExecutionContext):
+        if isinstance(v, ModelWorkflowExecutionContext):
             return v
-        else:
-            raise ValueError(f"execution_context must be dict or ModelWorkflowExecutionContext, got {type(v)}")
+        raise ValueError(f"execution_context must be dict or ModelWorkflowExecutionContext, got {type(v)}")

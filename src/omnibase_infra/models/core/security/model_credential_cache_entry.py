@@ -1,16 +1,15 @@
 """Credential Cache Entry Model.
 
-Strongly-typed model for credential cache entries.
+Strongly-typed model for credential cache entry to replace Dict[str, Any] usage.
 Maintains ONEX compliance with proper field validation.
 """
 
-from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from .enum_credential_type import EnumCredentialType
-from .enum_deployment_environment import EnumDeploymentEnvironment
+from omnibase_infra.enums.enum_credential_type import EnumCredentialType
+from omnibase_infra.enums.enum_deployment_environment import EnumDeploymentEnvironment
 
 
 class ModelCredentialCacheEntry(BaseModel):
@@ -30,18 +29,18 @@ class ModelCredentialCacheEntry(BaseModel):
     )
 
     # Cache Metadata
-    cached_at: datetime = Field(
-        description="Timestamp when credential was cached",
+    cached_at: str = Field(
+        description="ISO timestamp when credential was cached",
     )
 
-    expires_at: datetime | None = Field(
+    expires_at: str | None = Field(
         default=None,
-        description="Timestamp when credential expires",
+        description="ISO timestamp when credential expires",
     )
 
-    last_validated: datetime | None = Field(
+    last_validated: str | None = Field(
         default=None,
-        description="Timestamp of last validation",
+        description="ISO timestamp of last validation",
     )
 
     # Usage Tracking
@@ -51,9 +50,9 @@ class ModelCredentialCacheEntry(BaseModel):
         description="Number of times credential was accessed",
     )
 
-    last_accessed: datetime | None = Field(
+    last_accessed: str | None = Field(
         default=None,
-        description="Timestamp of last access",
+        description="ISO timestamp of last access",
     )
 
     # Security Status
@@ -88,5 +87,6 @@ class ModelCredentialCacheEntry(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"

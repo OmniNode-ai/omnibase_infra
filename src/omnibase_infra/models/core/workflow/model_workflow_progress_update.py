@@ -3,14 +3,13 @@
 from datetime import datetime
 from uuid import UUID
 
-from omnibase_core.models.model_base import ModelBase
-from pydantic import Field, field_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .model_workflow_step_details import ModelWorkflowStepDetails
 from .model_agent_activity import ModelAgentActivity
+from .model_workflow_step_details import ModelWorkflowStepDetails
 
 
-class ModelWorkflowProgressUpdate(ModelBase):
+class ModelWorkflowProgressUpdate(BaseModel):
     """Model for workflow progress updates from the ONEX workflow coordinator."""
 
     model_config = ConfigDict(extra="forbid")
@@ -53,18 +52,17 @@ class ModelWorkflowProgressUpdate(ModelBase):
         default_factory=datetime.utcnow, description="Progress update timestamp",
     )
 
-    @field_validator('step_details', mode='before')
+    @field_validator("step_details", mode="before")
     @classmethod
     def convert_step_details(cls, v: dict | ModelWorkflowStepDetails) -> ModelWorkflowStepDetails:
         """Convert dict to ModelWorkflowStepDetails with strict typing."""
         if isinstance(v, dict):
             return ModelWorkflowStepDetails(**v)
-        elif isinstance(v, ModelWorkflowStepDetails):
+        if isinstance(v, ModelWorkflowStepDetails):
             return v
-        else:
-            raise ValueError(f"step_details must be dict or ModelWorkflowStepDetails, got {type(v)}")
+        raise ValueError(f"step_details must be dict or ModelWorkflowStepDetails, got {type(v)}")
 
-    @field_validator('agent_activities', mode='before')
+    @field_validator("agent_activities", mode="before")
     @classmethod
     def convert_agent_activities(cls, v: list[dict | ModelAgentActivity]) -> list[ModelAgentActivity]:
         """Convert list of dicts to ModelAgentActivity with strict typing."""

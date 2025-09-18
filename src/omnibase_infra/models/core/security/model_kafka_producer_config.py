@@ -1,12 +1,13 @@
 """Kafka Producer Configuration Model.
 
-Strongly-typed model for Kafka producer configuration with TLS/SSL support.
+Strongly-typed model for Kafka producer configuration to replace Dict[str, Any] usage.
 Maintains ONEX compliance with proper field validation.
 """
 
 from pydantic import BaseModel, Field, SecretStr, field_serializer, field_validator
 
-from .enum_security_protocol import EnumSecurityProtocol
+from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
+from omnibase_infra.enums.enum_security_protocol import EnumSecurityProtocol
 
 
 class ModelKafkaProducerConfig(BaseModel):
@@ -65,9 +66,8 @@ class ModelKafkaProducerConfig(BaseModel):
     )
 
     # Performance Configuration
-    acks: str = Field(
-        default="all",
-        pattern="^(0|1|all)$",
+    acks: EnumKafkaAcks = Field(
+        default=EnumKafkaAcks.ALL,
         description="Number of acknowledgments required",
     )
 
@@ -136,6 +136,7 @@ class ModelKafkaProducerConfig(BaseModel):
 
     class Config:
         """Pydantic model configuration."""
+
         validate_assignment = True
         extra = "forbid"
         # Security: Never include sensitive fields in string representation

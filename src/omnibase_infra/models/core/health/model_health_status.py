@@ -6,9 +6,9 @@ Used across health monitoring nodes and status reporting.
 
 from datetime import datetime
 
+from omnibase_core.enums.enum_environment_type import EnumEnvironmentType
 from pydantic import BaseModel, Field
 
-from omnibase_core.enums.enum_environment_type import EnumEnvironmentType
 # Note: Using string temporarily until health status enum is migrated to core
 from omnibase_infra.models.core.health.model_health_details import ModelHealthDetails
 

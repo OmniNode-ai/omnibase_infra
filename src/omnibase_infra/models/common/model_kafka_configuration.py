@@ -1,11 +1,11 @@
 """Strongly typed Kafka configuration models."""
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, field_serializer
+from pydantic import BaseModel, Field, SecretStr, field_serializer, field_validator
 
 from ..security.enum_security_protocol import EnumSecurityProtocol
-from .enum_sasl_mechanism import EnumSaslMechanism
 from .enum_kafka_acks import EnumKafkaAcks
 from .enum_kafka_offset_reset import EnumKafkaOffsetReset
+from .enum_sasl_mechanism import EnumSaslMechanism
 
 
 class ModelKafkaConfiguration(BaseModel):
@@ -143,5 +143,5 @@ class ModelKafkaConfiguration(BaseModel):
         extra = "forbid"
         # Security: Never include sensitive fields in string representation
         json_encoders = {
-            SecretStr: lambda v: "***REDACTED***" if v else None
+            SecretStr: lambda v: "***REDACTED***" if v else None,
         }

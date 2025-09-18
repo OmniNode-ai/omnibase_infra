@@ -7,9 +7,9 @@ Used across observability infrastructure for alert management.
 from datetime import datetime
 from uuid import UUID
 
+from omnibase_core.enums.enum_environment_type import EnumEnvironmentType
 from pydantic import BaseModel, Field
 
-from omnibase_core.enums.enum_environment_type import EnumEnvironmentType
 from omnibase_infra.models.core.observability.model_alert_details import (
     ModelAlertDetails,
 )

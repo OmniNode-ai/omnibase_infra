@@ -2,8 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from omnibase_core.models.model_base import ModelBase
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from omnibase_spi.protocols.types.core_types import HealthStatus
@@ -11,7 +10,7 @@ if TYPE_CHECKING:
 from omnibase_infra.enums import EnumHealthStatus
 
 
-class ModelKafkaHealthDetails(ModelBase):
+class ModelKafkaHealthDetails(BaseModel):
     """Kafka-specific health details with self-assessment capability."""
 
     kafka_producer_count: int | None = Field(

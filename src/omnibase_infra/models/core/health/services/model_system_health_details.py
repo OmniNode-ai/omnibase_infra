@@ -2,8 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from omnibase_core.models.model_base import ModelBase
-from pydantic import Field, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 if TYPE_CHECKING:
     from omnibase_spi.protocols.types.core_types import HealthStatus
@@ -11,7 +10,7 @@ if TYPE_CHECKING:
 from omnibase_infra.enums import EnumHealthStatus
 
 
-class ModelSystemHealthDetails(ModelBase):
+class ModelSystemHealthDetails(BaseModel):
     """System-level health details with self-assessment capability."""
 
     # Performance indicators

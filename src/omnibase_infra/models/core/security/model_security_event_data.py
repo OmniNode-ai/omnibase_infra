@@ -9,12 +9,12 @@ This file will be removed in a future version.
 """
 
 # Re-export models for backwards compatibility
+from .model_audit_log_entry import ModelAuditLogEntry
 from .model_security_event_details import ModelSecurityEventDetails
 from .model_security_event_metadata import ModelSecurityEventMetadata
-from .model_audit_log_entry import ModelAuditLogEntry
 
 __all__ = [
+    "ModelAuditLogEntry",
     "ModelSecurityEventDetails",
     "ModelSecurityEventMetadata",
-    "ModelAuditLogEntry",
 ]

@@ -10,15 +10,15 @@ Maintaining imports for backward compatibility only.
 """
 
 # Import from new single-model files for backward compatibility
+from .model_credential_cache_entry import ModelCredentialCacheEntry
 from .model_kafka_producer_config import ModelKafkaProducerConfig
 from .model_security_policy import ModelSecurityPolicy
-from .model_credential_cache_entry import ModelCredentialCacheEntry
 
 # Re-export for backward compatibility
 __all__ = [
+    "ModelCredentialCacheEntry",
     "ModelKafkaProducerConfig",
     "ModelSecurityPolicy",
-    "ModelCredentialCacheEntry"
 ]
 
 # Legacy class definitions removed - use imports above

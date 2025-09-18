@@ -2,8 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from omnibase_core.models.model_base import ModelBase
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from omnibase_spi.protocols.types.core_types import HealthStatus
@@ -11,7 +10,7 @@ if TYPE_CHECKING:
 from omnibase_infra.enums import EnumHealthStatus
 
 
-class ModelPostgresHealthDetails(ModelBase):
+class ModelPostgresHealthDetails(BaseModel):
     """PostgreSQL-specific health details with self-assessment capability."""
 
     postgres_connection_count: int | None = Field(
@@ -61,7 +60,7 @@ class ModelPostgresHealthDetails(ModelBase):
             connection_usage = self.postgres_connection_count / self.max_connections
             if connection_usage > 0.9:
                 return EnumHealthStatus.WARNING
-            elif connection_usage > 0.95:
+            if connection_usage > 0.95:
                 return EnumHealthStatus.CRITICAL
 
         # Performance degradation

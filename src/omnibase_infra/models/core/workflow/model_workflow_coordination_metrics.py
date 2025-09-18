@@ -2,11 +2,10 @@
 
 from datetime import datetime
 
-from omnibase_core.models.model_base import ModelBase
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class ModelWorkflowCoordinationMetrics(ModelBase):
+class ModelWorkflowCoordinationMetrics(BaseModel):
     """Model for workflow coordination metrics from the ONEX workflow coordinator."""
 
     coordinator_id: str = Field(
@@ -49,7 +48,7 @@ class ModelWorkflowCoordinationMetrics(ModelBase):
         default_factory=datetime.utcnow, description="Metrics last updated timestamp",
     )
 
-    @field_validator('agent_coordination_success_rate', 'sub_agent_fleet_utilization')
+    @field_validator("agent_coordination_success_rate", "sub_agent_fleet_utilization")
     @classmethod
     def validate_rate_range(cls, v: float) -> float:
         """Ensure rate values are between 0.0 and 1.0."""
@@ -57,7 +56,7 @@ class ModelWorkflowCoordinationMetrics(ModelBase):
             raise ValueError("Rate values must be between 0.0 and 1.0")
         return v
 
-    @field_validator('completed_workflows_today', 'failed_workflows_today', 'active_workflows')
+    @field_validator("completed_workflows_today", "failed_workflows_today", "active_workflows")
     @classmethod
     def validate_non_negative_counts(cls, v: int) -> int:
         """Ensure count values are non-negative."""
@@ -65,8 +64,8 @@ class ModelWorkflowCoordinationMetrics(ModelBase):
             raise ValueError("Count values must be non-negative")
         return v
 
-    @model_validator(mode='after')
-    def validate_metric_relationships(self) -> 'ModelWorkflowCoordinationMetrics':
+    @model_validator(mode="after")
+    def validate_metric_relationships(self) -> "ModelWorkflowCoordinationMetrics":
         """Validate relationships between metrics."""
         # Total workflows processed today should be reasonable
         total_today = self.completed_workflows_today + self.failed_workflows_today

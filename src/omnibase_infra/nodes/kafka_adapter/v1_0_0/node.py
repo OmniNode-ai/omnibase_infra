@@ -39,6 +39,7 @@ from ....models.kafka.model_kafka_message import ModelKafkaMessage
 from .models.model_kafka_adapter_input import ModelKafkaAdapterInput
 from .models.model_kafka_adapter_output import ModelKafkaAdapterOutput
 
+
 class KafkaStructuredLogger:
     """
     Structured logger for Kafka adapter operations with correlation ID tracking.

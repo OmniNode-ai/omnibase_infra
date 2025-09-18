@@ -1,7 +1,7 @@
 """Kafka security configuration model."""
 
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, field_serializer
+from pydantic import BaseModel, Field, SecretStr, field_serializer, field_validator
 
 
 class ModelKafkaSSLConfig(BaseModel):

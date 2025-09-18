@@ -2,11 +2,10 @@
 
 import os
 
-from omnibase_core.models.model_base import ModelBase
-from pydantic import Field, SecretStr, field_validator, field_serializer
+from pydantic import BaseModel, Field, SecretStr, field_serializer, field_validator
 
 
-class ModelPostgresConnectionConfig(ModelBase):
+class ModelPostgresConnectionConfig(BaseModel):
     """PostgreSQL connection configuration."""
 
     host: str = Field(default="localhost", description="PostgreSQL host")

@@ -3,16 +3,15 @@
 from datetime import datetime
 from uuid import UUID
 
-from omnibase_core.models.model_base import ModelBase
-from pydantic import Field, field_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .model_workflow_result_data import ModelWorkflowResultData
 from .model_agent_coordination_summary import ModelAgentCoordinationSummary
-from .model_workflow_progress_history import ModelWorkflowProgressHistory
 from .model_sub_agent_result import ModelSubAgentResult
+from .model_workflow_progress_history import ModelWorkflowProgressHistory
+from .model_workflow_result_data import ModelWorkflowResultData
 
 
-class ModelWorkflowExecutionResult(ModelBase):
+class ModelWorkflowExecutionResult(BaseModel):
     """Model for workflow execution results from the ONEX workflow coordinator."""
 
     model_config = ConfigDict(extra="forbid")
@@ -59,29 +58,27 @@ class ModelWorkflowExecutionResult(ModelBase):
         default_factory=datetime.utcnow, description="Execution completion timestamp",
     )
 
-    @field_validator('result_data', mode='before')
+    @field_validator("result_data", mode="before")
     @classmethod
     def convert_result_data(cls, v: dict | ModelWorkflowResultData) -> ModelWorkflowResultData:
         """Convert dict to ModelWorkflowResultData with strict typing."""
         if isinstance(v, dict):
             return ModelWorkflowResultData(**v)
-        elif isinstance(v, ModelWorkflowResultData):
+        if isinstance(v, ModelWorkflowResultData):
             return v
-        else:
-            raise ValueError(f"result_data must be dict or ModelWorkflowResultData, got {type(v)}")
+        raise ValueError(f"result_data must be dict or ModelWorkflowResultData, got {type(v)}")
 
-    @field_validator('agent_coordination_summary', mode='before')
+    @field_validator("agent_coordination_summary", mode="before")
     @classmethod
     def convert_agent_coordination_summary(cls, v: dict | ModelAgentCoordinationSummary) -> ModelAgentCoordinationSummary:
         """Convert dict to ModelAgentCoordinationSummary with strict typing."""
         if isinstance(v, dict):
             return ModelAgentCoordinationSummary(**v)
-        elif isinstance(v, ModelAgentCoordinationSummary):
+        if isinstance(v, ModelAgentCoordinationSummary):
             return v
-        else:
-            raise ValueError(f"agent_coordination_summary must be dict or ModelAgentCoordinationSummary, got {type(v)}")
+        raise ValueError(f"agent_coordination_summary must be dict or ModelAgentCoordinationSummary, got {type(v)}")
 
-    @field_validator('progress_history', mode='before')
+    @field_validator("progress_history", mode="before")
     @classmethod
     def convert_progress_history(cls, v: list[dict | ModelWorkflowProgressHistory]) -> list[ModelWorkflowProgressHistory]:
         """Convert list of dicts to ModelWorkflowProgressHistory with strict typing."""
@@ -99,7 +96,7 @@ class ModelWorkflowExecutionResult(ModelBase):
 
         return converted_history
 
-    @field_validator('sub_agent_results', mode='before')
+    @field_validator("sub_agent_results", mode="before")
     @classmethod
     def convert_sub_agent_results(cls, v: list[dict | ModelSubAgentResult]) -> list[ModelSubAgentResult]:
         """Convert list of dicts to ModelSubAgentResult with strict typing."""
