@@ -6,7 +6,7 @@
 
 **File:** `src/omnibase_infra/infrastructure/postgres_connection_manager.py`
 **Location:** Query validation patterns
-**Optimization:** 
+**Optimization:**
 - Convert hardcoded regex patterns to lazy-loaded properties
 - Cache compiled regex objects using `functools.lru_cache`
 - Implement pattern-specific caching for SQL injection detection patterns
@@ -65,7 +65,7 @@ class KafkaProducerPool:
     def __init__(self, config: ModelKafkaProducerConfig, pool_name: str = "default"):
         # ... existing code ...
         self._compiled_patterns = self._initialize_patterns()
-    
+
     @lru_cache(maxsize=64)
     def _initialize_patterns(self) -> Dict[str, re.Pattern]:
         """Initialize and cache compiled regex patterns."""

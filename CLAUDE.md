@@ -432,12 +432,12 @@ Reference shared models as dependencies in contract:
 ```yaml
 dependencies:
   - name: "model_postgres_query_request"
-    type: "model" 
+    type: "model"
     class_name: "ModelPostgresQueryRequest"
     module: "omnibase_infra.models.postgres.model_postgres_query_request"
   - name: "model_postgres_transaction_request"
     type: "model"
-    class_name: "ModelPostgresTransactionRequest" 
+    class_name: "ModelPostgresTransactionRequest"
     module: "omnibase_infra.models.postgres.model_postgres_transaction_request"
 ```
 
@@ -482,7 +482,7 @@ src/omnibase_infra/
 #### 2.1 Migration Priority Order
 1. **consul_adapter** (Service discovery foundation)
 2. **consul_projector** (Consul state projection)
-3. **kafka_adapter** (Event streaming backbone) 
+3. **kafka_adapter** (Event streaming backbone)
 4. **kafka_wrapper** (Message processing)
 5. **vault_adapter** (Secret management)
 6. **infrastructure_reducer** (State consolidation)
@@ -500,7 +500,7 @@ For each infrastructure node:
 - Extract model definitions from `definitions` section
 - Document io_operations and dependencies
 
-**Step 2: Contract Migration** 
+**Step 2: Contract Migration**
 - Update contract with corrected naming (`tool_infrastructure_*` → node names)
 - Update all import references (`omnibase.` → `omnibase_core.`)
 - Ensure contract_version and node_version consistency
@@ -597,16 +597,16 @@ dependencies:
   # Protocol dependencies (existing pattern)
   - name: "protocol_event_bus"
     type: "protocol"
-    class_name: "ProtocolEventBus" 
+    class_name: "ProtocolEventBus"
     module: "omnibase_core.protocol.protocol_event_bus"
-    
+
   # Shared model dependencies (new pattern)
   - name: "model_postgres_query_request"
     type: "model"
     class_name: "ModelPostgresQueryRequest"
     module: "omnibase_infra.models.postgres.model_postgres_query_request"
   - name: "model_consul_kv_request"
-    type: "model" 
+    type: "model"
     class_name: "ModelConsulKvRequest"
     module: "omnibase_infra.models.consul.model_consul_kv_request"
 ```

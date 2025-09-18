@@ -87,58 +87,34 @@ repos:
         # Exclude test files and examples
         exclude: ^(tests/|src/omnibase_infra/examples|scripts/).*\.py$
 
-      # Infrastructure Validation
-      - id: validate-infrastructure-config
-        name: ONEX Infrastructure Config Validation
-        entry: poetry run python scripts/validate-infrastructure.py
+      # Available Infrastructure Validations (using existing scripts)
+      - id: validate-structure
+        name: ONEX Structure Validation
+        entry: poetry run python scripts/validation/validate_structure.py . omnibase_infra
         language: system
         pass_filenames: false
-        files: ^(terraform/|ansible/|kubernetes/|docker/).*$
         stages: [commit]
 
-      # Docker Compose Validation
+      - id: validate-naming
+        name: ONEX Naming Convention Validation
+        entry: poetry run python scripts/validation/validate_naming.py
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
+      - id: audit-optional
+        name: ONEX Optional Usage Audit
+        entry: poetry run python scripts/validation/audit_optional.py
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
+      # Docker Compose Validation (if file exists)
       - id: validate-docker-compose
         name: Docker Compose Validation
         entry: docker compose config
         language: system
         files: ^docker-compose.*\.ya?ml$
-        stages: [commit]
-
-      # Kubernetes Manifest Validation
-      - id: validate-k8s-manifests
-        name: Kubernetes Manifest Validation
-        entry: poetry run python scripts/validate-k8s-manifests.py
-        language: system
-        pass_filenames: true
-        files: ^kubernetes/.*\.ya?ml$
-        stages: [commit]
-
-      # Security scanning for infrastructure
-      - id: infrastructure-security-scan
-        name: Infrastructure Security Scan
-        entry: poetry run python scripts/security-scan.py
-        language: system
-        pass_filenames: true
-        files: ^(terraform/|ansible/|kubernetes/|docker/).*$
-        stages: [commit]
-
-      # String Version Validation (inherited from parent)
-      - id: validate-string-versions
-        name: ONEX String Version Validation
-        entry: poetry run python scripts/validate-string-versions.py
-        language: system
-        pass_filenames: true
-        files: ^.*\.(yaml|yml)$
-        stages: [commit]
-
-      # Prevent Manual YAML Validation (inherited from parent)
-      - id: validate-no-manual-yaml
-        name: ONEX Prevent Manual YAML Validation
-        entry: poetry run python scripts/validate-no-manual-yaml.py
-        language: system
-        pass_filenames: true
-        files: ^.*\.py$
-        exclude: ^scripts/validate-.*\.py$
         stages: [commit]
 
 # Configuration
