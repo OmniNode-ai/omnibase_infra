@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
 from omnibase_core.core.onex_container import ModelONEXContainer
 from omnibase_core.enums.enum_health_status import EnumHealthStatus
-from omnibase_core.model.core.model_health_status import ModelHealthStatus
+from omnibase_core.models.core.model_health_status import ModelHealthStatus
 from omnibase_core.node_effect_service import NodeEffectService
 from omnibase_spi.protocols.core import ProtocolKafkaClient
 
@@ -38,6 +38,7 @@ from ....models.kafka.model_kafka_health_response import ModelKafkaHealthRespons
 from ....models.kafka.model_kafka_message import ModelKafkaMessage
 from .models.model_kafka_adapter_input import ModelKafkaAdapterInput
 from .models.model_kafka_adapter_output import ModelKafkaAdapterOutput
+
 
 class KafkaStructuredLogger:
     """

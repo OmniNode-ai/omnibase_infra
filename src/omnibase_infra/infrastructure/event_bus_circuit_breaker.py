@@ -21,7 +21,7 @@ from enum import Enum
 from typing import Any
 
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 
 # Import new environment configuration model
 from ..models.infrastructure.model_circuit_breaker_environment_config import (

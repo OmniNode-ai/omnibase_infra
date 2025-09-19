@@ -36,7 +36,7 @@ except ImportError:
     context = None
 
 from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 
 from omnibase_infra.models.tracing.model_span_attributes import ModelSpanAttributes
 

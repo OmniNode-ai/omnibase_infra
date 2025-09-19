@@ -30,17 +30,16 @@ __all__ = [
     # Node-specific models
     "ModelConsulAdapterInput",
     "ModelConsulAdapterOutput",
-    "ModelConsulValueData",
-    "ModelConsulServiceConfig",
-
+    "ModelConsulHealthCheck",
+    "ModelConsulHealthCheckNode",
+    "ModelConsulHealthResponse",
     # Shared models (re-exported for backward compatibility)
     "ModelConsulKVRequest",
     "ModelConsulKVResponse",
-    "ModelConsulServiceRegistration",
-    "ModelConsulHealthCheck",
-    "ModelConsulServiceResponse",
-    "ModelConsulServiceListResponse",
+    "ModelConsulServiceConfig",
     "ModelConsulServiceInfo",
-    "ModelConsulHealthResponse",
-    "ModelConsulHealthCheckNode",
+    "ModelConsulServiceListResponse",
+    "ModelConsulServiceRegistration",
+    "ModelConsulServiceResponse",
+    "ModelConsulValueData",
 ]
