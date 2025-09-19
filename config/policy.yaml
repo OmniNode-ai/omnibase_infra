@@ -1,0 +1,98 @@
+ruleset_version: "0.1"
+repos:
+  omnibase_core:
+    forbids:
+      - "^from\\s+omniagent\\b"
+      - "^from\\s+omnimcp\\b"
+      - "^from\\s+omnibase_spi\\b"
+      - "^from\\s+omnibase_infra\\b"
+      - "^import\\s+omniagent\\b"
+      - "^import\\s+omnimcp\\b"
+    allowed_imports:
+      - "^from\\s+omnibase_core\\."
+      - "^import\\s+(typing|enum|dataclasses|abc|collections)"
+      - "^from\\s+(typing|enum|dataclasses|abc|collections)"
+
+  omnibase_spi:
+    forbids:
+      - "^import\\s+(os|pathlib|sqlite3)\\b"
+      - "^from\\s+(os|pathlib|sqlite3)\\b"
+      - "^from\\s+(requests|httpx|urllib)\\b"
+      - "^import\\s+(requests|httpx|urllib)\\b"
+      - "^from\\s+omnibase_core\\b"
+      - "^from\\s+omnibase_infra\\b"
+    allowed_imports:
+      - "^from\\s+omnibase_spi\\."
+      - "^import\\s+(typing|enum|dataclasses|abc)"
+      - "^from\\s+(typing|enum|dataclasses|abc)"
+
+  omnibase_infra:
+    forbids:
+      - "^from\\s+omniagent\\b"
+      - "^from\\s+omnimcp\\b"
+      - "^import\\s+omniagent\\b"
+      - "^import\\s+omnimcp\\b"
+    allowed_imports:
+      - "^from\\s+omnibase_core\\."
+      - "^from\\s+omnibase_infra\\."
+      - "^from\\s+omnibase_spi\\."
+      - "^import\\s+(typing|enum|dataclasses|abc)"
+
+  omniagent:
+    forbids:
+      - "^from\\s+omnibase_core\\b"
+      - "^from\\s+omnibase_infra\\b"
+      - "^import\\s+omnibase_core\\b"
+      - "^import\\s+omnibase_infra\\b"
+    allowed_imports:
+      - "^from\\s+omniagent\\."
+      - "^from\\s+omnimcp\\."
+      - "^import\\s+(typing|enum|dataclasses|abc)"
+
+  omnimcp:
+    forbids:
+      - "^from\\s+omnibase_core\\b"
+      - "^from\\s+omnibase_infra\\b"
+      - "^import\\s+omnibase_core\\b"
+      - "^import\\s+omnibase_infra\\b"
+    allowed_imports:
+      - "^from\\s+omnimcp\\."
+      - "^from\\s+omniagent\\."
+      - "^import\\s+(typing|enum|dataclasses|abc)"
+
+  omnimemory:
+    forbids:
+      - "^from\\s+omnibase_core\\b"
+      - "^from\\s+omnibase_infra\\b"
+      - "^import\\s+omnibase_core\\b"
+      - "^import\\s+omnibase_infra\\b"
+    allowed_imports:
+      - "^from\\s+omnimemory\\."
+      - "^import\\s+(typing|enum|dataclasses|abc)"
+
+# Severity levels for different rule categories
+severities:
+  naming:
+    protocol: "error"
+    model: "warning"
+    enum: "warning"
+    node: "warning"
+  boundary:
+    forbidden_import: "error"
+  spi:
+    runtimecheckable: "error"
+    forbidden_lib: "error"
+  typing:
+    unannotated: "warning"
+    any_type: "warning"
+    optional_assert: "warning"
+  waiver:
+    malformed: "warning"
+    expired: "error"
+
+# Token and byte limits
+limits:
+  max_diff_bytes_baseline: 204800  # 200KB per shard
+  max_diff_bytes_nightly: 512000   # 500KB total
+  max_summary_words: 400
+  max_ndjson_lines_per_shard: 1000
