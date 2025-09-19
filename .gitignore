@@ -289,3 +289,8 @@ kibana/data/
 # Container registry credentials
 config.json
 auth.json.env
+
+# ONEX Baseline Review artifacts
+.onex_baseline/
+baseline_review.out
+*.ndjson

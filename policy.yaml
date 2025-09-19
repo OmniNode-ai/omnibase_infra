@@ -1,0 +1,43 @@
+ruleset_version: "0.1"
+repos:
+  omnibase_core:
+    forbids:
+      - "^from\\s+omniagent\\b"
+      - "^from\\s+omnimcp\\b"
+      - "^from\\s+omnibase_infra\\b"
+      - "^import\\s+omniagent\\b"
+      - "^import\\s+omnimcp\\b"
+      - "^import\\s+omnibase_infra\\b"
+  omnibase_infra:
+    forbids:
+      - "^from\\s+omniagent\\b"
+      - "^from\\s+omnimcp\\b"
+      - "^import\\s+omniagent\\b"
+      - "^import\\s+omnimcp\\b"
+      # Allow imports from omnibase_core as it's a dependency
+  omniagent:
+    forbids:
+      - "^from\\s+omnibase_core\\b"
+      - "^from\\s+omnibase_infra\\b"
+      - "^import\\s+omnibase_core\\b"
+      - "^import\\s+omnibase_infra\\b"
+  omnimcp:
+    forbids:
+      - "^from\\s+omnibase_core\\b"
+      - "^from\\s+omnibase_infra\\b"
+      - "^import\\s+omnibase_core\\b"
+      - "^import\\s+omnibase_infra\\b"
+  omnimemory:
+    forbids:
+      - "^from\\s+omnibase_core\\b"
+      - "^from\\s+omnibase_infra\\b"
+      - "^import\\s+omnibase_core\\b"
+      - "^import\\s+omnibase_infra\\b"
+  omnibase_spi:
+    forbids:
+      - "^import\\s+(os|pathlib|sqlite3)\\b"
+      - "^from\\s+(requests|httpx|urllib|aiohttp)\\b"
+      - "^import\\s+(requests|httpx|urllib|aiohttp)\\b"
+      - "^from\\s+pathlib\\b"
+      - "^import\\s+socket\\b"
+      - "^from\\s+socket\\b"
