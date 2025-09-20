@@ -1,1 +1,0 @@
-"""Shared PostgreSQL models."""

@@ -1,1 +1,0 @@
-"""Infrastructure shared models for ONEX infrastructure nodes."""
