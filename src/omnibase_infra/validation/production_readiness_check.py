@@ -34,7 +34,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class ValidationResult(Enum):
@@ -52,6 +53,85 @@ class Priority(Enum):
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
+
+
+class ModelValidationDetails(BaseModel):
+    """Strongly typed validation check details to replace dict[str, Any]."""
+
+    test_name: str | None = Field(default=None, description="Name of the test performed")
+    component_tested: str | None = Field(default=None, description="Component that was tested")
+    metrics_collected: list[str] = Field(default_factory=list, description="Metrics that were collected")
+    thresholds_checked: list[str] = Field(default_factory=list, description="Thresholds that were validated")
+    configuration_verified: list[str] = Field(default_factory=list, description="Configuration items verified")
+    dependencies_found: list[str] = Field(default_factory=list, description="Dependencies discovered")
+    security_checks_passed: int = Field(default=0, description="Number of security checks passed")
+    performance_metrics: list[str] = Field(default_factory=list, description="Performance metrics measured")
+    compliance_status: str | None = Field(default=None, description="Compliance validation status")
+    recommendations: list[str] = Field(default_factory=list, description="Recommendations for improvement")
+
+
+class ModelValidationSummary(BaseModel):
+    """Strongly typed validation summary to replace dict[str, Any]."""
+
+    total_checks: int = Field(description="Total number of checks performed")
+    passed_checks: int = Field(description="Number of checks that passed")
+    failed_checks: int = Field(description="Number of checks that failed")
+    warning_checks: int = Field(description="Number of checks with warnings")
+    skipped_checks: int = Field(description="Number of checks that were skipped")
+    error_checks: int = Field(description="Number of checks that had errors")
+    total_duration_seconds: float = Field(description="Total validation duration")
+    overall_result: str = Field(description="Overall validation result")
+    compliance_percentage: float = Field(description="Overall compliance percentage")
+    critical_issues_count: int = Field(description="Number of critical issues found")
+    recommendations_count: int = Field(description="Number of recommendations generated")
+
+
+class ModelCriticalIssue(BaseModel):
+    """Strongly typed critical issue to replace dict[str, Any]."""
+
+    check_id: str = Field(description="ID of the check that failed")
+    priority: str = Field(description="Priority level of the issue")
+    category: str = Field(description="Category of the issue")
+    message: str = Field(description="Issue description")
+    impact: str = Field(description="Impact assessment")
+    remediation: str = Field(description="Recommended remediation")
+
+
+class ModelComplianceStatus(BaseModel):
+    """Strongly typed compliance status to replace dict[str, Any]."""
+
+    overall_compliance: str = Field(description="Overall compliance status")
+    security_compliance: float = Field(description="Security compliance percentage")
+    performance_compliance: float = Field(description="Performance compliance percentage")
+    architecture_compliance: float = Field(description="Architecture compliance percentage")
+    production_ready: bool = Field(description="Whether system is production ready")
+    blocking_issues: list[str] = Field(default_factory=list, description="Blocking issues for production")
+    recommended_actions: list[str] = Field(default_factory=list, description="Recommended actions")
+
+
+class ModelDeploymentChecklistItem(BaseModel):
+    """Strongly typed deployment checklist item to replace dict[str, Any]."""
+
+    item_id: str = Field(description="Checklist item ID")
+    title: str = Field(description="Checklist item title")
+    description: str = Field(description="Detailed description")
+    priority: str = Field(description="Priority level")
+    status: str = Field(description="Completion status")
+    dependencies: list[str] = Field(default_factory=list, description="Dependencies for this item")
+    estimated_effort: str | None = Field(default=None, description="Estimated effort to complete")
+
+
+class ModelValidationResults(BaseModel):
+    """Strongly typed complete validation results to replace dict[str, Any]."""
+
+    validation_timestamp: str = Field(description="When validation was performed")
+    environment: str = Field(description="Environment where validation was run")
+    summary: ModelValidationSummary = Field(description="Validation summary")
+    compliance_status: ModelComplianceStatus = Field(description="Compliance assessment")
+    critical_issues: list[ModelCriticalIssue] = Field(description="Critical issues found")
+    deployment_checklist: list[ModelDeploymentChecklistItem] = Field(description="Deployment checklist")
+    detailed_results: list[str] = Field(default_factory=list, description="Detailed check results")
+    next_validation_recommended: str | None = Field(default=None, description="When to run validation again")
 
 
 @dataclass
@@ -74,7 +154,7 @@ class CheckResult:
     check_id: str
     result: ValidationResult
     message: str
-    details: dict[str, Any] = field(default_factory=dict)
+    details: ModelValidationDetails = field(default_factory=ModelValidationDetails)
     duration_seconds: float = 0.0
     error: str | None = None
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
@@ -109,7 +189,7 @@ class ProductionReadinessValidator:
         for name, component in components.items():
             setattr(self, f"_{name}", component)
 
-    async def run_full_validation(self) -> dict[str, Any]:
+    async def run_full_validation(self) -> ModelValidationResults:
         """
         Run complete production readiness validation suite.
         
@@ -343,7 +423,7 @@ class ProductionReadinessValidator:
 
     # Security Validation Methods
 
-    async def _check_credential_management(self) -> dict[str, Any]:
+    async def _check_credential_management(self) -> ModelValidationDetails:
         """Validate credential management and Vault integration."""
         details = {}
 
@@ -399,7 +479,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_tls_configuration(self) -> dict[str, Any]:
+    async def _check_tls_configuration(self) -> ModelValidationDetails:
         """Validate TLS/SSL configuration."""
         details = {}
 
@@ -435,7 +515,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_rate_limiting(self) -> dict[str, Any]:
+    async def _check_rate_limiting(self) -> ModelValidationDetails:
         """Validate rate limiting implementation."""
         details = {}
 
@@ -473,7 +553,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_audit_logging(self) -> dict[str, Any]:
+    async def _check_audit_logging(self) -> ModelValidationDetails:
         """Validate audit logging implementation."""
         details = {}
 
@@ -517,7 +597,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_payload_encryption(self) -> dict[str, Any]:
+    async def _check_payload_encryption(self) -> ModelValidationDetails:
         """Validate payload encryption implementation."""
         details = {}
 
@@ -565,7 +645,7 @@ class ProductionReadinessValidator:
 
     # Performance Validation Methods
 
-    async def _check_connection_pooling(self) -> dict[str, Any]:
+    async def _check_connection_pooling(self) -> ModelValidationDetails:
         """Validate async connection pooling with proper cleanup."""
         details = {}
 
@@ -603,7 +683,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_async_health_checks(self) -> dict[str, Any]:
+    async def _check_async_health_checks(self) -> ModelValidationDetails:
         """Validate async health check implementation."""
         details = {}
 
@@ -642,7 +722,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_async_patterns(self) -> dict[str, Any]:
+    async def _check_async_patterns(self) -> ModelValidationDetails:
         """Validate consistent async/await patterns."""
         details = {}
 
@@ -691,7 +771,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_backpressure_handling(self) -> dict[str, Any]:
+    async def _check_backpressure_handling(self) -> ModelValidationDetails:
         """Validate backpressure handling via circuit breaker and rate limiting."""
         details = {}
 
@@ -724,7 +804,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_batch_processing(self) -> dict[str, Any]:
+    async def _check_batch_processing(self) -> ModelValidationDetails:
         """Validate batch processing in outbox pattern."""
         details = {}
 
@@ -767,7 +847,7 @@ class ProductionReadinessValidator:
 
     # Architecture Validation Methods
 
-    async def _check_configuration_management(self) -> dict[str, Any]:
+    async def _check_configuration_management(self) -> ModelValidationDetails:
         """Validate contract-driven configuration management."""
         details = {}
 
@@ -799,7 +879,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_circuit_breaker_implementation(self) -> dict[str, Any]:
+    async def _check_circuit_breaker_implementation(self) -> ModelValidationDetails:
         """Validate comprehensive circuit breaker implementation."""
         details = {}
 
@@ -862,7 +942,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_prometheus_metrics(self) -> dict[str, Any]:
+    async def _check_prometheus_metrics(self) -> ModelValidationDetails:
         """Validate Prometheus metrics implementation."""
         details = {}
 
@@ -913,7 +993,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_outbox_pattern(self) -> dict[str, Any]:
+    async def _check_outbox_pattern(self) -> ModelValidationDetails:
         """Validate PostgreSQL transactional outbox pattern."""
         details = {}
 
@@ -958,7 +1038,7 @@ class ProductionReadinessValidator:
             "details": details,
         }
 
-    async def _check_performance_benchmarks(self) -> dict[str, Any]:
+    async def _check_performance_benchmarks(self) -> ModelValidationDetails:
         """Validate performance benchmark suite availability."""
         details = {}
 
@@ -997,7 +1077,7 @@ class ProductionReadinessValidator:
 
     # Report Generation Methods
 
-    def _generate_validation_summary(self, total_duration: float) -> dict[str, Any]:
+    def _generate_validation_summary(self, total_duration: float) -> ModelValidationSummary:
         """Generate high-level validation summary."""
         total_checks = len(self._results)
         passed_checks = sum(1 for result in self._results.values() if result.result == ValidationResult.PASS)
@@ -1037,7 +1117,7 @@ class ProductionReadinessValidator:
 
         return round(total_score / len(self._results))
 
-    def _identify_critical_issues(self) -> list[dict[str, Any]]:
+    def _identify_critical_issues(self) -> list[ModelCriticalIssue]:
         """Identify critical issues that block production deployment."""
         critical_issues = []
 
@@ -1052,7 +1132,7 @@ class ProductionReadinessValidator:
 
         return critical_issues
 
-    def _assess_compliance_status(self) -> dict[str, Any]:
+    def _assess_compliance_status(self) -> ModelComplianceStatus:
         """Assess compliance with production requirements."""
         # Check if all critical and high priority checks passed
         critical_failed = []
@@ -1115,7 +1195,7 @@ class ProductionReadinessValidator:
 
         return recommendations
 
-    def _generate_deployment_checklist(self) -> list[dict[str, Any]]:
+    def _generate_deployment_checklist(self) -> list[ModelDeploymentChecklistItem]:
         """Generate deployment readiness checklist."""
         checklist_items = [
             {
@@ -1155,7 +1235,7 @@ class ProductionReadinessValidator:
 
         return checklist_items
 
-    def _serialize_results(self) -> dict[str, Any]:
+    def _serialize_results(self) -> ModelValidationResults:
         """Serialize validation results for JSON output."""
         return {
             check_id: {
@@ -1171,7 +1251,7 @@ class ProductionReadinessValidator:
 
 
 # Helper function for easy validation execution
-async def validate_production_readiness(**components) -> dict[str, Any]:
+async def validate_production_readiness(**components) -> ModelValidationResults:
     """
     Convenience function to run production readiness validation.
     

@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.core_error_codes import CoreErrorCode
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 from omnibase_core.onex_error import OnexError
 
 from omnibase_infra.infrastructure.event_bus_circuit_breaker import (

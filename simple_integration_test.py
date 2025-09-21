@@ -17,6 +17,7 @@ Prerequisites:
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import datetime
@@ -62,7 +63,7 @@ class SimpleInfrastructureTest:
                 port=5435,  # External PostgreSQL port
                 database="omnibase_infrastructure",
                 user="postgres",
-                password="9mK2vP8xL3nQ7wR5zE6uY4tA1bN3cF7gH9jK2mP5sT8vX1",
+                password=os.getenv("POSTGRES_PASSWORD", "dev_password_change_in_prod"),
             )
             logger.info("✅ PostgreSQL connection established")
         except Exception as e:
