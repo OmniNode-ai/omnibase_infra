@@ -4,6 +4,7 @@ Addresses PR #11 feedback about TLS config storing ssl_key_password as plain str
 Tests security-sensitive field handling and TLS configuration validation.
 """
 
+import os
 import pytest
 from pathlib import Path
 from pydantic import ValidationError, SecretStr
@@ -41,7 +42,7 @@ class TestModelTLSConfig:
             tls_version_min="1.3",
             ssl_cert_path="/etc/ssl/certs/server.crt",
             ssl_key_path="/etc/ssl/private/server.key",
-            ssl_key_password="SecurePassword123!",  # Note: Should be SecretStr in production
+            ssl_key_password=os.getenv("TEST_TLS_KEY_PASSWORD", "test_secure_password_123"),  # Note: Should be SecretStr in production
             ssl_ca_path="/etc/ssl/certs/ca.crt",
             ssl_verify_peer=True,
             ssl_verify_hostname=True,
@@ -60,7 +61,7 @@ class TestModelTLSConfig:
         assert tls_config.tls_version_min == "1.3"
         assert tls_config.ssl_cert_path == "/etc/ssl/certs/server.crt"
         assert tls_config.ssl_key_path == "/etc/ssl/private/server.key"
-        assert tls_config.ssl_key_password == "SecurePassword123!"
+        assert tls_config.ssl_key_password == os.getenv("TEST_TLS_KEY_PASSWORD", "test_secure_password_123")
         assert tls_config.ssl_verify_peer is True
         assert tls_config.ssl_verify_hostname is True
         assert tls_config.ocsp_stapling_enabled is True
@@ -88,7 +89,7 @@ class TestModelTLSConfig:
     def test_ssl_password_security_concerns(self):
         """Test SSL password handling - documents security concerns from PR feedback."""
         # SECURITY CONCERN: Password stored as plain string (from PR #11 feedback)
-        password = "VerySecretPassword123!"
+        password = os.getenv("TEST_SSL_PASSWORD", "test_very_secret_password_123")
 
         tls_config = ModelTLSConfig(ssl_key_password=password)
 
@@ -251,7 +252,7 @@ class TestModelTLSConfig:
         tls_config = ModelTLSConfig(
             ssl_cert_path="/etc/ssl/certs/server.crt",
             ssl_key_path="/etc/ssl/private/server.key",
-            ssl_key_password="SuperSecretPassword123!",
+            ssl_key_password=os.getenv("TEST_SUPER_SECRET_PASSWORD", "test_super_secret_password_123"),
             tls_version_min="1.3",
         )
 
@@ -260,7 +261,7 @@ class TestModelTLSConfig:
         # SECURITY REVIEW: Check what gets serialized
         assert json_data["ssl_cert_path"] == "/etc/ssl/certs/server.crt"  # OK to expose
         assert json_data["ssl_key_path"] == "/etc/ssl/private/server.key"  # Path OK to expose
-        assert json_data["ssl_key_password"] == "SuperSecretPassword123!"  # SECURITY RISK!
+        assert json_data["ssl_key_password"] == os.getenv("TEST_SUPER_SECRET_PASSWORD", "test_super_secret_password_123")  # SECURITY RISK!
         assert json_data["tls_version_min"] == "1.3"  # OK to expose
 
         # TODO: Implement secure serialization that masks sensitive fields
