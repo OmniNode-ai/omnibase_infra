@@ -15,7 +15,7 @@ from datetime import datetime
 from uuid import uuid4
 
 import pytest
-from omnibase_core.model.core.model_onex_event import ModelOnexEvent
+from omnibase_core.models.core.model_onex_event import ModelOnexEvent
 
 from omnibase_infra.infrastructure.container import RedPandaEventBus
 from omnibase_infra.infrastructure.event_bus_circuit_breaker import (

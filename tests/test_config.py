@@ -10,7 +10,7 @@ Provides centralized configuration for all test types including:
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -62,7 +62,7 @@ class PostgresTestConfig:
     # Database settings
     database: str = "test_omnibase_infra"
     user: str = "postgres"
-    password: str = "test_password"
+    password: str = field(default_factory=lambda: os.getenv("TEST_POSTGRES_PASSWORD", "test_password_change_in_prod"))
 
     # Connection pool settings
     min_connections: int = 1

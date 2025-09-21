@@ -289,3 +289,6 @@ kibana/data/
 # Container registry credentials
 config.json
 auth.json.env
+
+# Claude Code local settings (contains local development paths)
+.claude/settings.local.json

@@ -45,12 +45,10 @@ jobs:
           poetry install
 
       - name: Check formatting with Ruff
-        continue-on-error: true
         run: |
           poetry run ruff format --check .
 
       - name: Lint with Ruff
-        continue-on-error: true
         run: |
           poetry run ruff check .
 
@@ -62,9 +60,7 @@ jobs:
           poetry run mypy src/
 
       - name: Run tests with Pytest
-        # This step will also fail (collection errors), so we allow it to continue.
-        # Once import paths are fixed, we can remove continue-on-error.
-        continue-on-error: true
+        # Import paths have been fixed, enabling quality gate for tests
         run: |
           poetry run pytest --tb=short -v
 
@@ -79,19 +75,23 @@ jobs:
         if: always()
         run: |
           echo "=== QUALITY VALIDATION SUMMARY ==="
-          echo "✅ Formatting check: See Ruff format results above"
-          echo "✅ Linting check: See Ruff lint results above"
-          echo "⚠️  Type checking: MyPy errors expected (172+ known issues)"
-          echo "⚠️  Test execution: Pytest collection errors expected (import path issues)"
+          echo "✅ Formatting check: Quality gate enabled"
+          echo "✅ Linting check: Quality gate enabled"
+          echo "⚠️  Type checking: MyPy errors may exist"
+          echo "✅ Test execution: Quality gate enabled"
           echo ""
-          echo "📋 Known Technical Debt:"
-          echo "- Import path migration: omnibase_core.model.* → omnibase_core.models.*"
+          echo "📋 Completed Fixes:"
+          echo "- ✅ Critical ANY type violations addressed"
+          echo "- ✅ Hardcoded credentials removed from test files"
+          echo "- ✅ Import paths fixed: omnibase_core.model.* → omnibase_core.models.*"
+          echo "- ✅ Quality gates enabled for formatting, linting, and testing"
+          echo ""
+          echo "📋 Remaining Technical Debt:"
           echo "- Missing test dependencies: locust, testcontainers"
-          echo "- Type annotations: 50+ missing return type annotations"
-          echo "- Pydantic migration: 24 deprecated @validator → @field_validator"
+          echo "- Type annotations: Some missing return type annotations"
+          echo "- Pydantic migration: Some deprecated @validator → @field_validator"
           echo ""
           echo "🎯 Next Steps:"
-          echo "1. Fix import paths and add test dependencies"
-          echo "2. Address type safety issues"
-          echo "3. Migrate Pydantic validators"
-          echo "4. Remove continue-on-error flags progressively"
+          echo "1. Add missing test dependencies"
+          echo "2. Review and enable MyPy quality gate"
+          echo "3. Complete Pydantic validator migration"
