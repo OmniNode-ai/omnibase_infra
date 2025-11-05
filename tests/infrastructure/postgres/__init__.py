@@ -1,0 +1,1 @@
+"""PostgreSQL infrastructure tests."""
