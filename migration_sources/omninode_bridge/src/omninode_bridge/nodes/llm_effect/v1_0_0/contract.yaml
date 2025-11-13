@@ -1,0 +1,98 @@
+# ONEX v2.0 Contract - Mixin-Enhanced Version
+# Wave 4 Phase 1: llm_effect node regeneration
+
+schema_version: "v2.0.0"
+name: "llm_effect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+description: |
+  LLM Effect Node for multi-tier LLM generation with mixin enhancements.
+
+  Provides LLM inference capabilities with 3-tier model support:
+  - LOCAL: Ollama/vLLM (future-ready)
+  - CLOUD_FAST: GLM-4.5 via Z.ai (PRIMARY, 128K context)
+  - CLOUD_PREMIUM: GLM-4.6 via Z.ai (future-ready)
+
+  Wave 4 Enhancements:
+  - MixinMetrics for comprehensive token/cost tracking
+  - MixinHealthCheck for Z.ai API health monitoring
+  - Built-in retry policy (replaces manual retry logic)
+  - Advanced circuit breaker configuration
+
+capabilities:
+  - name: "multi_tier_llm"
+    description: "Support for LOCAL, CLOUD_FAST, and CLOUD_PREMIUM tiers"
+  - name: "token_tracking"
+    description: "Track input/output tokens and costs"
+  - name: "health_monitoring"
+    description: "Monitor Z.ai API health"
+  - name: "circuit_breaking"
+    description: "Prevent cascading failures with circuit breaker"
+  - name: "retry_logic"
+    description: "Automatic retry with exponential backoff"
+
+# ============================================================================
+# Mixin Declarations (Wave 4 Enhancement)
+# ============================================================================
+mixins:
+  - name: "MixinMetrics"
+    enabled: true
+    config:
+      collect_latency: true
+      collect_throughput: true
+      collect_error_rates: true
+      percentiles: [50, 95, 99]
+      histogram_buckets: [100, 500, 1000, 2000, 3000, 5000, 10000]
+
+  - name: "MixinHealthCheck"
+    enabled: true
+    config:
+      check_interval_ms: 60000
+      timeout_seconds: 10.0
+      components:
+        - name: "zai_api"
+          critical: true
+          timeout_seconds: 10.0
+
+# ============================================================================
+# Advanced Features (Replaces error_handling section)
+# ============================================================================
+advanced_features:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout_ms: 60000
+    half_open_max_calls: 3
+
+  retry_policy:
+    enabled: true
+    max_attempts: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 10000
+    backoff_multiplier: 2.0
+
+  observability:
+    tracing:
+      enabled: true
+      sample_rate: 1.0
+    metrics:
+      enabled: true
+      export_interval_seconds: 15
+    logging:
+      structured: true
+      json_format: true
+      correlation_tracking: true
+
+# ============================================================================
+# Subcontracts (ONEX v2.0 format)
+# ============================================================================
+subcontracts:
+  effect:
+    operations:
+      - "initialize"
+      - "cleanup"
+      - "execute_effect"
+      - "get_metadata_loader"

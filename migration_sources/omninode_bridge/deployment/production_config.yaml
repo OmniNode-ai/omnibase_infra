@@ -1,0 +1,401 @@
+# Production Configuration for ONEX v2.0 Code Generation System
+#
+# This configuration defines production deployment settings including:
+# - Worker configuration
+# - SLA thresholds
+# - Monitoring intervals
+# - Alert rules
+# - Resource limits
+#
+# Last Updated: 2025-11-06
+
+# === Service Configuration ===
+service:
+  name: "omninode_bridge_codegen"
+  version: "2.0.0"
+  environment: "production"
+
+  # Worker Configuration
+  workers: 4  # Number of parallel workers
+  max_concurrent_workflows: 100  # Maximum concurrent workflow executions
+
+  # Template Cache
+  template_cache_size: 200  # Maximum templates to cache
+  template_cache_ttl_seconds: 3600  # 1 hour TTL
+
+  # Feature Flags
+  enable_ai_quorum: true  # Enable AI Quorum for critical decisions
+  enable_distributed_tracing: true  # Enable distributed tracing
+  enable_metrics_export: true  # Enable Prometheus metrics export
+  enable_kafka_events: true  # Enable Kafka event publishing
+
+# === SLA Thresholds ===
+sla:
+  # Performance SLAs
+  workflow_latency_p95_ms: 5000  # P95 workflow latency <5s
+  workflow_latency_p99_ms: 10000  # P99 workflow latency <10s
+
+  # Quality SLAs
+  template_cache_hit_rate: 0.85  # Cache hit rate >85%
+  validation_pass_rate: 0.90  # Validation pass rate >90%
+  ai_quorum_consensus_rate: 0.80  # AI Quorum consensus >80%
+
+  # Cost SLAs
+  cost_per_node_usd: 0.05  # Cost per node <$0.05
+
+  # Reliability SLAs
+  error_rate_max: 0.05  # Error rate <5%
+  uptime_percentage: 99.9  # Uptime >99.9%
+
+  # Throughput SLAs
+  throughput_min_ops_sec: 10  # Minimum throughput >10 ops/sec
+
+# === Monitoring Configuration ===
+monitoring:
+  # Health Checks
+  health_check_interval_seconds: 30  # Run health checks every 30s
+  health_check_timeout_seconds: 5  # Timeout for individual health checks
+
+  # Metrics Export
+  metrics_export_interval_seconds: 10  # Export metrics every 10s
+  metrics_retention_hours: 24  # Retain metrics for 24 hours
+
+  # Prometheus Integration
+  prometheus_enabled: true
+  # Use standard exporter port (94xx range) to avoid conflict with Prometheus server (9090)
+  # Port 9464 follows the convention for application-specific exporters
+  prometheus_port: 9464  # Can be overridden with METRICS_PORT environment variable
+  prometheus_endpoint: "/metrics"
+
+  # Components to Monitor
+  components:
+    - template_manager
+    - validation_pipeline
+    - ai_quorum
+    - dependency_resolver
+    - context_distributor
+    - routing_orchestrator
+    - database
+    - kafka
+    - cache
+
+# === Alert Configuration ===
+alerting:
+  # Alert Deduplication
+  dedup_window_seconds: 300  # Suppress duplicate alerts for 5 minutes
+
+  # Notification Channels
+  notification_channels:
+    - log  # Always log alerts
+    # - slack  # Uncomment to enable Slack
+    # - email  # Uncomment to enable email
+    # - pagerduty  # Uncomment to enable PagerDuty
+
+  # Alert Rules
+  #
+  # === ALERT METRIC MAPPING ===
+  #
+  # Alert Engine: Custom Python-based evaluation via AlertManager.evaluate_rules()
+  #   - Located in: src/omninode_bridge/production/alerting.py
+  #   - Evaluation method: Python lambda conditions on metric dictionaries
+  #   - Performance: <10ms per evaluation cycle
+  #
+  # Metrics referenced in alert conditions:
+  #   - workflow_latency_p95 (ms): P95 workflow execution latency
+  #   - workflow_latency_p99 (ms): P99 workflow execution latency
+  #   - template_cache_hit_rate (0-1): Template cache hit ratio
+  #   - cost_per_node (USD): Cost per generated node
+  #   - validation_pass_rate (0-1): Validation success ratio
+  #   - error_rate (0-1): Error occurrence ratio
+  #   - throughput (ops/sec): Operations per second
+  #
+  # Metric Sources:
+  #   - Primary: src/omninode_bridge/production/monitoring.py
+  #     - SLAConfiguration class (lines 113-187) defines metric thresholds
+  #     - ProductionMonitor.monitor_slas() evaluates metrics against SLA thresholds
+  #   - Collection: metrics_collector gathers metrics during workflow execution
+  #   - Evaluation: AlertManager.evaluate_rules() checks conditions and fires alerts
+  #
+  # Alert Evaluation Flow:
+  #   1. Metrics collected during workflow execution
+  #   2. Passed to ProductionMonitor.monitor_slas(metrics)
+  #   3. SLAThreshold.evaluate() checks each metric against thresholds
+  #   4. AlertManager.evaluate_rules() processes alert rules below
+  #   5. Matching conditions trigger Alert objects
+  #   6. Alerts sent via configured notification channels
+  #
+  # Validation:
+  #   - Metric names MUST match those exported by monitoring.py
+  #   - Silent failure occurs if metric names mismatch
+  #   - Run tests/production/test_alerting.py to verify alert conditions
+  #
+  # ⚠️  IMPORTANT: When adding new alert rules:
+  #   1. Verify metric name exists in monitoring.py SLAConfiguration
+  #   2. Confirm metric is collected by metrics_collector
+  #   3. Add test case to test_alerting.py
+  #   4. Document metric unit and expected range
+  #
+  rules:
+    # Performance Alerts
+    - name: "high_workflow_latency_p95"
+      type: "latency_violation"
+      severity: "high"
+      condition: "workflow_latency_p95 > 10000"  # >10s
+      message: "Workflow P95 latency ({workflow_latency_p95}ms) exceeds SLA (10000ms)"
+      enabled: true
+
+    - name: "critical_workflow_latency_p99"
+      type: "latency_violation"
+      severity: "critical"
+      condition: "workflow_latency_p99 > 15000"  # >15s
+      message: "Workflow P99 latency ({workflow_latency_p99}ms) critically high (>15000ms)"
+      enabled: true
+
+    # Cache Alerts
+    - name: "low_cache_hit_rate"
+      type: "cache_hit_rate_low"
+      severity: "medium"
+      condition: "template_cache_hit_rate < 0.85"
+      message: "Template cache hit rate ({template_cache_hit_rate:.2%}) below target (85%)"
+      enabled: true
+
+    - name: "critical_cache_hit_rate"
+      type: "cache_hit_rate_low"
+      severity: "high"
+      condition: "template_cache_hit_rate < 0.70"
+      message: "Template cache hit rate ({template_cache_hit_rate:.2%}) critically low (<70%)"
+      enabled: true
+
+    # Cost Alerts
+    - name: "high_cost_per_node"
+      type: "cost_budget_exceeded"
+      severity: "critical"
+      condition: "cost_per_node > 0.05"
+      message: "Cost per node (${cost_per_node:.4f}) exceeds budget ($0.05)"
+      enabled: true
+
+    - name: "warning_cost_per_node"
+      type: "cost_budget_exceeded"
+      severity: "medium"
+      condition: "cost_per_node > 0.04"
+      message: "Cost per node (${cost_per_node:.4f}) approaching budget limit ($0.05)"
+      enabled: true
+
+    # Quality Alerts
+    - name: "low_validation_pass_rate"
+      type: "validation_pass_rate_low"
+      severity: "high"
+      condition: "validation_pass_rate < 0.90"
+      message: "Validation pass rate ({validation_pass_rate:.2%}) below SLA (90%)"
+      enabled: true
+
+    - name: "critical_validation_pass_rate"
+      type: "validation_pass_rate_low"
+      severity: "critical"
+      condition: "validation_pass_rate < 0.80"
+      message: "Validation pass rate ({validation_pass_rate:.2%}) critically low (<80%)"
+      enabled: true
+
+    # Error Rate Alerts
+    - name: "high_error_rate"
+      type: "error_rate_high"
+      severity: "critical"
+      condition: "error_rate > 0.05"  # >5%
+      message: "Error rate ({error_rate:.2%}) exceeds threshold (5%)"
+      enabled: true
+
+    - name: "warning_error_rate"
+      type: "error_rate_high"
+      severity: "high"
+      condition: "error_rate > 0.03"  # >3%
+      message: "Error rate ({error_rate:.2%}) elevated (>3%)"
+      enabled: true
+
+    # Throughput Alerts
+    - name: "low_throughput"
+      type: "throughput_low"
+      severity: "medium"
+      condition: "throughput < 10"
+      message: "Throughput ({throughput:.1f} ops/sec) below minimum (10 ops/sec)"
+      enabled: true
+
+# === Resource Limits ===
+resources:
+  # Memory Limits
+  memory_limit_mb: 2048  # 2GB memory limit
+  memory_warning_threshold_mb: 1536  # Warn at 75% usage
+
+  # CPU Limits
+  cpu_limit_cores: 4  # 4 CPU cores
+  cpu_warning_threshold_percent: 75  # Warn at 75% usage
+
+  # Connection Pools
+  database_pool_min: 10
+  database_pool_max: 50
+  database_pool_timeout_seconds: 30
+
+  # Task Queues
+  task_queue_max_size: 1000
+  task_queue_timeout_seconds: 60
+
+# === Logging Configuration ===
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "json"  # json or text
+
+  # Log Destinations
+  # CONTAINER BEST PRACTICE: Use stdout/stderr only for log aggregation
+  # - Container logs may be unwritable (permission issues)
+  # - Logs lost on container restart (no persistent volume)
+  # - No integration with log aggregation tools (Loki, Splunk, etc.)
+  # - Follows 12-factor app principles (https://12factor.net/logs)
+  destinations:
+    - console  # stdout/stderr - captured by container runtime
+    # - file  # DISABLED: File logging not recommended for containers
+    # - syslog
+
+  # File Logging (COMMENTED OUT - for reference only)
+  # file_path: "/var/log/omninode_bridge/production.log"
+  # max_file_size_mb: 100
+  # max_backup_files: 10
+
+  # Structured Logging Fields
+  include_fields:
+    - timestamp
+    - level
+    - logger
+    - message
+    - correlation_id
+    - component
+    - metrics
+
+# === Database Configuration ===
+database:
+  host: "${DB_HOST:-192.168.86.200}"  # Remote PostgreSQL server (configurable via DB_HOST)
+  port: ${DB_PORT:-5436}
+  database: "${DB_NAME:-omninode_bridge}"
+  user: "${DB_USER:-postgres}"
+  # password: Set via environment variable POSTGRES_PASSWORD
+
+  # Connection Pool
+  pool_min_size: 10
+  pool_max_size: 50
+  pool_timeout_seconds: 30
+
+  # Query Timeouts
+  query_timeout_seconds: 30
+  transaction_timeout_seconds: 60
+
+# === Kafka Configuration ===
+kafka:
+  # Environment-aware configuration: Uses KAFKA_BOOTSTRAP_SERVERS env var if set,
+  # otherwise defaults to remote Redpanda/Kafka for development
+  bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-192.168.86.200:29092}"
+
+  # Producer Configuration
+  producer:
+    compression_type: "snappy"
+    batch_size: 16384
+    linger_ms: 10
+    acks: "all"
+    retries: 3
+
+  # Topics
+  topics:
+    metrics: "codegen.metrics.v1"
+    alerts: "codegen.alerts.v1"
+    health: "codegen.health.v1"
+    events: "codegen.events.v1"
+
+# === AI Quorum Configuration ===
+ai_quorum:
+  # Model Configuration
+  models:
+    - name: "gemini-flash"
+      weight: 2.0
+      enabled: true
+    - name: "codestral"
+      weight: 1.5
+      enabled: true
+    - name: "deepseek-lite"
+      weight: 1.0
+      enabled: true
+    - name: "llama-3.1"
+      weight: 2.0
+      enabled: true
+    - name: "deepseek-full"
+      weight: 1.0
+      enabled: true
+
+  # Quorum Settings
+  consensus_threshold: 0.80  # 80% weighted consensus
+  suggestion_threshold: 0.60  # 60% weighted suggestion
+  timeout_seconds: 30  # 30s timeout for quorum queries
+
+  # Cost Limits
+  max_cost_per_query_usd: 0.01  # Max $0.01 per quorum query
+
+# === Validation Configuration ===
+validation:
+  # Validator Types
+  validators:
+    - syntax
+    - imports
+    - type_safety
+    - onex_compliance
+    - performance
+    - security
+
+  # Validation Settings
+  parallel_validation: true
+  validation_timeout_seconds: 10
+  fail_fast: false  # Continue validation even if one fails
+
+  # Quality Gates
+  quality_gates:
+    - name: "syntax_check"
+      required: true
+      weight: 1.0
+    - name: "type_safety"
+      required: true
+      weight: 1.5
+    - name: "onex_compliance"
+      required: true
+      weight: 2.0
+    - name: "performance_check"
+      required: false
+      weight: 1.0
+
+# === Template Configuration ===
+templates:
+  # Template Paths
+  template_dirs:
+    - "src/omninode_bridge/codegen/templates"
+    - "src/omninode_bridge/codegen/templates/test_templates"
+
+  # Cache Configuration
+  cache_enabled: true
+  cache_size: 200
+  cache_ttl_seconds: 3600
+
+  # Template Loading
+  auto_reload: false  # Disable auto-reload in production
+  strict_mode: true  # Strict template validation
+
+# === Deployment Configuration ===
+deployment:
+  # Deployment Strategy
+  strategy: "rolling"  # rolling, blue-green, canary
+
+  # Rolling Deployment
+  max_unavailable: 1  # Maximum unavailable workers during deployment
+  max_surge: 1  # Maximum additional workers during deployment
+
+  # Health Check for Deployment
+  health_check_grace_period_seconds: 30
+  health_check_interval_seconds: 10
+  health_check_failure_threshold: 3
+
+  # Rollback Configuration
+  auto_rollback_on_failure: true
+  rollback_threshold_error_rate: 0.10  # Rollback if error rate >10%

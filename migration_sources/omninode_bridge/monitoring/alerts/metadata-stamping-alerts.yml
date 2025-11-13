@@ -1,0 +1,216 @@
+# Metadata Stamping Service Alert Rules
+# Prometheus alerting rules for comprehensive monitoring
+
+groups:
+  - name: metadata-stamping-health
+    rules:
+      # Service Availability Alerts
+      - alert: MetadataStampingServiceDown
+        expr: up{job="metadata-stamping"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: metadata-stamping
+        annotations:
+          summary: "Metadata Stamping Service is down"
+          description: "The metadata stamping service has been down for more than 1 minute"
+          runbook_url: "https://docs.omninode.ai/runbooks/metadata-stamping-down"
+
+      - alert: MetadataStampingHighErrorRate
+        expr: rate(http_requests_total{job="metadata-stamping",status=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "High error rate in Metadata Stamping Service"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # Performance Alerts
+      - alert: MetadataStampingSlowResponse
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="metadata-stamping"}[5m])) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "Slow response times in Metadata Stamping Service"
+          description: "95th percentile response time is {{ $value }}s"
+
+      - alert: MetadataStampingHashGenerationSlow
+        expr: histogram_quantile(0.99, rate(blake3_hash_generation_duration_seconds_bucket{job="metadata-stamping"}[5m])) > 0.002
+        for: 2m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "BLAKE3 hash generation is slow"
+          description: "99th percentile hash generation time is {{ $value }}s, exceeding 2ms threshold"
+
+  - name: metadata-stamping-resources
+    rules:
+      # Resource Usage Alerts
+      - alert: MetadataStampingHighMemoryUsage
+        expr: container_memory_usage_bytes{name="omninode-bridge-metadata-stamping"} / container_spec_memory_limit_bytes{name="omninode-bridge-metadata-stamping"} > 0.9
+        for: 2m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "High memory usage in Metadata Stamping Service"
+          description: "Memory usage is {{ $value | humanizePercentage }} of the container limit"
+
+      - alert: MetadataStampingHighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{name="omninode-bridge-metadata-stamping"}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "High CPU usage in Metadata Stamping Service"
+          description: "CPU usage is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      - alert: MetadataStampingLowDiskSpace
+        expr: container_fs_usage_bytes{name="omninode-bridge-metadata-stamping"} / container_fs_limit_bytes{name="omninode-bridge-metadata-stamping"} > 0.85
+        for: 1m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "Low disk space in Metadata Stamping Service"
+          description: "Disk usage is {{ $value | humanizePercentage }} of the container limit"
+
+  - name: metadata-stamping-database
+    rules:
+      # Database Connection Alerts
+      - alert: MetadataStampingDatabaseConnectionHigh
+        expr: metadata_stamping_db_connections_active{job="metadata-stamping"} / metadata_stamping_db_connections_max{job="metadata-stamping"} > 0.8
+        for: 2m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "High database connection usage"
+          description: "Database connection usage is {{ $value | humanizePercentage }} of the pool limit"
+
+      - alert: MetadataStampingDatabaseSlowQueries
+        expr: histogram_quantile(0.95, rate(metadata_stamping_db_query_duration_seconds_bucket{job="metadata-stamping"}[5m])) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile database query time is {{ $value }}s"
+
+      - alert: MetadataStampingDatabaseDown
+        expr: metadata_stamping_db_health{job="metadata-stamping"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: metadata-stamping
+        annotations:
+          summary: "Database connectivity lost"
+          description: "Metadata stamping service cannot connect to the database"
+
+  - name: metadata-stamping-business
+    rules:
+      # Business Logic Alerts
+      - alert: MetadataStampingLowThroughput
+        expr: rate(metadata_stamping_operations_total{job="metadata-stamping",operation="stamp"}[5m]) < 1
+        for: 10m
+        labels:
+          severity: info
+          service: metadata-stamping
+        annotations:
+          summary: "Low stamping throughput"
+          description: "Stamping operations are below 1 per second for the last 10 minutes"
+
+      - alert: MetadataStampingHighFailureRate
+        expr: rate(metadata_stamping_operations_total{job="metadata-stamping",status="error"}[5m]) / rate(metadata_stamping_operations_total{job="metadata-stamping"}[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "High stamping failure rate"
+          description: "Stamping failure rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      - alert: MetadataStampingBatchProcessingStalled
+        expr: increase(metadata_stamping_batch_operations_total{job="metadata-stamping"}[5m]) == 0 and metadata_stamping_batch_queue_size{job="metadata-stamping"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "Batch processing appears stalled"
+          description: "No batch operations completed in 5 minutes but queue has {{ $value }} items"
+
+  - name: metadata-stamping-kafka
+    rules:
+      # Event Publishing Alerts
+      - alert: MetadataStampingKafkaPublishingFailed
+        expr: rate(metadata_stamping_kafka_publish_errors_total{job="metadata-stamping"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "High Kafka publishing error rate"
+          description: "Kafka publishing error rate is {{ $value }} errors per second"
+
+      - alert: MetadataStampingKafkaLag
+        expr: metadata_stamping_kafka_producer_lag{job="metadata-stamping"} > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "High Kafka producer lag"
+          description: "Kafka producer lag is {{ $value }} messages"
+
+  - name: metadata-stamping-security
+    rules:
+      # Security Alerts
+      - alert: MetadataStampingUnauthorizedAccess
+        expr: rate(http_requests_total{job="metadata-stamping",status="401"}[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "Unauthorized access attempts detected"
+          description: "{{ $value }} unauthorized requests per second in the last 5 minutes"
+
+      - alert: MetadataStampingSecurityValidationFailures
+        expr: rate(metadata_stamping_security_validation_failures_total{job="metadata-stamping"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "Security validation failures detected"
+          description: "{{ $value }} security validation failures per second"
+
+  - name: metadata-stamping-dependencies
+    rules:
+      # Dependency Health Alerts
+      - alert: MetadataStampingConsulDown
+        expr: metadata_stamping_consul_health{job="metadata-stamping"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "Consul service discovery unavailable"
+          description: "Cannot connect to Consul for service registration"
+
+      - alert: MetadataStampingRedisDown
+        expr: metadata_stamping_redis_health{job="metadata-stamping"} == 0
+        for: 30s
+        labels:
+          severity: warning
+          service: metadata-stamping
+        annotations:
+          summary: "Redis cache unavailable"
+          description: "Cannot connect to Redis cache"

@@ -1,0 +1,75 @@
+{#
+Compute Subcontract Template
+
+Generates computation logic methods.
+
+Context variables:
+- algorithm: Algorithm name or type
+- async_compute: Boolean for async computation
+- parallel: Boolean for parallel processing
+- input_schema: Input data schema
+- output_schema: Output data schema
+#}
+
+{% if async_compute %}async {% endif %}def _execute_computation(
+    self,
+    context: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Execute computation logic.
+
+    Generated from compute subcontract.
+    Algorithm: {{ algorithm | default('custom') }}
+    """
+    results = {}
+
+    {% if async_compute %}
+    # Async computation
+    {% if parallel %}
+    # Parallel processing enabled
+    tasks = []
+    for item in context.get("input_data", []):
+        tasks.append(self._process_item(item))
+
+    processed_results = await asyncio.gather(*tasks)
+    results['computed'] = processed_results
+    {% else %}
+    # Sequential async processing
+    input_data = context.get("input_data")
+    if input_data:
+        # Apply {{ algorithm }} algorithm
+        computed_value = await self._apply_algorithm(input_data)
+        results['computed'] = computed_value
+    {% endif %}
+    {% else %}
+    # Synchronous computation
+    input_data = context.get("input_data")
+    if input_data:
+        # Apply {{ algorithm }} algorithm
+        computed_value = self._apply_algorithm(input_data)
+        results['computed'] = computed_value
+    {% endif %}
+
+    return results
+
+{% if async_compute %}
+async def _apply_algorithm(self, data: Any) -> Any:
+    """Apply {{ algorithm }} algorithm to data."""
+    # TODO: Implement {{ algorithm }} algorithm
+    {% if parallel %}
+    await asyncio.sleep(0)  # Placeholder for async operation
+    {% endif %}
+    return data  # Placeholder
+
+{% if parallel %}
+async def _process_item(self, item: Any) -> Any:
+    """Process individual item in parallel."""
+    # TODO: Implement item processing
+    return await self._apply_algorithm(item)
+{% endif %}
+{% else %}
+def _apply_algorithm(self, data: Any) -> Any:
+    """Apply {{ algorithm }} algorithm to data."""
+    # TODO: Implement {{ algorithm }} algorithm
+    return data  # Placeholder
+{% endif %}

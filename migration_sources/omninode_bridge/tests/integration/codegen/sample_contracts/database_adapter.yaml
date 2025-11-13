@@ -1,0 +1,63 @@
+---
+# Database adapter pattern - Full production-ready setup
+node_id: "database_adapter_effect"
+node_type: "effect"
+version: "v1_0_0"
+namespace: "omninode.services.database"
+
+metadata:
+  name: "Database Adapter Effect"
+  description: "Production database adapter with health, metrics, caching, and service registry"
+  author: "Test Generator"
+  tags: ["database", "adapter", "production", "full-featured"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinHealthCheck"
+      config:
+        health_check_interval_seconds: 30
+        critical_checks:
+          - "database_connection"
+          - "connection_pool"
+
+    - mixin_name: "MixinMetrics"
+      config:
+        metrics_enabled: true
+        track_query_performance: true
+
+    - mixin_name: "MixinCaching"
+      config:
+        cache_enabled: true
+        cache_ttl_seconds: 300
+        max_cache_size: 1000
+
+    - mixin_name: "MixinServiceRegistry"
+      config:
+        service_name: "database_adapter"
+        auto_register: true
+
+    - mixin_name: "MixinLogData"
+      config:
+        log_level: "INFO"
+        structured_logging: true
+
+input_schema:
+  type: "object"
+  properties:
+    query:
+      type: "string"
+      description: "SQL query to execute"
+    params:
+      type: "object"
+      description: "Query parameters"
+
+output_schema:
+  type: "object"
+  properties:
+    results:
+      type: "array"
+      description: "Query results"
+    row_count:
+      type: "integer"
+    execution_time_ms:
+      type: "number"

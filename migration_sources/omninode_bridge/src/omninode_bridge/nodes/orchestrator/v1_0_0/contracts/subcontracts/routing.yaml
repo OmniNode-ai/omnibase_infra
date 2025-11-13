@@ -1,0 +1,235 @@
+# Routing Subcontract
+# Defines service discovery, load balancing, and routing patterns for NodeBridgeOrchestrator
+
+subcontract_type: routing
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: "Service routing and load balancing for OnexTree and MetadataStamping services"
+
+# === SERVICE REGISTRY ===
+service_registry:
+  # Registry backend
+  backend: "dns"  # Options: dns, consul, etcd, static
+
+  # Service definitions
+  services:
+    onextree:
+      service_name: "onextree"
+      service_type: "intelligence"
+      discovery:
+        method: "dns"
+        endpoint: "${ONEXTREE_SERVICE_URL}"
+        fallback_endpoints:
+          - "${ONEXTREE_SERVICE_URL_FALLBACK_1}"
+          - "${ONEXTREE_SERVICE_URL_FALLBACK_2}"
+      health_check:
+        enabled: true
+        endpoint: "/health"
+        interval_ms: 30000
+        timeout_ms: 5000
+        unhealthy_threshold: 3
+        healthy_threshold: 2
+
+    metadata_stamping:
+      service_name: "metadata_stamping"
+      service_type: "core"
+      discovery:
+        method: "dns"
+        endpoint: "${METADATA_STAMPING_SERVICE_URL}"
+        fallback_endpoints:
+          - "${METADATA_STAMPING_SERVICE_URL_FALLBACK}"
+      health_check:
+        enabled: true
+        endpoint: "/health"
+        interval_ms: 15000
+        timeout_ms: 2000
+        unhealthy_threshold: 2
+        healthy_threshold: 2
+
+# === LOAD BALANCING ===
+load_balancing:
+  # Default load balancing strategy
+  default_strategy: "round_robin"  # Options: round_robin, least_connections, random, weighted
+
+  # Service-specific strategies
+  service_strategies:
+    onextree:
+      strategy: "least_connections"
+      max_connections_per_instance: 50
+
+    metadata_stamping:
+      strategy: "round_robin"
+      max_connections_per_instance: 100
+
+  # Sticky sessions configuration
+  sticky_sessions:
+    enabled: false
+    ttl_ms: 300000  # 5 minutes
+
+# === ROUTING RULES ===
+routing_rules:
+  # Route by service type
+  - rule_id: "intelligence_routing"
+    description: "Route intelligence requests to OnexTree"
+    match:
+      step_type: "onextree_intelligence"
+    route_to: "onextree"
+    priority: 100
+
+  - rule_id: "hash_routing"
+    description: "Route hash generation to MetadataStamping"
+    match:
+      step_type: "hash_generation"
+    route_to: "metadata_stamping"
+    priority: 100
+
+  # Fallback routing
+  - rule_id: "default_routing"
+    description: "Default routing for unmatched requests"
+    match: {}
+    route_to: "metadata_stamping"
+    priority: 1
+
+# === CIRCUIT BREAKER ===
+circuit_breaker:
+  # Enable circuit breaker pattern
+  enabled: true
+
+  # Service-specific circuit breaker configuration
+  services:
+    onextree:
+      failure_threshold: 5
+      success_threshold: 2
+      timeout_ms: 30000
+      half_open_max_requests: 3
+      failure_rate_threshold_percent: 50
+
+    metadata_stamping:
+      failure_threshold: 3
+      success_threshold: 2
+      timeout_ms: 20000
+      half_open_max_requests: 5
+      failure_rate_threshold_percent: 40
+
+# === REQUEST ROUTING ===
+request_routing:
+  # Timeout configuration
+  timeouts:
+    default_timeout_ms: 5000
+    service_timeouts:
+      onextree: 5000
+      metadata_stamping: 2000
+
+  # Retry configuration
+  retries:
+    enabled: true
+    max_retries: 3
+    backoff_strategy: "exponential"
+    initial_backoff_ms: 100
+    max_backoff_ms: 2000
+
+  # Request headers
+  headers:
+    default_headers:
+      "X-Service-Name": "bridge_orchestrator"
+      "X-Service-Version": "1.0.0"
+      "Content-Type": "application/json"
+
+    propagate_headers:
+      - "X-Request-ID"
+      - "X-Correlation-ID"
+      - "X-Trace-ID"
+
+# === SERVICE MESH INTEGRATION ===
+service_mesh:
+  # Enable service mesh integration (Istio, Linkerd, etc.)
+  enabled: false
+
+  # Service mesh provider
+  provider: "istio"  # Options: istio, linkerd, consul_connect
+
+  # Mesh configuration
+  configuration:
+    mTLS_enabled: true
+    traffic_policy: "least_request"
+
+# === FAILOVER STRATEGY ===
+failover:
+  # Enable automatic failover
+  enabled: true
+
+  # Failover configuration by service
+  services:
+    onextree:
+      strategy: "fallback_endpoints"  # Options: fallback_endpoints, degraded_mode, skip
+      fallback_order:
+        - "${ONEXTREE_SERVICE_URL_FALLBACK_1}"
+        - "${ONEXTREE_SERVICE_URL_FALLBACK_2}"
+      degraded_mode:
+        enabled: true
+        action: "skip_intelligence"
+
+    metadata_stamping:
+      strategy: "fallback_endpoints"
+      fallback_order:
+        - "${METADATA_STAMPING_SERVICE_URL_FALLBACK}"
+      degraded_mode:
+        enabled: false  # Critical service, no degraded mode
+
+# === RATE LIMITING ===
+rate_limiting:
+  # Enable rate limiting
+  enabled: true
+
+  # Rate limits by service
+  services:
+    onextree:
+      max_requests_per_second: 50
+      burst_size: 10
+
+    metadata_stamping:
+      max_requests_per_second: 200
+      burst_size: 50
+
+  # Rate limiting algorithm
+  algorithm: "token_bucket"  # Options: token_bucket, leaky_bucket, fixed_window
+
+# === MONITORING & METRICS ===
+monitoring:
+  # Emit routing metrics
+  emit_metrics: true
+
+  # Metrics to track
+  metrics:
+    - "request_count_by_service"
+    - "request_latency_by_service"
+    - "failure_rate_by_service"
+    - "circuit_breaker_state_by_service"
+    - "active_connections_by_service"
+
+  # Distributed tracing
+  tracing:
+    enabled: true
+    provider: "opentelemetry"  # Options: opentelemetry, jaeger, zipkin
+    sample_rate: 0.1  # 10% sampling
+
+# === VALIDATION RULES ===
+validation:
+  # Validate service availability before routing
+  pre_routing_checks:
+    - check: "service_health"
+      required: true
+    - check: "circuit_breaker_open"
+      required: true
+    - check: "rate_limit_available"
+      required: false
+
+  # Validate response after routing
+  post_routing_checks:
+    - check: "response_schema"
+      required: true
+    - check: "response_timeout"
+      required: true

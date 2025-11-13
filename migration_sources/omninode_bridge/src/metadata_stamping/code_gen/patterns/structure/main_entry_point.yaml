@@ -1,0 +1,71 @@
+name: main_entry_point
+description: "Standard main() entry point for node execution"
+category: structure
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: high
+code_template: |
+  def main() -> int:
+      """
+      Entry point for node execution.
+
+      Returns:
+          Exit code (0 for success, non-zero for failure)
+      """
+      try:
+          from omnibase_core.infrastructure.node_base import NodeBase
+
+          # Contract filename - standard ONEX pattern
+          CONTRACT_FILENAME = "contract.yaml"
+
+          node_base = NodeBase(Path(__file__).parent / CONTRACT_FILENAME)
+          return 0
+      except Exception as e:
+          emit_log_event(
+              LogLevel.ERROR,
+              f"Node{Name}{Type} execution failed: {e!s}",
+              {"error": str(e), "error_type": type(e).__name__},
+          )
+          return 1
+
+
+  if __name__ == "__main__":
+      exit(main())
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - codegen_metrics_reducer
+
+configuration:
+  contract_filename: "contract.yaml"
+  contract_location: "Path(__file__).parent"
+  success_exit_code: 0
+  failure_exit_code: 1
+
+prerequisites:
+  - NodeBase from omnibase_core.infrastructure
+  - Path from pathlib
+  - emit_log_event for error logging
+  - contract.yaml in same directory
+
+metrics:
+  overhead_ms: 10
+  memory_bytes: 1024
+
+best_practices:
+  - "Always return int exit code"
+  - "Use Path(__file__).parent for contract location"
+  - "Contract filename is always 'contract.yaml'"
+  - "Return 0 on success, 1 on failure"
+  - "Log failure with emit_log_event"
+  - "Use exit(main()) at bottom"
+  - "Catch all exceptions in main()"
+  - "Include error_type in failure log"
+
+validation_rules:
+  - "Function must return int"
+  - "Must use Path(__file__).parent / CONTRACT_FILENAME"
+  - "Contract filename must be 'contract.yaml'"
+  - "Must return 0 on success, 1 on failure"
+  - "Must log errors before returning 1"
+  - "Must have if __name__ == '__main__' guard"

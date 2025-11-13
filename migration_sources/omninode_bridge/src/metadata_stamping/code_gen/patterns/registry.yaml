@@ -1,0 +1,238 @@
+# Pattern Registry
+# Complete catalog of all code generation patterns extracted from production nodes
+
+version: "1.0.0"
+generated: "2025-11-06"
+source_document: "docs/patterns/PRODUCTION_NODE_PATTERNS.md"
+total_patterns: 21
+
+patterns:
+  # ============================================================================
+  # Resilience Patterns (2)
+  # ============================================================================
+
+  - name: error_handling
+    category: resilience
+    priority: critical
+    file: resilience/error_handling.yaml
+    description: "Comprehensive error handling with OnexError wrapping"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, distributed_lock_effect]
+    key_features:
+      - "Re-raise OnexError without wrapping"
+      - "Map specific exceptions to error codes"
+      - "Include node_id and correlation_id"
+      - "Preserve exception chain with 'from e'"
+
+  - name: health_check_mode
+    category: resilience
+    priority: high
+    file: resilience/health_check_mode.yaml
+    description: "Skip expensive initialization in health check mode"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, store_effect]
+    key_features:
+      - "Defensive detection with try/except"
+      - "Skip Kafka, DB, API initialization"
+      - "Default to False on errors"
+      - "Set services to None"
+
+  # ============================================================================
+  # Observability Patterns (4)
+  # ============================================================================
+
+  - name: event_publishing
+    category: observability
+    priority: high
+    file: observability/event_publishing.yaml
+    description: "Kafka event publishing with OnexEnvelopeV1 wrapping"
+    applicable_to: [effect, orchestrator, reducer]
+    example_nodes: [codegen_orchestrator, llm_effect, codegen_metrics_reducer]
+
+  - name: structured_logging
+    category: observability
+    priority: high
+    file: observability/structured_logging.yaml
+    description: "Structured logging with emit_log_event"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, distributed_lock_effect]
+
+  - name: metrics_tracking
+    category: observability
+    priority: medium
+    file: observability/metrics_tracking.yaml
+    description: "Comprehensive metrics for operations, duration, success rate"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, codegen_metrics_reducer]
+
+  - name: time_tracking
+    category: observability
+    priority: medium
+    file: observability/time_tracking.yaml
+    description: "High-precision time tracking with perf_counter"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, codegen_metrics_reducer]
+
+  # ============================================================================
+  # Integration Patterns (5)
+  # ============================================================================
+
+  - name: consul_registration
+    category: integration
+    priority: high
+    file: integration/consul_registration.yaml
+    description: "Consul service discovery registration with health checks"
+    applicable_to: [effect, orchestrator, reducer]
+    example_nodes: [codegen_orchestrator, llm_effect, store_effect]
+
+  - name: consul_deregistration
+    category: integration
+    priority: medium
+    file: integration/consul_deregistration.yaml
+    description: "Clean Consul deregistration on shutdown"
+    applicable_to: [effect, orchestrator, reducer]
+    example_nodes: [codegen_orchestrator, llm_effect, store_effect]
+
+  - name: kafka_client_initialization
+    category: integration
+    priority: high
+    file: integration/kafka_client_initialization.yaml
+    description: "Kafka client initialization with fallback"
+    applicable_to: [effect, orchestrator, reducer]
+    example_nodes: [codegen_orchestrator, llm_effect, codegen_metrics_reducer]
+
+  - name: lifecycle_hooks
+    category: integration
+    priority: high
+    file: integration/lifecycle_hooks.yaml
+    description: "Startup and shutdown hooks for resource management"
+    applicable_to: [effect, orchestrator, reducer]
+    example_nodes: [codegen_orchestrator, llm_effect, store_effect]
+
+  - name: service_resolution
+    category: integration
+    priority: medium
+    file: integration/service_resolution.yaml
+    description: "Service resolution from DI container with fallbacks"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, store_effect]
+
+  # ============================================================================
+  # Structure Patterns (7)
+  # ============================================================================
+
+  - name: standard_imports
+    category: structure
+    priority: critical
+    file: structure/standard_imports.yaml
+    description: "Standard Python and ONEX imports for all nodes"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, codegen_metrics_reducer]
+
+  - name: class_declaration
+    category: structure
+    priority: critical
+    file: structure/class_declaration.yaml
+    description: "Node class declaration with comprehensive docstring"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, codegen_metrics_reducer]
+
+  - name: initialization_pattern
+    category: structure
+    priority: critical
+    file: structure/initialization_pattern.yaml
+    description: "Defensive __init__ with container DI and service resolution"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, store_effect]
+
+  - name: execute_orchestrator
+    category: structure
+    priority: critical
+    file: structure/execute_orchestrator.yaml
+    description: "Orchestrator execute_orchestration with workflow coordination"
+    applicable_to: [orchestrator]
+    example_nodes: [codegen_orchestrator]
+
+  - name: execute_reducer
+    category: structure
+    priority: critical
+    file: structure/execute_reducer.yaml
+    description: "Reducer execute_reduction with pure aggregation"
+    applicable_to: [reducer]
+    example_nodes: [codegen_metrics_reducer]
+
+  - name: execute_effect
+    category: structure
+    priority: critical
+    file: structure/execute_effect.yaml
+    description: "Effect execute_effect with external I/O operations"
+    applicable_to: [effect]
+    example_nodes: [llm_effect, distributed_lock_effect, store_effect]
+
+  - name: main_entry_point
+    category: structure
+    priority: high
+    file: structure/main_entry_point.yaml
+    description: "Standard main() entry point for node execution"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, codegen_metrics_reducer]
+
+  - name: type_hints
+    category: structure
+    priority: medium
+    file: structure/type_hints.yaml
+    description: "Comprehensive type hints for methods and attributes"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, codegen_metrics_reducer]
+
+  # ============================================================================
+  # Configuration Patterns (2)
+  # ============================================================================
+
+  - name: defensive_config
+    category: configuration
+    priority: high
+    file: configuration/defensive_config.yaml
+    description: "Defensive configuration loading with edge case handling"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, store_effect]
+
+  - name: environment_fallback
+    category: configuration
+    priority: medium
+    file: configuration/environment_fallback.yaml
+    description: "Environment variable fallbacks with sensible defaults"
+    applicable_to: [effect, orchestrator, reducer, compute]
+    example_nodes: [codegen_orchestrator, llm_effect, store_effect]
+
+# ============================================================================
+# Pattern Categories Summary
+# ============================================================================
+
+categories:
+  resilience:
+    count: 2
+    patterns: [error_handling, health_check_mode]
+  observability:
+    count: 4
+    patterns: [event_publishing, structured_logging, metrics_tracking, time_tracking]
+  integration:
+    count: 5
+    patterns: [consul_registration, consul_deregistration, kafka_client_initialization, lifecycle_hooks, service_resolution]
+  structure:
+    count: 7
+    patterns: [standard_imports, class_declaration, initialization_pattern, execute_orchestrator, execute_reducer, execute_effect, main_entry_point, type_hints]
+  configuration:
+    count: 2
+    patterns: [defensive_config, environment_fallback]
+
+priority_levels:
+  critical: 8
+  high: 8
+  medium: 5
+
+node_types:
+  orchestrator: 18
+  reducer: 18
+  effect: 18
+  compute: 15

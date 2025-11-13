@@ -1,0 +1,117 @@
+name: error_handling
+description: "Comprehensive error handling with OnexError wrapping and specific exception mapping"
+category: resilience
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: critical
+code_template: |
+  # Always re-raise OnexError as-is
+  try:
+      result = await some_operation()
+  except OnexError:
+      # Don't wrap OnexError - re-raise to preserve error context
+      raise
+
+  # Wrap other exceptions in OnexError
+  except ConnectionError as e:
+      # Network errors
+      raise OnexError(
+          error_code=EnumCoreErrorCode.CONNECTION_ERROR,
+          message=f"Network connection failed: {e!s}",
+          details={
+              "node_id": self.node_id,
+              "correlation_id": str(correlation_id),
+              "error_type": "ConnectionError",
+          },
+          cause=e,
+      ) from e
+
+  except (TimeoutError, asyncio.TimeoutError) as e:
+      # Timeout errors
+      raise OnexError(
+          error_code=EnumCoreErrorCode.TIMEOUT,
+          message=f"Operation timed out: {e!s}",
+          details={
+              "node_id": self.node_id,
+              "correlation_id": str(correlation_id),
+              "timeout_seconds": self.config.timeout,
+          },
+          cause=e,
+      ) from e
+
+  except (ValueError, KeyError, AttributeError) as e:
+      # Data validation errors
+      raise OnexError(
+          error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+          message=f"Invalid data: {e!s}",
+          details={
+              "node_id": self.node_id,
+              "correlation_id": str(correlation_id),
+              "error_type": type(e).__name__,
+          },
+          cause=e,
+      ) from e
+
+  except Exception as e:
+      # Unexpected errors - log with exc_info and wrap
+      emit_log_event(
+          LogLevel.ERROR,
+          f"Unexpected error: {type(e).__name__}",
+          {
+              "node_id": self.node_id,
+              "error": str(e),
+              "error_type": type(e).__name__,
+          },
+      )
+      logger.error(f"Unexpected error: {type(e).__name__}", exc_info=True)
+
+      raise OnexError(
+          error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+          message=f"Unexpected error: {e!s}",
+          details={
+              "node_id": self.node_id,
+              "correlation_id": str(correlation_id),
+              "error_type": type(e).__name__,
+          },
+          cause=e,
+      ) from e
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - distributed_lock_effect
+
+configuration:
+  error_codes:
+    VALIDATION_ERROR: "Input validation failures"
+    OPERATION_FAILED: "General operation failures"
+    CONNECTION_ERROR: "Network connection failures"
+    TIMEOUT: "Operation timeout"
+    INTERNAL_ERROR: "Unexpected internal errors"
+    DEPENDENCY_ERROR: "Service dependency failures"
+    CONFIGURATION_ERROR: "Configuration issues"
+    SERVICE_UNAVAILABLE: "External service unavailable"
+    INVALID_INPUT: "Invalid input parameters"
+    INVALID_OPERATION: "Unsupported operation"
+
+prerequisites:
+  - ModelOnexError imported from omnibase_core
+  - EnumCoreErrorCode imported from omnibase_core
+  - emit_log_event available for error logging
+
+metrics:
+  overhead_ms: 0.05
+  memory_bytes: 256
+
+best_practices:
+  - "Never wrap OnexError - always re-raise to preserve context"
+  - "Map specific exception types to appropriate error codes"
+  - "Always include node_id and correlation_id in error details"
+  - "Use 'from e' to preserve exception chain"
+  - "Log unexpected errors with exc_info=True for stack traces"
+  - "Include error_type in details for categorization"
+
+validation_rules:
+  - "All OnexError exceptions must re-raise without wrapping"
+  - "All non-OnexError exceptions must be wrapped"
+  - "Error details must include node_id and correlation_id"
+  - "Cause must be set for wrapped exceptions (from e)"

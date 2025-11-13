@@ -1,0 +1,180 @@
+# Codegen Topic Configuration for Redpanda
+# Purpose: Event infrastructure for autonomous code generation
+# Flow: omniclaude → omniarchon code generation workflow
+
+topics:
+  # Request topics (omniclaude → omniarchon)
+  omninode_codegen_request_analyze_v1:
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "PRD analysis requests from omniclaude to omniarchon"
+
+  omninode_codegen_request_validate_v1:
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Code validation requests for ONEX compliance checking"
+
+  omninode_codegen_request_pattern_v1:
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: >-
+      Pattern matching requests to find similar node implementations
+
+  omninode_codegen_request_mixin_v1:
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Mixin recommendation requests based on requirements"
+
+  # Response topics (omniarchon → omniclaude)
+  omninode_codegen_response_analyze_v1:
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "PRD analysis responses with semantic analysis results"
+
+  omninode_codegen_response_validate_v1:
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Code validation responses with quality and compliance scores"
+
+  omninode_codegen_response_pattern_v1:
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Pattern matching responses with similar node examples"
+
+  omninode_codegen_response_mixin_v1:
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Mixin recommendation responses with suggested mixins"
+
+  # Status topics (real-time updates)
+  omninode_codegen_status_session_v1:
+    partitions: 6  # Partition by session_id for ordering
+    replication_factor: 1
+    retention_ms: 259200000  # 3 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Real-time status updates for code generation sessions"
+
+  # Dead letter queues
+  omninode_codegen_dlq_analyze_v1:
+    partitions: 1
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Failed analysis requests for investigation"
+
+  omninode_codegen_dlq_validate_v1:
+    partitions: 1
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Failed validation requests for investigation"
+
+  omninode_codegen_dlq_pattern_v1:
+    partitions: 1
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Failed pattern matching requests for investigation"
+
+  omninode_codegen_dlq_mixin_v1:
+    partitions: 1
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    cleanup_policy: "delete"
+    compression_type: "gzip"
+    description: "Failed mixin recommendation requests for investigation"
+
+# Consumer group configurations
+consumer_groups:
+  omniclaude_codegen_consumer:
+    topics:
+      - omninode_codegen_response_analyze_v1
+      - omninode_codegen_response_validate_v1
+      - omninode_codegen_response_pattern_v1
+      - omninode_codegen_response_mixin_v1
+    auto_offset_reset: "latest"
+    enable_auto_commit: true
+    session_timeout_ms: 30000
+    heartbeat_interval_ms: 10000
+    description: "omniclaude consumer for code generation responses"
+
+  omniarchon_codegen_intelligence:
+    topics:
+      - omninode_codegen_request_analyze_v1
+      - omninode_codegen_request_validate_v1
+      - omninode_codegen_request_pattern_v1
+      - omninode_codegen_request_mixin_v1
+    auto_offset_reset: "latest"
+    enable_auto_commit: true
+    session_timeout_ms: 30000
+    heartbeat_interval_ms: 10000
+    description: "omniarchon consumer for code generation requests"
+
+# Performance configuration
+performance:
+  # Message size limits
+  max_message_bytes: 1048576  # 1MB per message
+
+  # Producer configuration
+  producer_acks: 1  # Wait for leader acknowledgment
+  producer_compression: "gzip"
+  producer_batch_size: 16384  # 16KB
+  producer_linger_ms: 10  # Wait up to 10ms for batching
+
+  # Consumer configuration
+  consumer_fetch_min_bytes: 1024  # 1KB minimum fetch
+  consumer_fetch_max_wait_ms: 500  # Wait up to 500ms for fetch_min_bytes
+  consumer_max_partition_fetch_bytes: 1048576  # 1MB per partition
+
+# Monitoring and alerting
+monitoring:
+  # DLQ monitoring thresholds
+  dlq_alert_threshold: 10  # Alert after 10 messages in DLQ
+  dlq_check_interval_ms: 60000  # Check every 60 seconds
+
+  # Performance monitoring
+  lag_alert_threshold: 1000  # Alert if consumer lag exceeds 1000 messages
+  processing_time_alert_ms: 5000  # Alert if processing takes >5 seconds
+
+  # Health checks
+  health_check_interval_ms: 30000  # Health check every 30 seconds
+
+# Schema evolution
+schema_versioning:
+  current_version: "1.0"
+  supported_versions: ["1.0"]
+  evolution_strategy: "backward_compatible"
+
+# Retention policies
+retention:
+  request_response_days: 7  # Keep request/response topics for 7 days
+  status_days: 3  # Keep status topics for 3 days
+  dlq_days: 30  # Keep DLQ topics for 30 days

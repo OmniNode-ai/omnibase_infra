@@ -1,0 +1,68 @@
+# Consul Service Registration Manifest
+service:
+  name: distributed-lock-effect
+  id: distributed-lock-effect-v1-{{ instance_id }}
+  port: 8062
+
+  tags:
+    - onex-node
+    - effect
+    - distributed-lock
+    - v1.0.0
+    - postgres
+
+  meta:
+    version: "1.0.0"
+    node_type: effect
+    capabilities: lock_acquire,lock_release,lock_extend,lock_query
+    performance_target_ms: "50"
+    max_throughput_qps: "100"
+
+  # Health Check Configuration
+  health_check:
+    http: "http://{{ service_host }}:8062/health"
+    method: GET
+    interval: "30s"
+    timeout: "10s"
+    deregister_critical_service_after: "90s"
+    success_before_passing: 2
+    failures_before_critical: 3
+
+  # Service Mesh Configuration
+  connect:
+    sidecar_service:
+      port: 8063
+      proxy:
+        upstreams:
+          - destination_name: postgres
+            local_bind_port: 5432
+          - destination_name: consul
+            local_bind_port: 8500
+
+  # Weights for load balancing
+  weights:
+    passing: 10
+    warning: 1
+
+  # Service discovery
+  enable_tag_override: false
+
+  # Consul checks
+  checks:
+    - id: distributed-lock-health
+      name: "Distributed Lock Health Check"
+      http: "http://{{ service_host }}:8062/health"
+      interval: "30s"
+      timeout: "10s"
+
+    - id: distributed-lock-postgres
+      name: "PostgreSQL Connection Check"
+      http: "http://{{ service_host }}:8062/health/postgres"
+      interval: "60s"
+      timeout: "15s"
+
+    - id: distributed-lock-locks
+      name: "Active Locks Check"
+      http: "http://{{ service_host }}:8062/health/locks"
+      interval: "60s"
+      timeout: "10s"

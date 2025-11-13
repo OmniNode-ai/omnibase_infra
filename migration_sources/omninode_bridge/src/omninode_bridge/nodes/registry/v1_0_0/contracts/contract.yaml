@@ -1,0 +1,224 @@
+# NodeBridgeRegistry Contract
+# ONEX v2.0 compliant contract with subcontract composition
+# Node Type: Effect (Registry)
+# Purpose: Node discovery and dual registration system (Consul + PostgreSQL)
+
+# Contract metadata
+name: "NodeBridgeRegistry"
+version: "1.0.0"
+node_type: "effect"
+description: "Production-ready bridge registry for node discovery and dual registration with memory leak prevention, circuit breakers, and security features"
+
+# Node identity and capabilities
+node_identity:
+  node_class: "NodeBridgeRegistry"
+  node_file: "node.py"
+  namespace: "omninode.bridge.registry"
+  category: "service_discovery"
+
+# Execution signature
+execute_method: "execute_effect"
+contract_type: "ModelContractEffect"
+
+# Subcontract composition (ONEX v2.0 pattern)
+subcontracts:
+  service_discovery:
+    $ref: "./service_discovery.yaml"
+    description: "Dual registration system (Consul + PostgreSQL) with production features"
+    required: true
+
+# Input/Output contracts
+input_contract:
+  type: "ModelContractEffect"
+  description: "Introspection events from Kafka for node registration"
+  required_fields:
+    - name: "event"
+      type: "ModelOnexEnvelopeV1"
+      description: "Kafka event envelope with NODE_INTROSPECTION payload"
+  optional_fields:
+    - name: "operation"
+      type: "string"
+      description: "Registry operation type"
+      enum: ["register", "deregister", "update", "heartbeat"]
+      default: "register"
+
+output_contract:
+  type: "RegistrationResult"
+  fields:
+    - name: "success"
+      type: "boolean"
+      description: "Whether registration succeeded"
+    - name: "node_id"
+      type: "UUID"
+      description: "Registered node identifier"
+    - name: "registry_backends"
+      type: "list[str]"
+      description: "Backends where node was registered"
+    - name: "timestamp"
+      type: "datetime"
+      description: "Registration timestamp"
+    - name: "errors"
+      type: "list[str] | None"
+      description: "Error messages if registration failed partially"
+
+# Dependencies and service requirements
+dependencies:
+  services:
+    - name: "kafka_client"
+      type: "KafkaClient"
+      required: true
+      description: "Kafka client for event consumption and publishing"
+    - name: "consul_client"
+      type: "RegistryConsulClient"
+      required: true
+      description: "Consul client for service discovery registration"
+    - name: "postgres_client"
+      type: "PostgresClient"
+      required: true
+      description: "PostgreSQL client for persistent node registry"
+    - name: "node_repository"
+      type: "NodeRegistrationRepository"
+      required: true
+      description: "Repository for node registration operations"
+
+  external_services:
+    - name: "Consul"
+      endpoint: "http://localhost:8500"
+      health_check: "/v1/status/leader"
+      critical: true
+    - name: "PostgreSQL"
+      endpoint: "localhost:5432"
+      database: "omninode_bridge"
+      critical: true
+    - name: "Kafka/Redpanda"
+      endpoint: "localhost:29092"
+      critical: true
+
+# Production readiness features
+production_features:
+  memory_leak_prevention: true
+  race_condition_prevention: true
+  circuit_breaker_pattern: true
+  atomic_registration: true
+  security_aware_logging: true
+  configurable_magic_numbers: true
+
+# Security configuration
+security:
+  password_management:
+    prefer_environment_variables: true
+    warn_on_container_config: true
+    validate_on_initialization: true
+  sensitive_data_masking:
+    enabled: true
+    mask_in_logs: true
+    mask_in_errors: true
+  input_validation:
+    validate_registry_id: true
+    max_registry_id_length: 128
+    allowed_registry_id_chars: "alphanumeric-_"
+    max_jsonb_size_bytes: 1048576  # 1 MB (DoS protection)
+
+# Operational configuration
+operational:
+  lifecycle_hooks:
+    - "on_startup"
+    - "on_shutdown"
+  startup_behavior:
+    initialize_services: true
+    start_kafka_consumer: true
+    start_cleanup_task: true
+    start_memory_monitor: true
+    request_node_introspection_broadcast: true
+  shutdown_behavior:
+    stop_background_tasks: true
+    deregister_nodes: false  # Keep registrations on shutdown
+    cleanup_resources: true
+  health_checks:
+    enabled: true
+    components:
+      - "node_runtime"
+      - "kafka_consumer"
+      - "consul_client"
+      - "postgres_client"
+
+# Performance requirements
+performance:
+  max_concurrent_registrations: 100
+  registration_timeout_seconds: 30
+  kafka_consumption_max_poll_records: 100
+  memory_limit_mb: 1024
+  cpu_limit_percent: 50
+  target_latency_registration_ms: 100
+
+# Background task management
+background_tasks:
+  kafka_consumer:
+    enabled: true
+    consumer_group: "bridge-registry-group"
+    restart_on_failure: true
+    max_restart_attempts: 3
+  cleanup_task:
+    enabled: true
+    interval_hours: 1
+    cleanup_stale_nodes: true
+    node_ttl_hours: 24
+  memory_monitor:
+    enabled: true
+    interval_seconds: 300
+    alert_threshold_mb: 1024
+    trigger_cleanup_at_percent: 80
+
+# Error handling
+error_handling:
+  retry_policy: "exponential_backoff"
+  max_retries: 3
+  circuit_breaker_enabled: true
+  graceful_degradation:
+    - component: "consul_client"
+      fallback: "postgresql_only_registration"
+    - component: "postgres_client"
+      fallback: "consul_only_registration"
+    - component: "kafka_client"
+      fallback: "log_events_only"
+
+# Monitoring and metrics
+monitoring:
+  track_registration_metrics: true
+  track_memory_metrics: true
+  track_kafka_metrics: true
+  track_circuit_breaker_state: true
+  metrics:
+    - "total_registrations"
+    - "successful_registrations"
+    - "failed_registrations"
+    - "consul_registrations"
+    - "postgres_registrations"
+    - "current_nodes_count"
+    - "memory_usage_mb"
+    - "cleanup_operations_count"
+    - "kafka_consumption_lag"
+  alert_on_high_failure_rate: true
+  failure_rate_threshold_percent: 10
+
+# Idempotency and reliability
+idempotency:
+  enabled: true
+  offset_tracking_enabled: true
+  offset_cache_type: "ttl_cache"
+  max_tracked_offsets: 10000
+  offset_cache_ttl_seconds: 3600
+  prevent_duplicate_processing: true
+
+# Compliance and standards
+compliance:
+  onex_version: "2.0"
+  one_protocol_version: "0.1"
+  standards:
+    - "ONEX v2.0 suffix-based naming"
+    - "Subcontract composition architecture"
+    - "ModelContainer dependency injection"
+    - "Production-ready pattern (memory leak prevention)"
+    - "Circuit breaker pattern for resilience"
+    - "Atomic dual registration"
+    - "Security-aware logging and validation"

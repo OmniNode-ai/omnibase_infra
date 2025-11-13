@@ -1,0 +1,136 @@
+---
+# FSM Subcontract
+# Finite State Machine configuration for workflow state management
+# References: NodeBridgeOrchestrator._transition_state(),
+#             EnumWorkflowState
+
+type: "workflow_state_machine"
+state_machine_name: "orchestrator_workflow_fsm"
+description: >-
+  FSM for tracking metadata stamping workflow lifecycle states
+
+# Valid workflow states
+states:
+  - state_name: "PENDING"
+    description: >-
+      Workflow created and awaiting processing
+    is_initial: true
+    is_terminal: false
+    timeout_seconds: null
+    actions_on_entry:
+      - "initialize_workflow_tracking"
+      - "allocate_correlation_id"
+    actions_on_exit:
+      - "publish_state_transition_event"
+
+  - state_name: "PROCESSING"
+    description: >-
+      Workflow actively executing stamping operations
+    is_initial: false
+    is_terminal: false
+    timeout_seconds: 60  # Max 60s for processing
+    actions_on_entry:
+      - "start_workflow_execution"
+      - "publish_workflow_started_event"
+    actions_on_exit:
+      - "finalize_workflow_metrics"
+
+  - state_name: "COMPLETED"
+    description: >-
+      Workflow completed successfully with stamped content
+    is_initial: false
+    is_terminal: true
+    timeout_seconds: null
+    actions_on_entry:
+      - "publish_workflow_completed_event"
+      - "update_success_metrics"
+      - "persist_final_state"
+    actions_on_exit: []
+
+  - state_name: "FAILED"
+    description: >-
+      Workflow failed due to error or timeout
+    is_initial: false
+    is_terminal: true
+    timeout_seconds: null
+    actions_on_entry:
+      - "publish_workflow_failed_event"
+      - "update_failure_metrics"
+      - "persist_error_state"
+    actions_on_exit: []
+
+# State transition rules
+transitions:
+  - from_state: "PENDING"
+    to_state: "PROCESSING"
+    trigger: "workflow_execution_started"
+    description: >-
+      Workflow begins execution
+    guard_conditions:
+      - "input_data_validated"
+      - "resources_available"
+    actions:
+      - "transition_state"
+      - "publish_state_transition_event"
+
+  - from_state: "PENDING"
+    to_state: "FAILED"
+    trigger: "validation_error"
+    description: >-
+      Workflow fails validation before processing
+    guard_conditions:
+      - "validation_failed"
+    actions:
+      - "transition_state"
+      - "publish_workflow_failed_event"
+
+  - from_state: "PROCESSING"
+    to_state: "COMPLETED"
+    trigger: "workflow_execution_succeeded"
+    description: >-
+      Workflow completes successfully
+    guard_conditions:
+      - "all_steps_completed"
+      - "stamp_created_successfully"
+    actions:
+      - "transition_state"
+      - "publish_workflow_completed_event"
+
+  - from_state: "PROCESSING"
+    to_state: "FAILED"
+    trigger: "workflow_execution_failed"
+    description: >-
+      Workflow fails during processing
+    guard_conditions:
+      - "error_occurred"
+    actions:
+      - "transition_state"
+      - "publish_workflow_failed_event"
+
+# Initial and terminal states
+initial_state: "PENDING"
+terminal_states:
+  - "COMPLETED"
+  - "FAILED"
+
+# State transition tracking
+tracking:
+  persist_transitions: true
+  track_transition_history: true
+  track_state_duration: true
+  emit_transition_events: true
+
+# Timeout handling
+timeout_handling:
+  enabled: true
+  timeout_state: "FAILED"
+  timeout_trigger: "workflow_timeout"
+  timeout_action: >-
+    transition_to_failed_with_timeout_error
+
+# Validation rules
+validation:
+  validate_transitions: true
+  enforce_guard_conditions: true
+  prevent_invalid_transitions: true
+  log_transition_attempts: true

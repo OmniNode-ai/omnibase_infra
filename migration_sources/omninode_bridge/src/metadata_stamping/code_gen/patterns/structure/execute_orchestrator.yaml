@@ -1,0 +1,135 @@
+name: execute_orchestrator
+description: "Orchestrator execute_orchestration method with workflow coordination"
+category: structure
+applicable_to: [orchestrator]
+priority: critical
+code_template: |
+  async def execute_orchestration(
+      self, contract: ModelContractOrchestrator
+  ) -> {OutputModel}:
+      """
+      Execute {workflow} orchestration.
+
+      Args:
+          contract: Orchestrator contract with workflow configuration
+
+      Returns:
+          {OutputModel} with workflow results
+
+      Raises:
+          OnexError: If workflow execution fails
+      """
+      start_time = time.perf_counter()
+      correlation_id = contract.correlation_id
+      workflow_id = uuid4()
+
+      emit_log_event(
+          LogLevel.INFO,
+          "Starting {workflow} orchestration",
+          {
+              "node_id": self.node_id,
+              "correlation_id": str(correlation_id),
+              "workflow_id": str(workflow_id),
+          },
+      )
+
+      try:
+          # Extract input data from contract
+          if not hasattr(contract, "input_data") or contract.input_data is None:
+              raise OnexError(
+                  error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+                  message="Contract missing input_data for orchestration",
+                  details={
+                      "node_id": self.node_id,
+                      "correlation_id": str(correlation_id),
+                  },
+              )
+
+          # Execute workflow steps
+          result = await self._execute_workflow(contract, workflow_id)
+
+          # Publish completion event
+          await self._publish_completed_event(correlation_id, workflow_id, result)
+
+          processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+          emit_log_event(
+              LogLevel.INFO,
+              "{Workflow} orchestration completed successfully",
+              {
+                  "node_id": self.node_id,
+                  "workflow_id": str(workflow_id),
+                  "processing_time_ms": processing_time_ms,
+              },
+          )
+
+          return result
+
+      except Exception as e:
+          # Publish failure event
+          await self._publish_failed_event(correlation_id, workflow_id, e)
+
+          # Cleanup
+          self._cleanup_workflow(workflow_id)
+
+          # Re-raise or wrap exception
+          if isinstance(e, OnexError):
+              raise
+
+          raise OnexError(
+              error_code=EnumCoreErrorCode.OPERATION_FAILED,
+              message=f"{Workflow} orchestration failed: {e!s}",
+              details={
+                  "node_id": self.node_id,
+                  "correlation_id": str(correlation_id),
+                  "workflow_id": str(workflow_id),
+              },
+              cause=e,
+          )
+
+example_nodes:
+  - codegen_orchestrator
+
+configuration:
+  method_signature: "execute_orchestration"
+  contract_type: "ModelContractOrchestrator"
+  returns_async: true
+
+execution_phases:
+  - initialization (start_time, correlation_id, workflow_id)
+  - validation (check contract.input_data)
+  - workflow execution (_execute_workflow)
+  - event publishing (completion/failure)
+  - metrics tracking (processing_time_ms)
+  - cleanup (on failure)
+
+prerequisites:
+  - ModelContractOrchestrator imported
+  - time.perf_counter available
+  - uuid4 for workflow_id
+  - Event publishing methods
+
+metrics:
+  overhead_ms: 2.0
+  memory_bytes: 2048
+
+best_practices:
+  - "Start timer at top of method"
+  - "Extract correlation_id from contract"
+  - "Generate unique workflow_id with uuid4()"
+  - "Log workflow start with IDs"
+  - "Validate contract.input_data exists"
+  - "Publish completion and failure events"
+  - "Track processing_time_ms"
+  - "Cleanup on failure"
+  - "Re-raise OnexError without wrapping"
+  - "Wrap other exceptions in OnexError"
+
+validation_rules:
+  - "Method must be async"
+  - "Must accept ModelContractOrchestrator"
+  - "Must generate workflow_id"
+  - "Must validate input_data"
+  - "Must publish events"
+  - "Must track metrics"
+  - "Must cleanup on failure"

@@ -1,0 +1,89 @@
+name: structured_logging
+description: "Structured logging with emit_log_event and consistent context"
+category: observability
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: high
+code_template: |
+  # Import logging at module level
+  import logging
+  from omnibase_core.enums.enum_log_level import EnumLogLevel as LogLevel
+  from omnibase_core.logging.structured import emit_log_event_sync as emit_log_event
+
+  logger = logging.getLogger(__name__)
+
+  # Use emit_log_event for structured logging
+  emit_log_event(
+      LogLevel.INFO,
+      "Operation completed successfully",
+      {
+          "node_id": self.node_id,
+          "correlation_id": str(correlation_id),
+          "duration_ms": round(duration_ms, 2),
+          "result_count": len(results),
+      },
+  )
+
+  # Use logger for detailed debugging (not emitted to event bus)
+  logger.debug(
+      f"Processing batch {batch_num}/{total_batches}",
+      extra={
+          "batch_num": batch_num,
+          "batch_size": len(batch),
+      },
+  )
+
+  # For exceptions, use exc_info=True
+  logger.error(
+      f"Unexpected error: {type(e).__name__}",
+      exc_info=True,
+      extra={"correlation_id": str(correlation_id)},
+  )
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - distributed_lock_effect
+
+configuration:
+  log_levels:
+    DEBUG: "Verbose information for debugging"
+    INFO: "Normal operations, milestones, completions"
+    WARNING: "Degraded mode, fallbacks, retries"
+    ERROR: "Operation failures, exceptions"
+
+context_keys:
+  required:
+    - node_id
+    - correlation_id
+  optional:
+    - duration_ms
+    - error
+    - error_type
+    - workflow_id
+    - step_id
+
+prerequisites:
+  - LogLevel enum from omnibase_core
+  - emit_log_event from omnibase_core.logging
+  - logging module configured
+
+metrics:
+  overhead_ms: 0.1
+  memory_bytes: 512
+
+best_practices:
+  - "Always include node_id in log context"
+  - "Include correlation_id for request tracing"
+  - "Round duration_ms to 2 decimal places"
+  - "Use DEBUG for verbose information"
+  - "Use INFO for milestones and completions"
+  - "Use WARNING for degraded mode and fallbacks"
+  - "Use ERROR for operation failures"
+  - "Use logger.error with exc_info=True for stack traces"
+  - "Don't log sensitive data (API keys, passwords)"
+
+validation_rules:
+  - "All log events must include node_id"
+  - "Operations must log correlation_id when available"
+  - "ERROR logs must include error and error_type"
+  - "Duration measurements must be rounded to 2 decimals"

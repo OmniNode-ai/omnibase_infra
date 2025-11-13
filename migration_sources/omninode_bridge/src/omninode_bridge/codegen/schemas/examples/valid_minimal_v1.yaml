@@ -1,0 +1,18 @@
+# Example: Valid Minimal Contract (v1.0.0 backward compatible)
+#
+# This is a minimal v1.0.0 contract that remains valid with v2.0.0 schema.
+# No schema_version, mixins, or advanced_features needed.
+
+name: "NodeMinimalEffect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+description: "Minimal effect node demonstrating backward compatibility with v1.0.0 contracts"
+
+subcontracts:
+  effect:
+    operations:
+      - "initialize"
+      - "shutdown"

@@ -1,0 +1,569 @@
+#!/usr/bin/env python3
+"""
+{{ node_name }} - ONEX v2.0 Effect node with database-heavy optimizations.
+
+{{ description }}
+
+Features:
+- Connection pooling with {{ min_pool_size }}-{{ max_pool_size }} connections
+- Transaction management with ACID guarantees
+- Query optimization with prepared statements
+- Batch operation support
+- Connection health monitoring
+- Query performance metrics
+
+Performance Targets:
+- Query latency: < 50ms (P95)
+- Throughput: 1000+ queries/sec
+- Connection pool efficiency: > 90%
+- Transaction success rate: > 99.9%
+
+Contract: {{ contract_name }}
+Node Type: EFFECT (Database Operations)
+"""
+
+import asyncio
+import logging
+import time
+from datetime import UTC, datetime
+from typing import Any, Optional
+from uuid import uuid4
+
+import asyncpg
+from omnibase_core import EnumCoreErrorCode, ModelOnexError
+from omnibase_core.enums.enum_log_level import EnumLogLevel as LogLevel
+from omnibase_core.logging.structured import emit_log_event_sync as emit_log_event
+from omnibase_core.models.contracts.model_contract_effect import ModelContractEffect
+from omnibase_core.models.core import ModelContainer
+from omnibase_core.nodes.node_effect import NodeEffect
+
+{% if circuit_breaker_enabled -%}
+try:
+    from omnibase_core.nodes.model_circuit_breaker import ModelCircuitBreaker
+except (ImportError, ModuleNotFoundError):
+    ModelCircuitBreaker = None  # type: ignore
+{% endif %}
+
+from .models import (
+    {{ input_model }},
+    {{ output_model }},
+    {{ config_model }},
+)
+
+# Aliases for compatibility
+OnexError = ModelOnexError
+CoreErrorCode = EnumCoreErrorCode
+
+logger = logging.getLogger(__name__)
+
+
+class {{ node_class_name }}(NodeEffect):
+    """
+    {{ node_description }}
+
+    Connection Pool Configuration:
+    - Min connections: {{ min_pool_size }}
+    - Max connections: {{ max_pool_size }}
+    - Connection timeout: {{ connection_timeout_seconds }}s
+    - Command timeout: {{ command_timeout_seconds }}s
+
+    {% if circuit_breaker_enabled -%}
+    Circuit Breaker:
+    - Failure threshold: {{ circuit_breaker_threshold }} consecutive failures
+    - Recovery timeout: {{ circuit_breaker_timeout_seconds }} seconds
+    - Protected: All database operations
+    {% endif %}
+
+    {% if retry_enabled -%}
+    Retry Policy:
+    - Max attempts: {{ max_retry_attempts }}
+    - Backoff: Exponential ({{ retry_backoff_base }}s base)
+    - Retryable errors: Connection timeouts, deadlocks, temporary failures
+    {% endif %}
+
+    Performance:
+    - Query latency: < 50ms (P95)
+    - Throughput: 1000+ queries/sec
+    - Connection pool efficiency: > 90%
+    """
+
+    def __init__(self, container: ModelContainer) -> None:
+        """
+        Initialize database effect node with connection pooling.
+
+        Args:
+            container: ONEX container for dependency injection
+
+        Raises:
+            OnexError: If configuration is invalid or pool creation fails
+        """
+        # Initialize base NodeEffect class
+        super().__init__(container)
+
+        # Health check mode detection
+        self._health_check_mode = self._detect_health_check_mode()
+
+        # Extract configuration from container
+        config_data = container.value if isinstance(container.value, dict) else {}
+
+        # Load database configuration
+        self.config = {{ config_model }}.from_container(config_data)
+
+        # Initialize connection pool (lazy initialization in health check mode)
+        self._pool: Optional[asyncpg.Pool] = None
+        self._pool_lock = asyncio.Lock()
+
+        {% if circuit_breaker_enabled -%}
+        # Initialize circuit breaker
+        if ModelCircuitBreaker is not None and not self._health_check_mode:
+            self._circuit_breaker = ModelCircuitBreaker(
+                failure_threshold={{ circuit_breaker_threshold }},
+                recovery_timeout_seconds={{ circuit_breaker_timeout_seconds }},
+            )
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="Circuit breaker initialized",
+                node_id="{{ node_name }}",
+                failure_threshold={{ circuit_breaker_threshold }},
+                recovery_timeout={{ circuit_breaker_timeout_seconds }},
+            )
+        else:
+            self._circuit_breaker = None
+        {% endif %}
+
+        # Metrics tracking
+        self._metrics = {
+            "queries_executed": 0,
+            "transactions_committed": 0,
+            "transactions_rolled_back": 0,
+            "connection_errors": 0,
+            "query_errors": 0,
+            "total_query_time_ms": 0.0,
+        }
+
+        emit_log_event(
+            level=LogLevel.INFO,
+            message="{{ node_name }} initialized",
+            node_id="{{ node_name }}",
+            health_check_mode=self._health_check_mode,
+            pool_config={
+                "min_size": {{ min_pool_size }},
+                "max_size": {{ max_pool_size }},
+                "timeout": {{ connection_timeout_seconds }},
+            },
+        )
+
+    def _detect_health_check_mode(self) -> bool:
+        """
+        Detect if node is running in health check mode.
+
+        Health check mode skips expensive initialization (database connections,
+        external service clients) to enable fast liveness probes.
+
+        Returns:
+            True if in health check mode, False otherwise
+        """
+        try:
+            import os
+            return os.getenv("HEALTH_CHECK_MODE", "false").lower() == "true"
+        except Exception as e:
+            emit_log_event(
+                level=LogLevel.WARNING,
+                message="Failed to detect health check mode, defaulting to False",
+                node_id="{{ node_name }}",
+                error=str(e),
+            )
+            return False
+
+    async def _ensure_pool(self) -> asyncpg.Pool:
+        """
+        Ensure connection pool is initialized.
+
+        Uses lazy initialization with async lock to prevent race conditions.
+
+        Returns:
+            Initialized connection pool
+
+        Raises:
+            OnexError: If pool creation fails
+        """
+        if self._pool is not None:
+            return self._pool
+
+        async with self._pool_lock:
+            # Double-check after acquiring lock
+            if self._pool is not None:
+                return self._pool
+
+            try:
+                start_time = time.perf_counter()
+
+                self._pool = await asyncpg.create_pool(
+                    host=self.config.database_host,
+                    port=self.config.database_port,
+                    database=self.config.database_name,
+                    user=self.config.database_user,
+                    password=self.config.database_password,
+                    min_size={{ min_pool_size }},
+                    max_size={{ max_pool_size }},
+                    timeout={{ connection_timeout_seconds }},
+                    command_timeout={{ command_timeout_seconds }},
+                )
+
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                emit_log_event(
+                    level=LogLevel.INFO,
+                    message="Database connection pool created",
+                    node_id="{{ node_name }}",
+                    elapsed_ms=elapsed_ms,
+                    min_size={{ min_pool_size }},
+                    max_size={{ max_pool_size }},
+                )
+
+                return self._pool
+
+            except Exception as e:
+                self._metrics["connection_errors"] += 1
+                error_msg = f"Failed to create connection pool: {str(e)}"
+
+                emit_log_event(
+                    level=LogLevel.ERROR,
+                    message=error_msg,
+                    node_id="{{ node_name }}",
+                    error=str(e),
+                )
+
+                raise OnexError(
+                    error_code=CoreErrorCode.RESOURCE_EXHAUSTED,
+                    message=error_msg,
+                    details={"database_host": self.config.database_host},
+                ) from e
+
+    {% if retry_enabled -%}
+    async def _execute_with_retry(
+        self,
+        operation_name: str,
+        operation_func: callable,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """
+        Execute database operation with retry logic.
+
+        Args:
+            operation_name: Name of operation for logging
+            operation_func: Async function to execute
+            *args: Positional arguments for operation
+            **kwargs: Keyword arguments for operation
+
+        Returns:
+            Operation result
+
+        Raises:
+            OnexError: If all retry attempts fail
+        """
+        last_error = None
+
+        for attempt in range(1, {{ max_retry_attempts }} + 1):
+            try:
+                return await operation_func(*args, **kwargs)
+
+            except (
+                asyncpg.exceptions.ConnectionDoesNotExistError,
+                asyncpg.exceptions.DeadlockDetectedError,
+                asyncpg.exceptions.QueryCanceledError,
+            ) as e:
+                last_error = e
+
+                if attempt < {{ max_retry_attempts }}:
+                    backoff_seconds = {{ retry_backoff_base }} * (2 ** (attempt - 1))
+
+                    emit_log_event(
+                        level=LogLevel.WARNING,
+                        message=f"Retrying {operation_name} after error",
+                        node_id="{{ node_name }}",
+                        attempt=attempt,
+                        max_attempts={{ max_retry_attempts }},
+                        backoff_seconds=backoff_seconds,
+                        error=str(e),
+                    )
+
+                    await asyncio.sleep(backoff_seconds)
+                else:
+                    emit_log_event(
+                        level=LogLevel.ERROR,
+                        message=f"All retry attempts failed for {operation_name}",
+                        node_id="{{ node_name }}",
+                        attempts={{ max_retry_attempts }},
+                        error=str(e),
+                    )
+
+            except Exception as e:
+                # Non-retryable error
+                last_error = e
+                break
+
+        # All retries failed
+        raise OnexError(
+            error_code=CoreErrorCode.UNAVAILABLE,
+            message=f"Operation {operation_name} failed after {attempt} attempts",
+            details={"last_error": str(last_error)},
+        ) from last_error
+    {% endif %}
+
+    async def execute_effect(self, contract: ModelContractEffect) -> {{ output_model }}:
+        """
+        Execute database effect operation.
+
+        Args:
+            contract: ONEX effect contract with input data
+
+        Returns:
+            {{ output_model }} with operation results
+
+        Raises:
+            OnexError: If operation fails
+        """
+        start_time = time.perf_counter()
+        correlation_id = str(uuid4())
+
+        try:
+            # Parse and validate input
+            input_data = {{ input_model }}(**contract.input_data)
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="Executing {{ operation_type }} operation",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                operation_type="{{ operation_type }}",
+            )
+
+            {% if circuit_breaker_enabled -%}
+            # Check circuit breaker state
+            if self._circuit_breaker is not None:
+                if not self._circuit_breaker.allow_request():
+                    raise OnexError(
+                        error_code=CoreErrorCode.UNAVAILABLE,
+                        message="Circuit breaker is OPEN, operation rejected",
+                        details={
+                            "circuit_state": "OPEN",
+                            "correlation_id": correlation_id,
+                        },
+                    )
+            {% endif %}
+
+            # Ensure connection pool is ready
+            pool = await self._ensure_pool()
+
+            # Execute database operation
+            {% if retry_enabled -%}
+            result = await self._execute_with_retry(
+                operation_name="{{ operation_type }}",
+                operation_func=self._execute_database_operation,
+                pool=pool,
+                input_data=input_data,
+                correlation_id=correlation_id,
+            )
+            {% else -%}
+            result = await self._execute_database_operation(
+                pool=pool,
+                input_data=input_data,
+                correlation_id=correlation_id,
+            )
+            {% endif %}
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["queries_executed"] += 1
+            self._metrics["total_query_time_ms"] += elapsed_ms
+
+            {% if circuit_breaker_enabled -%}
+            # Record success in circuit breaker
+            if self._circuit_breaker is not None:
+                self._circuit_breaker.record_success()
+            {% endif %}
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="{{ operation_type }} operation completed",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                elapsed_ms=elapsed_ms,
+            )
+
+            return result
+
+        except OnexError:
+            # Re-raise OnexError without wrapping
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["query_errors"] += 1
+
+            {% if circuit_breaker_enabled -%}
+            if self._circuit_breaker is not None:
+                self._circuit_breaker.record_failure()
+            {% endif %}
+
+            raise
+
+        except Exception as e:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["query_errors"] += 1
+
+            {% if circuit_breaker_enabled -%}
+            if self._circuit_breaker is not None:
+                self._circuit_breaker.record_failure()
+            {% endif %}
+
+            emit_log_event(
+                level=LogLevel.ERROR,
+                message="{{ operation_type }} operation failed",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                elapsed_ms=elapsed_ms,
+                error=str(e),
+            )
+
+            raise OnexError(
+                error_code=CoreErrorCode.INTERNAL_ERROR,
+                message=f"Database operation failed: {str(e)}",
+                details={
+                    "operation": "{{ operation_type }}",
+                    "correlation_id": correlation_id,
+                },
+            ) from e
+
+    async def _execute_database_operation(
+        self,
+        pool: asyncpg.Pool,
+        input_data: {{ input_model }},
+        correlation_id: str,
+    ) -> {{ output_model }}:
+        """
+        Execute the actual database operation with transaction support.
+
+        This is the core business logic that should be customized per node.
+
+        Args:
+            pool: Database connection pool
+            input_data: Validated input data
+            correlation_id: Correlation ID for tracing
+
+        Returns:
+            {{ output_model }} with operation results
+
+        Raises:
+            OnexError: If operation fails
+        """
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                try:
+                    # TODO: Implement your database logic here
+                    # Example: Execute query with prepared statement
+                    # result = await conn.fetch(
+                    #     "SELECT * FROM table WHERE id = $1",
+                    #     input_data.record_id,
+                    # )
+
+                    {% if placeholder_logic -%}
+                    # Placeholder logic - replace with actual implementation
+                    result_data = {
+                        "status": "success",
+                        "correlation_id": correlation_id,
+                        "message": "Database operation completed",
+                    }
+                    {% endif %}
+
+                    self._metrics["transactions_committed"] += 1
+
+                    return {{ output_model }}(**result_data)
+
+                except Exception as e:
+                    self._metrics["transactions_rolled_back"] += 1
+                    raise OnexError(
+                        error_code=CoreErrorCode.INTERNAL_ERROR,
+                        message=f"Transaction failed: {str(e)}",
+                        details={"correlation_id": correlation_id},
+                    ) from e
+
+    async def cleanup(self) -> None:
+        """
+        Cleanup database resources.
+
+        Closes connection pool and releases all connections.
+        """
+        if self._pool is not None:
+            try:
+                await self._pool.close()
+                emit_log_event(
+                    level=LogLevel.INFO,
+                    message="Database connection pool closed",
+                    node_id="{{ node_name }}",
+                )
+            except Exception as e:
+                emit_log_event(
+                    level=LogLevel.WARNING,
+                    message="Error closing connection pool",
+                    node_id="{{ node_name }}",
+                    error=str(e),
+                )
+
+    def get_metrics(self) -> dict[str, Any]:
+        """
+        Get current metrics for monitoring.
+
+        Returns:
+            Dictionary of metrics
+        """
+        avg_query_time = (
+            self._metrics["total_query_time_ms"] / self._metrics["queries_executed"]
+            if self._metrics["queries_executed"] > 0
+            else 0.0
+        )
+
+        return {
+            **self._metrics,
+            "avg_query_time_ms": avg_query_time,
+            "success_rate": (
+                self._metrics["transactions_committed"] /
+                (self._metrics["transactions_committed"] + self._metrics["transactions_rolled_back"])
+                if (self._metrics["transactions_committed"] + self._metrics["transactions_rolled_back"]) > 0
+                else 1.0
+            ),
+        }
+
+
+# Entry point for direct execution
+if __name__ == "__main__":
+    import sys
+
+    async def main():
+        """Main entry point for testing."""
+        container = ModelContainer(value={}, container_type="config")
+        node = {{ node_class_name }}(container)
+
+        # Example contract
+        contract = ModelContractEffect(
+            name="{{ contract_name }}",
+            version={"major": 1, "minor": 0, "patch": 0},
+            description="{{ description }}",
+            node_type="EFFECT",
+            input_model="{{ input_model }}",
+            output_model="{{ output_model }}",
+            input_data={
+                # TODO: Add example input data
+            }
+        )
+
+        try:
+            result = await node.execute_effect(contract)
+            print(f"Success: {result}")
+            print(f"Metrics: {node.get_metrics()}")
+            return 0
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        finally:
+            await node.cleanup()
+
+    sys.exit(asyncio.run(main()))

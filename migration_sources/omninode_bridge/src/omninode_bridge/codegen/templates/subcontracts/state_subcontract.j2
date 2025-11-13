@@ -1,0 +1,81 @@
+{#
+State Management Subcontract Template
+
+Generates state management methods.
+
+Context variables:
+- states: List of valid states
+- use_fsm: Boolean for FSM support
+- initial_state: Initial state name
+- transitions: List of valid state transitions
+#}
+
+async def _manage_state(
+    self,
+    context: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Manage node state.
+
+    Generated from state subcontract.
+    {% if states %}States: {{ states | join(', ') }}{% endif %}
+    """
+    results = {}
+
+    {% if use_fsm %}
+    # Finite State Machine enabled
+    {% if states %}
+    # Valid states: {{ states | join(', ') }}
+    current_state = context.get("current_state", "{{ initial_state | default('initial') }}")
+    target_state = context.get("target_state")
+
+    # Validate state transition
+    valid_states = [{% for state in states %}"{{ state }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+
+    if target_state not in valid_states:
+        results['error'] = f"Invalid target state: {target_state}"
+        results['current_state'] = current_state
+        return results
+
+    # Execute state transition
+    try:
+        {% if transitions %}
+        # Configured transitions
+        transition_key = f"{current_state}->{target_state}"
+        valid_transitions = {
+            {% for transition in transitions %}
+            "{{ transition }}": True,
+            {% endfor %}
+        }
+
+        if transition_key not in valid_transitions:
+            results['error'] = f"Invalid transition: {transition_key}"
+            results['current_state'] = current_state
+            return results
+        {% endif %}
+
+        # Apply state change
+        await self.state_manager.set_state(target_state)
+        results['previous_state'] = current_state
+        results['current_state'] = target_state
+        results['status'] = 'success'
+
+    except Exception as e:
+        logger.error(f"State transition failed: {e}")
+        results['error'] = str(e)
+        results['current_state'] = current_state
+    {% else %}
+    # No states configured
+    results['error'] = 'No states configured'
+    {% endif %}
+    {% else %}
+    # Simple state management (no FSM)
+    current_state = context.get("current_state", "{{ initial_state | default('initial') }}")
+    target_state = context.get("target_state", current_state)
+
+    await self.state_manager.set_state(target_state)
+    results['previous_state'] = current_state
+    results['current_state'] = target_state
+    {% endif %}
+
+    return results

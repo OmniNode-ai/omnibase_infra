@@ -1,0 +1,162 @@
+---
+# Workflow Coordination Subcontract
+# Multi-step workflow for metadata stamping orchestration
+# References: NodeBridgeOrchestrator.execute_orchestration(),
+#             _execute_workflow_steps()
+
+type: "multi_step_workflow"
+workflow_name: "metadata_stamping_workflow"
+description: >-
+  Orchestrates metadata stamping with OnexTree intelligence
+  integration and FSM state management
+
+# Workflow execution modes
+execution_modes:
+  - name: "event_driven"
+    description: >-
+      Event-driven coordination with reducer via EventBus
+    preferred: true
+    timeout_seconds: 30
+  - name: "legacy"
+    description: >-
+      Legacy synchronous workflow execution (fallback)
+    preferred: false
+    timeout_seconds: 60
+
+# Workflow stages with performance targets
+stages:
+  - name: "validate_input"
+    description: >-
+      Validate contract input data and workflow parameters
+    target_duration_ms: 10
+    required: true
+    step_type: "validation"
+    error_handling: "fail_fast"
+
+  - name: "initialize_fsm"
+    description: >-
+      Initialize FSM workflow state to PENDING
+    target_duration_ms: 5
+    required: true
+    step_type: "state_management"
+    fsm_transition:
+      from: null
+      to: "PENDING"
+
+  - name: "transition_processing"
+    description: >-
+      Transition FSM state from PENDING to PROCESSING
+    target_duration_ms: 5
+    required: true
+    step_type: "state_management"
+    fsm_transition:
+      from: "PENDING"
+      to: "PROCESSING"
+
+  - name: "publish_workflow_started"
+    description: >-
+      Publish WORKFLOW_STARTED event to Kafka
+    target_duration_ms: 10
+    required: false
+    step_type: "event_publishing"
+    event_type: "WORKFLOW_STARTED"
+
+  - name: "onextree_intelligence"
+    description: >-
+      Route to OnexTree for AI intelligence analysis
+      (optional, 500ms timeout)
+    target_duration_ms: 500
+    required: false
+    step_type: "onextree_intelligence"
+    service: "onextree"
+    timeout_ms: 500
+    graceful_degradation: true
+    fallback_on_error: true
+
+  - name: "hash_generation"
+    description: >-
+      Route to MetadataStampingService for BLAKE3 hash generation
+    target_duration_ms: 2
+    required: true
+    step_type: "hash_generation"
+    service: "metadata_stamping"
+    performance_requirement: "p99 < 2ms"
+
+  - name: "stamp_creation"
+    description: >-
+      Create metadata stamp with O.N.E. v0.1 compliance
+    target_duration_ms: 5
+    required: true
+    step_type: "stamp_creation"
+    compliance_standard: "O.N.E. v0.1"
+    namespace_support: true
+
+  - name: "aggregate_results"
+    description: >-
+      Aggregate workflow step results into final output
+    target_duration_ms: 10
+    required: true
+    step_type: "aggregation"
+
+  - name: "transition_completed"
+    description: >-
+      Transition FSM state to COMPLETED or FAILED
+    target_duration_ms: 5
+    required: true
+    step_type: "state_management"
+    fsm_transition:
+      from: "PROCESSING"
+      to: ["COMPLETED", "FAILED"]  # Conditional
+
+  - name: "publish_completion"
+    description: >-
+      Publish WORKFLOW_COMPLETED or WORKFLOW_FAILED event
+    target_duration_ms: 10
+    required: false
+    step_type: "event_publishing"
+    event_type: ["WORKFLOW_COMPLETED", "WORKFLOW_FAILED"]
+
+# Performance requirements
+performance:
+  # Standard workflows without OnexTree
+  overall_target_ms: 50
+  # Workflows with OnexTree intelligence
+  with_intelligence_target_ms: 150
+  max_concurrent_workflows: 100
+  throughput_target_per_second: 100
+
+# Error handling and retry configuration
+error_handling:
+  retry_policy:
+    max_retries: 3
+    backoff_strategy: "exponential"
+    backoff_base_seconds: 1
+    backoff_multiplier: 2
+  failure_modes:
+    - mode: "fail_fast"
+      condition: "validation_error"
+      action: "transition_to_failed"
+    - mode: "graceful_degradation"
+      condition: "onextree_timeout"
+      action: "continue_with_fallback"
+    - mode: "retry_with_backoff"
+      condition: "kafka_publish_error"
+      action: "retry_publish"
+
+# Event-driven coordination configuration
+event_driven:
+  enabled: true
+  action_event_type: "ORCHESTRATE_WORKFLOW"
+  completion_events:
+    - "STATE_COMMITTED"  # Success
+    - "REDUCER_GAVE_UP"  # Failure
+  timeout_seconds: 30
+  retry_on_timeout: false
+
+# Metrics and monitoring
+monitoring:
+  track_step_duration: true
+  track_workflow_duration: true
+  track_fsm_transitions: true
+  track_event_publishing: true
+  track_service_routing: true

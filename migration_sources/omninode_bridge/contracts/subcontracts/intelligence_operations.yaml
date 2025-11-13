@@ -1,0 +1,44 @@
+# ONEX v2.0 Subcontract - Intelligence Operations
+# Operations specific to intelligence gathering and AI services
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Intelligence operation patterns for RAG queries, pattern analysis,
+  quality assessment, and Archon MCP orchestration.
+
+operation_types:
+  - operation: "rag_query"
+    description: "Retrieve-Augment-Generate query across knowledge bases"
+    required_parameters:
+      - query_text
+      - context
+    optional_parameters:
+      - max_results
+      - enable_orchestration
+
+  - operation: "pattern_analysis"
+    description: "Analyze code patterns and anti-patterns"
+    required_parameters:
+      - code_content
+      - language
+    optional_parameters:
+      - pattern_types
+      - depth_level
+
+  - operation: "quality_assessment"
+    description: "Assess code quality and ONEX compliance"
+    required_parameters:
+      - content
+      - file_path
+    optional_parameters:
+      - include_recommendations
+      - check_compliance
+
+orchestration:
+  archon_mcp_enabled: true
+  parallel_execution: true
+  timeout_seconds: 30
+  graceful_degradation: true

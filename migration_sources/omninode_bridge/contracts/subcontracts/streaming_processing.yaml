@@ -1,0 +1,54 @@
+# ONEX v2.0 Subcontract - Streaming Processing
+# Streaming data processing patterns and requirements
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Streaming data processing patterns for real-time event processing,
+  state management, and backpressure handling.
+
+processing_guarantees:
+  - guarantee: "at_least_once"
+    description: "Each event processed at least once"
+    requirements:
+      - "idempotent_processing"
+      - "checkpoint_recovery"
+
+  - guarantee: "exactly_once"
+    description: "Each event processed exactly once"
+    requirements:
+      - "transactional_state"
+      - "two_phase_commit"
+
+backpressure_handling:
+  - strategy: "buffer"
+    description: "Buffer events up to limit"
+    max_buffer_size: 10000
+
+  - strategy: "drop"
+    description: "Drop oldest events when full"
+    emit_metrics: true
+
+  - strategy: "block"
+    description: "Block producer until space available"
+    timeout_ms: 5000
+
+state_management:
+  persistence: "memory"
+  checkpoint_interval_seconds: 60
+  snapshot_interval_seconds: 300
+  recovery_mode: "from_checkpoint"
+
+event_ordering:
+  guarantee: "per_partition"
+  timestamp_field: "timestamp"
+  watermark_strategy: "bounded_out_of_orderness"
+  max_out_of_orderness_seconds: 60
+
+performance_tuning:
+  batch_size: 100
+  processing_parallelism: 4
+  max_poll_records: 1000
+  prefetch_size: 500

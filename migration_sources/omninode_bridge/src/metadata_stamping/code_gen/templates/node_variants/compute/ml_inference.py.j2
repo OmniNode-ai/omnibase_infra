@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""
+{{ node_name }} - ONEX v2.0 Compute node for ML inference.
+
+{{ description }}
+
+Features:
+- Lazy model loading
+- Batch inference ({{ batch_size }} samples)
+- Preprocessing/postprocessing pipelines
+- Model caching
+- GPU support (if available)
+- Inference metrics
+
+Performance Targets:
+- Inference latency: < 50ms per sample (CPU)
+- Batch throughput: 100+ inferences/sec
+- Model load time: < 5s
+- Memory: < 2GB (with model)
+
+Contract: {{ contract_name }}
+Node Type: COMPUTE (ML Inference)
+"""
+
+import asyncio
+import logging
+import time
+from typing import Any, Optional
+from pathlib import Path
+
+from omnibase_core import EnumCoreErrorCode, ModelOnexError
+from omnibase_core.enums.enum_log_level import EnumLogLevel as LogLevel
+from omnibase_core.logging.structured import emit_log_event_sync as emit_log_event
+from omnibase_core.models.contracts.model_contract_compute import ModelContractCompute
+from omnibase_core.models.core import ModelContainer
+from omnibase_core.nodes.node_compute import NodeCompute
+
+from .models import {{ input_model }}, {{ output_model }}, {{ config_model }}
+
+OnexError = ModelOnexError
+CoreErrorCode = EnumCoreErrorCode
+logger = logging.getLogger(__name__)
+
+
+class {{ node_class_name }}(NodeCompute):
+    """{{ node_description }}
+
+    Model Configuration:
+    - Model path: {{ model_path }}
+    - Framework: {{ ml_framework }}
+    - Device: {{ device }}
+    - Batch size: {{ batch_size }}
+    """
+
+    def __init__(self, container: ModelContainer) -> None:
+        super().__init__(container)
+        self._health_check_mode = self._detect_health_check_mode()
+
+        config_data = container.value if isinstance(container.value, dict) else {}
+        self.config = {{ config_model }}.from_container(config_data)
+
+        self._model: Optional[Any] = None
+        self._model_lock = asyncio.Lock()
+        self._metrics = {
+            "inferences_executed": 0,
+            "model_load_time_ms": 0.0,
+            "total_inference_time_ms": 0.0,
+        }
+
+    def _detect_health_check_mode(self) -> bool:
+        try:
+            import os
+            return os.getenv("HEALTH_CHECK_MODE", "false").lower() == "true"
+        except Exception:
+            return False
+
+    async def _ensure_model_loaded(self) -> Any:
+        """Lazy load ML model."""
+        if self._model is not None:
+            return self._model
+
+        async with self._model_lock:
+            if self._model is not None:
+                return self._model
+
+            try:
+                start_time = time.perf_counter()
+
+                # TODO: Load model based on framework
+                {% if ml_framework == "onnx" -%}
+                import onnxruntime as ort
+                self._model = ort.InferenceSession(self.config.model_path)
+                {% elif ml_framework == "torch" -%}
+                import torch
+                self._model = torch.jit.load(self.config.model_path)
+                self._model.eval()
+                {% elif ml_framework == "tensorflow" -%}
+                import tensorflow as tf
+                self._model = tf.saved_model.load(self.config.model_path)
+                {% else -%}
+                # Generic model loading
+                self._model = self._load_model_generic()
+                {% endif %}
+
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                self._metrics["model_load_time_ms"] = elapsed_ms
+
+                emit_log_event(
+                    level=LogLevel.INFO,
+                    message="ML model loaded",
+                    node_id="{{ node_name }}",
+                    elapsed_ms=elapsed_ms,
+                    model_path=self.config.model_path,
+                )
+                return self._model
+
+            except Exception as e:
+                raise OnexError(
+                    error_code=CoreErrorCode.RESOURCE_EXHAUSTED,
+                    message=f"Failed to load model: {str(e)}",
+                ) from e
+
+    async def execute_compute(self, contract: ModelContractCompute) -> {{ output_model }}:
+        """Execute ML inference."""
+        start_time = time.perf_counter()
+
+        try:
+            input_data = {{ input_model }}(**contract.input_data)
+
+            # Ensure model is loaded
+            model = await self._ensure_model_loaded()
+
+            # Preprocess
+            preprocessed = await self._preprocess(input_data.features)
+
+            # Inference
+            predictions = await self._run_inference(model, preprocessed)
+
+            # Postprocess
+            result = await self._postprocess(predictions)
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["inferences_executed"] += 1
+            self._metrics["total_inference_time_ms"] += elapsed_ms
+
+            return {{ output_model }}(
+                predictions=result,
+                inference_time_ms=elapsed_ms,
+            )
+
+        except Exception as e:
+            raise OnexError(
+                error_code=CoreErrorCode.INTERNAL_ERROR,
+                message=f"Inference failed: {str(e)}",
+            ) from e
+
+    async def _preprocess(self, features: Any) -> Any:
+        """Preprocess input features."""
+        # TODO: Implement preprocessing
+        return features
+
+    async def _run_inference(self, model: Any, inputs: Any) -> Any:
+        """Run model inference."""
+        # TODO: Implement inference based on framework
+        {% if ml_framework == "onnx" -%}
+        outputs = model.run(None, {"input": inputs})
+        return outputs[0]
+        {% elif ml_framework == "torch" -%}
+        with torch.no_grad():
+            return model(inputs)
+        {% else -%}
+        return model(inputs)
+        {% endif %}
+
+    async def _postprocess(self, predictions: Any) -> Any:
+        """Postprocess model predictions."""
+        # TODO: Implement postprocessing
+        return predictions
+
+    def get_metrics(self) -> dict[str, Any]:
+        avg_inference_time = (
+            self._metrics["total_inference_time_ms"] / self._metrics["inferences_executed"]
+            if self._metrics["inferences_executed"] > 0
+            else 0.0
+        )
+        return {**self._metrics, "avg_inference_time_ms": avg_inference_time}

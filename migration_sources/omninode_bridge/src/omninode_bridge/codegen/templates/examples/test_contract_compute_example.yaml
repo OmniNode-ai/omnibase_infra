@@ -1,0 +1,391 @@
+# Test Contract Example - Compute Node (ONEX Standards Compliant)
+#
+# This example demonstrates comprehensive testing for a Compute node
+# that performs pure data transformation without side effects.
+#
+# Compute nodes should be pure functions with zero side effects,
+# making them ideal for property-based testing and deterministic validation.
+#
+# VERSION: 1.0.0
+
+# === CORE TEST CONTRACT IDENTIFICATION ===
+
+name: data_transformer_compute_tests
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: |
+  Comprehensive test contract for Data Transformer Compute node.
+
+  Tests pure data transformation functions with focus on:
+  - Deterministic behavior (same input → same output)
+  - Zero side effects (no external I/O)
+  - Performance throughput (>1000 ops/sec)
+  - Property-based testing for edge cases
+  - Memory efficiency
+
+  Compute nodes must ensure:
+  - No database, HTTP, or filesystem access
+  - No mutable shared state
+  - No non-deterministic operations (random, time)
+  - Pure functional transformations only
+
+# === TEST TARGET IDENTIFICATION ===
+
+target_node: NodeDataTransformerCompute
+target_version: "1.0.0"
+target_node_type: compute
+
+test_suite_name: test_node_data_transformer_compute
+test_file_path: tests/nodes/compute/data_transformer/
+
+# === COVERAGE REQUIREMENTS ===
+
+coverage_minimum: 95
+coverage_target: 100
+coverage_by_file: true
+coverage_by_function: true
+
+# === TEST TYPE SPECIFICATIONS ===
+
+test_types:
+  - unit
+  - contract
+  - performance
+  # Note: Property-based testing via pytest-hypothesis plugin
+
+# === TEST TARGETS AND SCENARIOS ===
+
+test_targets:
+  # Test main transformation logic
+  - target_name: execute_compute
+    target_type: method
+    test_scenarios:
+      - "transform valid input data"
+      - "transform empty dataset"
+      - "transform single-item dataset"
+      - "transform large dataset (10K+ items)"
+      - "transform with unicode characters"
+      - "transform with special characters"
+      - "transform with nested data structures"
+    expected_behaviors:
+      - "returns transformed data"
+      - "preserves input data immutability"
+      - "produces deterministic results"
+      - "completes within performance target"
+      - "uses constant memory (no leaks)"
+    input_parameters:
+      contract:
+        type: ModelContractCompute
+        required: true
+        fields:
+          input_data:
+            type: dict
+            required: true
+          transformation_type:
+            type: str
+            values: ["normalize", "filter", "map", "reduce"]
+    expected_outputs:
+      result:
+        type: ModelResult
+        success: true
+        data:
+          type: dict
+    edge_cases:
+      - "empty input data"
+      - "null values in data"
+      - "extremely large values (>1GB strings)"
+      - "deeply nested structures (>100 levels)"
+      - "circular references in data"
+      - "mixed data types in arrays"
+    error_conditions:
+      - "invalid transformation type"
+      - "malformed input data"
+      - "data exceeds memory limits"
+    assertions:
+      - "assert result.success is True"
+      - "assert result.data is not None"
+      - "assert input_data_unchanged(original, input_data)"
+      - "assert output_deterministic(input_data, result.data)"
+    test_priority: 1
+
+  # Test normalization transformation
+  - target_name: _normalize_data
+    target_type: method
+    test_scenarios:
+      - "normalize numeric data to 0-1 range"
+      - "normalize with min=max (constant data)"
+      - "normalize with negative numbers"
+      - "normalize with floating point precision"
+    expected_behaviors:
+      - "scales values to [0, 1] range"
+      - "preserves relative ordering"
+      - "handles edge cases gracefully"
+      - "maintains precision within tolerance"
+    edge_cases:
+      - "all values identical"
+      - "single value"
+      - "all zeros"
+      - "infinite values"
+      - "NaN values"
+    error_conditions:
+      - "non-numeric input"
+      - "empty dataset"
+    assertions:
+      - "assert all(0 <= v <= 1 for v in normalized_values)"
+      - "assert relative_order_preserved(input, output)"
+    test_priority: 1
+
+  # Test filtering transformation
+  - target_name: _filter_data
+    target_type: method
+    test_scenarios:
+      - "filter with simple predicate"
+      - "filter with complex predicate"
+      - "filter returns empty result"
+      - "filter returns all items"
+      - "filter with multiple conditions"
+    expected_behaviors:
+      - "returns items matching predicate"
+      - "preserves item order"
+      - "does not modify items"
+    edge_cases:
+      - "no items match predicate"
+      - "all items match predicate"
+      - "predicate with edge values"
+    assertions:
+      - "assert all(predicate(item) for item in filtered_data)"
+      - "assert order_preserved(input, filtered_data)"
+    test_priority: 1
+
+  # Test mapping transformation
+  - target_name: _map_data
+    target_type: method
+    test_scenarios:
+      - "map with simple function"
+      - "map with complex function"
+      - "map with type conversion"
+      - "map preserves structure"
+    expected_behaviors:
+      - "applies function to each item"
+      - "preserves collection structure"
+      - "maintains order"
+    edge_cases:
+      - "map function returns None"
+      - "map function changes type"
+      - "map function is identity"
+    assertions:
+      - "assert len(mapped_data) == len(input_data)"
+      - "assert all(isinstance(item, expected_type) for item in mapped_data)"
+    test_priority: 1
+
+  # Test reduction transformation
+  - target_name: _reduce_data
+    target_type: method
+    test_scenarios:
+      - "reduce with sum operation"
+      - "reduce with custom aggregation"
+      - "reduce empty collection"
+      - "reduce single item"
+    expected_behaviors:
+      - "aggregates collection to single value"
+      - "applies reducer function correctly"
+      - "handles initial value"
+    edge_cases:
+      - "empty collection with initial value"
+      - "empty collection without initial value"
+      - "single item collection"
+    error_conditions:
+      - "empty collection without initial value"
+      - "invalid reducer function"
+    assertions:
+      - "assert isinstance(reduced_value, expected_type)"
+      - "assert reduced_value == expected_result"
+    test_priority: 1
+
+  # Test determinism validation
+  - target_name: _validate_determinism
+    target_type: method
+    test_scenarios:
+      - "same input produces same output (10 iterations)"
+      - "same input across process restarts"
+      - "same input with different object instances"
+    expected_behaviors:
+      - "produces identical results for identical inputs"
+      - "no random behavior"
+      - "no time-based behavior"
+      - "no external state dependencies"
+    assertions:
+      - "assert all_outputs_identical(outputs)"
+      - "assert hash(output1) == hash(output2)"
+    test_priority: 1
+
+  # Test memory efficiency
+  - target_name: execute_compute
+    target_type: method
+    test_scenarios:
+      - "process 10K items without memory leak"
+      - "process 100K items with bounded memory"
+      - "process streaming data with constant memory"
+    expected_behaviors:
+      - "memory usage stays within bounds"
+      - "no memory leaks"
+      - "efficient data structures"
+    assertions:
+      - "assert memory_usage < max_memory_mb"
+      - "assert no_memory_leak_detected()"
+    test_priority: 2
+
+# === MOCK REQUIREMENTS ===
+
+mock_requirements:
+  # Minimal mocking for compute nodes
+  mock_dependencies: []
+
+  mock_external_services: []
+
+  # No database mocking needed
+  mock_database: false
+
+  # No HTTP mocking needed
+  mock_http_clients: false
+
+  # Fixture configuration
+  use_fixtures: true
+  fixture_scope: function
+
+  # Test data generators only
+  mock_return_values:
+    test_data_generator:
+      small_dataset:
+        size: 100
+        type: "numeric"
+      medium_dataset:
+        size: 1000
+        type: "mixed"
+      large_dataset:
+        size: 10000
+        type: "nested"
+
+# === ASSERTION REQUIREMENTS ===
+
+assertion_types:
+  - "equality"
+  - "type"
+  - "range"
+  - "determinism"
+  - "performance"
+
+custom_assertions:
+  - "assert_input_unchanged"
+  - "assert_output_deterministic"
+  - "assert_no_side_effects"
+  - "assert_memory_bounded"
+  - "assert_relative_order_preserved"
+
+# === TEST CONFIGURATION ===
+
+test_configuration:
+  # Pytest configuration
+  pytest_markers:
+    - "unit"
+    - "property_based"
+    - "performance"
+
+  pytest_plugins:
+    - "pytest-cov"
+    - "pytest-benchmark"
+    - "pytest-hypothesis"  # For property-based testing
+    - "pytest-memray"  # For memory profiling
+
+  pytest_options:
+    verbose: true
+    capture: "no"
+
+  # Test execution settings
+  parallel_execution: true
+  parallel_workers: 8  # CPU-bound, can parallelize more
+  timeout_seconds: 60
+
+  # Coverage configuration
+  coverage_enabled: true
+  coverage_threshold: 95
+  coverage_fail_under: true
+
+  # Fixtures
+  required_fixtures:
+    - "sample_data_small"
+    - "sample_data_medium"
+    - "sample_data_large"
+    - "determinism_validator"
+
+  # Test data
+  test_data_directory: "tests/data/data_transformer"
+  use_test_database: false  # Compute nodes don't use databases
+
+  # Output configuration
+  verbose_output: true
+  generate_html_report: true
+  report_output_directory: "htmlcov"
+
+  # Retry configuration (should not be needed for deterministic tests)
+  retry_failed_tests: false
+  # max_retries not set (defaults to 3) - unused when retry_failed_tests is false
+
+  # Environment setup (minimal for compute nodes)
+  setup_commands: []
+  teardown_commands: []
+
+  environment_variables:
+    TESTING: "true"
+    LOG_LEVEL: "WARNING"  # Reduce logging overhead
+
+  # Quality gates
+  enforce_type_checking: true
+  enforce_linting: true
+  allowed_warnings: []
+
+  # Performance benchmarks (configured via pytest options and pytest-benchmark)
+  # Target benchmarks documented in test docstrings:
+  #   - transform_100_items: <10ms latency, >1000 ops/sec
+  #   - transform_1000_items: <50ms latency, >500 ops/sec
+  #   - transform_10000_items: <200ms latency, >100 ops/sec
+  #   - memory_usage_10k_items: <100MB
+  #
+  # Property-based testing (configured via pytest-hypothesis plugin)
+  # Use pytest options for hypothesis configuration:
+  #   - hypothesis_max_examples: 1000
+  #   - hypothesis_deadline: 1000ms
+  #   - hypothesis_derandomize: true
+
+# === TEST GENERATION OPTIONS ===
+
+include_docstrings: true
+include_type_hints: true
+use_async_tests: false  # Compute nodes are typically synchronous
+parametrize_tests: true
+
+# === QUALITY GATES ===
+
+enforce_test_naming: true
+enforce_test_isolation: true
+enforce_deterministic_tests: true
+
+# Additional quality gates for compute nodes
+enforce_no_side_effects: true
+enforce_immutability: true
+enforce_performance_targets: true
+
+# === METADATA ===
+
+author: "OmniNode Bridge Team"
+documentation_url: "https://docs.omninode.dev/testing/compute-nodes"
+tags:
+  - "compute"
+  - "pure-functions"
+  - "data-transformation"
+  - "deterministic"
+  - "property-based-testing"
+  - "performance"

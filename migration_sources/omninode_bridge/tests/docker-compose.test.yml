@@ -1,0 +1,335 @@
+# Docker Compose for Two-Way Registration E2E Tests
+# Complete test environment with all services required for two-way registration pattern
+
+networks:
+  bridge-test-network:
+    driver: bridge
+
+services:
+  # ============================================================================
+  # Infrastructure Services
+  # ============================================================================
+
+  # PostgreSQL for testing (tool registry + state persistence)
+  postgres-test:
+    image: postgres:15
+    container_name: registration-test-postgres
+    networks:
+      - bridge-test-network
+    environment:
+      POSTGRES_DB: bridge_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d bridge_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+
+  # Kafka (RedPanda) for testing (event streaming)
+  redpanda-test:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: registration-test-redpanda
+    networks:
+      - bridge-test-network
+    ports:
+      - "19093:9092"  # External Kafka port (changed to avoid conflict)
+      - "19644:9644"  # Admin API
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:29092
+      - --advertise-kafka-addr=internal://redpanda-test:9092,external://localhost:29092
+      - --mode=dev-container
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --default-log-level=warn
+    environment:
+      REDPANDA_AUTO_CREATE_TOPICS_ENABLED: "true"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: 768m
+    mem_reservation: 256m
+    volumes:
+      - redpanda-test-data:/var/lib/redpanda/data
+
+  # Consul for testing (service discovery)
+  consul-test:
+    image: hashicorp/consul:1.17
+    container_name: registration-test-consul
+    networks:
+      - bridge-test-network
+    ports:
+      - "8500:8500"  # HTTP API
+      - "8600:8600/udp"  # DNS
+    command: agent -dev -client=0.0.0.0 -ui
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - consul-test-data:/consul/data
+
+  # ============================================================================
+  # Services
+  # ============================================================================
+
+  # Metadata Stamping Service (required by orchestrator)
+  metadata-stamping-test:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.metadata-stamping
+      target: development
+    image: omninode_bridge-metadata-stamping:test
+    container_name: registration-test-metadata-stamping
+    networks:
+      - bridge-test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redpanda-test:
+        condition: service_healthy
+      consul-test:
+        condition: service_healthy
+    environment:
+      # Database Configuration (with correct prefix)
+      METADATA_STAMPING_DB_HOST: postgres-test
+      METADATA_STAMPING_DB_PORT: 5432
+      METADATA_STAMPING_DB_NAME: bridge_test
+      METADATA_STAMPING_DB_USER: test
+      METADATA_STAMPING_DB_PASSWORD: test-password  # pragma: allowlist secret
+      METADATA_STAMPING_DB_POOL_MIN_SIZE: 5
+      METADATA_STAMPING_DB_POOL_MAX_SIZE: 20
+
+      # Service Configuration (with correct prefix)
+      METADATA_STAMPING_SERVICE_PORT: 8053
+      METADATA_STAMPING_SERVICE_HOST: 0.0.0.0
+      METADATA_STAMPING_LOG_LEVEL: DEBUG
+
+      # Performance Configuration (with correct prefix)
+      METADATA_STAMPING_HASH_GENERATOR_POOL_SIZE: 50
+      METADATA_STAMPING_HASH_GENERATOR_MAX_WORKERS: 2
+
+      # Service Registry (Consul) (with correct prefix)
+      METADATA_STAMPING_ENABLE_REGISTRY: "true"
+      METADATA_STAMPING_CONSUL_HOST: consul-test
+      METADATA_STAMPING_CONSUL_PORT: 8500
+      METADATA_STAMPING_SERVICE_REGISTRATION_ENABLED: "true"
+
+      # Event Publishing (Kafka/Redpanda) (with correct prefix)
+      METADATA_STAMPING_ENABLE_EVENTS: "true"
+      METADATA_STAMPING_KAFKA_BOOTSTRAP_SERVERS: redpanda-test:9092
+
+      # Security configuration (with correct prefix)
+      METADATA_STAMPING_ENABLE_SECURITY: "false"
+      METADATA_STAMPING_SIGNATURE_VALIDATION_ENABLED: "false"
+
+      # Feature flags (with correct prefix)
+      METADATA_STAMPING_ENABLE_PROMETHEUS_METRICS: "true"
+      METADATA_STAMPING_PROMETHEUS_PORT: 9090
+      METADATA_STAMPING_ENABLE_PERFORMANCE_METRICS: "true"
+    ports:
+      - "18053:8053"  # API port (changed to avoid conflict)
+      - "19094:9090"  # Metrics port (changed to avoid conflict)
+    volumes:
+      - ../src:/app/src
+      - ../logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8053/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # Bridge Nodes
+  # ============================================================================
+
+  # Orchestrator Node
+  orchestrator-test:
+    build:
+      context: ..
+      dockerfile: docker/bridge-nodes/Dockerfile.orchestrator
+    image: omninode_bridge-orchestrator:test
+    container_name: registration-test-orchestrator
+    networks:
+      - bridge-test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redpanda-test:
+        condition: service_healthy
+      consul-test:
+        condition: service_healthy
+      metadata-stamping-test:
+        condition: service_healthy
+    environment:
+      # Service configuration
+      LOG_LEVEL: debug
+      ENVIRONMENT: test
+      # Stubs configuration for testing
+      ONEX_STUB_MODE: "true"
+
+      # Introspection configuration
+      ENABLE_INTROSPECTION: "true"
+      ENABLE_HEARTBEAT: "true"
+      HEARTBEAT_INTERVAL_SECONDS: "30"
+
+      # Database configuration
+      POSTGRES_HOST: postgres-test
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: bridge_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: redpanda-test:9092
+      KAFKA_INTROSPECTION_TOPIC: node-introspection.v1
+      KAFKA_REGISTRY_REQUEST_TOPIC: registry-request-introspection.v1
+
+      # Service URLs
+      METADATA_STAMPING_SERVICE_URL: http://metadata-stamping-test:8053
+
+      # Application metadata
+      SERVICE_VERSION: 1.0.0-test
+      NODE_ID: orchestrator-test-1
+    ports:
+      - "18060:8060"  # API port (changed to avoid conflict)
+      - "19091:9091"  # Metrics port (changed to avoid conflict)
+    volumes:
+      - ../src:/app/src
+      - ../logs:/app/logs
+    healthcheck:
+      test: ["CMD", "/app/entrypoint.sh", "health-check", "orchestrator"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Reducer Node
+  reducer-test:
+    build:
+      context: ..
+      dockerfile: docker/bridge-nodes/Dockerfile.reducer
+    image: omninode_bridge-reducer:test
+    container_name: registration-test-reducer
+    networks:
+      - bridge-test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redpanda-test:
+        condition: service_healthy
+      consul-test:
+        condition: service_healthy
+    environment:
+      # Service configuration
+      LOG_LEVEL: debug
+      ENVIRONMENT: test
+      # Stubs configuration for testing
+      ONEX_STUB_MODE: "true"
+
+      # Introspection configuration
+      ENABLE_INTROSPECTION: "true"
+      ENABLE_HEARTBEAT: "true"
+      HEARTBEAT_INTERVAL_SECONDS: "30"
+
+      # Database configuration
+      POSTGRES_HOST: postgres-test
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: bridge_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: redpanda-test:9092
+      KAFKA_INTROSPECTION_TOPIC: node-introspection.v1
+      KAFKA_REGISTRY_REQUEST_TOPIC: registry-request-introspection.v1
+
+      # Application metadata
+      SERVICE_VERSION: 1.0.0-test
+      NODE_ID: reducer-test-1
+    ports:
+      - "18061:8061"  # API port (changed to avoid conflict)
+      - "19092:9092"  # Metrics port (changed to avoid conflict)
+    volumes:
+      - ../src:/app/src
+      - ../logs:/app/logs
+    healthcheck:
+      test: ["CMD", "/app/entrypoint.sh", "health-check", "reducer"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Registry Node
+  registry-test:
+    build:
+      context: ..
+      dockerfile: docker/bridge-nodes/Dockerfile.registry
+    image: omninode_bridge-registry:test
+    container_name: registration-test-registry
+    networks:
+      - bridge-test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redpanda-test:
+        condition: service_healthy
+      consul-test:
+        condition: service_healthy
+    environment:
+      # Service configuration
+      LOG_LEVEL: debug
+      ENVIRONMENT: test
+      # Stubs configuration for testing
+      ONEX_STUB_MODE: "true"
+
+      # Database configuration
+      POSTGRES_HOST: postgres-test
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: bridge_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: redpanda-test:9092
+      KAFKA_INTROSPECTION_TOPIC: node-introspection.v1
+      KAFKA_REGISTRY_REQUEST_TOPIC: registry-request-introspection.v1
+
+      # Consul configuration
+      CONSUL_HOST: consul-test
+      CONSUL_PORT: 8500
+
+      # Application metadata
+      SERVICE_VERSION: 1.0.0-test
+      REGISTRY_ID: registry-test-1
+    ports:
+      - "18062:8062"  # API port (changed to avoid conflict)
+      - "29093:9093"  # Metrics port (changed to avoid conflict)
+    volumes:
+      - ../src:/app/src
+      - ../logs:/app/logs
+    healthcheck:
+      test: ["CMD", "/app/entrypoint.sh", "health-check", "registry"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres-test-data:
+  redpanda-test-data:
+  consul-test-data:

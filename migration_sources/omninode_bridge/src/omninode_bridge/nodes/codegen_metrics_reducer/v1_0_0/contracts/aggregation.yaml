@@ -1,0 +1,12 @@
+# Aggregation Subcontract
+# Time-window and workflow-based aggregation strategies
+
+aggregation_type: "time_window"
+window_type: "hourly"  # Default window type
+window_size_seconds: 3600
+batch_size: 100
+strategies:
+  - name: "time_window"
+    description: "Aggregate by time window (hourly/daily/weekly)"
+  - name: "workflow_id"
+    description: "Group by workflow_id for per-workflow metrics"

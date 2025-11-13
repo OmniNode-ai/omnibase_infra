@@ -1,0 +1,51 @@
+# Example: Valid Contract with Mixins (v2.0.0)
+#
+# Demonstrates mixin declarations with proper configuration.
+# This contract uses MixinHealthCheck and MixinMetrics.
+
+schema_version: "v2.0.0"
+name: "NodeDatabaseAdapterEffect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+description: "Database adapter effect node with health checks and metrics collection"
+
+capabilities:
+  - name: "database_persistence"
+    description: "Persist data to PostgreSQL database"
+  - name: "health_monitoring"
+    description: "Monitor database connection health"
+
+mixins:
+  - name: "MixinHealthCheck"
+    enabled: true
+    config:
+      check_interval_ms: 30000
+      timeout_seconds: 5.0
+      components:
+        - name: "database"
+          critical: true
+          timeout_seconds: 5.0
+        - name: "connection_pool"
+          critical: false
+          timeout_seconds: 3.0
+
+  - name: "MixinMetrics"
+    enabled: true
+    config:
+      collect_latency: true
+      collect_throughput: true
+      collect_error_rates: true
+      percentiles: [50, 95, 99]
+      histogram_buckets: [10, 50, 100, 500, 1000]
+
+subcontracts:
+  effect:
+    operations:
+      - "initialize"
+      - "shutdown"
+      - "process"
+      - "health_check"
+      - "metrics"

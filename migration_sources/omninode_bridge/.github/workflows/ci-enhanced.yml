@@ -1,0 +1,147 @@
+# Enhanced CI/CD Pipeline for OmniNode Bridge - STREAMLINED
+# Complex security, performance, and reliability testing temporarily disabled for development speed
+# Most jobs commented out - uncomment when ready for full validation
+
+name: Enhanced CI/CD Pipeline (Streamlined)
+
+# Temporarily disabled for bridge project development - enhanced CI not needed
+on:
+  # push:
+  #   branches: [ main, develop, 'fix/*', 'feature/*' ]
+  # pull_request:
+  #   branches: [ main, develop ]
+  workflow_dispatch:
+  # Only run on manual dispatch when enhanced CI is needed
+
+env:
+  # Environment configuration
+  ENVIRONMENT: test
+  LOG_LEVEL: info
+  SERVICE_VERSION: ${{ github.sha }}
+
+  # Registry and Docker configuration
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+  # Security configuration (test values)
+  SECURITY_MODE: permissive
+  API_KEY: test-api-key-for-ci  # pragma: allowlist secret
+  JWT_SECRET: test-jwt-secret-minimum-32-characters-long-for-ci-testing  # pragma: allowlist secret
+
+  # Test database configuration
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_DATABASE: omninode_bridge_test
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+  # Test Kafka configuration
+  KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+  KAFKA_WORKFLOW_TOPIC: test.omninode_bridge.onex.workflows.v1
+  KAFKA_TASK_EVENTS_TOPIC: test.omninode_bridge.onex.task-events.v1
+
+jobs:
+  # Pre-validation: Fast checks to fail early
+  pre-validation:
+    name: Pre-validation Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip duplicate actions
+        id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          concurrent_skipping: 'same_content_newer'
+          skip_after_successful_duplicate: 'true'
+
+      - name: Validate workflow syntax
+        run: |
+          # Check if any workflow files have syntax issues
+          find .github/workflows -name "*.yml" -o -name "*.yaml" | \
+          xargs -I {} sh -c 'echo "Validating {}"; python -c "import yaml; yaml.safe_load(open(\"{}\"))"'
+
+      - name: Check environment file
+        run: |
+          if [ ! -f ".env.example" ]; then
+            echo "Error: .env.example file is missing"
+            exit 1
+          fi
+          # Validate environment file has required variables
+          required_vars=("API_KEY" "POSTGRES_PASSWORD" "JWT_SECRET")
+          for var in "${required_vars[@]}"; do
+            if ! grep -q "^${var}=" .env.example; then
+              echo "Error: Required variable $var not found in .env.example"
+              exit 1
+            fi
+          done
+
+  # Enhanced security scanning temporarily disabled for development speed
+  # quality-security:
+  #   name: Code Quality & Security
+  #   runs-on: ubuntu-latest
+  #   needs: pre-validation
+  #   # Complex matrix security scanning commented out to speed up development
+  #   # Uncomment when ready for comprehensive security validation
+
+  # Parallel unit tests temporarily simplified for development speed
+  # unit-tests:
+  #   name: Unit Tests
+  #   runs-on: ubuntu-latest
+  #   needs: pre-validation
+  #   # Complex parallel test matrix commented out to speed up development
+  #   # Use basic unit tests from main CI workflow instead
+
+  # Enhanced integration tests temporarily disabled for development speed
+  # integration-tests:
+  #   name: Integration Tests
+  #   runs-on: ubuntu-latest
+  #   needs: [pre-validation, unit-tests]
+  #   # Complex multi-database integration testing commented out to speed up development
+  #   # Use basic integration tests from main CI workflow when needed
+
+  # Docker security build temporarily disabled for development speed
+  # docker-security-build:
+  #   name: Docker Security Build
+  #   runs-on: ubuntu-latest
+  #   needs: [pre-validation, quality-security]
+  #   # Complex Docker security scanning commented out to speed up development
+  #   # Use basic Docker builds from main CI workflow instead
+
+  # Comprehensive end-to-end testing temporarily disabled for development speed
+  # e2e-comprehensive:
+  #   name: E2E Comprehensive Testing
+  #   runs-on: ubuntu-latest
+  #   needs: [integration-tests, docker-security-build]
+  #   # Complex E2E testing with load testing commented out to speed up development
+  #   # Use basic deployment tests when needed
+
+  # Enhanced coverage analysis temporarily disabled for development speed
+  # coverage-analysis:
+  #   name: Coverage Analysis & Quality Gates
+  #   runs-on: ubuntu-latest
+  #   needs: [unit-tests, integration-tests]
+  #   # Complex coverage analysis with quality gates commented out to speed up development
+  #   # Use basic coverage from main CI workflow instead
+
+  # Performance and reliability validation temporarily disabled for development speed
+  # performance-reliability:
+  #   name: Performance & Reliability Validation
+  #   runs-on: ubuntu-latest
+  #   needs: [e2e-comprehensive]
+  #   # Complex performance testing and code complexity analysis commented out to speed up development
+  #   # Uncomment when ready for comprehensive performance validation
+
+  # Final validation and reporting temporarily disabled for development speed
+  # validation-report:
+  #   name: Final Validation Report
+  #   runs-on: ubuntu-latest
+  #   needs: [coverage-analysis, performance-reliability]
+  #   # Complex validation reporting commented out to speed up development
+  #   # Most validation jobs are disabled, so this report would be minimal anyway

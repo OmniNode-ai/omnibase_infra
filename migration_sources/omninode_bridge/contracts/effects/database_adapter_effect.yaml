@@ -1,0 +1,350 @@
+# ONEX v2.0 Contract - Database Adapter Effect
+# Effect node for persisting bridge workflow data to PostgreSQL
+
+schema_version: "2.0"
+contract_version: "1.0.0"
+last_updated: "2025-10-24"
+
+# Node Identity
+node_identity:
+  name: "database_adapter_effect"
+  display_name: "Bridge Database Adapter Effect"
+  node_type: "effect"
+  version: "1.0.0"
+  description: |
+    Effect node for persisting bridge workflow and metadata data to PostgreSQL.
+    Consumes Kafka events from bridge nodes (Orchestrator, Reducer, Registry) and
+    provides ACID-compliant data persistence with connection pooling and circuit breaker.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-24"
+  tags:
+    - "database-persistence"
+    - "postgresql"
+    - "effect-node"
+    - "bridge-adapter"
+    - "kafka-consumer"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/architecture/ARCHITECTURE.md"
+    type: "architecture"
+    description: "System architecture and ONEX v2.0 compliance"
+  - path: "docs/database/DATABASE_GUIDE.md"
+    type: "guide"
+    description: "Database schema and operations guide"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 10      # <10ms database operations (p95)
+    max_ms: 50         # Max acceptable latency
+  throughput:
+    target_events_per_second: 1000
+    max_concurrent_operations: 100
+  memory_usage:
+    target_mb: 128
+    max_mb: 512
+  connection_pool:
+    min_size: 5
+    max_size: 20
+    efficiency_threshold: 0.90
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - operation_type
+    - operation_data
+  properties:
+    operation_type:
+      type: "string"
+      description: "Type of database operation"
+      enum:
+        - "persist_workflow_execution"
+        - "persist_workflow_step"
+        - "persist_bridge_state"
+        - "persist_fsm_transition"
+        - "persist_metadata_stamp"
+        - "update_node_heartbeat"
+    operation_data:
+      type: "object"
+      description: "Operation-specific data payload"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Correlation ID for tracking"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - success
+    - execution_time_ms
+  properties:
+    success:
+      type: "boolean"
+      description: "Operation success status"
+    operation_id:
+      type: "string"
+      format: "uuid"
+      description: "Database operation identifier"
+    rows_affected:
+      type: "integer"
+      minimum: 0
+      description: "Number of rows affected"
+    execution_time_ms:
+      type: "integer"
+      minimum: 0
+      description: "Execution time in milliseconds"
+    error_message:
+      type: "string"
+      description: "Error message if operation failed"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/effect_operations.yaml"
+    - "./contracts/kafka_events.yaml"
+    - "./contracts/state_management.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "postgresql"
+      type: "database"
+      required: true
+      host: "omninode-bridge-postgres"
+      port: 5432
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+  libraries:
+    - name: "asyncpg"
+      version: ">=0.29.0"
+      description: "Async PostgreSQL client"
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation and settings management"
+    - name: "aiokafka"
+      version: ">=0.11.0"
+      description: "Async Kafka client"
+
+# IO Operations (Effect Node Specific)
+io_operations:
+  - name: "persist_workflow_execution"
+    description: "Insert/update workflow execution record"
+    target_ms: 10
+    input_model: "ModelWorkflowExecutionInput"
+    output_model: "ModelDatabaseOperationOutput"
+    side_effects:
+      - "database_write"
+      - "transaction_commit"
+
+  - name: "persist_workflow_step"
+    description: "Insert workflow step history record"
+    target_ms: 8
+    input_model: "ModelWorkflowStepInput"
+    output_model: "ModelDatabaseOperationOutput"
+    side_effects:
+      - "database_insert"
+      - "transaction_commit"
+
+  - name: "persist_bridge_state"
+    description: "Upsert bridge aggregation state"
+    target_ms: 12
+    input_model: "ModelBridgeStateInput"
+    output_model: "ModelDatabaseOperationOutput"
+    side_effects:
+      - "database_upsert"
+      - "transaction_commit"
+
+  - name: "persist_fsm_transition"
+    description: "Insert FSM state transition record"
+    target_ms: 8
+    input_model: "ModelFSMTransitionInput"
+    output_model: "ModelDatabaseOperationOutput"
+    side_effects:
+      - "database_insert"
+      - "transaction_commit"
+
+  - name: "persist_metadata_stamp"
+    description: "Insert metadata stamp audit record"
+    target_ms: 10
+    input_model: "ModelMetadataStampInput"
+    output_model: "ModelDatabaseOperationOutput"
+    side_effects:
+      - "database_insert"
+      - "transaction_commit"
+
+  - name: "update_node_heartbeat"
+    description: "Update node heartbeat timestamp"
+    target_ms: 5
+    input_model: "ModelNodeHeartbeatInput"
+    output_model: "ModelDatabaseOperationOutput"
+    side_effects:
+      - "database_update"
+      - "transaction_commit"
+
+# Kafka Integration
+kafka:
+  consumer_topics:
+    - "dev.omninode-bridge.orchestrator.workflow-started.v1"
+    - "dev.omninode-bridge.orchestrator.workflow-completed.v1"
+    - "dev.omninode-bridge.orchestrator.workflow-failed.v1"
+    - "dev.omninode-bridge.orchestrator.step-completed.v1"
+    - "dev.omninode-bridge.orchestrator.stamp-created.v1"
+    - "dev.omninode-bridge.reducer.state-aggregation-completed.v1"
+    - "dev.omninode-bridge.registry.node-heartbeat.v1"
+  consumer_group: "database-adapter-effect-group"
+  event_envelope: "OnexEnvelopeV1"
+  auto_commit: false
+  max_poll_records: 100
+
+# Database Schema
+database_tables:
+  - name: "workflow_executions"
+    description: "Workflow execution tracking"
+    operations: ["insert", "update", "select"]
+  - name: "workflow_steps"
+    description: "Workflow step history"
+    operations: ["insert", "select"]
+  - name: "bridge_states"
+    description: "Bridge aggregation state (UPSERT)"
+    operations: ["upsert", "select"]
+  - name: "fsm_transitions"
+    description: "FSM state transition history"
+    operations: ["insert", "select"]
+  - name: "metadata_stamps"
+    description: "Metadata stamp audit trail"
+    operations: ["insert", "select"]
+  - name: "node_registrations"
+    description: "Node heartbeat and health"
+    operations: ["update", "insert", "select"]
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 1.5
+    timeout_ms: 60000  # 1 minute
+  fallback_strategy: "graceful_degradation"
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_timeout_seconds: 30
+    half_open_max_calls: 3
+  error_codes:
+    - code: "DATABASE_CONNECTION_FAILED"
+      description: "PostgreSQL connection failed"
+      severity: "critical"
+    - code: "DATABASE_OPERATION_FAILED"
+      description: "Database operation failed"
+      severity: "error"
+    - code: "TRANSACTION_ROLLBACK"
+      description: "Transaction rolled back due to error"
+      severity: "warning"
+    - code: "VALIDATION_ERROR"
+      description: "Input validation failed"
+      severity: "error"
+    - code: "CIRCUIT_BREAKER_OPEN"
+      description: "Circuit breaker is open, rejecting requests"
+      severity: "warning"
+
+# Quality Gates
+quality_gates:
+  - name: "database_operation_performance"
+    description: "Verify database operations <10ms (p95)"
+    threshold: 0.95
+  - name: "connection_pool_efficiency"
+    description: "Verify connection pool efficiency >90%"
+    threshold: 0.90
+  - name: "type_safety"
+    description: "Verify Pydantic v2 type safety"
+    threshold: 1.0
+  - name: "transaction_success_rate"
+    description: "Verify transaction success rate >99%"
+    threshold: 0.99
+
+# Health Checks
+health_checks:
+  - name: "postgresql_connectivity"
+    type: "database"
+    interval_seconds: 30
+    timeout_seconds: 5
+    critical: true
+  - name: "kafka_consumer"
+    type: "network"
+    interval_seconds: 60
+    timeout_seconds: 3
+    critical: false
+  - name: "circuit_breaker_status"
+    type: "internal"
+    interval_seconds: 30
+    critical: true
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 90
+    required: true
+    critical_paths:
+      - "database_operations"
+      - "circuit_breaker"
+      - "kafka_consumer"
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "end_to_end_persistence"
+      - "kafka_event_flow"
+      - "transaction_rollback"
+      - "circuit_breaker_behavior"
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "database_operation_time"
+        target: 10.0
+        unit: "milliseconds"
+      - metric: "throughput"
+        target: 1000
+        unit: "events_per_second"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "database_operations_total"
+      type: "counter"
+      description: "Total database operations"
+      labels: ["operation_type", "status"]
+    - name: "database_operation_duration_seconds"
+      type: "histogram"
+      description: "Database operation duration"
+      buckets: [0.005, 0.01, 0.02, 0.05, 0.1]
+    - name: "connection_pool_size"
+      type: "gauge"
+      description: "Current connection pool size"
+    - name: "connection_pool_usage"
+      type: "gauge"
+      description: "Connection pool usage percentage"
+    - name: "circuit_breaker_state"
+      type: "gauge"
+      description: "Circuit breaker state (0=closed, 1=open, 2=half_open)"
+    - name: "kafka_messages_consumed_total"
+      type: "counter"
+      description: "Total Kafka messages consumed"
+    - name: "operation_errors_total"
+      type: "counter"
+      description: "Total operation errors by type"
+      labels: ["error_type"]
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+  traces:
+    enabled: true
+    sampling_rate: 0.1
+    trace_database_operations: true

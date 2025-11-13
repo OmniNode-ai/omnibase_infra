@@ -1,0 +1,57 @@
+---
+# API client pattern - External service integration
+node_id: "api_client_effect"
+node_type: "effect"
+version: "v1_0_0"
+namespace: "omninode.services.integration"
+
+metadata:
+  name: "API Client Effect"
+  description: "API client with health checks, metrics, and introspection"
+  author: "Test Generator"
+  tags: ["api", "client", "integration", "external"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinHealthCheck"
+      config:
+        health_check_interval_seconds: 60
+        critical_checks:
+          - "api_reachability"
+
+    - mixin_name: "MixinMetrics"
+      config:
+        metrics_enabled: true
+        track_latency: true
+        track_error_rate: true
+
+    - mixin_name: "MixinRequestResponseIntrospection"
+      config:
+        introspection_enabled: true
+        log_requests: true
+        log_responses: true
+
+    - mixin_name: "MixinLogData"
+      config:
+        log_level: "DEBUG"
+
+input_schema:
+  type: "object"
+  properties:
+    endpoint:
+      type: "string"
+    method:
+      type: "string"
+      enum: ["GET", "POST", "PUT", "DELETE"]
+    payload:
+      type: "object"
+
+output_schema:
+  type: "object"
+  properties:
+    status_code:
+      type: "integer"
+    response_data:
+      type: "object"
+    latency_ms:
+      type: "number"

@@ -1,0 +1,1 @@
+"""Deployment Receiver Effect Node."""

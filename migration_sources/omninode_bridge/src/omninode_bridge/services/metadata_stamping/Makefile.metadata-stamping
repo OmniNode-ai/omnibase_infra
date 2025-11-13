@@ -1,0 +1,106 @@
+# Makefile for metadata stamping service development
+
+.PHONY: help install dev test lint format clean docker-build docker-up docker-down db-upgrade
+
+# Default target
+help:
+	@echo "Available commands for MetadataStampingService:"
+	@echo "  install       Install dependencies"
+	@echo "  dev          Start development server"
+	@echo "  test         Run tests"
+	@echo "  test-cov     Run tests with coverage"
+	@echo "  test-perf    Run performance tests"
+	@echo "  lint         Run linting checks"
+	@echo "  format       Format code"
+	@echo "  clean        Clean up generated files"
+	@echo "  docker-build Build Docker images"
+	@echo "  docker-up    Start Docker development environment"
+	@echo "  docker-down  Stop Docker development environment"
+	@echo "  db-upgrade   Run database migrations"
+	@echo "  db-reset     Reset database"
+
+# Development setup
+install:
+	poetry install --with dev
+	poetry run pre-commit install
+
+dev:
+	METADATA_STAMPING_SERVICE_RELOAD=true \
+	METADATA_STAMPING_LOG_LEVEL=DEBUG \
+	poetry run python -m src.omninode_bridge.services.metadata_stamping.main
+
+# Database operations
+db-upgrade:
+	poetry run alembic upgrade head
+
+db-downgrade:
+	poetry run alembic downgrade -1
+
+db-reset:
+	poetry run alembic downgrade base
+	poetry run alembic upgrade head
+
+# Testing
+test:
+	poetry run pytest src/omninode_bridge/services/metadata_stamping/tests/ -v
+
+test-cov:
+	poetry run pytest src/omninode_bridge/services/metadata_stamping/tests/ \
+		-v --cov=src/omninode_bridge/services/metadata_stamping \
+		--cov-report=term-missing --cov-report=html
+
+test-perf:
+	poetry run pytest src/omninode_bridge/services/metadata_stamping/tests/ \
+		-v -m performance
+
+test-integration:
+	poetry run pytest src/omninode_bridge/services/metadata_stamping/tests/ \
+		-v -m integration
+
+# Code quality
+lint:
+	poetry run ruff check src/omninode_bridge/services/metadata_stamping/
+	poetry run mypy src/omninode_bridge/services/metadata_stamping/
+
+format:
+	poetry run black src/omninode_bridge/services/metadata_stamping/
+	poetry run isort src/omninode_bridge/services/metadata_stamping/
+
+# Docker operations
+docker-build:
+	docker-compose -f docker-compose.metadata-stamping.yml build
+
+docker-up:
+	docker-compose -f docker-compose.metadata-stamping.yml up -d
+
+docker-down:
+	docker-compose -f docker-compose.metadata-stamping.yml down
+
+docker-logs:
+	docker-compose -f docker-compose.metadata-stamping.yml logs -f metadata-stamping
+
+docker-test:
+	docker-compose -f docker-compose.metadata-stamping.yml run --rm metadata-stamping \
+		poetry run pytest src/omninode_bridge/services/metadata_stamping/tests/ -v
+
+# Cleanup
+clean:
+	find . -type f -name "*.pyc" -delete
+	find . -type d -name "__pycache__" -delete
+	find . -type d -name "*.egg-info" -exec rm -rf {} +
+	rm -rf dist/
+	rm -rf build/
+	rm -rf htmlcov/
+	rm -rf .coverage
+	rm -rf .pytest_cache/
+	rm -rf .mypy_cache/
+
+# Production deployment helpers
+build-prod:
+	docker build --target production -t metadata-stamping:latest \
+		-f docker/metadata-stamping/Dockerfile .
+
+run-prod:
+	docker run -p 8053:8053 \
+		--env-file .env.production \
+		metadata-stamping:latest

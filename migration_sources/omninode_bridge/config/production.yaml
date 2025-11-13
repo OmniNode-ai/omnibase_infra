@@ -1,0 +1,265 @@
+# Production Environment Configuration
+# Overrides base node configuration for production deployment
+# Applied on top of orchestrator.yaml or reducer.yaml
+
+# Environment identification
+environment: "production"
+
+# Orchestrator production overrides
+orchestrator:
+  # High concurrency for production load
+  max_concurrent_workflows: 500
+  workflow_timeout_seconds: 180  # Shorter timeout
+  workflow_retry_attempts: 5
+  task_batch_size: 100
+
+  # Optimized worker pool
+  worker_pool_size: 20
+  event_processing_buffer_size: 5000
+
+# Reducer production overrides
+reducer:
+  # Large batches for efficiency
+  aggregation_batch_size: 500
+  batch_size: 200
+  max_aggregation_buffer_size: 50000
+
+  # Less frequent persistence for performance
+  state_persistence_interval_seconds: 60
+  state_snapshot_interval_seconds: 600
+
+  # High worker counts
+  worker_pool_size: 16
+  aggregation_worker_threads: 8
+  io_worker_threads: 8
+  event_processing_buffer_size: 2000
+
+# Service endpoints (production cluster)
+services:
+  onextree:
+    host: "onextree-service"  # Kubernetes service name
+    port: 8051
+    base_url: "http://onextree-service:8051"
+    timeout_seconds: 15  # Strict timeout
+
+  metadata_stamping:
+    host: "metadata-stamping-service"
+    port: 8053
+    base_url: "http://metadata-stamping-service:8053"
+    timeout_seconds: 15  # Strict timeout
+
+# Kafka configuration (production cluster)
+kafka:
+  bootstrap_servers: "${KAFKA_BOOTSTRAP:-kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092}"
+
+  # Production producer settings
+  producer:
+    compression_type: "zstd"  # Best compression
+    batch_size: 65536  # 64KB
+    linger_ms: 10
+    acks: "all"  # Full replication
+    max_in_flight_requests: 5
+    request_timeout_ms: 30000
+    retries: 10
+
+  # Production consumer settings
+  consumer:
+    max_poll_records: 1000
+    max_poll_interval_ms: 300000
+    session_timeout_ms: 30000
+    fetch_min_bytes: 4096
+    fetch_max_wait_ms: 500
+
+  # Production topics (no prefix)
+  topics:
+    workflow_commands: "omninode.bridge.workflow.commands.v1"
+    workflow_events: "omninode.bridge.workflow.events.v1"
+    task_events: "omninode.bridge.task.events.v1"
+    state_sync: "omninode.bridge.state.sync.v1"
+    aggregated_metrics: "omninode.bridge.metrics.aggregated.v1"
+    state_snapshots: "omninode.bridge.state.snapshots.v1"
+
+# Database configuration (production PostgreSQL cluster)
+database:
+  host: "postgres-primary"  # Kubernetes service or cloud endpoint (configurable via DB_HOST env override)
+  port: 5432
+  database: "omninode_bridge_prod"
+  user: "bridge_service"
+  # Password via POSTGRES_PASSWORD env var or secret
+
+  # Large pool for production
+  pool_min_size: 20
+  pool_max_size: 100
+  pool_timeout_seconds: 5
+
+  # Strict timeouts
+  query_timeout_seconds: 30
+  command_timeout_seconds: 60
+
+  # Production-optimized
+  statement_cache_size: 500
+  batch_insert_size: 1000
+
+# Logging configuration
+logging:
+  level: "INFO"  # Production logging level
+  format: "json"  # Structured JSON logs
+  enable_structured_logging: true
+  log_requests: false  # Reduce log volume
+  log_responses: false
+
+  # Multiple outputs
+  outputs:
+    - type: "console"
+      enabled: true
+      level: "INFO"
+    - type: "file"
+      enabled: true
+      path: "/var/log/omninode/production.log"
+      max_size_mb: 500
+      backup_count: 30
+      level: "INFO"
+    - type: "file"
+      enabled: true
+      path: "/var/log/omninode/errors.log"
+      max_size_mb: 200
+      backup_count: 90
+      level: "ERROR"
+
+# Monitoring configuration
+monitoring:
+  enable_prometheus: true
+  prometheus_port: 9090
+  metrics_interval_seconds: 10  # Frequent metrics
+
+  # Health checks
+  health_check_interval_seconds: 15
+  service_health_timeout_seconds: 3
+
+  # Comprehensive tracking
+  track_workflow_latency: true
+  track_task_latency: true
+  track_dependency_resolution_time: true
+  track_aggregation_latency: true
+  track_batch_processing_latency: true
+  track_state_persistence_latency: true
+  track_buffer_utilization: true
+
+  # Alerting thresholds
+  alerts:
+    workflow_latency_p99_ms: 500
+    task_latency_p99_ms: 200
+    aggregation_latency_p99_ms: 100
+    buffer_utilization_threshold: 0.85
+    error_rate_threshold: 0.01
+
+# Circuit breaker (strict)
+circuit_breaker:
+  enabled: true
+  failure_threshold: 3
+  recovery_timeout_seconds: 120
+  half_open_max_requests: 2
+
+# Caching (optimized)
+cache:
+  enabled: true
+  workflow_state_ttl_seconds: 7200  # 2 hours
+  task_result_ttl_seconds: 3600  # 1 hour
+  aggregation_state_ttl_seconds: 1800  # 30 minutes
+  dependency_graph_ttl_seconds: 14400  # 4 hours
+  dimension_cache_ttl_seconds: 3600
+  max_cache_size_mb: 1024  # 1GB
+
+# Aggregation (production settings)
+aggregation:
+  metrics:
+    enabled: true
+    window_seconds: 60
+    functions: ["count", "sum", "avg", "min", "max", "p50", "p95", "p99"]
+    dimensions: ["node_type", "operation", "status", "region", "cluster"]
+
+  events:
+    enabled: true
+    window_seconds: 30
+    group_by: ["event_type", "source", "environment"]
+    count_threshold: 1000
+
+  workflow_state:
+    enabled: true
+    window_seconds: 120
+    track_transitions: true
+    track_duration: true
+    track_errors: true
+
+# Windowing (production configuration)
+windowing:
+  tumbling:
+    enabled: true
+    sizes: [60, 300, 3600, 86400]  # 1min, 5min, 1hour, 1day
+
+  sliding:
+    enabled: true
+    size_seconds: 300
+    slide_seconds: 60
+
+  session:
+    enabled: true
+    gap_seconds: 600
+
+# Security settings
+security:
+  # TLS/SSL
+  enable_tls: true
+  tls_cert_path: "/etc/certs/tls.crt"
+  tls_key_path: "/etc/certs/tls.key"
+  tls_ca_path: "/etc/certs/ca.crt"
+
+  # Authentication
+  enable_authentication: true
+  auth_token_ttl_seconds: 3600
+
+  # Rate limiting
+  enable_rate_limiting: true
+  rate_limit_requests_per_minute: 10000
+  rate_limit_burst_size: 500
+
+# Resource limits
+resources:
+  # Memory limits
+  max_memory_mb: 4096
+  memory_warning_threshold_mb: 3584
+
+  # CPU limits
+  max_cpu_percent: 80
+  cpu_warning_threshold_percent: 70
+
+  # Storage limits
+  max_disk_usage_mb: 10240
+  disk_warning_threshold_mb: 8192
+
+# High availability
+high_availability:
+  # Replication
+  enable_replication: true
+  replication_factor: 3
+  min_in_sync_replicas: 2
+
+  # Leader election
+  enable_leader_election: true
+  leader_election_timeout_seconds: 30
+
+  # Failover
+  enable_auto_failover: true
+  failover_timeout_seconds: 60
+
+# Backup and disaster recovery
+backup:
+  # State backups
+  enable_state_backup: true
+  backup_interval_seconds: 3600
+  backup_retention_days: 30
+  backup_storage_path: "/var/backups/omninode"
+
+  # Point-in-time recovery
+  enable_point_in_time_recovery: true
+  wal_retention_hours: 168  # 1 week

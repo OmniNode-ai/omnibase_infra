@@ -1,0 +1,137 @@
+name: execute_effect
+description: "Effect execute_effect method with external I/O operations"
+category: structure
+applicable_to: [effect]
+priority: critical
+code_template: |
+  async def execute_effect(self, contract: ModelContractEffect) -> {OutputModel}:
+      """
+      Execute {operation} effect.
+
+      Args:
+          contract: Effect contract with input_state containing operation params
+
+      Returns:
+          {OutputModel} with operation results
+
+      Raises:
+          OnexError: If operation fails
+      """
+      start_time = time.perf_counter()
+      correlation_id = contract.correlation_id
+
+      emit_log_event(
+          LogLevel.INFO,
+          "Starting {operation} effect",
+          {
+              "node_id": str(self.node_id),
+              "correlation_id": str(correlation_id),
+          },
+      )
+
+      try:
+          # Parse request from contract input_state
+          input_state = contract.input_state or {}
+          request = {RequestModel}(
+              operation=input_state.get("operation"),
+              # ... other fields
+              correlation_id=correlation_id,
+          )
+
+          # Route to appropriate handler
+          if request.operation == "operation_type":
+              result = await self._handle_operation(request)
+          else:
+              raise OnexError(
+                  message=f"Unknown operation: {request.operation}",
+                  error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+                  operation=str(request.operation),
+              )
+
+          duration_ms = (time.perf_counter() - start_time) * 1000
+
+          emit_log_event(
+              LogLevel.INFO,
+              f"{Operation} effect completed",
+              {
+                  "node_id": str(self.node_id),
+                  "correlation_id": str(correlation_id),
+                  "duration_ms": round(duration_ms, 2),
+              },
+          )
+
+          return result
+
+      except OnexError:
+          raise
+
+      except Exception as e:
+          emit_log_event(
+              LogLevel.ERROR,
+              f"{Operation} effect failed: {e}",
+              {
+                  "node_id": str(self.node_id),
+                  "correlation_id": str(correlation_id),
+                  "error": str(e),
+              },
+          )
+
+          raise OnexError(
+              message=f"{Operation} effect failed: {e}",
+              error_code=EnumCoreErrorCode.OPERATION_FAILED,
+              node_id=str(self.node_id),
+              correlation_id=str(correlation_id),
+              error=str(e),
+          ) from e
+
+example_nodes:
+  - llm_effect
+  - distributed_lock_effect
+  - store_effect
+
+configuration:
+  method_signature: "execute_effect"
+  contract_type: "ModelContractEffect"
+  returns_async: true
+  io_operations: true
+
+execution_phases:
+  - initialization (start_time, correlation_id)
+  - request parsing (from input_state)
+  - operation routing
+  - handler execution
+  - metrics tracking (duration_ms)
+  - logging (start, completion, failure)
+
+prerequisites:
+  - ModelContractEffect imported
+  - time.perf_counter available
+  - Request model defined
+  - Operation handlers implemented
+
+metrics:
+  overhead_ms: 1.5
+  memory_bytes: 1024
+
+best_practices:
+  - "Start timer at top of method"
+  - "Extract correlation_id from contract"
+  - "Log effect start with correlation_id"
+  - "Parse request from input_state"
+  - "Route to appropriate handler"
+  - "Validate operation type"
+  - "Track duration_ms"
+  - "Log completion with duration"
+  - "Re-raise OnexError without wrapping"
+  - "Wrap other exceptions in OnexError"
+  - "Include correlation_id in all logs"
+
+validation_rules:
+  - "Method must be async"
+  - "Must accept ModelContractEffect"
+  - "Must extract correlation_id"
+  - "Must parse input_state"
+  - "Must validate operation type"
+  - "Must track duration"
+  - "Must log start and completion"
+  - "Must handle errors properly"

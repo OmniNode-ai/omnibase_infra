@@ -1,0 +1,47 @@
+# Bandit security scanner configuration for bridge project
+# Optimized for development velocity while maintaining essential security checks
+
+exclude_dirs:
+  - tests
+  - scripts/test
+  - examples
+  - docs
+  - .venv
+  - .pytest_cache
+  - __pycache__
+  - htmlcov-unit
+  - alembic
+  - .github
+  - monitoring
+
+# Skip specific test IDs for known false positives in bridge/microservices
+skips:
+  - B104  # hardcoded_bind_all_interfaces - OK for containerized microservices
+  - B101  # assert_used - OK for development/testing code
+  - B603  # subprocess_without_shell_equals_true - OK for controlled subprocess usage
+  - B607  # start_process_with_partial_path - OK for containerized environments
+  - B113  # request_without_timeout - OK for internal service calls in bridge
+  - B108  # hardcoded_tmp_directory - OK for containerized temporary files
+  - B112  # try_except_continue - OK for resilient bridge processing
+  - B110  # try_except_pass - OK for optional features in bridge
+  - B301  # pickle - OK for controlled internal state serialization
+  - B302  # marshal - OK for performance-critical bridge operations
+  - B303  # insecure_hash - OK for non-cryptographic hashing
+  - B324  # insecure_hash_function - OK for checksums and non-security uses
+  - B506  # yaml_load - OK when using safe_load (which we do)
+
+# Exclude specific files with controlled security patterns
+exclude:
+  - src/omninode_bridge/services/workflow_coordinator.py  # Contains controlled eval() usage for workflow DSL
+  - src/omninode_bridge/utils/workflow_cache.py  # Contains controlled pickle usage for performance
+  - src/omninode_bridge/cli/commands.py  # Contains subprocess calls for CLI operations
+  - scripts/setup-security.sh  # Shell script with expected security patterns
+  - examples/  # Example code may contain simplified patterns
+  - tests/  # Test code may use patterns not suitable for production
+
+# Test configuration - more lenient for bridge project
+tests: []
+
+# Severity and confidence levels - balanced for bridge project
+severity: HIGH  # Only flag HIGH and CRITICAL issues
+confidence: MEDIUM  # Medium confidence to reduce false positives

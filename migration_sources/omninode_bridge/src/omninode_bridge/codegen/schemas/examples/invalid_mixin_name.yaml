@@ -1,0 +1,27 @@
+# Example: Invalid Contract - Wrong Mixin Name Pattern
+#
+# VALIDATION ERROR: Mixin name doesn't match required pattern
+# Expected: ^Mixin[A-Z][a-zA-Z0-9]*$
+# Actual: InvalidMixinName (doesn't start with "Mixin")
+
+schema_version: "v2.0.0"
+name: "NodeInvalidMixinEffect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+description: "Example contract with invalid mixin name"
+
+mixins:
+  - name: "InvalidMixinName"  # ERROR: Must start with "Mixin"
+    enabled: true
+
+subcontracts:
+  effect:
+    operations:
+      - "initialize"
+      - "shutdown"
+
+# Expected validation error:
+# ValidationError: mixins[0].name: 'InvalidMixinName' does not match pattern '^Mixin[A-Z][a-zA-Z0-9]*$'

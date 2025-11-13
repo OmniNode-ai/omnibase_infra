@@ -1,0 +1,294 @@
+# FSM Subcontract - Finite State Machine for NodeBridgeReducer
+# Workflow FSM State Tracking for Bridge Aggregation
+
+subcontract_type: "fsm"
+version: "1.0.0"
+description: "Defines FSM state machine for workflow tracking during aggregation operations"
+
+# === STATE MACHINE CONFIGURATION ===
+state_machine:
+  name: "bridge_workflow_fsm"
+  description: "Manages workflow states during aggregation and reduction"
+  initial_state: "PENDING"
+  version: "1.0.0"
+
+# === STATE DEFINITIONS ===
+# Using workflow FSM pattern: PENDING → PROCESSING → COMPLETED/FAILED
+states:
+  PENDING:
+    state_name: "PENDING"
+    state_type: "initial"
+    description: "Workflow pending aggregation execution"
+    is_terminal: false
+    timeout_ms: 30000  # 30 seconds
+    allowed_transitions:
+      - "PROCESSING"
+      - "FAILED"
+    actions:
+      on_enter:
+        - "log_workflow_started"
+        - "initialize_aggregation_buffer"
+      on_exit:
+        - "update_timestamp"
+
+  PROCESSING:
+    state_name: "PROCESSING"
+    state_type: "active"
+    description: "Workflow processing - actively aggregating metadata"
+    is_terminal: false
+    timeout_ms: 15000  # 15 seconds
+    allowed_transitions:
+      - "COMPLETED"
+      - "FAILED"
+    actions:
+      on_enter:
+        - "increment_processing_count"
+        - "start_aggregation_timer"
+      on_exit:
+        - "stop_aggregation_timer"
+        - "log_transition"
+
+  COMPLETED:
+    state_name: "COMPLETED"
+    state_type: "terminal"
+    description: "Workflow completed successfully"
+    is_terminal: true
+    is_recoverable: false
+    allowed_transitions: []  # Terminal state
+    actions:
+      on_enter:
+        - "publish_completion_event"
+        - "persist_final_state"
+        - "cleanup_resources"
+
+  FAILED:
+    state_name: "FAILED"
+    state_type: "error"
+    description: "Workflow failed during aggregation"
+    is_terminal: true
+    is_recoverable: true
+    allowed_transitions: []  # Terminal state, but can be retried
+    actions:
+      on_enter:
+        - "publish_failure_event"
+        - "log_error_details"
+        - "persist_error_state"
+        - "cleanup_resources"
+
+# === TRANSITION DEFINITIONS ===
+transitions:
+  start_workflow:
+    transition_name: "start_workflow"
+    from_state: "PENDING"
+    to_state: "PROCESSING"
+    trigger: "workflow_started"
+    description: "Start aggregation workflow"
+    guard_conditions:
+      - "has_valid_input"
+      - "within_timeout"
+    actions:
+      - "log_transition"
+      - "increment_processing_count"
+      - "initialize_metrics"
+
+  complete_workflow:
+    transition_name: "complete_workflow"
+    from_state: "PROCESSING"
+    to_state: "COMPLETED"
+    trigger: "workflow_completed"
+    description: "Complete aggregation successfully"
+    guard_conditions:
+      - "all_data_processed"
+      - "state_persisted"
+    actions:
+      - "log_transition"
+      - "publish_completion_event"
+      - "finalize_metrics"
+      - "cleanup_resources"
+
+  fail_workflow:
+    transition_name: "fail_workflow"
+    from_state: "*"  # Can fail from any state
+    to_state: "FAILED"
+    trigger: "error_occurred"
+    description: "Fail workflow due to error"
+    guard_conditions:
+      - "is_terminal_error"
+    actions:
+      - "log_transition"
+      - "log_error_details"
+      - "publish_failure_event"
+      - "cleanup_resources"
+
+# === STATE TRACKING ===
+tracking:
+  track_transitions: true
+  persist_history: true
+  history_retention_days: 90
+  max_history_entries: 1000
+
+  # Transition History Schema
+  history_fields:
+    - "transition_id"
+    - "workflow_id"
+    - "correlation_id"
+    - "from_state"
+    - "to_state"
+    - "trigger"
+    - "timestamp"
+    - "duration_ms"
+    - "metadata"
+
+# === PERSISTENCE CONFIGURATION ===
+persistence:
+  backend: "postgresql"
+  table_name: "fsm_workflow_states"
+  enable_versioning: true
+  enable_atomic_transitions: true
+
+  # State Snapshots
+  enable_snapshots: true
+  snapshot_interval_ms: 5000
+
+  # Schema
+  state_schema:
+    workflow_id: "UUID"
+    correlation_id: "UUID"
+    namespace: "VARCHAR(255)"
+    current_state: "VARCHAR(50)"
+    previous_state: "VARCHAR(50)"
+    transition_count: "INTEGER"
+    transition_history: "JSONB"
+    metadata: "JSONB"
+    created_at: "TIMESTAMP WITH TIME ZONE"
+    updated_at: "TIMESTAMP WITH TIME ZONE"
+
+# === RECOVERY CONFIGURATION ===
+recovery:
+  enable_state_recovery: true
+  recovery_on_startup: true
+  recovery_strategy: "last_known_state"  # last_known_state, checkpoint, replay
+  max_recovery_attempts: 3
+  recovery_timeout_ms: 10000
+
+  # Checkpoint Configuration
+  enable_checkpoints: true
+  checkpoint_interval_ms: 30000  # 30 seconds
+  checkpoint_retention_count: 10
+
+# === TIMEOUT HANDLING ===
+timeout_handling:
+  enable_timeout_detection: true
+  timeout_check_interval_ms: 1000
+
+  # Timeout Actions
+  on_timeout:
+    - "transition_to_failed"
+    - "log_timeout_event"
+    - "publish_timeout_alert"
+    - "cleanup_resources"
+
+# === EVENT PUBLISHING ===
+events:
+  publish_state_changes: true
+  publish_transitions: true
+
+  event_types:
+    - name: "state_entered"
+      description: "Published when entering a new state"
+      kafka_topic: "bridge.fsm.state_entered"
+    - name: "state_exited"
+      description: "Published when exiting a state"
+      kafka_topic: "bridge.fsm.state_exited"
+    - name: "transition_started"
+      description: "Published when state transition begins"
+      kafka_topic: "bridge.fsm.transition_started"
+    - name: "transition_completed"
+      description: "Published when state transition completes"
+      kafka_topic: "bridge.fsm.transition_completed"
+    - name: "transition_failed"
+      description: "Published when state transition fails"
+      kafka_topic: "bridge.fsm.transition_failed"
+
+# === GUARD CONDITIONS ===
+guard_conditions:
+  has_valid_input:
+    type: "validation"
+    description: "Validates input data is present and well-formed"
+    implementation: "_validate_input_data"
+
+  within_timeout:
+    type: "time_constraint"
+    description: "Ensures operation hasn't exceeded timeout"
+    implementation: "_check_timeout"
+
+  all_data_processed:
+    type: "completion_check"
+    description: "Verifies all data has been aggregated"
+    implementation: "_verify_aggregation_complete"
+
+  state_persisted:
+    type: "persistence_check"
+    description: "Confirms state was successfully persisted to database"
+    implementation: "_verify_state_persisted"
+
+  is_terminal_error:
+    type: "error_classification"
+    description: "Determines if error is terminal (non-recoverable)"
+    implementation: "_classify_error"
+
+# === VALIDATION RULES ===
+validation:
+  validate_transitions: true
+  allow_invalid_transitions: false  # Strict validation
+  log_invalid_transitions: true
+
+  # Transition Validation Rules
+  validation_rules:
+    - rule: "source_state_exists"
+      description: "Source state must exist in state machine"
+    - rule: "target_state_exists"
+      description: "Target state must exist in state machine"
+    - rule: "transition_allowed"
+      description: "Transition must be in allowed_transitions list"
+    - rule: "guard_conditions_met"
+      description: "All guard conditions must pass"
+
+# === PERFORMANCE TUNING ===
+performance:
+  enable_state_caching: true
+  cache_ttl_seconds: 60
+  enable_parallel_transitions: false  # Sequential transitions for safety
+  max_concurrent_workflows: 50
+
+  # Optimization
+  batch_state_updates: true
+  batch_size: 20
+  batch_flush_interval_ms: 1000
+
+# === MONITORING & METRICS ===
+monitoring:
+  enable_transition_metrics: true
+  enable_state_duration_metrics: true
+  enable_error_metrics: true
+
+  metrics:
+    - name: "fsm_state_transitions_total"
+      type: "counter"
+      description: "Total state transitions"
+      labels: ["from_state", "to_state", "namespace"]
+
+    - name: "fsm_state_duration_seconds"
+      type: "histogram"
+      description: "Time spent in each state"
+      labels: ["state", "namespace"]
+
+    - name: "fsm_transition_errors_total"
+      type: "counter"
+      description: "Total transition errors"
+      labels: ["from_state", "to_state", "error_type"]
+
+    - name: "fsm_workflows_active"
+      type: "gauge"
+      description: "Number of active workflows"
+      labels: ["namespace"]

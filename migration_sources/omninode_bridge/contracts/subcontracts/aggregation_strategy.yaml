@@ -1,0 +1,67 @@
+# ONEX v2.0 Subcontract - Aggregation Strategy
+# Streaming aggregation patterns for Reducer nodes
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Aggregation strategy patterns for streaming data processing.
+  Defines time windows, aggregation functions, and grouping strategies.
+
+window_types:
+  - type: "tumbling"
+    description: "Fixed-size non-overlapping windows"
+    use_cases:
+      - "hourly_metrics"
+      - "daily_summaries"
+
+  - type: "sliding"
+    description: "Overlapping windows that slide over time"
+    use_cases:
+      - "moving_averages"
+      - "real_time_trends"
+
+  - type: "session"
+    description: "Dynamic windows based on activity"
+    use_cases:
+      - "user_sessions"
+      - "workflow_executions"
+
+aggregation_functions:
+  - function: "count"
+    description: "Count events"
+    output_type: "integer"
+
+  - function: "sum"
+    description: "Sum numeric values"
+    output_type: "number"
+
+  - function: "avg"
+    description: "Average of values"
+    output_type: "number"
+
+  - function: "min"
+    description: "Minimum value"
+    output_type: "number"
+
+  - function: "max"
+    description: "Maximum value"
+    output_type: "number"
+
+  - function: "percentile"
+    description: "Percentile calculation"
+    parameters:
+      - percentile
+    output_type: "number"
+
+grouping_strategies:
+  - "by_field"
+  - "by_time_window"
+  - "by_composite_key"
+  - "global"
+
+performance_targets:
+  throughput_events_per_second: 1000
+  latency_ms: 100
+  memory_efficiency: "constant_space"

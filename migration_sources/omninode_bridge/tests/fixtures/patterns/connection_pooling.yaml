@@ -1,0 +1,83 @@
+# Connection Pooling Pattern
+name: connection_pooling
+category: performance
+description: Database connection pooling for efficient resource management
+
+# Applicability
+node_types:
+  - effect
+
+complexity: 4
+recommended_for:
+  - database_operations
+  - high_throughput
+  - resource_efficiency
+
+# Pattern Definition
+code_template: |
+  async def initialize_connection_pool(
+      self,
+      dsn: str,
+      min_size: int = 10,
+      max_size: int = 50,
+      command_timeout: float = 60.0,
+  ):
+      """Initialize database connection pool.
+
+      Args:
+          dsn: Database connection string
+          min_size: Minimum pool size
+          max_size: Maximum pool size
+          command_timeout: Command timeout in seconds
+      """
+      self._connection_pool = await asyncpg.create_pool(
+          dsn,
+          min_size=min_size,
+          max_size=max_size,
+          command_timeout=command_timeout,
+      )
+      logger.info(f"Connection pool initialized: {min_size}-{max_size} connections")
+
+  async def execute_query(self, query: str, *params):
+      """Execute query using connection pool.
+
+      Args:
+          query: SQL query
+          params: Query parameters
+
+      Returns:
+          Query results
+      """
+      async with self._connection_pool.acquire() as conn:
+          return await conn.fetch(query, *params)
+
+  async def close_connection_pool(self):
+      """Close database connection pool."""
+      if self._connection_pool:
+          await self._connection_pool.close()
+          logger.info("Connection pool closed")
+
+dependencies:
+  - asyncpg
+
+imports:
+  - import asyncpg
+  - import logging
+
+# Usage Example
+example: |
+  # Initialize pool
+  await node.initialize_connection_pool(
+      dsn="postgresql://user:pass@localhost/db",
+      min_size=10,
+      max_size=50
+  )
+
+  # Execute query
+  results = await node.execute_query(
+      "SELECT * FROM users WHERE id = $1",
+      user_id
+  )
+
+  # Cleanup
+  await node.close_connection_pool()

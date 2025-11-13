@@ -1,0 +1,80 @@
+{#
+Operation Specification Template
+
+Defines the specific method to generate with input/output models and business context.
+
+Template Variables:
+- method_name: str - Name of method to implement
+- method_signature: str - Full method signature
+- method_docstring: str | None - Method docstring (optional)
+- input_model: str - Input model name (e.g., "ModelContractEffect")
+- input_model_description: str - What the input contains
+- output_model: str - Output model name (e.g., "ModelContractResponse")
+- output_model_description: str - What the output contains
+- business_purpose: str - Business description of what this method does
+- operations: list[str] - List of operations this service supports
+- features: list[str] - List of required features
+- performance_requirements: dict | None - Performance requirements (optional)
+#}
+# Operation Specification
+
+## Method: {{ method_name }}
+
+**Signature:**
+```python
+{{ method_signature }}
+```
+{% if method_docstring %}
+
+**Docstring:**
+{{ method_docstring }}
+{% endif %}
+
+## Input Model: {{ input_model }}
+{{ input_model_description }}
+
+**Key Input Fields:**
+- `contract.input_state`: Dictionary containing operation parameters
+- `contract.correlation_id`: UUID for request tracing
+- `contract.io_operations`: List of I/O operation configurations (timeout, retry, etc.)
+
+## Output Model: {{ output_model }}
+{{ output_model_description }}
+
+**Required Output Fields:**
+- `success`: Boolean indicating operation success
+- `output_state`: Dictionary containing operation results
+- `metadata`: Dictionary with execution metrics (latency_ms, etc.)
+- `error`: Optional ModelOnexError if operation failed
+
+## Business Purpose
+{{ business_purpose }}
+
+**Related Operations:**
+{% for operation in operations[:5] %}
+- {{ operation }}
+{% endfor %}
+{% if operations|length > 5 %}
+- ... and {{ operations|length - 5 }} more operations
+{% endif %}
+
+**Required Features:**
+{% for feature in features[:8] %}
+- {{ feature }}
+{% endfor %}
+{% if features|length > 8 %}
+- ... and {{ features|length - 8 }} more features
+{% endif %}
+{% if performance_requirements %}
+
+## Performance Requirements
+{% for key, value in performance_requirements.items() %}
+- **{{ key }}**: {{ value }}
+{% endfor %}
+{% endif %}
+
+**Error Scenarios to Handle:**
+1. Invalid input validation (missing required fields)
+2. External system failures (connection errors, timeouts)
+3. Business logic errors (invalid state transitions)
+4. Resource exhaustion (memory, connections, etc.)

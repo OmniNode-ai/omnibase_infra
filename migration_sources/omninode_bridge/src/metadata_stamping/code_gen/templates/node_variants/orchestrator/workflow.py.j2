@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""
+{{ node_name }} - ONEX v2.0 Orchestrator node for workflow coordination.
+
+{{ description }}
+
+Features:
+- FSM state management ({{ fsm_states | join(', ') }})
+- Multi-step coordination
+- Retry logic with exponential backoff
+- Rollback support
+- Workflow persistence
+- Parallel execution ({{ max_parallel_steps }} concurrent)
+
+Performance Targets:
+- Step latency: < 100ms per step
+- Throughput: 50+ workflows/sec
+- State transition: < 10ms
+- Max steps: {{ max_workflow_steps }}
+
+Contract: {{ contract_name }}
+Node Type: ORCHESTRATOR (Workflow)
+"""
+
+import asyncio
+import logging
+import time
+from enum import Enum
+from typing import Any, Optional
+from uuid import uuid4
+
+from omnibase_core import EnumCoreErrorCode, ModelOnexError
+from omnibase_core.enums.enum_log_level import EnumLogLevel as LogLevel
+from omnibase_core.logging.structured import emit_log_event_sync as emit_log_event
+from omnibase_core.models.contracts.model_contract_orchestrator import ModelContractOrchestrator
+from omnibase_core.models.core import ModelContainer
+from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
+
+from .models import {{ input_model }}, {{ output_model }}, EnumWorkflowState
+
+OnexError = ModelOnexError
+CoreErrorCode = EnumCoreErrorCode
+logger = logging.getLogger(__name__)
+
+
+class {{ node_class_name }}(NodeOrchestrator):
+    """{{ node_description }}
+
+    Workflow Configuration:
+    - States: {{ fsm_states | join(', ') }}
+    - Max steps: {{ max_workflow_steps }}
+    - Parallel steps: {{ max_parallel_steps }}
+    - Retry attempts: {{ max_retry_attempts }}
+    """
+
+    def __init__(self, container: ModelContainer) -> None:
+        super().__init__(container)
+        self._workflows: dict[str, dict[str, Any]] = {}
+        self._workflow_lock = asyncio.Lock()
+
+        self._metrics = {
+            "workflows_started": 0,
+            "workflows_completed": 0,
+            "workflows_failed": 0,
+            "workflows_rolled_back": 0,
+            "total_workflow_time_ms": 0.0,
+        }
+
+    async def execute_orchestration(self, contract: ModelContractOrchestrator) -> {{ output_model }}:
+        """Execute workflow orchestration."""
+        start_time = time.perf_counter()
+        workflow_id = str(uuid4())
+
+        try:
+            input_data = {{ input_model }}(**contract.input_data)
+
+            # Initialize workflow state
+            async with self._workflow_lock:
+                self._workflows[workflow_id] = {
+                    "state": EnumWorkflowState.{{ initial_state }},
+                    "steps_completed": [],
+                    "current_step": 0,
+                    "data": input_data.dict(),
+                }
+                self._metrics["workflows_started"] += 1
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="Workflow started",
+                node_id="{{ node_name }}",
+                workflow_id=workflow_id,
+            )
+
+            # Execute workflow steps
+            result = await self._execute_workflow_steps(workflow_id, input_data)
+
+            # Transition to completed state
+            await self._transition_state(workflow_id, EnumWorkflowState.COMPLETED)
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["workflows_completed"] += 1
+            self._metrics["total_workflow_time_ms"] += elapsed_ms
+
+            return {{ output_model }}(
+                workflow_id=workflow_id,
+                state=EnumWorkflowState.COMPLETED,
+                result=result,
+                elapsed_ms=elapsed_ms,
+            )
+
+        except Exception as e:
+            # Attempt rollback
+            try:
+                await self._rollback_workflow(workflow_id)
+                self._metrics["workflows_rolled_back"] += 1
+            except Exception as rollback_error:
+                emit_log_event(
+                    level=LogLevel.ERROR,
+                    message="Workflow rollback failed",
+                    node_id="{{ node_name }}",
+                    workflow_id=workflow_id,
+                    error=str(rollback_error),
+                )
+
+            self._metrics["workflows_failed"] += 1
+            await self._transition_state(workflow_id, EnumWorkflowState.FAILED)
+
+            raise OnexError(
+                error_code=CoreErrorCode.INTERNAL_ERROR,
+                message=f"Workflow failed: {str(e)}",
+                details={"workflow_id": workflow_id},
+            ) from e
+
+    async def _execute_workflow_steps(
+        self,
+        workflow_id: str,
+        input_data: {{ input_model }},
+    ) -> Any:
+        """Execute all workflow steps."""
+        steps = input_data.workflow_steps
+
+        for step_index, step in enumerate(steps):
+            await self._transition_state(workflow_id, EnumWorkflowState.PROCESSING)
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message=f"Executing workflow step {step_index + 1}/{len(steps)}",
+                node_id="{{ node_name }}",
+                workflow_id=workflow_id,
+                step=step.name,
+            )
+
+            # Execute step with retry
+            step_result = await self._execute_step_with_retry(
+                workflow_id,
+                step,
+                max_attempts={{ max_retry_attempts }},
+            )
+
+            # Record step completion
+            async with self._workflow_lock:
+                self._workflows[workflow_id]["steps_completed"].append({
+                    "step": step.name,
+                    "result": step_result,
+                })
+
+        # Return final result
+        return self._workflows[workflow_id]["steps_completed"]
+
+    async def _execute_step_with_retry(
+        self,
+        workflow_id: str,
+        step: Any,
+        max_attempts: int,
+    ) -> Any:
+        """Execute a single step with retry logic."""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # TODO: Implement step execution logic
+                result = await self._execute_step(workflow_id, step)
+                return result
+
+            except Exception as e:
+                if attempt < max_attempts:
+                    backoff = 2 ** (attempt - 1)
+                    emit_log_event(
+                        level=LogLevel.WARNING,
+                        message=f"Step failed, retrying (attempt {attempt}/{max_attempts})",
+                        node_id="{{ node_name }}",
+                        workflow_id=workflow_id,
+                        step=step.name,
+                        backoff_seconds=backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    raise
+
+    async def _execute_step(self, workflow_id: str, step: Any) -> Any:
+        """Execute a single workflow step."""
+        # TODO: Implement actual step execution
+        return {"status": "success", "step": step.name}
+
+    async def _transition_state(
+        self,
+        workflow_id: str,
+        new_state: EnumWorkflowState,
+    ) -> None:
+        """Transition workflow to new state."""
+        async with self._workflow_lock:
+            if workflow_id in self._workflows:
+                old_state = self._workflows[workflow_id]["state"]
+                self._workflows[workflow_id]["state"] = new_state
+
+                emit_log_event(
+                    level=LogLevel.INFO,
+                    message="Workflow state transition",
+                    node_id="{{ node_name }}",
+                    workflow_id=workflow_id,
+                    old_state=old_state.value,
+                    new_state=new_state.value,
+                )
+
+    async def _rollback_workflow(self, workflow_id: str) -> None:
+        """Rollback workflow steps."""
+        async with self._workflow_lock:
+            if workflow_id not in self._workflows:
+                return
+
+            completed_steps = self._workflows[workflow_id]["steps_completed"]
+
+            emit_log_event(
+                level=LogLevel.WARNING,
+                message="Rolling back workflow",
+                node_id="{{ node_name }}",
+                workflow_id=workflow_id,
+                steps_to_rollback=len(completed_steps),
+            )
+
+            # Rollback in reverse order
+            for step_data in reversed(completed_steps):
+                # TODO: Implement rollback logic per step
+                pass
+
+    def get_metrics(self) -> dict[str, Any]:
+        return self._metrics

@@ -1,0 +1,11 @@
+# FSM Subcontract
+# Finite State Machine configuration for workflow state management
+
+type: "workflow_state_machine"
+states:
+  - "pending"
+  - "processing"
+  - "completed"
+  - "failed"
+initial_state: "pending"
+terminal_states: ["completed", "failed"]

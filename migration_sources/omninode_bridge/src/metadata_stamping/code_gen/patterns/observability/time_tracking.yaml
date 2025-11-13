@@ -1,0 +1,53 @@
+name: time_tracking
+description: "High-precision time tracking using perf_counter for duration measurements"
+category: observability
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: medium
+code_template: |
+  import time
+
+  # Always use time.perf_counter() for high-precision timing
+  start_time = time.perf_counter()
+
+  # ... operation ...
+
+  # Calculate duration in milliseconds
+  duration_ms = (time.perf_counter() - start_time) * 1000
+
+  # Round to 2 decimal places for logging
+  emit_log_event(
+      LogLevel.INFO,
+      "Operation completed",
+      {"duration_ms": round(duration_ms, 2)},
+  )
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - codegen_metrics_reducer
+
+configuration:
+  time_unit: milliseconds
+  precision_decimals: 2
+  timer_function: "time.perf_counter()"
+
+prerequisites:
+  - time module imported
+
+metrics:
+  overhead_ns: 50
+  precision_ns: 1
+
+best_practices:
+  - "Always use time.perf_counter() for timing (not time.time())"
+  - "Calculate duration in milliseconds for consistency"
+  - "Round to 2 decimal places for logging and metrics"
+  - "Measure even on failures for complete metrics"
+  - "Start timer at beginning of execute method"
+  - "Calculate duration before logging/returning"
+
+validation_rules:
+  - "Must use time.perf_counter() (not time.time() or datetime)"
+  - "Must convert to milliseconds (* 1000)"
+  - "Must round to 2 decimal places for logging"
+  - "Timer must start at top of method"

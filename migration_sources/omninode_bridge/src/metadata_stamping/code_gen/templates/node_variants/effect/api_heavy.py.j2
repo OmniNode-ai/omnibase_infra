@@ -1,0 +1,705 @@
+#!/usr/bin/env python3
+"""
+{{ node_name }} - ONEX v2.0 Effect node with API-heavy optimizations.
+
+{{ description }}
+
+Features:
+- HTTP client with connection pooling
+- Circuit breaker for fault tolerance
+- Retry logic with exponential backoff
+- Rate limiting ({{ rate_limit_requests }} requests per {{ rate_limit_window_seconds }}s)
+- Timeout management ({{ http_timeout_seconds }}s)
+- Request/response metrics
+- Response caching (optional)
+
+Performance Targets:
+- Request latency: < 100ms (P95) for healthy endpoints
+- Throughput: 100+ requests/sec
+- Circuit breaker recovery: < 60s
+- Retry success rate: > 90% for transient failures
+
+Contract: {{ contract_name }}
+Node Type: EFFECT (API Operations)
+"""
+
+import asyncio
+import logging
+import time
+from datetime import UTC, datetime
+from typing import Any, Optional
+from uuid import uuid4
+
+import httpx
+from omnibase_core import EnumCoreErrorCode, ModelOnexError
+from omnibase_core.enums.enum_log_level import EnumLogLevel as LogLevel
+from omnibase_core.logging.structured import emit_log_event_sync as emit_log_event
+from omnibase_core.models.contracts.model_contract_effect import ModelContractEffect
+from omnibase_core.models.core import ModelContainer
+from omnibase_core.nodes.node_effect import NodeEffect
+
+{% if circuit_breaker_enabled -%}
+try:
+    from omnibase_core.nodes.model_circuit_breaker import ModelCircuitBreaker
+except (ImportError, ModuleNotFoundError):
+    ModelCircuitBreaker = None  # type: ignore
+{% endif %}
+
+{% if rate_limiting_enabled -%}
+from collections import deque
+{% endif %}
+
+from .models import (
+    {{ input_model }},
+    {{ output_model }},
+    {{ config_model }},
+)
+
+# Aliases for compatibility
+OnexError = ModelOnexError
+CoreErrorCode = EnumCoreErrorCode
+
+logger = logging.getLogger(__name__)
+
+
+class {{ node_class_name }}(NodeEffect):
+    """
+    {{ node_description }}
+
+    HTTP Client Configuration:
+    - Connection pool: {{ max_connections }} max connections
+    - Timeout: {{ http_timeout_seconds }}s
+    - Retry policy: {{ max_retry_attempts }} attempts with exponential backoff
+    - Keep-alive: Enabled
+
+    {% if circuit_breaker_enabled -%}
+    Circuit Breaker:
+    - Failure threshold: {{ circuit_breaker_threshold }} consecutive failures
+    - Recovery timeout: {{ circuit_breaker_timeout_seconds }} seconds
+    - Protected: All external API calls
+    {% endif %}
+
+    {% if rate_limiting_enabled -%}
+    Rate Limiting:
+    - Max requests: {{ rate_limit_requests }} per {{ rate_limit_window_seconds }}s
+    - Strategy: Sliding window
+    - Backpressure: Queue and retry with backoff
+    {% endif %}
+
+    {% if caching_enabled -%}
+    Response Caching:
+    - Cache TTL: {{ cache_ttl_seconds }}s
+    - Max cache size: {{ max_cache_size }} entries
+    - Strategy: LRU eviction
+    {% endif %}
+
+    Performance:
+    - Request latency: < 100ms (P95)
+    - Throughput: 100+ requests/sec
+    - Success rate: > 95%
+    """
+
+    def __init__(self, container: ModelContainer) -> None:
+        """
+        Initialize API effect node with HTTP client.
+
+        Args:
+            container: ONEX container for dependency injection
+
+        Raises:
+            OnexError: If configuration is invalid
+        """
+        # Initialize base NodeEffect class
+        super().__init__(container)
+
+        # Health check mode detection
+        self._health_check_mode = self._detect_health_check_mode()
+
+        # Extract configuration from container
+        config_data = container.value if isinstance(container.value, dict) else {}
+
+        # Load API configuration
+        self.config = {{ config_model }}.from_container(config_data)
+
+        # Initialize HTTP client (lazy initialization in health check mode)
+        self._http_client: Optional[httpx.AsyncClient] = None
+        self._client_lock = asyncio.Lock()
+
+        {% if circuit_breaker_enabled -%}
+        # Initialize circuit breaker
+        if ModelCircuitBreaker is not None and not self._health_check_mode:
+            self._circuit_breaker = ModelCircuitBreaker(
+                failure_threshold={{ circuit_breaker_threshold }},
+                recovery_timeout_seconds={{ circuit_breaker_timeout_seconds }},
+            )
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="Circuit breaker initialized",
+                node_id="{{ node_name }}",
+                failure_threshold={{ circuit_breaker_threshold }},
+                recovery_timeout={{ circuit_breaker_timeout_seconds }},
+            )
+        else:
+            self._circuit_breaker = None
+        {% endif %}
+
+        {% if rate_limiting_enabled -%}
+        # Initialize rate limiter
+        self._rate_limit_window: deque = deque(maxlen={{ rate_limit_requests }})
+        self._rate_limit_lock = asyncio.Lock()
+        {% endif %}
+
+        {% if caching_enabled -%}
+        # Initialize response cache
+        self._response_cache: dict[str, tuple[datetime, Any]] = {}
+        self._cache_lock = asyncio.Lock()
+        {% endif %}
+
+        # Metrics tracking
+        self._metrics = {
+            "requests_sent": 0,
+            "requests_succeeded": 0,
+            "requests_failed": 0,
+            "rate_limited": 0,
+            "circuit_breaker_trips": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "total_request_time_ms": 0.0,
+        }
+
+        emit_log_event(
+            level=LogLevel.INFO,
+            message="{{ node_name }} initialized",
+            node_id="{{ node_name }}",
+            health_check_mode=self._health_check_mode,
+            http_config={
+                "timeout": {{ http_timeout_seconds }},
+                "max_connections": {{ max_connections }},
+                "rate_limit": "{{ rate_limit_requests }}/{{ rate_limit_window_seconds }}s",
+            },
+        )
+
+    def _detect_health_check_mode(self) -> bool:
+        """
+        Detect if node is running in health check mode.
+
+        Returns:
+            True if in health check mode, False otherwise
+        """
+        try:
+            import os
+            return os.getenv("HEALTH_CHECK_MODE", "false").lower() == "true"
+        except Exception as e:
+            emit_log_event(
+                level=LogLevel.WARNING,
+                message="Failed to detect health check mode, defaulting to False",
+                node_id="{{ node_name }}",
+                error=str(e),
+            )
+            return False
+
+    async def _ensure_http_client(self) -> httpx.AsyncClient:
+        """
+        Ensure HTTP client is initialized.
+
+        Uses lazy initialization with async lock to prevent race conditions.
+
+        Returns:
+            Initialized HTTP client
+        """
+        if self._http_client is not None:
+            return self._http_client
+
+        async with self._client_lock:
+            # Double-check after acquiring lock
+            if self._http_client is not None:
+                return self._http_client
+
+            limits = httpx.Limits(
+                max_connections={{ max_connections }},
+                max_keepalive_connections={{ max_keepalive_connections }},
+            )
+
+            self._http_client = httpx.AsyncClient(
+                timeout={{ http_timeout_seconds }},
+                limits=limits,
+                http2=True,  # Enable HTTP/2 for better performance
+            )
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="HTTP client initialized",
+                node_id="{{ node_name }}",
+                max_connections={{ max_connections }},
+            )
+
+            return self._http_client
+
+    {% if rate_limiting_enabled -%}
+    async def _check_rate_limit(self) -> bool:
+        """
+        Check if request is within rate limit.
+
+        Uses sliding window algorithm to track requests.
+
+        Returns:
+            True if request is allowed, False if rate limited
+        """
+        async with self._rate_limit_lock:
+            now = datetime.now(UTC)
+            window_start = now.timestamp() - {{ rate_limit_window_seconds }}
+
+            # Remove expired timestamps
+            while self._rate_limit_window and self._rate_limit_window[0] < window_start:
+                self._rate_limit_window.popleft()
+
+            # Check if under limit
+            if len(self._rate_limit_window) >= {{ rate_limit_requests }}:
+                self._metrics["rate_limited"] += 1
+                return False
+
+            # Add current timestamp
+            self._rate_limit_window.append(now.timestamp())
+            return True
+    {% endif %}
+
+    {% if caching_enabled -%}
+    async def _get_cached_response(self, cache_key: str) -> Optional[Any]:
+        """
+        Get cached response if available and not expired.
+
+        Args:
+            cache_key: Cache key for lookup
+
+        Returns:
+            Cached response or None if not found/expired
+        """
+        async with self._cache_lock:
+            if cache_key not in self._response_cache:
+                self._metrics["cache_misses"] += 1
+                return None
+
+            cached_at, cached_data = self._response_cache[cache_key]
+            age_seconds = (datetime.now(UTC) - cached_at).total_seconds()
+
+            if age_seconds > {{ cache_ttl_seconds }}:
+                # Expired
+                del self._response_cache[cache_key]
+                self._metrics["cache_misses"] += 1
+                return None
+
+            self._metrics["cache_hits"] += 1
+            return cached_data
+
+    async def _cache_response(self, cache_key: str, response_data: Any) -> None:
+        """
+        Cache response data.
+
+        Args:
+            cache_key: Cache key for storage
+            response_data: Data to cache
+        """
+        async with self._cache_lock:
+            # LRU eviction if cache is full
+            if len(self._response_cache) >= {{ max_cache_size }}:
+                # Remove oldest entry
+                oldest_key = next(iter(self._response_cache))
+                del self._response_cache[oldest_key]
+
+            self._response_cache[cache_key] = (datetime.now(UTC), response_data)
+    {% endif %}
+
+    async def _execute_with_retry(
+        self,
+        request_func: callable,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """
+        Execute HTTP request with retry logic.
+
+        Args:
+            request_func: Async function to execute
+            *args: Positional arguments for request
+            **kwargs: Keyword arguments for request
+
+        Returns:
+            Request response
+
+        Raises:
+            OnexError: If all retry attempts fail
+        """
+        last_error = None
+
+        for attempt in range(1, {{ max_retry_attempts }} + 1):
+            try:
+                return await request_func(*args, **kwargs)
+
+            except (
+                httpx.TimeoutException,
+                httpx.ConnectError,
+                httpx.RemoteProtocolError,
+            ) as e:
+                last_error = e
+
+                if attempt < {{ max_retry_attempts }}:
+                    backoff_seconds = {{ retry_backoff_base }} * (2 ** (attempt - 1))
+
+                    emit_log_event(
+                        level=LogLevel.WARNING,
+                        message="Retrying API request after error",
+                        node_id="{{ node_name }}",
+                        attempt=attempt,
+                        max_attempts={{ max_retry_attempts }},
+                        backoff_seconds=backoff_seconds,
+                        error=str(e),
+                    )
+
+                    await asyncio.sleep(backoff_seconds)
+                else:
+                    emit_log_event(
+                        level=LogLevel.ERROR,
+                        message="All retry attempts failed for API request",
+                        node_id="{{ node_name }}",
+                        attempts={{ max_retry_attempts }},
+                        error=str(e),
+                    )
+
+            except httpx.HTTPStatusError as e:
+                # Handle specific HTTP status codes
+                if e.response.status_code == 429:
+                    # Rate limited by server
+                    if attempt < {{ max_retry_attempts }}:
+                        backoff_seconds = {{ retry_backoff_base }} * (2 ** (attempt - 1))
+                        await asyncio.sleep(backoff_seconds)
+                        continue
+
+                # Non-retryable HTTP error
+                last_error = e
+                break
+
+            except Exception as e:
+                # Non-retryable error
+                last_error = e
+                break
+
+        # All retries failed
+        raise OnexError(
+            error_code=CoreErrorCode.UNAVAILABLE,
+            message=f"API request failed after {attempt} attempts",
+            details={"last_error": str(last_error)},
+        ) from last_error
+
+    async def execute_effect(self, contract: ModelContractEffect) -> {{ output_model }}:
+        """
+        Execute API effect operation.
+
+        Args:
+            contract: ONEX effect contract with input data
+
+        Returns:
+            {{ output_model }} with API response
+
+        Raises:
+            OnexError: If operation fails
+        """
+        start_time = time.perf_counter()
+        correlation_id = str(uuid4())
+
+        try:
+            # Parse and validate input
+            input_data = {{ input_model }}(**contract.input_data)
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="Executing {{ operation_type }} API operation",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                endpoint=input_data.endpoint,
+            )
+
+            {% if circuit_breaker_enabled -%}
+            # Check circuit breaker state
+            if self._circuit_breaker is not None:
+                if not self._circuit_breaker.allow_request():
+                    self._metrics["circuit_breaker_trips"] += 1
+                    raise OnexError(
+                        error_code=CoreErrorCode.UNAVAILABLE,
+                        message="Circuit breaker is OPEN, request rejected",
+                        details={
+                            "circuit_state": "OPEN",
+                            "correlation_id": correlation_id,
+                        },
+                    )
+            {% endif %}
+
+            {% if rate_limiting_enabled -%}
+            # Check rate limit
+            if not await self._check_rate_limit():
+                raise OnexError(
+                    error_code=CoreErrorCode.RESOURCE_EXHAUSTED,
+                    message="Rate limit exceeded",
+                    details={
+                        "rate_limit": "{{ rate_limit_requests }}/{{ rate_limit_window_seconds }}s",
+                        "correlation_id": correlation_id,
+                    },
+                )
+            {% endif %}
+
+            {% if caching_enabled -%}
+            # Check cache for GET requests
+            if input_data.method.upper() == "GET":
+                cache_key = f"{input_data.endpoint}:{input_data.params}"
+                cached_result = await self._get_cached_response(cache_key)
+                if cached_result is not None:
+                    emit_log_event(
+                        level=LogLevel.DEBUG,
+                        message="Cache hit for API request",
+                        node_id="{{ node_name }}",
+                        correlation_id=correlation_id,
+                    )
+                    return cached_result
+            {% endif %}
+
+            # Ensure HTTP client is ready
+            client = await self._ensure_http_client()
+
+            # Execute API request with retry
+            result = await self._execute_with_retry(
+                self._make_api_request,
+                client=client,
+                input_data=input_data,
+                correlation_id=correlation_id,
+            )
+
+            {% if caching_enabled -%}
+            # Cache successful GET responses
+            if input_data.method.upper() == "GET":
+                await self._cache_response(cache_key, result)
+            {% endif %}
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["requests_sent"] += 1
+            self._metrics["requests_succeeded"] += 1
+            self._metrics["total_request_time_ms"] += elapsed_ms
+
+            {% if circuit_breaker_enabled -%}
+            # Record success in circuit breaker
+            if self._circuit_breaker is not None:
+                self._circuit_breaker.record_success()
+            {% endif %}
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="{{ operation_type }} API operation completed",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                elapsed_ms=elapsed_ms,
+            )
+
+            return result
+
+        except OnexError:
+            # Re-raise OnexError without wrapping
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["requests_failed"] += 1
+
+            {% if circuit_breaker_enabled -%}
+            if self._circuit_breaker is not None:
+                self._circuit_breaker.record_failure()
+            {% endif %}
+
+            raise
+
+        except Exception as e:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["requests_failed"] += 1
+
+            {% if circuit_breaker_enabled -%}
+            if self._circuit_breaker is not None:
+                self._circuit_breaker.record_failure()
+            {% endif %}
+
+            emit_log_event(
+                level=LogLevel.ERROR,
+                message="{{ operation_type }} API operation failed",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                elapsed_ms=elapsed_ms,
+                error=str(e),
+            )
+
+            raise OnexError(
+                error_code=CoreErrorCode.INTERNAL_ERROR,
+                message=f"API operation failed: {str(e)}",
+                details={
+                    "operation": "{{ operation_type }}",
+                    "correlation_id": correlation_id,
+                },
+            ) from e
+
+    async def _make_api_request(
+        self,
+        client: httpx.AsyncClient,
+        input_data: {{ input_model }},
+        correlation_id: str,
+    ) -> {{ output_model }}:
+        """
+        Make the actual API request.
+
+        This is the core business logic that should be customized per node.
+
+        Args:
+            client: HTTP client
+            input_data: Validated input data
+            correlation_id: Correlation ID for tracing
+
+        Returns:
+            {{ output_model }} with API response
+
+        Raises:
+            OnexError: If request fails
+        """
+        try:
+            # Add correlation ID to headers
+            headers = {
+                **input_data.headers,
+                "X-Correlation-ID": correlation_id,
+            }
+
+            # Make HTTP request
+            response = await client.request(
+                method=input_data.method,
+                url=input_data.endpoint,
+                headers=headers,
+                params=input_data.params,
+                json=input_data.body if input_data.body else None,
+            )
+
+            # Raise for HTTP errors
+            response.raise_for_status()
+
+            # Parse response
+            {% if placeholder_logic -%}
+            result_data = {
+                "status_code": response.status_code,
+                "body": response.json() if response.content else {},
+                "headers": dict(response.headers),
+                "correlation_id": correlation_id,
+            }
+            {% endif %}
+
+            return {{ output_model }}(**result_data)
+
+        except httpx.HTTPStatusError as e:
+            raise OnexError(
+                error_code=CoreErrorCode.UNAVAILABLE,
+                message=f"HTTP error: {e.response.status_code}",
+                details={
+                    "status_code": e.response.status_code,
+                    "response_body": e.response.text,
+                    "correlation_id": correlation_id,
+                },
+            ) from e
+
+        except Exception as e:
+            raise OnexError(
+                error_code=CoreErrorCode.INTERNAL_ERROR,
+                message=f"API request failed: {str(e)}",
+                details={"correlation_id": correlation_id},
+            ) from e
+
+    async def cleanup(self) -> None:
+        """
+        Cleanup HTTP client resources.
+
+        Closes HTTP client and releases all connections.
+        """
+        if self._http_client is not None:
+            try:
+                await self._http_client.aclose()
+                emit_log_event(
+                    level=LogLevel.INFO,
+                    message="HTTP client closed",
+                    node_id="{{ node_name }}",
+                )
+            except Exception as e:
+                emit_log_event(
+                    level=LogLevel.WARNING,
+                    message="Error closing HTTP client",
+                    node_id="{{ node_name }}",
+                    error=str(e),
+                )
+
+    def get_metrics(self) -> dict[str, Any]:
+        """
+        Get current metrics for monitoring.
+
+        Returns:
+            Dictionary of metrics
+        """
+        avg_request_time = (
+            self._metrics["total_request_time_ms"] / self._metrics["requests_sent"]
+            if self._metrics["requests_sent"] > 0
+            else 0.0
+        )
+
+        success_rate = (
+            self._metrics["requests_succeeded"] / self._metrics["requests_sent"]
+            if self._metrics["requests_sent"] > 0
+            else 1.0
+        )
+
+        {% if caching_enabled -%}
+        cache_hit_rate = (
+            self._metrics["cache_hits"] /
+            (self._metrics["cache_hits"] + self._metrics["cache_misses"])
+            if (self._metrics["cache_hits"] + self._metrics["cache_misses"]) > 0
+            else 0.0
+        )
+        {% else -%}
+        cache_hit_rate = 0.0
+        {% endif %}
+
+        return {
+            **self._metrics,
+            "avg_request_time_ms": avg_request_time,
+            "success_rate": success_rate,
+            "cache_hit_rate": cache_hit_rate,
+        }
+
+
+# Entry point for direct execution
+if __name__ == "__main__":
+    import sys
+
+    async def main():
+        """Main entry point for testing."""
+        container = ModelContainer(value={}, container_type="config")
+        node = {{ node_class_name }}(container)
+
+        # Example contract
+        contract = ModelContractEffect(
+            name="{{ contract_name }}",
+            version={"major": 1, "minor": 0, "patch": 0},
+            description="{{ description }}",
+            node_type="EFFECT",
+            input_model="{{ input_model }}",
+            output_model="{{ output_model }}",
+            input_data={
+                # TODO: Add example input data
+            }
+        )
+
+        try:
+            result = await node.execute_effect(contract)
+            print(f"Success: {result}")
+            print(f"Metrics: {node.get_metrics()}")
+            return 0
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        finally:
+            await node.cleanup()
+
+    sys.exit(asyncio.run(main()))

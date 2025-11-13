@@ -1,0 +1,356 @@
+# Docker Build and Push for Bridge Nodes
+# Multi-stage builds for orchestrator and reducer nodes
+
+name: Docker Build (Bridge Nodes)
+
+on:
+  push:
+    branches: [ main, develop, 'feature/node-implementation' ]
+    paths:
+      - 'src/omninode_bridge/nodes/**'
+      - 'Dockerfile.orchestrator'
+      - 'Dockerfile.reducer'
+      - 'docker/bridge-nodes/**'
+      - '.github/workflows/docker-build.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/omninode_bridge/nodes/**'
+      - 'Dockerfile.orchestrator'
+      - 'Dockerfile.reducer'
+      - 'docker/bridge-nodes/**'
+  workflow_dispatch:
+    inputs:
+      push_to_registry:
+        description: 'Push images to registry'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: omninode-bridge
+
+jobs:
+  # Build Orchestrator Node Docker Image
+  build-orchestrator:
+    name: Build Orchestrator Node
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      # Always authenticate to pull base images during build
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-orchestrator
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build orchestrator image
+        id: build-orchestrator
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/bridge-nodes/Dockerfile.orchestrator
+          platforms: linux/amd64
+          push: ${{ github.ref == 'refs/heads/main' || github.event.inputs.push_to_registry == 'true' }}
+          load: ${{ github.ref != 'refs/heads/main' && github.event.inputs.push_to_registry != 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          secrets: |  # pragma: allowlist secret
+            github_token=${{ secrets.GITHUB_TOKEN }}
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+
+      # Import test must fail the build if unsuccessful - validates Docker image integrity
+      # A failed import indicates broken dependencies, missing modules, or build issues
+      - name: Test orchestrator image
+        if: github.ref != 'refs/heads/main' && github.event.inputs.push_to_registry != 'true'
+        run: |
+          echo "Testing orchestrator image (local build)..."
+          docker run --rm \
+            -e ENVIRONMENT=test \
+            ${{ steps.build-orchestrator.outputs.imageid }} \
+            python -c "from omninode_bridge.nodes.orchestrator.v1_0_0.node import NodeBridgeOrchestrator; print('✅ Orchestrator import successful')"
+
+      - name: Generate orchestrator build summary
+        if: always()
+        run: |
+          echo "# 🐳 Orchestrator Node Docker Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Info:" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-orchestrator\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Tags: ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Platforms: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- SHA: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  # Build Reducer Node Docker Image
+  build-reducer:
+    name: Build Reducer Node
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      # Always authenticate to pull base images during build
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-reducer
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build reducer image
+        id: build-reducer
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/bridge-nodes/Dockerfile.reducer
+          platforms: linux/amd64
+          push: ${{ github.ref == 'refs/heads/main' || github.event.inputs.push_to_registry == 'true' }}
+          load: ${{ github.ref != 'refs/heads/main' && github.event.inputs.push_to_registry != 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          secrets: |  # pragma: allowlist secret
+            github_token=${{ secrets.GITHUB_TOKEN }}
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+
+      # Import test must fail the build if unsuccessful - validates Docker image integrity
+      # A failed import indicates broken dependencies, missing modules, or build issues
+      - name: Test reducer image
+        if: github.ref != 'refs/heads/main' && github.event.inputs.push_to_registry != 'true'
+        run: |
+          echo "Testing reducer image (local build)..."
+          docker run --rm \
+            -e ENVIRONMENT=test \
+            ${{ steps.build-reducer.outputs.imageid }} \
+            python -c "from omninode_bridge.nodes.reducer.v1_0_0.node import NodeBridgeReducer; print('✅ Reducer import successful')"
+
+      - name: Generate reducer build summary
+        if: always()
+        run: |
+          echo "# 🐳 Reducer Node Docker Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Info:" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-reducer\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Tags: ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Platforms: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- SHA: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  # Security Scanning with Trivy
+  security-scan:
+    name: Security Scan (Trivy)
+    runs-on: ubuntu-latest
+    needs: [build-orchestrator, build-reducer]
+    # Only run when images are pushed to registry
+    if: github.ref == 'refs/heads/main' || github.event.inputs.push_to_registry == 'true'
+
+    strategy:
+      matrix:
+        image: [orchestrator, reducer]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-${{ matrix.image }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-${{ matrix.image }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-${{ matrix.image }}.sarif'
+          category: 'trivy-${{ matrix.image }}'
+
+      - name: Generate Trivy report
+        if: always()
+        run: |
+          echo "# 🔒 Security Scan (${{ matrix.image }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Security scan completed for ${{ matrix.image }} node" >> $GITHUB_STEP_SUMMARY
+          echo "- Scanner: Trivy" >> $GITHUB_STEP_SUMMARY
+          echo "- Severity: CRITICAL, HIGH" >> $GITHUB_STEP_SUMMARY
+
+  # Image Size Analysis
+  image-analysis:
+    name: Image Size Analysis
+    runs-on: ubuntu-latest
+    needs: [build-orchestrator, build-reducer]
+    # Only run when images are pushed to registry
+    if: github.ref == 'refs/heads/main' || github.event.inputs.push_to_registry == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Analyze orchestrator image size
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-orchestrator:${{ github.sha }}
+          ORCH_SIZE=$(docker image inspect ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-orchestrator:${{ github.sha }} --format='{{.Size}}')
+          ORCH_SIZE_MB=$((ORCH_SIZE / 1024 / 1024))
+          echo "ORCH_SIZE_MB=$ORCH_SIZE_MB" >> $GITHUB_ENV
+
+      - name: Analyze reducer image size
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-reducer:${{ github.sha }}
+          RED_SIZE=$(docker image inspect ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-reducer:${{ github.sha }} --format='{{.Size}}')
+          RED_SIZE_MB=$((RED_SIZE / 1024 / 1024))
+          echo "RED_SIZE_MB=$RED_SIZE_MB" >> $GITHUB_ENV
+
+      - name: Generate size analysis report
+        run: |
+          echo "# 📦 Image Size Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Image Sizes:" >> $GITHUB_STEP_SUMMARY
+          echo "- Orchestrator: ${ORCH_SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
+          echo "- Reducer: ${RED_SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ ${ORCH_SIZE_MB} -gt 500 ]; then
+            echo "⚠️ Orchestrator image is larger than 500MB" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Orchestrator image size is acceptable" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ ${RED_SIZE_MB} -gt 500 ]; then
+            echo "⚠️ Reducer image is larger than 500MB" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Reducer image size is acceptable" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Build Summary
+  build-summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-orchestrator, build-reducer, security-scan, image-analysis]
+    if: always()
+
+    steps:
+      - name: Set lowercase repository owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Generate build summary
+        run: |
+          echo "# 🚀 Docker Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Results:" >> $GITHUB_STEP_SUMMARY
+          echo "- Orchestrator Build: ${{ needs.build-orchestrator.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Reducer Build: ${{ needs.build-reducer.result }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.security-scan.result }}" != "skipped" ]; then
+            echo "- Security Scan: ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Security Scan: ⏭️ Skipped (not on main branch)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ needs.image-analysis.result }}" != "skipped" ]; then
+            echo "- Image Analysis: ${{ needs.image-analysis.result }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Image Analysis: ⏭️ Skipped (not on main branch)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "## 📦 Published Images:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-orchestrator:latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_PREFIX }}-reducer:latest\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ Images not pushed (not on main branch)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check overall status
+        run: |
+          if [ "${{ needs.build-orchestrator.result }}" != "success" ] || \
+             [ "${{ needs.build-reducer.result }}" != "success" ]; then
+            echo "❌ Docker build failed"
+            exit 1
+          else
+            echo "✅ All Docker builds succeeded!"
+          fi

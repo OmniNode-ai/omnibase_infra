@@ -1,0 +1,181 @@
+# Enhanced Multi-Stage Dockerfile for OmniNode Bridge HookReceiver Service
+# Implements security best practices, performance optimization, and reduced attack surface
+
+# ===============================================
+# Stage 1: Build Dependencies (Builder Stage)
+# ===============================================
+FROM python:3.12-slim as builder
+
+# Install build dependencies in a single layer
+# BuildKit cache mounts persist APT cache between builds for faster subsequent builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libsnappy-dev \
+    libpq-dev \
+    git \
+    && apt-get clean
+
+# Install Poetry with pinned version for reproducible builds
+RUN pip install --no-cache-dir poetry==2.1.3
+
+# Configure Poetry for container optimization
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VENV_IN_PROJECT=1 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache \
+    POETRY_INSTALLER_PARALLEL=true
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files first for better caching
+COPY pyproject.toml poetry.lock ./
+
+# Install dependencies to virtual environment
+# BuildKit cache mount persists Poetry cache between builds (wheels, metadata) for faster installs
+RUN --mount=type=cache,target=/tmp/poetry_cache \
+    poetry config virtualenvs.create true \
+    && poetry install --only=main --no-root
+
+# ===============================================
+# Stage 2: Security Scanning (Optional)
+# ===============================================
+FROM builder as security-scan
+
+# Install security scanning tools
+RUN pip install --no-cache-dir bandit safety pip-audit
+
+# Copy source code for security analysis
+COPY src/ ./src/
+
+# Run security scans (will fail build if critical issues found)
+RUN bandit -r src -f json -o /tmp/bandit-report.json || \
+    (echo "Security scan found issues:" && cat /tmp/bandit-report.json && exit 1)
+
+RUN safety check --json --output /tmp/safety-report.json || \
+    (echo "Dependency vulnerabilities found:" && cat /tmp/safety-report.json && exit 1)
+
+RUN pip-audit --format=json --output=/tmp/audit-report.json || \
+    (echo "Pip audit found issues:" && cat /tmp/audit-report.json && exit 1)
+
+# ===============================================
+# Stage 3: Runtime Image (Production)
+# ===============================================
+FROM python:3.12-slim as runtime
+
+# Install only runtime dependencies
+# BuildKit cache mounts persist APT cache between builds for faster subsequent builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libsnappy1v5 \
+    libpq5 \
+    dumb-init \
+    && apt-get clean
+
+# Create application user and group with specific UID/GID for security
+RUN groupadd -r -g 1001 hookuser && \
+    useradd -r -g hookuser -u 1001 -d /app -s /bin/bash hookuser
+
+# Set working directory and ownership
+WORKDIR /app
+RUN chown hookuser:hookuser /app
+
+# Copy virtual environment from builder stage
+COPY --from=builder --chown=hookuser:hookuser /app/.venv /app/.venv
+
+# Copy application source code
+COPY --chown=hookuser:hookuser src/ ./src/
+
+# Create necessary directories with proper ownership
+RUN mkdir -p /app/logs /app/tmp && \
+    chown -R hookuser:hookuser /app/logs /app/tmp
+
+# Switch to non-root user early
+USER hookuser
+
+# Configure environment for production
+ENV PYTHONPATH=/app/src \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Expose service port
+EXPOSE 8001
+
+# Add metadata labels
+LABEL org.opencontainers.image.title="OmniNode Bridge Hook Receiver" \
+      org.opencontainers.image.description="Enhanced secure hook receiver service" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.created="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+      org.opencontainers.image.authors="OmniNode Team" \
+      org.opencontainers.image.url="https://github.com/OmniNode-ai/omninode_bridge" \
+      org.opencontainers.image.source="https://github.com/OmniNode-ai/omninode_bridge" \
+      maintainer="devops@omninode.ai"
+
+# Enhanced health check with proper timeout and retries
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+    CMD curl -f -H "User-Agent: HealthCheck/1.0" http://localhost:8001/health || exit 1
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+
+# Run the service with proper signal handling
+CMD ["python", "-m", "omninode_bridge.main"]
+
+# ===============================================
+# Development Stage (Optional)
+# ===============================================
+FROM runtime as development
+
+# Switch back to root to install development tools
+USER root
+
+# Install development dependencies
+# BuildKit cache mounts persist APT cache between builds for faster subsequent builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    vim \
+    less \
+    procps \
+    net-tools
+
+# Copy development virtual environment from builder
+COPY --from=builder /app/.venv-dev /app/.venv-dev
+
+# Switch back to application user
+USER hookuser
+
+# Override environment for development
+ENV PATH="/app/.venv-dev/bin:$PATH" \
+    ENVIRONMENT=development \
+    LOG_LEVEL=debug
+
+# Development command with auto-reload
+CMD ["python", "-m", "uvicorn", "omninode_bridge.services.hook_receiver:create_app", \
+     "--host", "0.0.0.0", "--port", "8001", "--factory", "--reload"]
+
+# ===============================================
+# Testing Stage (Optional)
+# ===============================================
+FROM builder as testing
+
+# Install test dependencies
+RUN poetry install --with dev
+
+# Copy test files
+COPY tests/ ./tests/
+COPY pytest.ini ./
+
+# Run tests
+RUN python -m pytest tests/ -v --cov=src/omninode_bridge
+
+# Export test results
+RUN python -m pytest tests/ --junit-xml=/tmp/test-results.xml \
+    --cov=src/omninode_bridge --cov-report=xml:/tmp/coverage.xml

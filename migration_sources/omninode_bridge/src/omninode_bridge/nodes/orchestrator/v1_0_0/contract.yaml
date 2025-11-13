@@ -1,0 +1,360 @@
+# NodeBridgeOrchestrator Contract - Stamping Workflow Coordination
+# ONEX v2.0 Compliant Contract with Subcontract Composition
+
+# Required fields for ModelContractOrchestrator
+name: "bridge_orchestrator"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "Orchestrates metadata stamping workflows with OnexTree intelligence integration"
+node_type: "ORCHESTRATOR"
+
+# Input/Output Models (required by omnibase_core) - must be strings (model class names)
+input_model: "ModelStampRequest"
+output_model: "ModelStampResult"
+
+# Legacy fields for compatibility (using main version field)
+# contract_version removed - using main version field above
+# Note: This contract uses inline definitions instead of $ref to subcontracts
+# for better self-contained contracts and easier reading
+
+node_name: bridge_orchestrator
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+contract_name: bridge_orchestrator_contract
+author: omninode_bridge team
+created_at: "2025-10-02"
+
+# === INPUT STATE (required by ONEX v2.0) ===
+# Input state for metadata stamping workflow orchestration
+input_state:
+  type: object
+  description: "Input state for metadata stamping workflow orchestration"
+  properties:
+    workflow_id:
+      type: string
+      format: uuid
+      description: "Unique workflow correlation ID"
+    content:
+      type: string
+      description: "Content to stamp (text or file path)"
+      minLength: 1
+    namespace:
+      type: string
+      description: "Multi-tenant namespace for stamping"
+      default: "omninode.services.metadata"
+    enable_intelligence:
+      type: boolean
+      default: true
+      description: "Enable OnexTree AI intelligence gathering"
+    current_fsm_state:
+      type: string
+      enum: ["pending", "processing", "completed", "failed"]
+      default: "pending"
+      description: "Current FSM state of workflow"
+    step_context:
+      type: object
+      description: "Context data for current workflow step"
+      properties:
+        current_step:
+          type: string
+        step_number:
+          type: integer
+          minimum: 1
+        total_steps:
+          type: integer
+
+# === OUTPUT STATE (required by ONEX v2.0) ===
+# Output state after stamping workflow execution
+output_state:
+  type: object
+  description: "Output state after metadata stamping workflow completes"
+  properties:
+    success:
+      type: boolean
+      description: "Whether workflow completed successfully"
+    workflow_id:
+      type: string
+      format: uuid
+      description: "Workflow correlation ID"
+    final_fsm_state:
+      type: string
+      enum: ["completed", "failed"]
+      description: "Final FSM state"
+    file_hash:
+      type: string
+      pattern: "^[a-f0-9]{64}$"
+      description: "BLAKE3 hash of stamped content"
+    stamp_data:
+      type: object
+      description: "Complete stamp metadata"
+      properties:
+        protocol_version:
+          type: string
+        namespace:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        file_type:
+          type: string
+    intelligence_data:
+      type: object
+      description: "OnexTree intelligence analysis results"
+      properties:
+        analysis_score:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        recommendations:
+          type: array
+          items:
+            type: string
+    total_duration_ms:
+      type: number
+      description: "Total workflow execution time in milliseconds"
+    step_durations:
+      type: object
+      description: "Duration of each workflow step"
+      properties:
+        validate_input:
+          type: number
+        onextree_intelligence:
+          type: number
+        hash_generation:
+          type: number
+        stamp_creation:
+          type: number
+        event_publishing:
+          type: number
+    events_published:
+      type: array
+      items:
+        type: string
+        enum: ["stamp_workflow_started", "stamp_workflow_completed", "stamp_workflow_failed", "stamp_created"]
+      description: "List of Kafka events published during workflow"
+    error_message:
+      type: string
+      description: "Error message if workflow failed"
+    failed_step:
+      type: string
+      description: "Step where workflow failed (if applicable)"
+
+# === ONEX 2.0 COMPOSITION ===
+# Subcontracts define orchestrator capabilities through composition
+workflow_coordination:
+  workflow_steps:
+    - validate_input
+    - onextree_intelligence
+    - hash_generation
+    - stamp_creation
+    - event_publishing
+
+routing:
+  routing_strategy: "service_based"
+  services:
+    - onextree
+    - metadata_stamping
+
+fsm:
+  initial_state: "pending"
+  states:
+    - name: "pending"
+      transitions: ["processing"]
+    - name: "processing"
+      transitions: ["completed", "failed"]
+    - name: "completed"
+      transitions: []
+    - name: "failed"
+      transitions: []
+
+event_type:
+  published_events:
+    - stamp_workflow_started
+    - stamp_workflow_completed
+    - stamp_workflow_failed
+    - stamp_created
+
+# === WORKFLOW DEFINITION ===
+# Sequential steps for stamping workflow execution
+workflow_steps:
+  - step_id: "validate_input"
+    step_type: "validation"
+    description: "Validate stamp request input data"
+    required: true
+    timeout_ms: 1000
+    retry_policy:
+      max_retries: 2
+      backoff_ms: 100
+
+  - step_id: "onextree_intelligence"
+    step_type: "onextree_intelligence"
+    description: "Route to OnexTree for AI-enhanced validation and intelligence"
+    required: false  # Optional AI enhancement
+    service: "onextree"
+    timeout_ms: 5000
+    retry_policy:
+      max_retries: 1
+      backoff_ms: 500
+
+  - step_id: "hash_generation"
+    step_type: "hash_generation"
+    description: "Generate BLAKE3 hash via MetadataStampingService"
+    required: true
+    service: "metadata_stamping"
+    timeout_ms: 2000
+    retry_policy:
+      max_retries: 3
+      backoff_ms: 200
+
+  - step_id: "stamp_creation"
+    step_type: "stamp_creation"
+    description: "Create O.N.E. v0.1 compliant metadata stamp"
+    required: true
+    timeout_ms: 3000
+    retry_policy:
+      max_retries: 2
+      backoff_ms: 300
+
+  - step_id: "event_publishing"
+    step_type: "event_publishing"
+    description: "Publish workflow events to Kafka"
+    required: true
+    timeout_ms: 2000
+    retry_policy:
+      max_retries: 3
+      backoff_ms: 500
+
+# === SERVICE ROUTING ===
+# Service discovery and endpoint configuration
+services:
+  onextree:
+    discovery_method: "dns"
+    endpoint: "${ONEXTREE_SERVICE_URL}"
+    health_check_endpoint: "/health"
+    timeout_ms: 5000
+    circuit_breaker:
+      failure_threshold: 5
+      timeout_ms: 30000
+      half_open_max_requests: 3
+
+  metadata_stamping:
+    discovery_method: "dns"
+    endpoint: "${METADATA_STAMPING_SERVICE_URL}"
+    health_check_endpoint: "/health"
+    timeout_ms: 2000
+    circuit_breaker:
+      failure_threshold: 3
+      timeout_ms: 20000
+      half_open_max_requests: 5
+
+# === FSM STATE MACHINE ===
+# Workflow state management
+fsm_states:
+  initial_state: "pending"
+
+  states:
+    - name: "pending"
+      description: "Workflow initialized, awaiting processing"
+      transitions:
+        - "processing"
+      actions:
+        on_enter: "log_workflow_started"
+        on_exit: "update_timestamp"
+
+    - name: "processing"
+      description: "Workflow steps executing"
+      transitions:
+        - "completed"
+        - "failed"
+      actions:
+        on_enter: "increment_processing_count"
+        on_exit: "log_transition"
+
+    - name: "completed"
+      description: "Workflow successfully completed"
+      transitions: []  # Terminal state
+      actions:
+        on_enter: "publish_completion_event"
+
+    - name: "failed"
+      description: "Workflow execution failed"
+      transitions: []  # Terminal state
+      actions:
+        on_enter: "publish_failure_event"
+
+# === EVENT DEFINITIONS ===
+# Kafka event publishing configuration
+published_events:
+  - event_type: "stamp_workflow_started"
+    schema: "ModelStampWorkflowEvent"
+    description: "Published when workflow begins processing"
+    kafka_topic: "${KAFKA_TOPIC_WORKFLOWS}"
+    partition_key: "correlation_id"
+
+  - event_type: "stamp_workflow_completed"
+    schema: "ModelStampWorkflowEvent"
+    description: "Published when workflow completes successfully"
+    kafka_topic: "${KAFKA_TOPIC_WORKFLOWS}"
+    partition_key: "correlation_id"
+
+  - event_type: "stamp_workflow_failed"
+    schema: "ModelStampWorkflowEvent"
+    description: "Published when workflow fails"
+    kafka_topic: "${KAFKA_TOPIC_WORKFLOWS}"
+    partition_key: "correlation_id"
+
+  - event_type: "stamp_created"
+    schema: "ModelStampCreatedEvent"
+    description: "Published when metadata stamp is created"
+    kafka_topic: "${KAFKA_TOPIC_STAMPS}"
+    partition_key: "namespace"
+
+# === PERFORMANCE REQUIREMENTS ===
+# Resource limits and performance targets
+execution_capabilities:
+  max_concurrent_workflows: 100
+  timeout_ms: 30000
+  memory_limit_mb: 512
+  cpu_limit_cores: 2
+
+# === VALIDATION RULES ===
+# Input/output validation configuration
+validation:
+  input:
+    required_fields:
+      - file_path
+      - file_data
+      - namespace
+    optional_fields:
+      - content_type
+      - intelligence_enabled
+
+  output:
+    required_fields:
+      - success
+      - stamp_id
+      - file_hash
+      - stamped_content
+
+# === THUNK EMISSION ===
+# Async task emission configuration
+thunk_emission:
+  enabled: true
+  max_concurrent_thunks: 50
+  timeout_ms: 15000
+
+# === CONDITIONAL BRANCHING ===
+# Workflow branching logic
+conditional_branching:
+  enabled: true
+  conditions:
+    - condition_id: "intelligence_required"
+      field: "intelligence_enabled"
+      operator: "equals"
+      value: true
+      branch_to: "onextree_intelligence"

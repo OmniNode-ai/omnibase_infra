@@ -1,0 +1,112 @@
+# Reducer Node Contract with Aggregation
+node_id: event_reducer_node
+node_type: reducer
+version: v1_0_0
+
+metadata:
+  service_name: event_aggregator
+  domain: event_processing
+  description: Event aggregation reducer with streaming support
+  author: test_suite
+  tags:
+    - streaming
+    - aggregation
+    - reducer
+
+# Reducer-specific subcontracts
+subcontracts:
+  # FSM Subcontract
+  fsm:
+    states:
+      - idle
+      - aggregating
+      - flushing
+      - completed
+    initial_state: idle
+    transitions:
+      - from: idle
+        to: aggregating
+        trigger: start_aggregation
+      - from: aggregating
+        to: flushing
+        trigger: window_complete
+      - from: flushing
+        to: aggregating
+        trigger: continue_aggregation
+      - from: flushing
+        to: completed
+        trigger: finish
+
+  # Aggregation Subcontract
+  aggregation:
+    type: time_window
+    window_type: tumbling
+    window_size_ms: 60000  # 1 minute
+    aggregation_keys:
+      - namespace
+      - event_type
+    metrics:
+      - name: event_count
+        type: count
+      - name: total_size_bytes
+        type: sum
+        field: event_size_bytes
+      - name: avg_size_bytes
+        type: average
+        field: event_size_bytes
+      - name: unique_sources
+        type: distinct_count
+        field: source_id
+    output_format:
+      type: object
+      include_metadata: true
+
+  # State Management Subcontract
+  state_management:
+    persistence: memory
+    storage_backend: in_memory_cache
+    state_schema:
+      type: object
+      properties:
+        current_window_start: { type: string, format: date-time }
+        current_window_end: { type: string, format: date-time }
+        aggregated_data: { type: object }
+        partial_results: { type: object }
+    ttl_seconds: 3600
+
+input_schema:
+  type: object
+  required:
+    - events
+  properties:
+    events:
+      type: array
+      items:
+        type: object
+        properties:
+          event_id: { type: string }
+          event_type: { type: string }
+          namespace: { type: string }
+          source_id: { type: string }
+          event_size_bytes: { type: number }
+          timestamp: { type: string, format: date-time }
+          data: { type: object }
+
+output_schema:
+  type: object
+  properties:
+    aggregated_results:
+      type: object
+      properties:
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        aggregations:
+          type: object
+          additionalProperties:
+            type: object
+    metadata:
+      type: object
+      properties:
+        window_size_ms: { type: number }
+        events_processed: { type: number }
+        aggregation_time_ms: { type: number }

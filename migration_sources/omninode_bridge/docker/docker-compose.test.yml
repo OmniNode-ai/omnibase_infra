@@ -1,0 +1,313 @@
+# Docker Compose configuration for CI/CD testing
+# Optimized for GitHub Actions and automated testing environments
+# Addresses environment variable requirements from container restart loop fixes
+
+version: '3.8'
+
+networks:
+  test-network:
+    driver: bridge
+
+services:
+  # PostgreSQL Test Database
+  postgres-test:
+    image: postgres:15
+    container_name: omninode-bridge-postgres-test
+    networks:
+      - test-network
+    environment:
+      POSTGRES_DB: omninode_bridge_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omninode_bridge_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    command: |
+      postgres -c 'max_connections=200'
+               -c 'shared_buffers=256MB'
+               -c 'effective_cache_size=1GB'
+               -c 'work_mem=4MB'
+               -c 'maintenance_work_mem=64MB'
+               -c 'fsync=off'
+               -c 'synchronous_commit=off'
+               -c 'full_page_writes=off'
+
+  # RedPanda Test Event Streaming
+  redpanda-test:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-bridge-redpanda-test
+    networks:
+      - test-network
+    ports:
+      - "9093:9092"
+      - "9645:9644"
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://omninode-bridge-redpanda-test:9092,external://localhost:9093
+      - --pandaproxy-addr=internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr=internal://omninode-bridge-redpanda-test:8082,external://localhost:18082
+      - --schema-registry-addr=internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr=omninode-bridge-redpanda-test:33145
+      - --advertise-rpc-addr=omninode-bridge-redpanda-test:33145
+      - --mode=dev-container
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --default-log-level=warn
+    environment:
+      REDPANDA_AUTO_CREATE_TOPICS_ENABLED: true
+      REDPANDA_DEFAULT_TOPIC_PARTITIONS: 1
+      REDPANDA_DEFAULT_TOPIC_REPLICATIONS: 1
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Test Topic Setup Service
+  redpanda-test-topics:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-bridge-redpanda-test-topics
+    networks:
+      - test-network
+    depends_on:
+      redpanda-test:
+        condition: service_healthy
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        echo 'Creating test topics for CI/CD...'
+        rpk topic create test.omninode_bridge.onex.workflows.v1 --brokers omninode-bridge-redpanda-test:9092 --partitions 1 --replicas 1 || true
+        rpk topic create test.omninode_bridge.onex.task-events.v1 --brokers omninode-bridge-redpanda-test:9092 --partitions 1 --replicas 1 || true
+        rpk topic create test.omninode_bridge.onex.evt.hook-received.v1 --brokers omninode-bridge-redpanda-test:9092 --partitions 1 --replicas 1 || true
+        rpk topic create test.omninode_bridge.onex.evt.postgres-query-completed.v1 --brokers omninode-bridge-redpanda-test:9092 --partitions 1 --replicas 1 || true
+        echo 'Test topic creation completed'
+        rpk topic list --brokers omninode-bridge-redpanda-test:9092
+    healthcheck:
+      test: ["CMD", "rpk", "topic", "list", "--brokers", "omninode-bridge-redpanda-test:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Hook Receiver Test Service
+  hook-receiver-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.hook-receiver
+    container_name: omninode-bridge-hook-receiver-test
+    networks:
+      - test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redpanda-test-topics:
+        condition: service_healthy
+    ports:
+      - "8101:8001"
+    environment:
+      # Service configuration
+      HOOK_RECEIVER_HOST: 0.0.0.0
+      HOOK_RECEIVER_PORT: 8001
+      LOG_LEVEL: debug
+
+      # Test Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: omninode-bridge-redpanda-test:9092
+
+      # Test PostgreSQL configuration
+      POSTGRES_HOST: omninode-bridge-postgres-test
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: omninode_bridge_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+      # Test authentication
+      API_KEY: test-api-key-for-ci  # pragma: allowlist secret
+
+      # Application metadata
+      ENVIRONMENT: test
+      SERVICE_VERSION: test
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: "no"  # Don't restart in test environment
+
+  # Model Metrics Test Service
+  model-metrics-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.model-metrics
+    container_name: omninode-bridge-model-metrics-test
+    networks:
+      - test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redpanda-test-topics:
+        condition: service_healthy
+    ports:
+      - "8105:8005"
+    environment:
+      # Service configuration
+      MODEL_METRICS_HOST: 0.0.0.0
+      MODEL_METRICS_PORT: 8005
+      MODEL_METRICS_WORKERS: 1
+      LOG_LEVEL: debug
+
+      # Test authentication
+      API_KEY: test-api-key-for-ci  # pragma: allowlist secret
+
+      # Application metadata
+      ENVIRONMENT: test
+      SERVICE_VERSION: test
+
+      # AI Lab configuration (mock for testing)
+      AI_LAB_MAC_STUDIO: 127.0.0.1
+      AI_LAB_MAC_MINI: 127.0.0.1
+      AI_LAB_AI_PC: 127.0.0.1
+      AI_LAB_MACBOOK_AIR: 127.0.0.1
+      AI_LAB_OLLAMA_PORT: 11434
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: "no"
+
+  # Workflow Coordinator Test Service
+  workflow-coordinator-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.workflow-coordinator
+    container_name: omninode-bridge-workflow-coordinator-test
+    networks:
+      - test-network
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redpanda-test-topics:
+        condition: service_healthy
+      model-metrics-test:
+        condition: service_healthy
+    ports:
+      - "8106:8006"
+    environment:
+      # Service configuration
+      WORKFLOW_COORDINATOR_HOST: 0.0.0.0
+      WORKFLOW_COORDINATOR_PORT: 8006
+      WORKFLOW_COORDINATOR_WORKERS: 1
+      LOG_LEVEL: debug
+
+      # Test Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: omninode-bridge-redpanda-test:9092
+      KAFKA_WORKFLOW_TOPIC: test.omninode_bridge.onex.workflows.v1
+      KAFKA_TASK_EVENTS_TOPIC: test.omninode_bridge.onex.task-events.v1
+
+      # Test PostgreSQL configuration
+      POSTGRES_HOST: omninode-bridge-postgres-test
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: omninode_bridge_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+      # Test service endpoints
+      HOOK_RECEIVER_URL: http://omninode-bridge-hook-receiver-test:8001
+      MODEL_METRICS_URL: http://omninode-bridge-model-metrics-test:8005
+
+      # Test authentication
+      API_KEY: test-api-key-for-ci  # pragma: allowlist secret
+
+      # Application metadata
+      ENVIRONMENT: test
+      SERVICE_VERSION: test
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    restart: "no"
+
+  # Test Runner Service - Runs the actual tests
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.hook-receiver  # Reuse existing dockerfile
+    container_name: omninode-bridge-test-runner
+    networks:
+      - test-network
+    depends_on:
+      hook-receiver-test:
+        condition: service_healthy
+      model-metrics-test:
+        condition: service_healthy
+      workflow-coordinator-test:
+        condition: service_healthy
+    environment:
+      # Test environment configuration
+      ENVIRONMENT: test
+      LOG_LEVEL: debug
+
+      # Test database configuration
+      POSTGRES_HOST: omninode-bridge-postgres-test
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: omninode_bridge_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+      # Test Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: omninode-bridge-redpanda-test:9092
+
+      # Test service URLs
+      HOOK_RECEIVER_URL: http://omninode-bridge-hook-receiver-test:8001
+      MODEL_METRICS_URL: http://omninode-bridge-model-metrics-test:8005
+      WORKFLOW_COORDINATOR_URL: http://omninode-bridge-workflow-coordinator-test:8006
+
+      # Test authentication
+      API_KEY: test-api-key-for-ci  # pragma: allowlist secret
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./pytest.ini:/app/pytest.ini
+    command: |
+      bash -c "
+        echo 'Waiting for all services to be ready...'
+        sleep 30
+        echo 'Running integration tests...'
+        python -m pytest tests/integration/ -v --tb=short
+        echo 'Running end-to-end tests...'
+        python -m pytest tests/e2e/ -v --tb=short || echo 'E2E tests not found, skipping'
+        echo 'Test execution completed'
+      "
+    restart: "no"
+    profiles:
+      - testing  # Only start with specific profile
+
+volumes:
+  postgres_test_data:

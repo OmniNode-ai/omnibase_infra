@@ -1,0 +1,336 @@
+# Critical Alert Rules for OmniNode Bridge Production
+groups:
+  - name: critical_service_alerts
+    interval: 30s
+    rules:
+      # ========================================
+      # Service Availability - Critical
+      # ========================================
+
+      - alert: ServiceCompletelyDown
+        expr: up{job=~"hook-receiver|model-metrics|workflow-coordinator"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          team: platform
+          escalation: immediate
+          impact: high
+        annotations:
+          summary: "Critical service {{ $labels.job }} is completely down"
+          description: |
+            Service {{ $labels.job }} has been unreachable for more than 30 seconds.
+            This indicates a complete service failure requiring immediate attention.
+          runbook_url: "https://docs.omninode.ai/runbooks/service-down"
+          dashboard_url: "https://grafana.omninode.ai/d/omninode-overview"
+
+      - alert: AllServicesDown
+        expr: count(up{job=~"hook-receiver|model-metrics|workflow-coordinator"} == 0) >= 3
+        for: 15s
+        labels:
+          severity: critical
+          team: platform
+          escalation: immediate
+          impact: catastrophic
+        annotations:
+          summary: "CATASTROPHIC: All OmniNode Bridge services are down"
+          description: |
+            All core services (HookReceiver, ModelMetrics, WorkflowCoordinator) are down.
+            This indicates a system-wide failure requiring immediate executive escalation.
+          runbook_url: "https://docs.omninode.ai/runbooks/disaster-response"
+
+      - alert: DatabaseCompletelyDown
+        expr: up{job="postgres-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: immediate
+          impact: high
+        annotations:
+          summary: "Critical database failure - PostgreSQL completely down"
+          description: |
+            PostgreSQL database is completely unreachable. All services depending on
+            the database will be impacted. Immediate intervention required.
+          runbook_url: "https://docs.omninode.ai/runbooks/database-emergency"
+
+      # ========================================
+      # Performance - Critical
+      # ========================================
+
+      - alert: ExtremeResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m])
+          ) > 5
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          escalation: urgent
+          impact: high
+        annotations:
+          summary: "Extreme response times detected on {{ $labels.job }}"
+          description: |
+            95th percentile response time is {{ $value | printf "%.2f" }}s for {{ $labels.job }}.
+            This indicates severe performance degradation affecting user experience.
+          runbook_url: "https://docs.omninode.ai/runbooks/performance-emergency"
+
+      - alert: CriticalErrorRate
+        expr: |
+          (
+            rate(http_requests_total{status=~"5..", job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m]) /
+            rate(http_requests_total{job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m])
+          ) > 0.1
+        for: 1m
+        labels:
+          severity: critical
+          team: development
+          escalation: urgent
+          impact: high
+        annotations:
+          summary: "Critical error rate {{ $value | humanizePercentage }} on {{ $labels.job }}"
+          description: |
+            Error rate has exceeded 10% for {{ $labels.job }}. This indicates a serious
+            issue affecting a significant portion of requests.
+          runbook_url: "https://docs.omninode.ai/runbooks/high-error-rate"
+
+      # ========================================
+      # Infrastructure - Critical
+      # ========================================
+
+      - alert: CriticalDiskSpaceExhaustion
+        expr: |
+          (
+            (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_avail_bytes{fstype!="tmpfs"}) /
+            node_filesystem_size_bytes{fstype!="tmpfs"}
+          ) > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: urgent
+          impact: medium
+        annotations:
+          summary: "Critical disk space exhaustion on {{ $labels.instance }}"
+          description: |
+            Disk usage is {{ $value | humanizePercentage }} on {{ $labels.instance }} {{ $labels.mountpoint }}.
+            System may fail within minutes if not addressed immediately.
+          runbook_url: "https://docs.omninode.ai/runbooks/disk-space-emergency"
+
+      - alert: CriticalMemoryExhaustion
+        expr: |
+          (
+            (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) /
+            node_memory_MemTotal_bytes
+          ) > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: urgent
+          impact: high
+        annotations:
+          summary: "Critical memory exhaustion on {{ $labels.instance }}"
+          description: |
+            Memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}.
+            System is at risk of OOM killer activation.
+          runbook_url: "https://docs.omninode.ai/runbooks/memory-emergency"
+
+      # ========================================
+      # Business Logic - Critical
+      # ========================================
+
+      - alert: CriticalHookProcessingFailure
+        expr: |
+          rate(omninode_hooks_processed_total{status="error"}[5m]) /
+          rate(omninode_hooks_processed_total[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          team: development
+          escalation: urgent
+          impact: high
+        annotations:
+          summary: "Critical hook processing failure rate {{ $value | humanizePercentage }}"
+          description: |
+            More than 50% of hooks are failing to process. This indicates a serious
+            issue with core business logic requiring immediate attention.
+          runbook_url: "https://docs.omninode.ai/runbooks/hook-processing-failure"
+
+      - alert: ModelMetricsCompleteLoss
+        expr: |
+          rate(omninode_model_executions_total[5m]) == 0 and
+          rate(http_requests_total{job="model-metrics"}[5m]) > 0
+        for: 3m
+        labels:
+          severity: critical
+          team: ai
+          escalation: urgent
+          impact: high
+        annotations:
+          summary: "Complete loss of AI model execution capability"
+          description: |
+            No model executions recorded despite receiving requests. AI functionality
+            may be completely unavailable.
+          runbook_url: "https://docs.omninode.ai/runbooks/ai-model-failure"
+
+  - name: infrastructure_critical_alerts
+    interval: 30s
+    rules:
+      # ========================================
+      # Network and Connectivity - Critical
+      # ========================================
+
+      - alert: LoadBalancerDown
+        expr: up{job="nginx-exporter"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: immediate
+          impact: catastrophic
+        annotations:
+          summary: "Load balancer/reverse proxy is down"
+          description: |
+            Nginx load balancer is down. All external traffic is being blocked.
+            This is a complete service outage requiring immediate attention.
+          runbook_url: "https://docs.omninode.ai/runbooks/load-balancer-down"
+
+      - alert: MessageBrokerDown
+        expr: up{job="kafka-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: urgent
+          impact: high
+        annotations:
+          summary: "Message broker (Kafka) is down"
+          description: |
+            Kafka message broker is unreachable. Event processing and service
+            communication will be severely impacted.
+          runbook_url: "https://docs.omninode.ai/runbooks/kafka-emergency"
+
+      - alert: CacheCompletelyDown
+        expr: up{job="redis-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: urgent
+          impact: medium
+        annotations:
+          summary: "Redis cache is completely down"
+          description: |
+            Redis cache is unreachable for 2+ minutes. Performance will be severely
+            degraded and some features may become unavailable.
+          runbook_url: "https://docs.omninode.ai/runbooks/redis-emergency"
+
+      # ========================================
+      # Security - Critical
+      # ========================================
+
+      - alert: SecurityBreach
+        expr: increase(omninode_security_events_total{event_type="breach"}[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          team: security
+          escalation: immediate
+          impact: catastrophic
+        annotations:
+          summary: "SECURITY BREACH DETECTED"
+          description: |
+            A security breach has been detected. Immediate security team intervention
+            required. All access logs should be preserved for investigation.
+          runbook_url: "https://docs.omninode.ai/runbooks/security-incident"
+
+      - alert: ExcessiveAuthenticationFailures
+        expr: |
+          rate(omninode_auth_failures_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: critical
+          team: security
+          escalation: urgent
+          impact: medium
+        annotations:
+          summary: "Excessive authentication failures detected"
+          description: |
+            {{ $value | printf "%.2f" }} authentication failures per second.
+            This may indicate a brute force attack or system compromise.
+          runbook_url: "https://docs.omninode.ai/runbooks/auth-attack"
+
+      # ========================================
+      # Data Integrity - Critical
+      # ========================================
+
+      - alert: DatabaseCorruption
+        expr: increase(postgres_database_corruption_events_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: immediate
+          impact: catastrophic
+        annotations:
+          summary: "Database corruption detected"
+          description: |
+            Database corruption has been detected. Immediate backup verification
+            and recovery procedures may be required.
+          runbook_url: "https://docs.omninode.ai/runbooks/database-corruption"
+
+      - alert: BackupFailure
+        expr: |
+          time() - omninode_backup_last_success_timestamp > 86400
+        for: 1h
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: urgent
+          impact: high
+        annotations:
+          summary: "Critical backup failure - no successful backup in 24+ hours"
+          description: |
+            No successful backup has been completed in over 24 hours.
+            Data protection is compromised and RPO/RTO targets are at risk.
+          runbook_url: "https://docs.omninode.ai/runbooks/backup-failure"
+
+  - name: certificate_critical_alerts
+    interval: 3600s  # Check hourly for certificates
+    rules:
+      # ========================================
+      # SSL/TLS Certificate - Critical
+      # ========================================
+
+      - alert: SSLCertificateExpiringSoon
+        expr: |
+          (ssl_certificate_expiry_seconds - time()) / 86400 < 7
+        for: 0s
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: urgent
+          impact: high
+        annotations:
+          summary: "SSL certificate for {{ $labels.instance }} expires in {{ $value }} days"
+          description: |
+            SSL certificate will expire within 7 days. Service will become
+            inaccessible if not renewed immediately.
+          runbook_url: "https://docs.omninode.ai/runbooks/ssl-renewal"
+
+      - alert: SSLCertificateExpired
+        expr: |
+          ssl_certificate_expiry_seconds < time()
+        for: 0s
+        labels:
+          severity: critical
+          team: infrastructure
+          escalation: immediate
+          impact: catastrophic
+        annotations:
+          summary: "SSL certificate for {{ $labels.instance }} has EXPIRED"
+          description: |
+            SSL certificate has expired. Service is likely inaccessible to clients.
+            Immediate certificate renewal required.
+          runbook_url: "https://docs.omninode.ai/runbooks/ssl-expired"

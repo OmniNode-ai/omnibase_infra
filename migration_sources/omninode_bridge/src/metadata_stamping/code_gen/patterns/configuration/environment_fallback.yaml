@@ -1,0 +1,78 @@
+name: environment_fallback
+description: "Environment variable fallbacks for configuration with sensible defaults"
+category: configuration
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: medium
+code_template: |
+  # Configuration with environment variable fallbacks
+  self.kafka_broker_url: str = container.config.get(
+      "kafka_broker_url",
+      os.getenv(
+          "KAFKA_BOOTSTRAP_SERVERS",
+          "omninode-bridge-redpanda:9092"
+      )
+  )
+
+  self.consul_host: str = container.config.get(
+      "consul_host",
+      os.getenv("CONSUL_HOST", "omninode-bridge-consul")
+  )
+
+  self.consul_port: int = container.config.get(
+      "consul_port",
+      int(os.getenv("CONSUL_PORT", "28500"))
+  )
+
+  self.timeout_seconds: float = container.config.get(
+      "timeout_seconds",
+      float(os.getenv("TIMEOUT_SECONDS", "30.0"))
+  )
+
+  self.enable_feature: bool = container.config.get(
+      "enable_feature",
+      os.getenv("ENABLE_FEATURE", "true").lower() == "true"
+  )
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - store_effect
+
+configuration:
+  env_var_naming: "SCREAMING_SNAKE_CASE"
+  default_values:
+    kafka: "omninode-bridge-redpanda:9092"
+    consul_host: "omninode-bridge-consul"
+    consul_port: "28500"
+    timeout: "30.0"
+
+type_conversions:
+  int: "int(os.getenv(key, default))"
+  float: "float(os.getenv(key, default))"
+  bool: "os.getenv(key, default).lower() == 'true'"
+  str: "os.getenv(key, default)"
+
+prerequisites:
+  - os module imported
+  - Type hints for attributes
+
+metrics:
+  overhead_ms: 0.05
+  memory_bytes: 64
+
+best_practices:
+  - "Use SCREAMING_SNAKE_CASE for environment variables"
+  - "Match env var name to config key (e.g., timeout_seconds → TIMEOUT_SECONDS)"
+  - "Provide sensible production defaults"
+  - "Cast to appropriate type (int, float, bool, str)"
+  - "Use .lower() == 'true' for boolean env vars"
+  - "Document all environment variables"
+  - "Use omninode-bridge-* hostnames for services"
+  - "Default to internal Docker ports (9092, 5432, etc.)"
+
+validation_rules:
+  - "All config keys must have env var fallback"
+  - "All env vars must have default values"
+  - "Type conversions must match attribute type"
+  - "Boolean env vars must use .lower() == 'true'"
+  - "Numeric env vars must be wrapped in int() or float()"

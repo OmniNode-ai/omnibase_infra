@@ -1,0 +1,162 @@
+name: lifecycle_hooks
+description: "Startup and shutdown lifecycle hooks for resource management"
+category: integration
+applicable_to: [effect, orchestrator, reducer]
+priority: high
+code_template: |
+  async def startup(self) -> None:
+      """
+      Node startup lifecycle hook.
+
+      Initializes container services, connects Kafka, registers with Consul,
+      and starts background tasks.
+
+      Should be called when node is ready to serve requests.
+      """
+      emit_log_event(
+          LogLevel.INFO,
+          "Node{Name}{Type} starting up",
+          {"node_id": self.node_id},
+      )
+
+      # Initialize container services if available
+      if hasattr(self.container, "initialize"):
+          try:
+              await self.container.initialize()
+              emit_log_event(
+                  LogLevel.INFO,
+                  "Container services initialized successfully",
+                  {
+                      "node_id": self.node_id,
+                      "kafka_connected": (
+                          self.kafka_client.is_connected
+                          if self.kafka_client
+                          else False
+                      ),
+                  },
+              )
+          except Exception as e:
+              emit_log_event(
+                  LogLevel.WARNING,
+                  f"Container initialization failed, continuing in degraded mode: {e}",
+                  {
+                      "node_id": self.node_id,
+                      "error": str(e),
+                      "error_type": type(e).__name__,
+                  },
+              )
+
+      # Connect to Kafka if client is available
+      if self.kafka_client and not self.kafka_client.is_connected:
+          try:
+              await self.kafka_client.connect()
+              emit_log_event(
+                  LogLevel.INFO,
+                  "Kafka client connected",
+                  {"node_id": self.node_id},
+              )
+          except Exception as e:
+              emit_log_event(
+                  LogLevel.WARNING,
+                  f"Kafka connection failed: {e}",
+                  {"node_id": self.node_id},
+              )
+
+      emit_log_event(
+          LogLevel.INFO,
+          "Node{Name}{Type} startup complete",
+          {"node_id": self.node_id},
+      )
+
+  async def shutdown(self) -> None:
+      """
+      Node shutdown lifecycle hook.
+
+      Stops background tasks, disconnects Kafka, deregisters from Consul,
+      and cleans up resources.
+
+      Should be called when node is preparing to exit.
+      """
+      emit_log_event(
+          LogLevel.INFO,
+          "Node{Name}{Type} shutting down",
+          {"node_id": self.node_id},
+      )
+
+      # Stop background tasks if any
+      if hasattr(self, "_background_task") and self._background_task:
+          self._background_task.cancel()
+          try:
+              await self._background_task
+          except asyncio.CancelledError:
+              pass
+
+      # Cleanup container services
+      if hasattr(self.container, "cleanup"):
+          try:
+              await self.container.cleanup()
+              emit_log_event(
+                  LogLevel.INFO,
+                  "Container services cleaned up successfully",
+                  {"node_id": self.node_id},
+              )
+          except Exception as e:
+              emit_log_event(
+                  LogLevel.WARNING,
+                  f"Container cleanup failed: {e}",
+                  {
+                      "node_id": self.node_id,
+                      "error": str(e),
+                      "error_type": type(e).__name__,
+                  },
+              )
+
+      # Deregister from Consul for clean service discovery
+      self._deregister_from_consul()
+
+      emit_log_event(
+          LogLevel.INFO,
+          "Node{Name}{Type} shutdown complete",
+          {"node_id": self.node_id},
+      )
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - store_effect
+
+configuration:
+  startup_timeout_seconds: 30
+  shutdown_timeout_seconds: 10
+  graceful_shutdown: true
+
+prerequisites:
+  - Container with initialize() and cleanup() methods
+  - Kafka client with connect() method
+  - Consul registration/deregistration methods
+  - Background task management
+
+metrics:
+  startup_time_ms: 500
+  shutdown_time_ms: 200
+  memory_overhead_bytes: 1024
+
+best_practices:
+  - "Log at start and end of lifecycle hooks"
+  - "Initialize container services first"
+  - "Connect to Kafka after container initialization"
+  - "Continue in degraded mode if services fail"
+  - "Cancel background tasks on shutdown"
+  - "Handle asyncio.CancelledError for task cancellation"
+  - "Cleanup container services on shutdown"
+  - "Deregister from Consul last"
+  - "Never fail startup on service failures"
+  - "Never fail shutdown on cleanup failures"
+
+validation_rules:
+  - "startup() must be async"
+  - "shutdown() must be async"
+  - "Must handle exceptions without failing lifecycle"
+  - "Must log at INFO level for milestones"
+  - "Must log at WARNING for failures"
+  - "Must cancel background tasks on shutdown"

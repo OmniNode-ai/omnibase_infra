@@ -1,0 +1,471 @@
+# Streamlined CI/CD Pipeline for OmniNode Bridge
+# Essential validation workflow with reduced complexity for fast development
+# Complex security scanning and extensive testing temporarily disabled for development speed
+
+name: Streamlined CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop, 'fix/*', 'feature/*' ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  # Environment configuration
+  ENVIRONMENT: test
+  LOG_LEVEL: info
+  SERVICE_VERSION: ${{ github.sha }}
+
+  # Security configuration (test values)
+  SECURITY_MODE: permissive
+  API_KEY: test-api-key-for-ci  # pragma: allowlist secret
+  JWT_SECRET: test-jwt-secret-minimum-32-characters-long-for-ci-testing  # pragma: allowlist secret
+
+  # Test database configuration
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_DATABASE: omninode_bridge_test
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+  # Test Kafka configuration
+  KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+  KAFKA_WORKFLOW_TOPIC: test.omninode_bridge.onex.workflows.v1
+  KAFKA_TASK_EVENTS_TOPIC: test.omninode_bridge.onex.task-events.v1
+
+  # Service ports for testing
+  HOOK_RECEIVER_PORT: 8001
+  MODEL_METRICS_PORT: 8005
+  WORKFLOW_COORDINATOR_PORT: 8006
+
+jobs:
+  # Essential code quality checks only
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_DB: omninode_bridge_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+        ports:
+          - 5436:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run code formatting checks
+        run: |
+          poetry run black --check src tests
+          poetry run isort --check-only src tests
+
+      # Ruff disabled - conflicts with black/isort formatting
+      # - name: Run linting
+      #   run: poetry run ruff check src tests
+
+      - name: Validate O.N.E. v0.1 Metadata Headers
+        run: |
+          echo "Validating O.N.E. v0.1 metadata headers..."
+          poetry run python scripts/validate_metadata.py --all --strict --output-format json
+        continue-on-error: false
+
+      # SECURITY REQUIREMENT: Validate SQL injection tests are never skipped
+      # Issue #30 - SQL injection tests must always execute for production security
+      - name: Validate SQL Injection Tests Are Active
+        run: |
+          echo "🔒 Validating SQL injection tests are not skipped (Security Requirement)..."
+          echo ""
+
+          # Check both SQL injection test files
+          SQL_INJECTION_TESTS=(
+            "tests/test_generic_crud_sql_injection.py"
+            "tests/integration/infrastructure/test_sql_injection_protection.py"
+          )
+
+          TOTAL_ISSUES=0
+          FAILED_FILES=""
+
+          for TEST_FILE in "${SQL_INJECTION_TESTS[@]}"; do
+            if [ ! -f "$TEST_FILE" ]; then
+              echo "❌ ERROR: SQL injection test file not found: $TEST_FILE"
+              echo "This is a SECURITY REQUIREMENT violation."
+              exit 1
+            fi
+
+            echo "Checking: $TEST_FILE"
+
+            # Run tests and capture output to check for SKIPPED, ERROR, or FAILED status
+            TEST_OUTPUT=$(poetry run pytest "$TEST_FILE" -v --tb=no 2>&1 || true)
+
+            # Extract summary line (e.g., "5 failed, 3 skipped, 2 errors in 1.23s")
+            SUMMARY_LINE=$(echo "$TEST_OUTPUT" | grep -E "^=+ .*(passed|failed|error|skipped).* =+$" | tail -1)
+
+            # Count non-passing tests from summary
+            FAILED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0")
+            SKIPPED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE "[0-9]+ skipped" | grep -oE "[0-9]+" || echo "0")
+            ERROR_COUNT=$(echo "$SUMMARY_LINE" | grep -oE "[0-9]+ error" | grep -oE "[0-9]+" || echo "0")
+            PASSED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
+
+            TOTAL_FILE_ISSUES=$((FAILED_COUNT + SKIPPED_COUNT + ERROR_COUNT))
+
+            if [ "$TOTAL_FILE_ISSUES" -gt 0 ]; then
+              echo "  ⚠️  Status: $PASSED_COUNT passed, $FAILED_COUNT failed, $SKIPPED_COUNT skipped, $ERROR_COUNT errors"
+              TOTAL_ISSUES=$((TOTAL_ISSUES + TOTAL_FILE_ISSUES))
+              FAILED_FILES="${FAILED_FILES}  - $TEST_FILE ($FAILED_COUNT failed, $SKIPPED_COUNT skipped, $ERROR_COUNT errors)\n"
+            else
+              echo "  ✅ All tests passing ($PASSED_COUNT passed, 0 failed, 0 skipped, 0 errors)"
+            fi
+          done
+
+          echo ""
+
+          if [ "$TOTAL_ISSUES" -gt 0 ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ SECURITY REQUIREMENT VIOLATION: SQL injection tests not passing"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "Total non-passing tests: $TOTAL_ISSUES"
+            echo ""
+            echo "Files with issues:"
+            echo -e "$FAILED_FILES"
+            echo ""
+            echo "📋 Issue: #30 - SQL injection tests must always pass"
+            echo ""
+            echo "Why this matters:"
+            echo "  • SQL injection is a CRITICAL security vulnerability (OWASP Top 10 #1)"
+            echo "  • These tests validate that all database operations use"
+            echo "    parameterized queries and proper input validation"
+            echo "  • Non-passing tests mean unvalidated security controls in production"
+            echo ""
+            echo "Required action:"
+            echo "  1. Fix all FAILED tests (implementation or fixture issues)"
+            echo "  2. Remove pytest.skip() calls - implement proper fixtures"
+            echo "  3. Resolve any ERROR status tests (fixture scope, imports, etc.)"
+            echo "  4. Ensure 100% of SQL injection tests PASS before merging"
+            echo ""
+            echo "Security Impact:"
+            echo "  • FAILED tests = Potentially vulnerable database operations"
+            echo "  • SKIPPED tests = Untested code paths in production"
+            echo "  • ERROR tests = No validation of security controls"
+            echo ""
+            echo "See: https://github.com/OmniNode-ai/omninode_bridge/issues/30"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ SQL Injection Test Validation: PASSED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "All SQL injection tests are passing - security requirement satisfied."
+          echo "No failed, skipped, or erroring tests detected."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # Type checking temporarily disabled for bridge project development speed
+      # - name: Run type checking
+      #   run: poetry run mypy src
+
+      # Optional basic security scans (enabled via ENABLE_SECURITY_SCANS environment variable)
+      - name: Run basic security scan (Bandit)
+        if: env.ENABLE_SECURITY_SCANS == 'true'
+        run: |
+          echo "Running basic Bandit security scan..."
+          poetry run bandit -r src -f json -o bandit-report.json || echo "Bandit scan completed with warnings"
+
+      - name: Run dependency vulnerability scan
+        if: env.ENABLE_SECURITY_SCANS == 'true'
+        run: |
+          echo "Running basic dependency vulnerability scan..."
+          poetry run pip-audit --format=json --output=pip-audit-report.json || echo "pip-audit scan completed with warnings"
+
+      - name: Upload basic security reports
+        if: env.ENABLE_SECURITY_SCANS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: basic-security-scans
+          path: |
+            bandit-report.json
+            pip-audit-report.json
+          retention-days: 30
+        continue-on-error: true
+
+  # Unit tests temporarily disabled for bridge project development speed
+  # unit-tests:
+  #   name: Unit Tests
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     matrix:
+  #       python-version: ['3.12']
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Set up Python ${{ matrix.python-version }}
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: ${{ matrix.python-version }}
+  #         cache: 'pip'
+  #
+  #     - name: Install Poetry
+  #       uses: snok/install-poetry@v1
+  #       with:
+  #         version: '1.8.3'
+  #         virtualenvs-create: true
+  #         virtualenvs-in-project: true
+  #
+  #     - name: Install dependencies
+  #       run: poetry install --with dev
+  #
+  #     - name: Run unit tests
+  #       run: |
+  #         poetry run pytest tests/unit/ \
+  #           --cov=src/omninode_bridge \
+  #           --cov-report=xml \
+  #           --cov-report=term-missing \
+  #           --cov-report=html \
+  #           --junit-xml=pytest-unit.xml \
+  #           --timeout=30 \
+  #           -v
+  #
+  #     - name: Upload coverage reports
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: coverage-unit-${{ matrix.python-version }}
+  #         path: |
+  #           coverage.xml
+  #           htmlcov/
+  #           pytest-unit.xml
+  #         retention-days: 30
+
+  # Integration tests temporarily disabled for bridge project development speed
+  # integration-tests:
+  #   name: Integration Tests
+  #   runs-on: ubuntu-latest
+  #   services:
+  #     postgres:
+  #       image: postgres:15
+  #       env:
+  #         POSTGRES_DB: omninode_bridge_test
+  #         POSTGRES_USER: postgres
+  #         POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+  #       options: >-
+  #         --health-cmd pg_isready
+  #         --health-interval 10s
+  #         --health-timeout 5s
+  #         --health-retries 5
+  #       ports:
+  #         - 5432:5432
+  #
+  #     redpanda:
+  #       image: redpandadata/redpanda:v24.2.7
+  #       options: >-
+  #         --health-cmd "rpk cluster info"
+  #         --health-interval 30s
+  #         --health-timeout 10s
+  #         --health-retries 5
+  #       ports:
+  #         - 9092:9092
+  #       env:
+  #         REDPANDA_AUTO_CREATE_TOPICS_ENABLED: "true"
+  #
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+  #         cache: 'pip'
+  #
+  #     - name: Install Poetry
+  #       uses: snok/install-poetry@v1
+  #       with:
+  #         version: '1.8.3'
+  #         virtualenvs-create: true
+  #         virtualenvs-in-project: true
+  #
+  #     - name: Install dependencies
+  #       run: poetry install --with dev
+  #
+  #     - name: Comprehensive service health checks
+  #       run: |
+  #         # Export environment variables for the health check script
+  #         export POSTGRES_HOST=localhost
+  #         export POSTGRES_PORT=5432
+  #         export POSTGRES_DATABASE=omninode_bridge_test
+  #         export POSTGRES_USER=postgres
+  #         export POSTGRES_PASSWORD=test-password  # pragma: allowlist secret
+  #         export KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+  #
+  #         # Run comprehensive health checks and migrations
+  #         ./scripts/wait-for-services.sh
+  #       env:
+  #         POSTGRES_HOST: localhost
+  #         POSTGRES_PORT: 5432
+  #         POSTGRES_DATABASE: omninode_bridge_test
+  #         POSTGRES_USER: postgres
+  #         POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+  #         KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+  #
+  #     - name: Run integration tests
+  #       run: |
+  #         poetry run pytest tests/integration/ \
+  #           --cov=src/omninode_bridge \
+  #           --cov-report=xml \
+  #           --cov-report=term-missing \
+  #           --junit-xml=pytest-integration.xml \
+  #           --timeout=60 \
+  #           -v \
+  #           -x \
+  #           --tb=short
+  #       env:
+  #         # Core environment
+  #         ENVIRONMENT: test
+  #         LOG_LEVEL: info
+  #
+  #         # Database configuration
+  #         POSTGRES_HOST: localhost
+  #         POSTGRES_PORT: 5432
+  #         POSTGRES_DATABASE: omninode_bridge_test
+  #         POSTGRES_USER: postgres
+  #         POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+  #
+  #         # Kafka configuration
+  #         KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+  #         KAFKA_WORKFLOW_TOPIC: test.omninode_bridge.onex.workflows.v1
+  #         KAFKA_TASK_EVENTS_TOPIC: test.omninode_bridge.onex.task-events.v1
+  #
+  #         # Service configuration
+  #         HOOK_RECEIVER_PORT: 8001
+  #         MODEL_METRICS_PORT: 8005
+  #         WORKFLOW_COORDINATOR_PORT: 8006
+  #
+  #         # Security configuration (test values)
+  #         SECURITY_MODE: permissive
+  #         API_KEY: test-api-key-for-ci  # pragma: allowlist secret
+  #         JWT_SECRET: test-jwt-secret-minimum-32-characters-long-for-ci-testing  # pragma: allowlist secret
+  #
+  #     - name: Upload integration test reports
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: integration-test-reports
+  #         path: |
+  #           coverage.xml
+  #           pytest-integration.xml
+  #         retention-days: 30
+
+  # Docker build validation temporarily disabled for bridge project development speed
+  # docker-build:
+  #   name: Docker Build
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     matrix:
+  #       service: [hook-receiver, model-metrics, workflow-coordinator]
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+  #
+  #     - name: Build Docker image
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         file: Dockerfile.${{ matrix.service }}
+  #         platforms: linux/amd64
+  #         push: false
+  #         tags: omninode-bridge-${{ matrix.service }}:test
+  #         cache-from: type=gha
+  #         cache-to: type=gha,mode=max
+  #
+  #     # Simple import test only - complex environment testing disabled for speed
+  #     - name: Test Docker image
+  #       run: |
+  #         echo "Testing ${{ matrix.service }} container startup..."
+  #         docker run --rm \
+  #           -e ENVIRONMENT=test \
+  #           --entrypoint=/bin/bash \
+  #           omninode-bridge-${{ matrix.service }}:test \
+  #           -c "python -c 'import omninode_bridge; print(\"Import successful\")'"
+
+  # End-to-end deployment testing temporarily disabled for development speed
+  # e2e-deployment:
+  #   name: End-to-End Deployment Test
+  #   runs-on: ubuntu-latest
+  #   needs: [quality, unit-tests, docker-build]
+  #   # Complex E2E testing commented out to speed up development
+  #   # Uncomment when ready for full deployment validation
+
+  # Coverage analysis temporarily disabled for bridge project development speed
+  # coverage-analysis:
+  #   name: Coverage Analysis
+  #   runs-on: ubuntu-latest
+  #   needs: [unit-tests]
+  #   if: always()
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Download coverage artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         pattern: coverage-*
+  #         merge-multiple: true
+  #
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+  #
+  #     - name: Install coverage tools
+  #       run: pip install coverage
+  #
+  #     - name: Basic coverage report
+  #       run: |
+  #         echo "=== Available coverage files ==="
+  #         find . -name "*.coverage*" -o -name "coverage.xml" | sort
+  #
+  #         # Try to combine coverage files if they exist
+  #         if ls .coverage* >/dev/null 2>&1; then
+  #           echo "Found .coverage files, combining..."
+  #           coverage combine
+  #           coverage report --show-missing
+  #           coverage xml -o coverage-combined.xml
+  #         elif ls coverage.xml >/dev/null 2>&1; then
+  #           echo "Found coverage.xml files, creating basic report..."
+  #           python -c 'import xml.etree.ElementTree as ET; import sys; tree = ET.parse("coverage.xml") if __name__ == "__main__" else None; root = tree.getroot() if tree else None; total_lines = int(root.get("lines-valid", 0)) if root else 0; covered_lines = int(root.get("lines-covered", 0)) if root else 0; coverage_percent = (covered_lines / total_lines) * 100 if total_lines > 0 else 0; print(f"Coverage: {coverage_percent:.1f}% ({covered_lines}/{total_lines} lines)") if total_lines > 0 else print("No coverage data available")'
+  #         else
+  #           echo "No coverage files found - this is OK for initial setup"
+  #         fi
+  #
+  #     # Complex coverage validation temporarily disabled
+  #     # - name: Check coverage threshold
+  #     #   run: coverage report --fail-under=70 || echo "Coverage below threshold - needs improvement"

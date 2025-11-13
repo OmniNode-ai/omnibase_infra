@@ -1,0 +1,65 @@
+{#
+Reference Context Template
+
+Provides concrete examples from similar production nodes.
+
+Template Variables:
+- references: list[dict] - List of reference implementations
+  Each reference contains:
+    - node_name: str
+    - file_path: str
+    - similarity_score: float
+    - matched_features: list[str]
+    - code: str
+    - adaptation_notes: str
+- has_references: bool - Whether any references are available
+#}
+{% if has_references %}
+# Reference Implementations
+
+These are real implementations from similar production nodes that you can adapt.
+
+{% for ref in references %}
+## Similar Node {{ loop.index }}: {{ ref.node_name }}
+**Location**: `{{ ref.file_path }}`
+**Similarity Score**: {{ "%.2f"|format(ref.similarity_score) }}
+**Matched Features**: {{ ref.matched_features|join(', ') }}
+
+### Implementation
+```python
+{{ ref.code }}
+```
+
+### Adaptation Guidance
+{{ ref.adaptation_notes }}
+
+{% if not loop.last %}
+---
+
+{% endif %}
+{% endfor %}
+
+**How to Use References:**
+1. Study the structure and patterns used
+2. Adapt variable names and logic to your requirements
+3. Preserve error handling and logging patterns
+4. Keep performance optimizations (connection pooling, caching, etc.)
+5. Update docstrings to reflect your implementation
+6. Test thoroughly with your specific use case
+
+**Common Pitfalls to Avoid:**
+- ❌ Don't copy-paste without understanding
+- ❌ Don't skip input validation
+- ❌ Don't forget to include correlation_id in logs
+- ❌ Don't omit timeout handling for I/O operations
+- ❌ Don't use time.time() for latency (use time.perf_counter())
+
+{% else %}
+# Reference Implementations
+
+No similar node implementations found for this operation.
+
+**Recommendation**: Follow the patterns and guidelines provided above carefully.
+Use the template variant structure as your foundation.
+
+{% endif %}

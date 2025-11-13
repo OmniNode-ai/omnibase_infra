@@ -1,0 +1,872 @@
+# ONEX v2.0 Contract - Container Deployment Workflow
+# Orchestrator workflow for automated container packaging, transfer, and deployment
+
+schema_version: "2.0"
+contract_version: "1.0.0"
+last_updated: "2025-10-25"
+
+# Node Identity
+node_identity:
+  name: "deployment_workflow"
+  display_name: "Container Deployment Workflow"
+  node_type: "orchestrator"
+  version: "1.0.0"
+  description: |
+    Orchestrator workflow for automated container deployment to remote systems.
+    Coordinates Docker image packaging, secure transfer to remote hook receiver,
+    deployment execution, and health validation with comprehensive rollback support.
+
+    Workflow Stages:
+    1. Package Preparation: Build Docker image and gather metadata
+    2. Transfer Initiation: Send container to remote hook receiver
+    3. Deployment Execution: Deploy and start container on remote system
+    4. Health Validation: Verify deployment success and service availability
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-25"
+  tags:
+    - "workflow-orchestration"
+    - "container-deployment"
+    - "docker"
+    - "remote-deployment"
+    - "event-driven"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/deployment/REMOTE_MIGRATION_GUIDE.md"
+    type: "guide"
+    description: "Remote container migration and deployment guide"
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "deployment/scripts/rebuild-service.sh"
+    type: "script"
+    description: "Service rebuild automation script"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 30000      # 30 seconds for small containers
+    max_ms: 180000        # 3 minutes max for large containers
+  memory_usage:
+    target_mb: 256
+    max_mb: 1024
+  throughput:
+    target_deployments_per_hour: 20
+    max_concurrent_deployments: 5
+
+  # Stage-specific performance targets
+  stage_targets:
+    package_preparation:
+      target_ms: 10000    # 10s for build + metadata
+      max_ms: 60000       # 1 minute max
+    transfer_initiation:
+      target_ms: 5000     # 5s for transfer initiation
+      max_ms: 30000       # 30s max
+    deployment_execution:
+      target_ms: 10000    # 10s for deployment
+      max_ms: 60000       # 1 minute max
+    health_validation:
+      target_ms: 5000     # 5s for health checks
+      max_ms: 30000       # 30s max
+
+# Workflow Stages
+workflow_stages:
+  - stage_number: 1
+    stage_name: "package_preparation"
+    description: "Build Docker image and gather deployment metadata"
+    target_duration_ms: 10000
+    dependencies: []
+    operations:
+      - name: "build_docker_image"
+        description: "Build container image with latest source code"
+        timeout_ms: 45000
+      - name: "gather_metadata"
+        description: "Collect container metadata and configuration"
+        timeout_ms: 2000
+      - name: "validate_image"
+        description: "Verify image integrity and requirements"
+        timeout_ms: 3000
+    output_artifacts:
+      - "docker_image"
+      - "deployment_metadata.json"
+      - "image_manifest.json"
+
+  - stage_number: 2
+    stage_name: "transfer_initiation"
+    description: "Transfer container to remote hook receiver"
+    target_duration_ms: 5000
+    dependencies: ["package_preparation"]
+    operations:
+      - name: "establish_connection"
+        description: "Connect to remote hook receiver endpoint"
+        timeout_ms: 5000
+      - name: "send_deployment_request"
+        description: "Send deployment request with container metadata"
+        timeout_ms: 15000
+      - name: "verify_transfer"
+        description: "Confirm transfer success and remote readiness"
+        timeout_ms: 5000
+    output_artifacts:
+      - "transfer_receipt.json"
+      - "remote_deployment_id"
+
+  - stage_number: 3
+    stage_name: "deployment_execution"
+    description: "Deploy and start container on remote system"
+    target_duration_ms: 10000
+    dependencies: ["transfer_initiation"]
+    operations:
+      - name: "stop_existing_container"
+        description: "Stop existing container if present"
+        timeout_ms: 10000
+        allow_failure: true
+      - name: "deploy_container"
+        description: "Deploy new container with configuration"
+        timeout_ms: 30000
+      - name: "start_container"
+        description: "Start deployed container"
+        timeout_ms: 15000
+    output_artifacts:
+      - "container_id"
+      - "deployment_logs.txt"
+
+  - stage_number: 4
+    stage_name: "health_validation"
+    description: "Verify deployment success and service health"
+    target_duration_ms: 5000
+    dependencies: ["deployment_execution"]
+    operations:
+      - name: "check_container_status"
+        description: "Verify container is running"
+        timeout_ms: 3000
+      - name: "validate_health_endpoint"
+        description: "Check service health endpoint availability"
+        timeout_ms: 5000
+      - name: "verify_service_registration"
+        description: "Confirm service registered with Consul (if applicable)"
+        timeout_ms: 3000
+        allow_failure: true
+    output_artifacts:
+      - "health_check_results.json"
+      - "deployment_report.json"
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - container_name
+    - image_tag
+    - remote_host
+  properties:
+    container_name:
+      type: "string"
+      description: "Name of the container to deploy"
+      pattern: "^[a-z0-9-]+$"
+      minLength: 3
+      maxLength: 64
+      example: "orchestrator"
+
+    image_tag:
+      type: "string"
+      description: "Docker image tag to deploy"
+      pattern: "^[a-zA-Z0-9._-]+$"
+      default: "latest"
+      example: "v1.0.0"
+
+    remote_host:
+      type: "string"
+      description: "Remote host IP or hostname"
+      pattern: "^[a-zA-Z0-9.-]+$"
+      example: "192.168.86.200"
+
+    remote_port:
+      type: "integer"
+      description: "Remote hook receiver port"
+      minimum: 1024
+      maximum: 65535
+      default: 8001
+
+    deployment_config:
+      type: "object"
+      description: "Container deployment configuration"
+      properties:
+        environment_variables:
+          type: "object"
+          description: "Environment variables for container"
+        port_mappings:
+          type: "array"
+          description: "Port mapping configuration"
+          items:
+            type: "object"
+            properties:
+              host_port:
+                type: "integer"
+              container_port:
+                type: "integer"
+        volumes:
+          type: "array"
+          description: "Volume mount configuration"
+          items:
+            type: "object"
+            properties:
+              host_path:
+                type: "string"
+              container_path:
+                type: "string"
+        network_mode:
+          type: "string"
+          enum: ["bridge", "host", "none"]
+          default: "bridge"
+        restart_policy:
+          type: "string"
+          enum: ["no", "always", "on-failure", "unless-stopped"]
+          default: "unless-stopped"
+
+    build_options:
+      type: "object"
+      description: "Docker build options"
+      properties:
+        dockerfile_path:
+          type: "string"
+          default: "Dockerfile"
+        build_context:
+          type: "string"
+          default: "."
+        build_args:
+          type: "object"
+          description: "Build arguments"
+        no_cache:
+          type: "boolean"
+          default: false
+
+    health_check_config:
+      type: "object"
+      description: "Health check configuration"
+      properties:
+        health_endpoint:
+          type: "string"
+          description: "HTTP health check endpoint"
+          example: "/health"
+        expected_status_code:
+          type: "integer"
+          default: 200
+        max_retries:
+          type: "integer"
+          default: 5
+        retry_interval_ms:
+          type: "integer"
+          default: 2000
+
+    rollback_on_failure:
+      type: "boolean"
+      description: "Automatically rollback on deployment failure"
+      default: true
+
+    skip_health_validation:
+      type: "boolean"
+      description: "Skip health validation stage"
+      default: false
+
+    workflow_id:
+      type: "string"
+      format: "uuid"
+      description: "Optional workflow ID (auto-generated if not provided)"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - workflow_id
+    - success
+    - total_duration_ms
+    - deployment_id
+  properties:
+    workflow_id:
+      type: "string"
+      format: "uuid"
+      description: "Unique workflow identifier"
+
+    success:
+      type: "boolean"
+      description: "Overall deployment success status"
+
+    total_duration_ms:
+      type: "integer"
+      minimum: 0
+      description: "Total workflow execution time"
+
+    deployment_id:
+      type: "string"
+      format: "uuid"
+      description: "Unique deployment identifier"
+
+    container_id:
+      type: "string"
+      description: "Deployed container ID on remote system"
+
+    deployed_url:
+      type: "string"
+      format: "uri"
+      description: "Deployed service URL"
+      example: "http://192.168.86.200:8060"
+
+    health_status:
+      type: "object"
+      description: "Health check results"
+      properties:
+        container_running:
+          type: "boolean"
+        health_endpoint_accessible:
+          type: "boolean"
+        service_registered:
+          type: "boolean"
+        health_check_response:
+          type: "object"
+
+    stages_completed:
+      type: "array"
+      description: "List of completed stage names"
+      items:
+        type: "string"
+
+    stages_failed:
+      type: "array"
+      description: "List of failed stage names"
+      items:
+        type: "string"
+
+    image_metadata:
+      type: "object"
+      description: "Docker image metadata"
+      properties:
+        image_id:
+          type: "string"
+        image_size_bytes:
+          type: "integer"
+        creation_time:
+          type: "string"
+          format: "date-time"
+        layers_count:
+          type: "integer"
+
+    deployment_metrics:
+      type: "object"
+      description: "Deployment performance metrics"
+      properties:
+        build_duration_ms:
+          type: "integer"
+        transfer_duration_ms:
+          type: "integer"
+        deployment_duration_ms:
+          type: "integer"
+        health_validation_duration_ms:
+          type: "integer"
+
+    stage_results:
+      type: "array"
+      description: "Individual stage results"
+      items:
+        type: "object"
+        properties:
+          stage_name:
+            type: "string"
+          success:
+            type: "boolean"
+          duration_ms:
+            type: "integer"
+          operations:
+            type: "array"
+            items:
+              type: "object"
+              properties:
+                operation_name:
+                  type: "string"
+                success:
+                  type: "boolean"
+                duration_ms:
+                  type: "integer"
+                error_message:
+                  type: "string"
+
+    rollback_performed:
+      type: "boolean"
+      description: "Whether rollback was performed"
+      default: false
+
+    rollback_result:
+      type: "object"
+      description: "Rollback operation result"
+      properties:
+        success:
+          type: "boolean"
+        previous_container_restored:
+          type: "boolean"
+        rollback_duration_ms:
+          type: "integer"
+
+    error_message:
+      type: "string"
+      description: "Error message if workflow failed"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/workflow_coordination.yaml"
+    - "./contracts/fsm_states.yaml"
+    - "./contracts/event_handling.yaml"
+    - "./contracts/deployment_operations.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "docker_engine"
+      type: "container_runtime"
+      required: true
+      version: ">=20.10.0"
+
+    - name: "remote_hook_receiver"
+      type: "deployment_receiver"
+      required: true
+      endpoint: "http://{remote_host}:{remote_port}"
+
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+
+    - name: "consul"
+      type: "service_discovery"
+      required: false
+      description: "Optional service registration"
+
+  libraries:
+    - name: "aiodocker"
+      version: ">=0.21.0"
+      description: "Async Docker client"
+
+    - name: "aiohttp"
+      version: ">=3.9.0"
+      description: "Async HTTP client"
+
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation"
+
+    - name: "aiokafka"
+      version: ">=0.11.0"
+      description: "Async Kafka client"
+
+# FSM State Management
+fsm_states:
+  states:
+    - name: "PENDING"
+      description: "Deployment workflow created, not yet started"
+      transitions: ["PACKAGING", "FAILED"]
+
+    - name: "PACKAGING"
+      description: "Building Docker image and gathering metadata"
+      transitions: ["TRANSFERRING", "FAILED"]
+
+    - name: "TRANSFERRING"
+      description: "Transferring container to remote system"
+      transitions: ["DEPLOYING", "FAILED"]
+
+    - name: "DEPLOYING"
+      description: "Deploying container on remote system"
+      transitions: ["VALIDATING", "FAILED", "ROLLING_BACK"]
+
+    - name: "VALIDATING"
+      description: "Validating deployment health and availability"
+      transitions: ["COMPLETED", "FAILED", "ROLLING_BACK"]
+
+    - name: "ROLLING_BACK"
+      description: "Rolling back failed deployment"
+      transitions: ["FAILED", "ROLLBACK_COMPLETED"]
+
+    - name: "ROLLBACK_COMPLETED"
+      description: "Rollback completed (deployment failed but restored previous state)"
+      transitions: []
+
+    - name: "COMPLETED"
+      description: "Deployment completed successfully"
+      transitions: []
+
+    - name: "FAILED"
+      description: "Deployment failed"
+      transitions: []
+
+  initial_state: "PENDING"
+  final_states: ["COMPLETED", "FAILED", "ROLLBACK_COMPLETED"]
+
+# Kafka Integration
+kafka:
+  consumer_topics: []  # Orchestrator initiates, doesn't consume
+  producer_topics:
+    - "dev.omninode-bridge.deployment.started.v1"
+    - "dev.omninode-bridge.deployment.stage-completed.v1"
+    - "dev.omninode-bridge.deployment.completed.v1"
+    - "dev.omninode-bridge.deployment.failed.v1"
+    - "dev.omninode-bridge.deployment.health-check.v1"
+    - "dev.omninode-bridge.deployment.rollback-initiated.v1"
+    - "dev.omninode-bridge.deployment.rollback-completed.v1"
+
+  event_envelope: "OnexEnvelopeV1"
+
+  event_types:
+    - event_type: "DEPLOYMENT_STARTED"
+      description: "Deployment workflow initiated"
+      payload_schema: "ModelDeploymentStartedEvent"
+
+    - event_type: "DEPLOYMENT_STAGE_COMPLETED"
+      description: "Deployment stage completed successfully"
+      payload_schema: "ModelDeploymentStageCompletedEvent"
+
+    - event_type: "DEPLOYMENT_COMPLETED"
+      description: "Deployment completed successfully"
+      payload_schema: "ModelDeploymentCompletedEvent"
+
+    - event_type: "DEPLOYMENT_FAILED"
+      description: "Deployment failed"
+      payload_schema: "ModelDeploymentFailedEvent"
+
+    - event_type: "DEPLOYMENT_HEALTH_CHECK"
+      description: "Health check result"
+      payload_schema: "ModelDeploymentHealthCheckEvent"
+
+    - event_type: "DEPLOYMENT_ROLLBACK_INITIATED"
+      description: "Rollback initiated due to deployment failure"
+      payload_schema: "ModelDeploymentRollbackInitiatedEvent"
+
+    - event_type: "DEPLOYMENT_ROLLBACK_COMPLETED"
+      description: "Rollback completed"
+      payload_schema: "ModelDeploymentRollbackCompletedEvent"
+
+# Coordination Strategy
+coordination:
+  execution_mode: "sequential_with_validation"
+  parallel_stages: []  # All stages are sequential for deployment safety
+
+  checkpoint_stages:
+    - "package_preparation"     # Validate image before transfer
+    - "transfer_initiation"     # Validate transfer before deployment
+    - "deployment_execution"    # Validate deployment before health checks
+
+  rollback_strategy: "restore_previous_container"
+  state_persistence: "kafka_events"
+
+  validation_gates:
+    - stage: "package_preparation"
+      validations:
+        - "image_exists"
+        - "image_integrity"
+        - "metadata_complete"
+
+    - stage: "transfer_initiation"
+      validations:
+        - "remote_endpoint_reachable"
+        - "transfer_acknowledged"
+
+    - stage: "deployment_execution"
+      validations:
+        - "container_started"
+        - "no_port_conflicts"
+
+    - stage: "health_validation"
+      validations:
+        - "container_running"
+        - "health_endpoint_responding"
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    initial_backoff_ms: 1000
+    max_backoff_ms: 30000
+    timeout_ms: 180000  # 3 minutes total
+
+    # Operation-specific retry policies
+    operation_retries:
+      build_docker_image:
+        max_attempts: 2
+        timeout_ms: 60000
+
+      establish_connection:
+        max_attempts: 5
+        backoff_multiplier: 1.5
+
+      validate_health_endpoint:
+        max_attempts: 5
+        backoff_multiplier: 1.2
+
+  fallback_strategy: "rollback_and_notify"
+
+  error_codes:
+    - code: "BUILD_FAILED"
+      description: "Docker image build failed"
+      severity: "error"
+      action: "retry_build"
+      retry_allowed: true
+
+    - code: "TRANSFER_FAILED"
+      description: "Container transfer to remote failed"
+      severity: "error"
+      action: "retry_transfer"
+      retry_allowed: true
+
+    - code: "DEPLOYMENT_FAILED"
+      description: "Container deployment failed"
+      severity: "error"
+      action: "initiate_rollback"
+      retry_allowed: true
+
+    - code: "HEALTH_CHECK_FAILED"
+      description: "Health check validation failed"
+      severity: "error"
+      action: "initiate_rollback"
+      retry_allowed: true
+
+    - code: "REMOTE_ENDPOINT_UNREACHABLE"
+      description: "Cannot connect to remote hook receiver"
+      severity: "error"
+      action: "abort_workflow"
+      retry_allowed: false
+
+    - code: "ROLLBACK_FAILED"
+      description: "Rollback operation failed"
+      severity: "critical"
+      action: "manual_intervention_required"
+      retry_allowed: false
+
+    - code: "TIMEOUT"
+      description: "Stage execution timeout"
+      severity: "error"
+      action: "retry_stage"
+      retry_allowed: true
+
+# Quality Gates
+quality_gates:
+  - name: "image_build_success"
+    description: "Verify Docker image built successfully"
+    threshold: 1.0
+    stage: "package_preparation"
+
+  - name: "image_size_check"
+    description: "Verify image size within reasonable limits (<2GB)"
+    threshold: 1.0
+    stage: "package_preparation"
+    max_size_bytes: 2147483648  # 2GB
+
+  - name: "transfer_success"
+    description: "Verify container transferred to remote"
+    threshold: 1.0
+    stage: "transfer_initiation"
+
+  - name: "deployment_success"
+    description: "Verify container deployed and started"
+    threshold: 1.0
+    stage: "deployment_execution"
+
+  - name: "health_check_pass"
+    description: "Verify service health check passes"
+    threshold: 1.0
+    stage: "health_validation"
+
+  - name: "total_duration"
+    description: "Verify total deployment time within target"
+    threshold: 0.80
+    stage: "completed"
+    target_duration_ms: 30000
+
+# Health Checks
+health_checks:
+  - name: "docker_engine"
+    type: "system"
+    command: "docker info"
+    interval_seconds: 60
+    timeout_seconds: 5
+    critical: true
+
+  - name: "remote_hook_receiver"
+    type: "http"
+    endpoint: "http://{remote_host}:{remote_port}/health"
+    interval_seconds: 30
+    timeout_seconds: 5
+    critical: true
+
+  - name: "kafka_connectivity"
+    type: "network"
+    interval_seconds: 60
+    timeout_seconds: 5
+    critical: false
+
+  - name: "deployed_container"
+    type: "docker"
+    container_name: "{container_name}"
+    interval_seconds: 15
+    timeout_seconds: 3
+    critical: true
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 85
+    required: true
+    critical_paths:
+      - "workflow_coordination"
+      - "stage_execution"
+      - "fsm_transitions"
+      - "error_handling"
+      - "rollback_logic"
+
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "successful_deployment_flow"
+      - "deployment_with_rollback"
+      - "health_check_failure_handling"
+      - "remote_endpoint_unreachable"
+      - "concurrent_deployments"
+      - "deployment_timeout_handling"
+
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "small_container_deployment"
+        target: 30.0
+        unit: "seconds"
+        container_size_mb: 100
+
+      - metric: "large_container_deployment"
+        target: 120.0
+        unit: "seconds"
+        container_size_mb: 1000
+
+      - metric: "stage_transition_time"
+        target: 100
+        unit: "milliseconds"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "deployments_started_total"
+      type: "counter"
+      description: "Total deployments initiated"
+      labels: ["container_name", "remote_host"]
+
+    - name: "deployments_completed_total"
+      type: "counter"
+      description: "Total deployments completed successfully"
+      labels: ["container_name", "remote_host"]
+
+    - name: "deployments_failed_total"
+      type: "counter"
+      description: "Total deployments failed"
+      labels: ["container_name", "remote_host", "failure_stage"]
+
+    - name: "deployments_rolled_back_total"
+      type: "counter"
+      description: "Total deployments rolled back"
+      labels: ["container_name", "remote_host"]
+
+    - name: "deployment_duration_seconds"
+      type: "histogram"
+      description: "Total deployment duration"
+      buckets: [15.0, 30.0, 60.0, 120.0, 180.0]
+      labels: ["container_name"]
+
+    - name: "stage_duration_seconds"
+      type: "histogram"
+      description: "Individual stage duration"
+      buckets: [5.0, 10.0, 15.0, 30.0, 60.0]
+      labels: ["stage_name", "container_name"]
+
+    - name: "image_size_bytes"
+      type: "histogram"
+      description: "Docker image sizes"
+      buckets: [1.0e7, 1.0e8, 5.0e8, 1.0e9, 2.0e9]  # 10MB, 100MB, 500MB, 1GB, 2GB
+      labels: ["container_name"]
+
+    - name: "health_check_success_rate"
+      type: "gauge"
+      description: "Health check success rate"
+      labels: ["container_name", "remote_host"]
+
+    - name: "current_deployment_state"
+      type: "gauge"
+      description: "Current deployment FSM state"
+      labels: ["workflow_id", "container_name", "state"]
+
+    - name: "concurrent_deployments"
+      type: "gauge"
+      description: "Number of concurrent deployments"
+
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+    log_stage_transitions: true
+    log_health_checks: true
+
+    # Sensitive data redaction
+    redact_fields:
+      - "deployment_config.environment_variables"
+      - "auth_tokens"
+
+  traces:
+    enabled: true
+    sampling_rate: 1.0  # 100% sampling for critical deployments
+    trace_stage_execution: true
+    trace_kafka_events: true
+    trace_docker_operations: true
+    trace_http_requests: true
+
+# Security Considerations
+security:
+  authentication:
+    remote_endpoint:
+      required: true
+      method: "bearer_token"
+
+  authorization:
+    required_permissions:
+      - "docker:build"
+      - "docker:push"
+      - "network:remote_connect"
+      - "deployment:execute"
+
+  data_protection:
+    encrypt_transfer: true
+    encrypt_at_rest: false
+    redact_sensitive_logs: true
+
+  audit:
+    log_all_deployments: true
+    log_rollbacks: true
+    log_failures: true
+
+# Operational Runbook
+operational:
+  troubleshooting:
+    - issue: "Deployment timeout"
+      diagnosis: "Check network connectivity and remote system resources"
+      resolution: "Retry deployment or increase timeout limits"
+
+    - issue: "Health check failing"
+      diagnosis: "Container started but service not responding"
+      resolution: "Check container logs, verify port mappings"
+
+    - issue: "Rollback failed"
+      diagnosis: "Cannot restore previous container state"
+      resolution: "Manual intervention required - restore from backup"
+
+  maintenance:
+    - task: "Clean old images"
+      frequency: "weekly"
+      command: "docker image prune -a --force"
+
+    - task: "Review deployment metrics"
+      frequency: "daily"
+      action: "Analyze failure rates and performance trends"

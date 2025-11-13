@@ -1,0 +1,80 @@
+{#
+Database Subcontract Template
+
+Generates database operation methods for CRUD and queries.
+
+Context variables:
+- operations: List of database operations (select, insert, update, delete, query)
+- table_name: Database table name
+- use_transactions: Boolean for transaction support
+- use_connection_pool: Boolean for connection pooling
+#}
+
+async def _execute_database_operations(
+    self,
+    context: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Execute database operations.
+
+    Generated from database subcontract.
+    {% if operations %}Operations: {{ operations | join(', ') }}{% endif %}
+    """
+    results = {}
+
+    {% if use_transactions %}
+    # Transaction support enabled
+    async with self.db_client.transaction() as tx:
+        try:
+    {% else %}
+    try:
+    {% endif %}
+            {% if operations %}
+            # Configured operations: {{ operations | join(', ') }}
+            {% for operation in operations %}
+            # {{ operation }} operation
+            {% if operation == 'select' %}
+            results['{{ operation }}'] = await self.db_client.fetch_all(
+                "SELECT * FROM {{ table_name | default('table') }} WHERE id = $1",
+                context.get("id")
+            )
+            {% elif operation == 'insert' %}
+            results['{{ operation }}'] = await self.db_client.execute(
+                "INSERT INTO {{ table_name | default('table') }} (data) VALUES ($1)",
+                context.get("data")
+            )
+            {% elif operation == 'update' %}
+            results['{{ operation }}'] = await self.db_client.execute(
+                "UPDATE {{ table_name | default('table') }} SET data = $1 WHERE id = $2",
+                context.get("data"),
+                context.get("id")
+            )
+            {% elif operation == 'delete' %}
+            results['{{ operation }}'] = await self.db_client.execute(
+                "DELETE FROM {{ table_name | default('table') }} WHERE id = $1",
+                context.get("id")
+            )
+            {% else %}
+            # Custom query: {{ operation }}
+            results['{{ operation }}'] = await self.db_client.fetch_all(
+                context.get("query_{{ operation }}", "SELECT 1")
+            )
+            {% endif %}
+
+            {% endfor %}
+            {% else %}
+            # No specific operations configured - add your database logic here
+            results['status'] = 'success'
+            {% endif %}
+    {% if use_transactions %}
+            await tx.commit()
+        except Exception as e:
+            await tx.rollback()
+            raise
+    {% else %}
+        except Exception as e:
+            logger.error(f"Database operation failed: {e}")
+            raise
+    {% endif %}
+
+    return results

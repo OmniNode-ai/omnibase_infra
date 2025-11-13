@@ -1,0 +1,11 @@
+# Routing Subcontract
+# Service routing configuration for external dependencies
+
+type: "service_routing"
+services:
+  omniarchon:
+    url: "${OMNIARCHON_URL}"
+    timeout_ms: 5000
+    retry_policy:
+      max_attempts: 2
+      backoff_ms: 1000

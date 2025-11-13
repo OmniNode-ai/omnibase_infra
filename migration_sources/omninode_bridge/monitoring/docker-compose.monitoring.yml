@@ -1,0 +1,491 @@
+# Complete Monitoring Stack for OmniNode Bridge Production
+version: '3.8'
+
+networks:
+  monitoring:
+    driver: bridge
+    external: false
+  omninode-bridge-network:
+    external: true
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+
+services:
+  # ========================================
+  # Core Monitoring Services
+  # ========================================
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: omninode-bridge-prometheus
+    restart: unless-stopped
+    user: "65534:65534"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts:/etc/prometheus/alerts:ro
+      - ./rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=50GB'
+      - '--storage.tsdb.wal-compression'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--web.external-url=http://localhost:9090'
+      - '--query.timeout=2m'
+      - '--query.max-concurrency=20'
+      - '--query.max-samples=50000000'
+    networks:
+      - monitoring
+      - omninode-bridge-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  grafana:
+    image: grafana/grafana:10.1.2
+    container_name: omninode-bridge-grafana
+    restart: unless-stopped
+    user: "472:472"
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD_FILE=/run/secrets/grafana_admin_password
+      - GF_SECURITY_SECRET_KEY_FILE=/run/secrets/grafana_secret_key
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_USERS_ALLOW_ORG_CREATE=false
+      - GF_USERS_AUTO_ASSIGN_ORG=true
+      - GF_USERS_AUTO_ASSIGN_ORG_ROLE=Viewer
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel
+      - GF_SERVER_ROOT_URL=https://grafana.omninode.ai
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_LOG_MODE=console
+      - GF_LOG_LEVEL=info
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+    secrets:
+      - grafana_admin_password
+      - grafana_secret_key
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: omninode-bridge-alertmanager
+    restart: unless-stopped
+    user: "65534:65534"
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--cluster.listen-address=0.0.0.0:9094'
+      - '--log.level=info'
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+
+  # ========================================
+  # Infrastructure Exporters
+  # ========================================
+
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: omninode-bridge-node-exporter
+    restart: unless-stopped
+    user: "65534:65534"
+    ports:
+      - "127.0.0.1:9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.cpu'
+      - '--collector.diskstats'
+      - '--collector.filesystem'
+      - '--collector.loadavg'
+      - '--collector.meminfo'
+      - '--collector.netdev'
+      - '--collector.netstat'
+      - '--collector.stat'
+      - '--collector.time'
+      - '--collector.uname'
+      - '--collector.vmstat'
+      - '--web.max-requests=40'
+      - '--log.level=info'
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: omninode-bridge-cadvisor
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    command:
+      - '--housekeeping_interval=30s'
+      - '--max_housekeeping_interval=35s'
+      - '--event_storage_event_limit=default=0'
+      - '--event_storage_age_limit=default=0'
+      - '--disable_metrics=disk,network,tcp,udp,percpu,sched,process'
+      - '--docker_only'
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.14.0
+    container_name: omninode-bridge-postgres-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in environment}@omninode-bridge-postgres:5432/omninode_bridge?sslmode=disable
+      - PG_EXPORTER_INCLUDE_DATABASES=omninode_bridge
+      - PG_EXPORTER_EXCLUDE_DATABASES=template0,template1
+      - PG_EXPORTER_AUTO_DISCOVER_DATABASES=true
+      - PG_EXPORTER_WEB_LISTEN_ADDRESS=0.0.0.0:9187
+      - PG_EXPORTER_WEB_TELEMETRY_PATH=/metrics
+      - PG_EXPORTER_LOG_LEVEL=info
+    networks:
+      - monitoring
+      - omninode-bridge-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  # redis-exporter:
+  #   image: oliver006/redis_exporter:v1.55.0
+  #   container_name: omninode-bridge-redis-exporter
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:9121:9121"
+  #   environment:
+  #     - REDIS_ADDR=redis://redis:6379
+  #     - REDIS_PASSWORD=${REDIS_PASSWORD}
+  #     - REDIS_EXPORTER_INCL_SYSTEM_METRICS=true
+  #     - REDIS_EXPORTER_SKIP_TLS_VERIFICATION=true
+  #     - REDIS_EXPORTER_LOG_FORMAT=txt
+  #   networks:
+  #     - monitoring
+  #     - omninode-bridge-network
+  #   depends_on:
+  #     - redis
+  #   healthcheck:
+  #     test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9121/metrics"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   cap_drop:
+  #     - ALL
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 256M
+  #         cpus: '0.25'
+  #       reservations:
+  #         memory: 128M
+  #         cpus: '0.1'
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: omninode-bridge-kafka-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9308:9308"
+    command:
+      - '--kafka.server=omninode-bridge-redpanda:9092'
+      - '--web.listen-address=0.0.0.0:9308'
+      - '--web.telemetry-path=/metrics'
+      - '--log.level=info'
+      - '--sasl.enabled=false'
+      - '--tls.enabled=false'
+      - '--kafka.version=2.8.0'
+      - '--use.consumelag.zookeeper=false'
+    networks:
+      - monitoring
+      - omninode-bridge-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9308/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  # ========================================
+  # Optional Log Management (ELK Stack)
+  # ========================================
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.9.0
+    container_name: omninode-bridge-elasticsearch
+    restart: unless-stopped
+    environment:
+      - node.name=omninode-elasticsearch
+      - cluster.name=omninode-logs
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:9200:9200"
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cat/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.9.0
+    container_name: omninode-bridge-kibana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=kibana.omninode.ai
+      - SERVER_BASEPATH=""
+      - LOGGING_ROOT_LEVEL=warn
+    networks:
+      - monitoring
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.9.0
+    container_name: omninode-bridge-logstash
+    restart: unless-stopped
+    volumes:
+      - ./logstash/config:/usr/share/logstash/config:ro
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+    environment:
+      - "LS_JAVA_OPTS=-Xmx512m -Xms512m"
+      - PIPELINE_WORKERS=2
+      - LOG_LEVEL=info
+    networks:
+      - monitoring
+      - omninode-bridge-network
+    depends_on:
+      - elasticsearch
+    ports:
+      - "127.0.0.1:5044:5044"
+      - "127.0.0.1:9600:9600"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # ========================================
+  # Backup Monitoring
+  # ========================================
+
+  backup-monitor:
+    image: prom/blackbox-exporter:v0.24.0
+    container_name: omninode-bridge-backup-monitor
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9115:9115"
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    command:
+      - '--config.file=/etc/blackbox_exporter/config.yml'
+      - '--web.listen-address=0.0.0.0:9115'
+      - '--log.level=info'
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9115/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+secrets:
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
+  grafana_secret_key:
+    file: ./secrets/grafana_secret_key.txt

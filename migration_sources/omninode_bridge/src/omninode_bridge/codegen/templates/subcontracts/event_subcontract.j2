@@ -1,0 +1,59 @@
+{#
+Event Handling Subcontract Template
+
+Generates event publishing/consuming methods.
+
+Context variables:
+- topics: List of Kafka topics
+- use_kafka: Boolean for Kafka support
+- event_types: List of event type names
+- namespace: Event namespace
+#}
+
+async def _handle_event_operations(
+    self,
+    context: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Handle event publishing and consuming.
+
+    Generated from event subcontract.
+    {% if topics %}Topics: {{ topics | join(', ') }}{% endif %}
+    """
+    results = {}
+
+    {% if use_kafka %}
+    # Kafka event handling
+    {% if topics %}
+    # Publish events to configured topics
+    {% for topic in topics %}
+    # Topic: {{ topic }}
+    event_data = context.get("event_data_{{ topic }}", {})
+    envelope = OnexEnvelopeV1(
+        event_type="{{ topic }}",
+        namespace="{{ namespace | default('dev.omninode') }}",
+        payload=event_data,
+        metadata=context.get("metadata", {})
+    )
+
+    try:
+        await self.event_publisher.publish(
+            topic="{{ topic }}",
+            event=envelope
+        )
+        results['published_{{ topic }}'] = True
+    except Exception as e:
+        logger.error(f"Failed to publish to {{ topic }}: {e}")
+        results['published_{{ topic }}'] = False
+
+    {% endfor %}
+    {% else %}
+    # No specific topics configured - add your event logic here
+    results['status'] = 'no_topics_configured'
+    {% endif %}
+    {% else %}
+    # Non-Kafka event handling
+    results['status'] = 'non_kafka_events'
+    {% endif %}
+
+    return results

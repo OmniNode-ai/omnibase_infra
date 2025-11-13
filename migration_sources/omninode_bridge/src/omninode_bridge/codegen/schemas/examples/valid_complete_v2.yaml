@@ -1,0 +1,250 @@
+# Example: Complete Contract with All Features (v2.0.0)
+#
+# Demonstrates all v2.0.0 features:
+# - Schema version
+# - Multiple mixins with configuration
+# - Advanced features (circuit breaker, retry, DLQ, transactions, security, observability)
+# - Complete subcontracts
+
+schema_version: "v2.0.0"
+name: "NodeAdvancedEventProcessorEffect"
+version:
+  major: 2
+  minor: 0
+  patch: 0
+node_type: "effect"
+description: "Advanced event processor with full observability, fault tolerance, and security"
+
+capabilities:
+  - name: "event_processing"
+    description: "Process events from Kafka topics"
+  - name: "database_persistence"
+    description: "Persist processed events to PostgreSQL"
+  - name: "service_discovery"
+    description: "Register with Consul for service discovery"
+  - name: "distributed_tracing"
+    description: "OpenTelemetry distributed tracing"
+
+endpoints:
+  kafka_consumer:
+    topics:
+      - "events.processing.requested"
+      - "events.processing.retry"
+    consumer_group: "event_processors"
+
+dependencies:
+  services:
+    - name: "postgres_connection_manager"
+      required: true
+      description: "PostgreSQL connection pool"
+    - name: "kafka_consumer"
+      required: true
+      description: "Kafka event consumer"
+    - name: "consul_client"
+      required: false
+      description: "Consul service registry client"
+
+configuration:
+  postgres_host:
+    default: "localhost"
+    description: "PostgreSQL hostname"
+  postgres_port:
+    default: 5432
+    description: "PostgreSQL port"
+  kafka_bootstrap_servers:
+    default: "localhost:9092"
+    description: "Kafka bootstrap servers"
+
+mixins:
+  - name: "MixinHealthCheck"
+    enabled: true
+    config:
+      check_interval_ms: 30000
+      timeout_seconds: 5.0
+      components:
+        - name: "database"
+          critical: true
+          timeout_seconds: 5.0
+        - name: "kafka_consumer"
+          critical: true
+          timeout_seconds: 3.0
+        - name: "consul"
+          critical: false
+          timeout_seconds: 2.0
+
+  - name: "MixinMetrics"
+    enabled: true
+    config:
+      collect_latency: true
+      collect_throughput: true
+      collect_error_rates: true
+      percentiles: [50, 95, 99, 99.9]
+      histogram_buckets: [10, 25, 50, 100, 250, 500, 1000, 2500]
+
+  - name: "MixinEventDrivenNode"
+    enabled: true
+    config:
+      kafka_bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS}"
+      consumer_group: "${SERVICE_NAME}_consumers"
+      topics:
+        - "events.processing.requested"
+        - "events.processing.retry"
+      auto_offset_reset: "latest"
+      enable_auto_commit: true
+
+  - name: "MixinServiceRegistry"
+    enabled: true
+    config:
+      consul_host: "${CONSUL_HOST}"
+      consul_port: 8500
+      service_name: "${SERVICE_NAME}"
+      health_check_interval_seconds: 10
+      deregister_critical_service_after: "30m"
+
+  - name: "MixinLogData"
+    enabled: true
+    config:
+      log_level: "INFO"
+      structured: true
+      include_correlation_id: true
+      redact_sensitive_fields: true
+      sensitive_field_patterns:
+        - "password"
+        - "token"
+        - "api_key"
+        - "secret"
+
+advanced_features:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout_ms: 60000
+    half_open_max_calls: 3
+    services:
+      - name: "postgres"
+        failure_threshold: 3
+        recovery_timeout_ms: 30000
+      - name: "kafka"
+        failure_threshold: 10
+        recovery_timeout_ms: 120000
+
+  retry_policy:
+    enabled: true
+    max_attempts: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 30000
+    backoff_multiplier: 2.0
+    retryable_exceptions:
+      - "TimeoutError"
+      - "ConnectionError"
+      - "TemporaryFailure"
+    retryable_status_codes: [429, 500, 502, 503, 504]
+
+  dead_letter_queue:
+    enabled: true
+    max_retries: 3
+    topic_suffix: ".dlq"
+    retry_delay_ms: 5000
+    alert_threshold: 100
+    monitoring:
+      enabled: true
+      check_interval_seconds: 60
+
+  transactions:
+    enabled: true
+    isolation_level: "READ_COMMITTED"
+    timeout_seconds: 30
+    rollback_on_error: true
+    savepoints: true
+
+  security_validation:
+    enabled: true
+    sanitize_inputs: true
+    sanitize_logs: true
+    validate_sql: true
+    max_input_length: 10000
+    forbidden_patterns:
+      - "(?i)(DROP|DELETE|TRUNCATE)\\s+TABLE"
+      - "(?i)EXEC(UTE)?\\s+"
+    redact_fields:
+      - "password"
+      - "api_key"
+      - "secret"
+      - "token"
+
+  observability:
+    tracing:
+      enabled: true
+      exporter: "otlp"
+      endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+      sample_rate: 1.0
+    metrics:
+      enabled: true
+      prometheus_port: 9090
+      export_interval_seconds: 15
+    logging:
+      structured: true
+      json_format: true
+      correlation_tracking: true
+
+subcontracts:
+  effect:
+    operations:
+      - "initialize"
+      - "shutdown"
+      - "health_check"
+      - "metrics"
+      - "process"
+
+  event_type:
+    consumed_events:
+      - "EVENT_PROCESSING_REQUESTED"
+      - "EVENT_PROCESSING_RETRY"
+    produced_events:
+      - "EVENT_PROCESSING_COMPLETED"
+      - "EVENT_PROCESSING_FAILED"
+
+  state_management:
+    persistence: "postgres"
+    tracked_state:
+      - "events_processed"
+      - "events_failed"
+      - "circuit_breaker_state"
+      - "performance_metrics"
+
+performance_targets:
+  event_processing_latency_p95_ms: 50
+  event_processing_latency_p99_ms: 100
+  throughput_events_per_second: 1000
+  database_operation_latency_p95_ms: 10
+
+health_checks:
+  components:
+    - name: "database"
+      critical: true
+      timeout_seconds: 5.0
+    - name: "kafka_consumer"
+      critical: true
+      timeout_seconds: 3.0
+    - name: "circuit_breaker"
+      critical: true
+      timeout_seconds: 1.0
+
+input_state:
+  type: object
+  description: "Input state for event processing"
+  properties:
+    events_pending:
+      type: integer
+      minimum: 0
+
+output_state:
+  type: object
+  description: "Output state after event processing"
+  properties:
+    events_processed:
+      type: integer
+      minimum: 0
+    execution_time_ms:
+      type: integer
+      minimum: 0

@@ -1,0 +1,46 @@
+# ONEX v2.0 Subcontract - Effect Operations
+# Shared contract definitions for Effect node operations
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Common operation patterns and requirements for Effect nodes.
+  Defines standard I/O operation signatures, side effect declarations,
+  and execution patterns for all Effect-type nodes.
+
+operation_patterns:
+  - pattern: "network_io"
+    description: "Network I/O operations with retry and timeout"
+    requirements:
+      - "timeout_seconds"
+      - "retry_policy"
+      - "circuit_breaker"
+
+  - pattern: "database_io"
+    description: "Database operations with transaction management"
+    requirements:
+      - "transaction_support"
+      - "connection_pooling"
+      - "prepared_statements"
+
+  - pattern: "file_io"
+    description: "File system operations with error handling"
+    requirements:
+      - "path_validation"
+      - "permission_checks"
+      - "atomic_writes"
+
+retry_policy_defaults:
+  max_attempts: 3
+  backoff_multiplier: 2.0
+  timeout_ms: 30000
+
+side_effect_categories:
+  - "network_io"
+  - "database_io"
+  - "file_io"
+  - "cache_modification"
+  - "event_publishing"
+  - "external_service_call"

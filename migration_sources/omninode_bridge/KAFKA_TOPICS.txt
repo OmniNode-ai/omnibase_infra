@@ -1,0 +1,175 @@
+================================================================================
+COMPLETE KAFKA TOPIC INVENTORY - OmniNode Bridge
+================================================================================
+Generated: 2025-11-07 (Updated: Corruption RESOLVED)
+Redpanda Cluster: omninode-bridge-redpanda (192.168.86.200:29092)
+
+================================================================================
+TOPIC SUMMARY
+================================================================================
+Total Topics: 59
+Healthy Topics (with partitions): 59 ✅
+Corrupted Topics (0 partitions): 0 (RESOLVED)
+
+================================================================================
+ALL TOPICS (Alphabetical)
+================================================================================
+
+NAME                                                             PARTITIONS  REPLICAS
+agent-actions                                                    1           1
+agent-actions-test-0b1702db                                      1           1
+agent-detection-failures                                         1           1
+agent-execution-logs                                             3           1
+agent-observability-dlq                                          1           1
+agent-routing-decisions                                          1           1
+agent-transformation-events                                      1           1
+agent.routing.requested.v1                                       1           1
+dev.archon-intelligence.intelligence.code-analysis-completed.v1  3           1
+dev.archon-intelligence.intelligence.code-analysis-failed.v1     3           1
+dev.archon-intelligence.intelligence.code-analysis-requested.v1  3           1
+dev.archon-intelligence.tree.discover.v1                         1           1
+dev.archon-intelligence.tree.get-status-completed.v1             3           1
+dev.archon-intelligence.tree.get-status-failed.v1                1           1
+dev.archon-intelligence.tree.get-status-requested.v1             3           1
+dev.archon-intelligence.tree.incremental-stamp-completed.v1      1           1
+dev.archon-intelligence.tree.incremental-stamp-failed.v1         1           1
+dev.archon-intelligence.tree.incremental-stamp-requested.v1      1           1
+dev.archon-intelligence.tree.index-project-completed.v1          3           1
+dev.archon-intelligence.tree.index-project-failed.v1             1           1
+dev.archon-intelligence.tree.index-project-requested.v1          1           1
+dev.archon-intelligence.tree.search-files-completed.v1           3           1
+dev.archon-intelligence.tree.search-files-failed.v1              1           1
+dev.archon-intelligence.tree.search-files-requested.v1           3           1
+dev.omniclaude.codegen.analyze.request.v1                        1           1
+dev.omniclaude.codegen.analyze.response.v1                       1           1
+dev.omniclaude.docs.evt.documentation-changed.v1                 6           1
+dev.omniclaude.docs.evt.documentation-indexed.v1                 3           1
+dev.omninode_bridge.onex.aud.postgres-operations.v1              3           1
+dev.omninode_bridge.onex.cdc.postgres-schema-changes.v1          3           1
+dev.omninode_bridge.onex.cmd.metadata-stamp-request.v1           3           1
+dev.omninode_bridge.onex.cmd.postgres-execute-query.v1           3           1
+dev.omninode_bridge.onex.cmd.postgres-health-check.v1            3           1
+dev.omninode_bridge.onex.dlt.postgres-execute-query.v1           3           1
+dev.omninode_bridge.onex.evt.blake3-hash-generated.v1            1           1
+dev.omninode_bridge.onex.evt.hook-received.v1                    3           1
+dev.omninode_bridge.onex.evt.metadata-batch-processed.v1         3           1
+dev.omninode_bridge.onex.evt.metadata-stamp-created.v1           3           1
+dev.omninode_bridge.onex.evt.metadata-stamp-validated.v1         3           1
+dev.omninode_bridge.onex.evt.node-heartbeat.v1                   1           1
+dev.omninode_bridge.onex.evt.node-introspection.v1               1           1
+dev.omninode_bridge.onex.evt.onextree-intelligence-received.v1   1           1
+dev.omninode_bridge.onex.evt.onextree-intelligence-requested.v1  1           1
+dev.omninode_bridge.onex.evt.postgres-connection-established.v1  3           1
+dev.omninode_bridge.onex.evt.postgres-connection-failed.v1       3           1
+dev.omninode_bridge.onex.evt.postgres-query-completed.v1         3           1
+dev.omninode_bridge.onex.evt.postgres-query-failed.v1            3           1
+dev.omninode_bridge.onex.evt.registry-request-introspection.v1   1           1
+dev.omninode_bridge.onex.evt.service-deregistered.v1             3           1
+dev.omninode_bridge.onex.evt.service-registered.v1               3           1
+dev.omninode_bridge.onex.evt.session-created.v1                  3           1
+dev.omninode_bridge.onex.evt.stamp-workflow-completed.v1         1           1
+dev.omninode_bridge.onex.evt.stamp-workflow-failed.v1            1           1
+dev.omninode_bridge.onex.evt.stamp-workflow-started.v1           1           1
+dev.omninode_bridge.onex.evt.tool-executed.v1                    3           1
+dev.omninode_bridge.onex.evt.workflow-state-transition.v1        1           1
+dev.omninode_bridge.onex.evt.workflow-step-completed.v1          1           1
+dev.omninode_bridge.onex.met.metadata-performance.v1             3           1
+dev.omninode_bridge.onex.met.postgres-performance.v1             3           1
+dev.omninode_bridge.onex.qrs.postgres-health-replies.v1          3           1
+dev.omninode_bridge.onex.qrs.postgres-health-requests.v1         3           1
+dev.omninode_bridge.onex.qrs.postgres-health-response.v1         3           1
+dev.omninode_bridge.onex.rty.postgres-execute-query.v1           3           1
+intelligence.requests                                            1           1
+intelligence.responses                                           1           1
+omninode.bridge.events                                           1           1
+omninode.service.lifecycle                                       1           1
+omninode.system.events                                           1           1
+omninode.tool.updates                                            1           1
+router-performance-metrics                                       1           1
+test-topic                                                       1           1
+
+================================================================================
+CORRUPTION RESOLUTION (2025-11-07)
+================================================================================
+
+✅ RESOLVED: All 6 previously corrupted topics now have proper partitions
+
+ISSUE:
+- 6 topics had 0 partitions (metadata corruption in local dev container)
+- Topics were unusable for publishing or consuming messages
+
+ROOT CAUSE:
+- Local development Redpanda container had deep metadata corruption
+- All new topics created were getting 0 partitions
+- Remote production Redpanda (192.168.86.200) was UNAFFECTED
+
+RESOLUTION:
+1. Identified corruption was in LOCAL container only
+2. Removed corrupted local container: omninode-bridge-redpanda
+3. Removed corrupted data volume: omninode_bridge_redpanda_data
+4. Verified remote Redpanda topics are healthy with 1 partition, 1 replica
+
+AFFECTED TOPICS (NOW HEALTHY):
+1. ✅ dev.omninode_bridge.onex.evt.node-introspection.v1
+2. ✅ dev.omninode_bridge.onex.evt.stamp-workflow-completed.v1
+3. ✅ dev.omninode_bridge.onex.evt.stamp-workflow-failed.v1
+4. ✅ dev.omninode_bridge.onex.evt.stamp-workflow-started.v1
+5. ✅ dev.omninode_bridge.onex.evt.workflow-state-transition.v1
+6. ✅ dev.omninode_bridge.onex.evt.workflow-step-completed.v1
+
+NOTE: The corrupted v2 topics created during troubleshooting can be safely
+deleted if desired, but they don't affect operations.
+
+================================================================================
+TOPIC CATEGORIES
+================================================================================
+
+Agent Coordination (8 topics):
+- agent-actions, agent-actions-test-0b1702db, agent-detection-failures
+- agent-execution-logs, agent-observability-dlq, agent-routing-decisions
+- agent-transformation-events, agent.routing.requested.v1
+
+Archon Intelligence (15 topics):
+- dev.archon-intelligence.intelligence.* (3 topics)
+- dev.archon-intelligence.tree.* (12 topics)
+
+OmniClaude (2 topics):
+- dev.omniclaude.codegen.*, dev.omniclaude.docs.*
+
+OmniNode Bridge Events (18 topics):
+- dev.omninode_bridge.onex.evt.* (workflow, metadata, postgres, service events)
+
+OmniNode Bridge Commands (3 topics):
+- dev.omninode_bridge.onex.cmd.* (metadata, postgres operations)
+
+OmniNode Bridge Metrics (2 topics):
+- dev.omninode_bridge.onex.met.* (metadata, postgres performance)
+
+OmniNode Bridge Audit (1 topic):
+- dev.omninode_bridge.onex.aud.postgres-operations.v1
+
+OmniNode Bridge Query/Response (3 topics):
+- dev.omninode_bridge.onex.qrs.postgres-health-*
+
+OmniNode Bridge CDC (1 topic):
+- dev.omninode_bridge.onex.cdc.postgres-schema-changes.v1
+
+OmniNode Bridge DLT (1 topic):
+- dev.omninode_bridge.onex.dlt.postgres-execute-query.v1
+
+OmniNode Bridge Retry (1 topic):
+- dev.omninode_bridge.onex.rty.postgres-execute-query.v1
+
+Legacy Topics (5 topics):
+- intelligence.*, omninode.bridge.events, omninode.service.lifecycle
+- omninode.system.events, omninode.tool.updates
+
+Router Performance (1 topic):
+- router-performance-metrics
+
+Test Topics (1 topic):
+- test-topic
+
+================================================================================
+END OF REPORT
+================================================================================

@@ -1,0 +1,370 @@
+# Test Contract Example - Effect Node (ONEX Standards Compliant)
+#
+# This example demonstrates comprehensive testing for an Effect node
+# that performs PostgreSQL CRUD operations with connection pooling.
+#
+# Effect nodes handle external I/O operations (database, HTTP, filesystem)
+# and require extensive mocking of external dependencies.
+#
+# VERSION: 1.0.0
+
+# === CORE TEST CONTRACT IDENTIFICATION ===
+
+name: postgres_crud_effect_tests
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: |
+  Comprehensive test contract for PostgreSQL CRUD Effect node.
+
+  Tests database operations, connection pooling, transaction management,
+  and error handling for external I/O operations.
+
+  Effect nodes must ensure:
+  - Proper resource management (connections, transactions)
+  - Graceful error handling and recovery
+  - Performance within latency targets
+  - Security (SQL injection prevention, input validation)
+
+# === TEST TARGET IDENTIFICATION ===
+
+target_node: NodePostgresCrudEffect
+target_version: "1.0.0"
+target_node_type: effect
+
+test_suite_name: test_node_postgres_crud_effect
+test_file_path: tests/nodes/effects/postgres_crud/
+
+# === COVERAGE REQUIREMENTS ===
+
+coverage_minimum: 90
+coverage_target: 95
+coverage_by_file: true
+coverage_by_function: true
+
+# === TEST TYPE SPECIFICATIONS ===
+
+test_types:
+  - unit
+  - integration
+  - contract
+  - performance
+  - security
+
+# === TEST TARGETS AND SCENARIOS ===
+
+test_targets:
+  # Test CRUD create operation
+  - target_name: execute_effect
+    target_type: method
+    test_scenarios:
+      - "successful record creation"
+      - "creation with duplicate key violation"
+      - "creation with foreign key constraint violation"
+      - "creation with invalid data types"
+      - "creation with transaction rollback"
+      - "concurrent record creation"
+    expected_behaviors:
+      - "creates record in database"
+      - "returns ModelResult with success=True"
+      - "commits transaction on success"
+      - "rolls back transaction on error"
+      - "publishes effect_executed event"
+    input_parameters:
+      contract:
+        type: ModelContractEffect
+        required: true
+        fields:
+          data:
+            type: dict
+            required: true
+          operation:
+            type: str
+            values: ["create", "read", "update", "delete"]
+    expected_outputs:
+      result:
+        type: ModelResult
+        success: true
+        data:
+          type: dict
+    edge_cases:
+      - "empty data dictionary"
+      - "data with null values for required fields"
+      - "data with extremely long string values (>10000 chars)"
+      - "data with special characters and unicode"
+      - "data with SQL keywords as values"
+    error_conditions:
+      - "database connection failure"
+      - "connection pool exhaustion"
+      - "query timeout"
+      - "deadlock detection"
+      - "constraint violation"
+    assertions:
+      - "assert result.success is True"
+      - "assert result.data['id'] is not None"
+      - "assert database_record_exists(result.data['id'])"
+      - "assert transaction_committed"
+    test_priority: 1
+
+  # Test connection pool management
+  - target_name: _get_database_connection
+    target_type: method
+    test_scenarios:
+      - "acquire connection from pool"
+      - "release connection to pool"
+      - "pool exhaustion handling"
+      - "connection validation before use"
+      - "stale connection detection and renewal"
+    expected_behaviors:
+      - "acquires connection from pool"
+      - "validates connection health"
+      - "releases connection on completion"
+      - "blocks when pool exhausted (with timeout)"
+      - "renews stale connections"
+    edge_cases:
+      - "pool at maximum capacity"
+      - "all connections in use"
+      - "connection closed by server"
+    error_conditions:
+      - "pool timeout exceeded"
+      - "connection validation failure"
+      - "pool closed during acquisition"
+    assertions:
+      - "assert connection is not None"
+      - "assert connection.is_active()"
+      - "assert pool_size_within_limits()"
+    test_priority: 1
+
+  # Test transaction management
+  - target_name: _execute_with_transaction
+    target_type: method
+    test_scenarios:
+      - "successful transaction commit"
+      - "transaction rollback on error"
+      - "nested transaction handling"
+      - "savepoint creation and rollback"
+      - "deadlock detection and retry"
+    expected_behaviors:
+      - "begins transaction"
+      - "commits on success"
+      - "rolls back on error"
+      - "releases resources in finally block"
+    error_conditions:
+      - "commit failure"
+      - "rollback failure"
+      - "deadlock timeout"
+    assertions:
+      - "assert transaction_committed or transaction_rolled_back"
+      - "assert no_leaked_connections()"
+    test_priority: 1
+
+  # Test SQL injection prevention
+  - target_name: _build_query
+    target_type: method
+    test_scenarios:
+      - "query with parameterized values"
+      - "query with SQL injection attempt in string"
+      - "query with SQL injection attempt in number"
+      - "query with multiple parameters"
+    expected_behaviors:
+      - "uses parameterized queries"
+      - "escapes special characters"
+      - "rejects malicious input"
+    edge_cases:
+      - "input with SQL keywords (SELECT, DROP, etc.)"
+      - "input with comment markers (--, /*)"
+      - "input with semicolons"
+    error_conditions:
+      - "SQL injection detected"
+      - "invalid parameter type"
+    assertions:
+      - "assert query_is_parameterized()"
+      - "assert no_sql_injection_vulnerability()"
+    test_priority: 1
+
+  # Test error handling and recovery
+  - target_name: _handle_database_error
+    target_type: method
+    test_scenarios:
+      - "handle connection timeout"
+      - "handle query timeout"
+      - "handle constraint violation"
+      - "handle deadlock"
+      - "handle server disconnect"
+    expected_behaviors:
+      - "logs error with context"
+      - "returns appropriate error result"
+      - "cleans up resources"
+      - "publishes effect_failed event"
+    assertions:
+      - "assert result.success is False"
+      - "assert error_logged_with_context()"
+      - "assert resources_cleaned_up()"
+    test_priority: 2
+
+# === MOCK REQUIREMENTS ===
+
+mock_requirements:
+  # Dependencies to mock
+  mock_dependencies:
+    - "asyncpg.pool.Pool"
+    - "asyncpg.connection.Connection"
+    - "omninode_bridge.infrastructure.database.PostgreSQLClient"
+
+  mock_external_services:
+    - "PostgreSQL database"
+    - "Database connection pool"
+
+  # Database mocking
+  mock_database: true
+  database_mock_config:
+    use_in_memory: false  # Use real test database for integration tests
+    preload_data: true
+
+  # Mock return values
+  mock_return_values:
+    Connection.execute:
+      success: true
+      rows_affected: 1
+    Pool.acquire:
+      return_type: Connection
+      delay_ms: 5
+
+  # Mock exceptions
+  mock_exceptions:
+    - "asyncpg.exceptions.ConnectionDoesNotExistError"
+    - "asyncpg.exceptions.PostgresConnectionError"
+    - "asyncpg.exceptions.QueryCanceledError"
+    - "asyncpg.exceptions.DeadlockDetectedError"
+    - "asyncpg.exceptions.UniqueViolationError"
+    - "asyncpg.exceptions.ForeignKeyViolationError"
+
+  # Fixture configuration
+  use_fixtures: true
+  fixture_scope: function
+
+# === ASSERTION REQUIREMENTS ===
+
+assertion_types:
+  - "equality"
+  - "type"
+  - "exception"
+  - "database_state"
+  - "mock_call_verification"
+
+custom_assertions:
+  - "assert_database_record_exists"
+  - "assert_transaction_committed"
+  - "assert_connection_released"
+  - "assert_no_sql_injection"
+
+# === TEST CONFIGURATION ===
+
+test_configuration:
+  # Pytest configuration
+  pytest_markers:
+    - "unit"
+    - "integration"
+    - "asyncio"
+    - "security"
+
+  pytest_plugins:
+    - "pytest-asyncio"
+    - "pytest-mock"
+    - "pytest-cov"
+    - "pytest-postgresql"
+
+  pytest_options:
+    verbose: true
+    capture: "no"
+
+  # Test execution settings
+  parallel_execution: true
+  parallel_workers: 4
+  timeout_seconds: 300
+
+  # Coverage configuration
+  coverage_enabled: true
+  coverage_threshold: 90
+  coverage_fail_under: true
+
+  # Fixtures
+  required_fixtures:
+    - "mock_postgres_pool"
+    - "mock_postgres_connection"
+    - "test_database"
+    - "database_transaction"
+
+  # Test data
+  test_data_directory: "tests/data/postgres_crud"
+  use_test_database: true
+  test_database_config:
+    database: "test_omninode_bridge"
+    recreate: true
+    apply_migrations: true
+
+  # Output configuration
+  verbose_output: true
+  generate_html_report: true
+  report_output_directory: "htmlcov"
+
+  # Retry configuration
+  retry_failed_tests: true
+  max_retries: 3
+
+  # Environment setup
+  setup_commands:
+    - "docker compose up -d postgres"
+    - "poetry run alembic upgrade head"
+  teardown_commands:
+    - "docker compose down"
+
+  environment_variables:
+    TESTING: "true"
+    LOG_LEVEL: "DEBUG"
+    POSTGRES_HOST: "localhost"
+    POSTGRES_PORT: "5432"
+    POSTGRES_DATABASE: "test_omninode_bridge"
+    POSTGRES_USER: "test_user"
+    POSTGRES_PASSWORD: "test_password"
+
+  # Quality gates
+  enforce_type_checking: true
+  enforce_linting: true
+  allowed_warnings:
+    - "DeprecationWarning"
+
+  # Performance benchmarks (configured via pytest options)
+  # Note: Use pytest-benchmark plugin for actual performance testing
+  # Target benchmarks documented in test docstrings:
+  #   - create_record: <50ms latency, >100 qps
+  #   - read_record: <20ms latency, >200 qps
+  #   - update_record: <50ms latency, >100 qps
+  #   - delete_record: <30ms latency, >150 qps
+
+# === TEST GENERATION OPTIONS ===
+
+include_docstrings: true
+include_type_hints: true
+use_async_tests: true
+parametrize_tests: true
+
+# === QUALITY GATES ===
+
+enforce_test_naming: true
+enforce_test_isolation: true
+enforce_deterministic_tests: true
+
+# === METADATA ===
+
+author: "OmniNode Bridge Team"
+documentation_url: "https://docs.omninode.dev/testing/effect-nodes"
+tags:
+  - "effect"
+  - "database"
+  - "postgresql"
+  - "crud"
+  - "connection-pooling"
+  - "transactions"

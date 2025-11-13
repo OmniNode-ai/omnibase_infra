@@ -1,0 +1,54 @@
+# Metadata Stamping Service Health Check Configuration
+
+# Prometheus Configuration for Metadata Stamping
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "metadata-stamping-alerts.yml"
+
+scrape_configs:
+  # Metadata Stamping Service Metrics
+  - job_name: 'metadata-stamping'
+    static_configs:
+      - targets: ['omninode-bridge-metadata-stamping:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 3s
+
+  # Infrastructure Dependencies
+  - job_name: 'metadata-dependencies'
+    static_configs:
+      - targets:
+          - 'omninode-bridge-postgres:5432'
+          - 'omninode-bridge-consul:8500'
+          - 'omninode-bridge-redpanda:9644'
+    scrape_interval: 30s
+
+# Alerting Rules for Performance Monitoring
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Performance Thresholds
+alert_thresholds:
+  blake3_hash_generation:
+    p99_execution_time_ms: 2.0
+    p95_execution_time_ms: 1.5
+    avg_execution_time_ms: 1.0
+
+  api_response_time:
+    p95_response_time_ms: 10.0
+    p99_response_time_ms: 25.0
+    avg_response_time_ms: 5.0
+
+  database_operations:
+    p95_query_time_ms: 5.0
+    connection_pool_efficiency: 0.90
+
+  service_availability:
+    uptime_percentage: 99.9
+    health_check_success_rate: 95.0

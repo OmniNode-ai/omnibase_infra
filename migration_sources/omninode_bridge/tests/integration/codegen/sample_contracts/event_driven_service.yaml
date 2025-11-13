@@ -1,0 +1,52 @@
+---
+# Event-driven pattern - MixinEventDrivenNode + MixinServiceRegistry + MixinHealthCheck
+node_id: "event_driven_service"
+node_type: "effect"
+version: "v1_0_0"
+namespace: "omninode.services.events"
+
+metadata:
+  name: "Event-Driven Service Node"
+  description: "Complete event-driven service with registry and health monitoring"
+  author: "Test Generator"
+  tags: ["test", "event-driven", "service-registry", "production"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinEventDrivenNode"
+      config:
+        event_bus_enabled: true
+        introspection_enabled: true
+
+    - mixin_name: "MixinServiceRegistry"
+      config:
+        service_name: "event_driven_service"
+        consul_host: "localhost"
+        consul_port: 8500
+        auto_register: true
+
+    - mixin_name: "MixinHealthCheck"
+      config:
+        health_check_interval_seconds: 15
+
+event_patterns:
+  subscribes:
+    - topic: "test.events.data.received"
+      event_type: "DataReceivedEvent"
+  publishes:
+    - topic: "test.events.data.processed"
+      event_type: "DataProcessedEvent"
+
+input_schema:
+  type: "object"
+  properties:
+    event_data:
+      type: "object"
+
+output_schema:
+  type: "object"
+  properties:
+    event_result:
+      type: "object"
+    published_events:
+      type: "array"

@@ -1,0 +1,518 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "MetadataStampingService - Phase 2 Monitoring",
+    "tags": ["metadata", "stamping", "phase2", "omninode"],
+    "style": "dark",
+    "timezone": "browser",
+    "editable": true,
+    "hideControls": false,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"],
+      "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
+    },
+    "refresh": "30s",
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Service Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"metadata-stamping-service\"}",
+            "legendFormat": "Service Status",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            },
+            "mappings": [
+              {"type": "value", "value": "0", "text": "DOWN"},
+              {"type": "value", "value": "1", "text": "UP"}
+            ]
+          }
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Request Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(metadata_stamping_requests_total[5m])",
+            "legendFormat": "Requests/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "color": {"mode": "palette-classic"}
+          }
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Average Response Time",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(metadata_stamping_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50 Response Time",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "decimals": 3,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 0.01},
+                {"color": "red", "value": 0.1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "Error Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(metadata_stamping_requests_total{status=\"error\"}[5m]) / rate(metadata_stamping_requests_total[5m]) * 100",
+            "legendFormat": "Error Rate %",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "decimals": 2,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 5}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0}
+      },
+      {
+        "id": 5,
+        "title": "BLAKE3 Hash Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(blake3_hash_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50 Hash Time",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(blake3_hash_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95 Hash Time",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(blake3_hash_duration_seconds_bucket[5m]))",
+            "legendFormat": "P99 Hash Time",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "decimals": 4,
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "gradientMode": "none"
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "P99 Hash Time"},
+              "properties": [
+                {"id": "custom.lineWidth", "value": 3},
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}
+              ]
+            }
+          ]
+        },
+        "options": {
+          "tooltip": {"mode": "multi", "sort": "none"},
+          "legend": {"displayMode": "table", "placement": "bottom", "values": ["current", "max"]},
+          "displayModes": ["list"]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4}
+      },
+      {
+        "id": 6,
+        "title": "Cache Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(redis_cache_hits_total[5m]) / (rate(redis_cache_hits_total[5m]) + rate(redis_cache_misses_total[5m])) * 100",
+            "legendFormat": "Cache Hit Rate %",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(redis_cache_operations_total[5m])",
+            "legendFormat": "Cache Operations/sec",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Cache Hit Rate %"},
+              "properties": [
+                {"id": "unit", "value": "percent"},
+                {"id": "custom.axisPlacement", "value": "left"}
+              ]
+            },
+            {
+              "matcher": {"id": "byName", "options": "Cache Operations/sec"},
+              "properties": [
+                {"id": "unit", "value": "ops"},
+                {"id": "custom.axisPlacement", "value": "right"}
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4}
+      },
+      {
+        "id": 7,
+        "title": "Kafka Message Processing",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(kafka_messages_produced_total[5m])",
+            "legendFormat": "Messages Produced/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(kafka_messages_consumed_total[5m])",
+            "legendFormat": "Messages Consumed/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "kafka_consumer_lag_sum",
+            "legendFormat": "Consumer Lag",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Consumer Lag"},
+              "properties": [
+                {"id": "custom.axisPlacement", "value": "right"},
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12}
+      },
+      {
+        "id": 8,
+        "title": "Database Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(postgres_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50 Query Time",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(postgres_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95 Query Time",
+            "refId": "B"
+          },
+          {
+            "expr": "postgres_connections_active",
+            "legendFormat": "Active Connections",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byRegexp", "options": "P[0-9]+ Query Time"},
+              "properties": [
+                {"id": "unit", "value": "s"},
+                {"id": "custom.axisPlacement", "value": "left"}
+              ]
+            },
+            {
+              "matcher": {"id": "byName", "options": "Active Connections"},
+              "properties": [
+                {"id": "custom.axisPlacement", "value": "right"},
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "purple"}}
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12}
+      },
+      {
+        "id": 9,
+        "title": "Metadata Extraction Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(metadata_extraction_total[5m])",
+            "legendFormat": "Extractions/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(metadata_extraction_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95 Extraction Time",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(metadata_extraction_errors_total[5m])",
+            "legendFormat": "Extraction Errors/sec",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "P95 Extraction Time"},
+              "properties": [
+                {"id": "unit", "value": "s"},
+                {"id": "custom.axisPlacement", "value": "right"}
+              ]
+            },
+            {
+              "matcher": {"id": "byName", "options": "Extraction Errors/sec"},
+              "properties": [
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20}
+      },
+      {
+        "id": 10,
+        "title": "File Type Distribution",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "increase(metadata_extraction_total[1h])",
+            "legendFormat": "{{file_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "vis": false
+              }
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "pieType": "pie",
+          "tooltip": {"mode": "single", "sort": "none"},
+          "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]},
+          "displayLabels": ["name", "percent"]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20}
+      },
+      {
+        "id": 11,
+        "title": "System Resources",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "process_resident_memory_bytes{job=\"metadata-stamping-service\"} / 1024 / 1024",
+            "legendFormat": "Memory Usage (MB)",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(process_cpu_seconds_total{job=\"metadata-stamping-service\"}[5m]) * 100",
+            "legendFormat": "CPU Usage %",
+            "refId": "B"
+          },
+          {
+            "expr": "process_open_fds{job=\"metadata-stamping-service\"}",
+            "legendFormat": "Open File Descriptors",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Memory Usage (MB)"},
+              "properties": [
+                {"id": "unit", "value": "decbytes"},
+                {"id": "custom.axisPlacement", "value": "left"}
+              ]
+            },
+            {
+              "matcher": {"id": "byName", "options": "CPU Usage %"},
+              "properties": [
+                {"id": "unit", "value": "percent"},
+                {"id": "custom.axisPlacement", "value": "right"}
+              ]
+            },
+            {
+              "matcher": {"id": "byName", "options": "Open File Descriptors"},
+              "properties": [
+                {"id": "custom.axisPlacement", "value": "right"},
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}
+              ]
+            }
+          ]
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28}
+      },
+      {
+        "id": 12,
+        "title": "Performance Alerts",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"metadata-stamping-service\", level=\"error\"} |= \"performance\"",
+            "refId": "A"
+          },
+          {
+            "expr": "{job=\"metadata-stamping-service\", level=\"warning\"} |= \"threshold\"",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "showTime": true,
+          "showLabels": false,
+          "showCommonLabels": true,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "dedupStrategy": "none",
+          "sortOrder": "Descending"
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 36}
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "instance",
+          "type": "query",
+          "query": "label_values(up{job=\"metadata-stamping-service\"}, instance)",
+          "refresh": 1,
+          "includeAll": true,
+          "allValue": ".*",
+          "multi": true,
+          "options": [],
+          "current": {"selected": false, "text": "All", "value": "$__all"}
+        },
+        {
+          "name": "file_type",
+          "type": "query",
+          "query": "label_values(metadata_extraction_total, file_type)",
+          "refresh": 1,
+          "includeAll": true,
+          "allValue": ".*",
+          "multi": true,
+          "options": [],
+          "current": {"selected": false, "text": "All", "value": "$__all"}
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "enable": true,
+          "expr": "changes(process_start_time_seconds{job=\"metadata-stamping-service\"}[1h])",
+          "iconColor": "green",
+          "titleFormat": "Service Restart",
+          "textFormat": "{{instance}} restarted"
+        },
+        {
+          "name": "Performance Alerts",
+          "datasource": "prometheus",
+          "enable": true,
+          "expr": "ALERTS{job=\"metadata-stamping-service\", alertstate=\"firing\"}",
+          "iconColor": "red",
+          "titleFormat": "{{alertname}}",
+          "textFormat": "{{instance}}: {{summary}}"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,140 @@
+# State Management Subcontract - PostgreSQL Persistence for NodeBridgeReducer
+
+subcontract_type: "state_management"
+version: "1.0.0"
+description: "Defines state persistence, transactions, and recovery for bridge state"
+
+# === BACKEND CONFIGURATION ===
+backend:
+  type: "postgresql"
+  driver: "asyncpg"  # Async PostgreSQL driver
+  enable_ssl: "${POSTGRES_ENABLE_SSL:false}"
+
+# === CONNECTION CONFIGURATION ===
+connection:
+  # Environment variable defaults
+  host: "${POSTGRES_HOST:localhost}"
+  port: "${POSTGRES_PORT:5432}"
+  database: "${POSTGRES_DB:omninode_bridge}"
+  user: "${POSTGRES_USER:postgres}"
+  password: "${POSTGRES_PASSWORD}"  # Required, no default
+
+  # SSL Configuration
+  ssl_mode: "${POSTGRES_SSL_MODE:prefer}"  # disable, allow, prefer, require, verify-ca, verify-full
+  ssl_cert_path: "${POSTGRES_SSL_CERT_PATH:}"
+  ssl_key_path: "${POSTGRES_SSL_KEY_PATH:}"
+  ssl_root_cert_path: "${POSTGRES_SSL_ROOT_CERT_PATH:}"
+
+  # Connection Pool Settings
+  pool_min_size: 10
+  pool_max_size: "${POSTGRES_POOL_MAX_SIZE:20}"
+  pool_max_queries: 50000  # Recycle connection after N queries
+  pool_max_inactive_connection_lifetime: 300.0  # 5 minutes
+  pool_timeout: 10.0  # 10 seconds
+
+  # Connection Behavior
+  command_timeout: "${POSTGRES_COMMAND_TIMEOUT:30.0}"  # 30 seconds
+  server_settings:
+    application_name: "omninode_bridge_reducer"
+    timezone: "UTC"
+
+# === TRANSACTION CONFIGURATION ===
+transaction:
+  isolation_level: "read_committed"  # read_uncommitted, read_committed, repeatable_read, serializable
+  default_timeout_ms: 10000  # 10 seconds
+  enable_retry: true
+  max_retry_attempts: 3
+  retry_backoff_ms: 100
+  retry_backoff_multiplier: 2
+
+# === STATE TABLES ===
+tables:
+  bridge_state:
+    schema: "public"
+    table_name: "bridge_state"
+    description: "Aggregated bridge state by namespace"
+    columns:
+      - name: "id"
+        type: "UUID"
+        primary_key: true
+      - name: "namespace"
+        type: "VARCHAR(255)"
+        indexed: true
+      - name: "total_stamps"
+        type: "BIGINT"
+      - name: "total_size_bytes"
+        type: "BIGINT"
+      - name: "unique_file_types"
+        type: "INTEGER"
+      - name: "avg_file_size_bytes"
+        type: "BIGINT"
+      - name: "aggregation_data"
+        type: "JSONB"
+      - name: "updated_at"
+        type: "TIMESTAMP WITH TIME ZONE"
+      - name: "version"
+        type: "INTEGER"
+
+  fsm_states:
+    schema: "public"
+    table_name: "fsm_states"
+    description: "FSM workflow state tracking"
+    columns:
+      - name: "id"
+        type: "UUID"
+        primary_key: true
+      - name: "workflow_id"
+        type: "UUID"
+        indexed: true
+        unique: true
+      - name: "namespace"
+        type: "VARCHAR(255)"
+        indexed: true
+      - name: "current_state"
+        type: "VARCHAR(50)"
+      - name: "previous_state"
+        type: "VARCHAR(50)"
+      - name: "transition_history"
+        type: "JSONB"
+      - name: "created_at"
+        type: "TIMESTAMP WITH TIME ZONE"
+      - name: "updated_at"
+        type: "TIMESTAMP WITH TIME ZONE"
+
+# === PERSISTENCE STRATEGIES ===
+persistence:
+  strategy: "write_through"  # write_through, write_back, write_behind
+  enable_batching: true
+  batch_size: 50
+  batch_flush_interval_ms: 1000
+
+  # Conflict Resolution
+  conflict_resolution: "last_write_wins"  # last_write_wins, version_based, merge
+  enable_optimistic_locking: true
+
+# === RECOVERY & DURABILITY ===
+recovery:
+  enable_wal: true  # Write-Ahead Logging
+  checkpoint_interval_ms: 60000  # 1 minute
+  enable_point_in_time_recovery: true
+  backup_retention_days: 7
+
+# === PERFORMANCE TUNING ===
+performance:
+  enable_prepared_statements: true
+  enable_query_caching: true
+  cache_size_mb: 128
+  enable_connection_pooling: true
+
+  # Query Optimization
+  use_indexes: true
+  enable_parallel_queries: false  # PostgreSQL 9.6+ feature
+  work_mem_mb: 64  # Memory for sort/hash operations
+
+# === MONITORING ===
+monitoring:
+  enable_query_logging: false  # Set to true for debugging
+  log_slow_queries: true
+  slow_query_threshold_ms: 1000
+  enable_connection_metrics: true
+  enable_transaction_metrics: true

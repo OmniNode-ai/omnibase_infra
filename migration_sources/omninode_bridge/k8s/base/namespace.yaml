@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omninode-bridge
+  labels:
+    app.kubernetes.io/name: omninode-bridge
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/component: namespace
+    app.kubernetes.io/part-of: omninode-bridge
+    environment: production
+  annotations:
+    description: "OmniNode Bridge - Intelligent service lifecycle management and adaptive event processing"
+---
+# Network policy to isolate the namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: omninode-bridge-network-policy
+  namespace: omninode-bridge
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: omninode-bridge
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: omninode-bridge
+  - to: []  # Allow external egress for API calls
+    ports:
+    - protocol: TCP
+      port: 53    # DNS
+    - protocol: UDP
+      port: 53    # DNS
+    - protocol: TCP
+      port: 443   # HTTPS
+    - protocol: TCP
+      port: 80    # HTTP (for health checks)

@@ -1,0 +1,148 @@
+version: '3.8'
+name: omninode_bridge
+
+services:
+  # Topic creation service - creates all 13 codegen topics automatically
+  topic-creator:
+    image: confluentinc/cp-kafka:${CP_KAFKA_VERSION:-7.6.1}
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    command: |
+      bash -c "
+      echo 'Waiting for Redpanda to be fully ready...'
+      sleep 10
+
+      echo 'Creating codegen topics with configurations...'
+
+      # Request topics (omniclaude → omniarchon) - 3 partitions each
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_request_analyze_v1 \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_request_validate_v1 \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_request_pattern_v1 \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_request_mixin_v1 \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      # Response topics (omniarchon → omniclaude) - 3 partitions each
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_response_analyze_v1 \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_response_validate_v1 \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_response_pattern_v1 \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_response_mixin_v1 \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      # Status topic (real-time updates) - 6 partitions
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_status_session_v1 \
+        --partitions 6 \
+        --replication-factor 1 \
+        --config retention.ms=259200000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      # Dead letter queues - 1 partition each
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_dlq_analyze_v1 \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.ms=2592000000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_dlq_validate_v1 \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.ms=2592000000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_dlq_pattern_v1 \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.ms=2592000000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --create --if-not-exists \
+        --topic omninode_codegen_dlq_mixin_v1 \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.ms=2592000000 \
+        --config cleanup.policy=delete \
+        --config compression.type=gzip
+
+      echo '================================================'
+      echo 'All 13 codegen topics created successfully!'
+      echo '================================================'
+      echo ''
+      echo 'Topic Summary:'
+      echo '- 4 request topics (3 partitions each)'
+      echo '- 4 response topics (3 partitions each)'
+      echo '- 1 status topic (6 partitions)'
+      echo '- 4 DLQ topics (1 partition each)'
+      echo ''
+      echo 'Listing all topics:'
+      kafka-topics --bootstrap-server omninode-bridge-redpanda:9092 --list | grep omninode_codegen
+      echo ''
+      echo 'Topic creation complete!'
+      "
+    networks:
+      - omninode-bridge-network
+
+networks:
+  omninode-bridge-network:
+    external: true

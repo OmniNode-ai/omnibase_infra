@@ -1,0 +1,47 @@
+# ONEX v2.0 Subcontract - Workflow Coordination
+# Multi-node workflow coordination and orchestration
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Workflow coordination patterns for multi-node orchestration,
+  dependency management, and execution sequencing.
+
+coordination_patterns:
+  - pattern: "sequential"
+    description: "Execute stages in sequence"
+    requirements:
+      - "stage_ordering"
+      - "previous_stage_completion"
+
+  - pattern: "parallel"
+    description: "Execute stages in parallel"
+    requirements:
+      - "independent_stages"
+      - "result_aggregation"
+
+  - pattern: "conditional"
+    description: "Conditional execution based on state"
+    requirements:
+      - "condition_evaluation"
+      - "alternative_paths"
+
+stage_lifecycle:
+  - state: "pending"
+    description: "Stage ready to execute"
+  - state: "in_progress"
+    description: "Stage currently executing"
+  - state: "completed"
+    description: "Stage completed successfully"
+  - state: "failed"
+    description: "Stage execution failed"
+  - state: "skipped"
+    description: "Stage skipped due to conditions"
+
+error_handling:
+  retry_failed_stages: true
+  max_stage_retries: 2
+  continue_on_optional_failure: true
+  rollback_on_critical_failure: true

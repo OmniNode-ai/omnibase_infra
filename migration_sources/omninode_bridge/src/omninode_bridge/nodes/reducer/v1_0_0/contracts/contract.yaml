@@ -1,0 +1,214 @@
+# NodeBridgeReducer Contract
+# ONEX v2.0 compliant contract with subcontract composition
+# Node Type: Reducer
+# Purpose: Streaming aggregation of stamping metadata with FSM state tracking
+
+# Contract metadata
+name: "NodeBridgeReducer"
+version: "1.0.0"
+node_type: "reducer"
+description: "Bridge Reducer for metadata aggregation, FSM state tracking, and intent-based persistence"
+
+# Node identity and capabilities
+node_identity:
+  node_class: "NodeBridgeReducer"
+  node_file: "node.py"
+  namespace: "omninode.bridge.reducer"
+  category: "data_aggregation"
+
+# Execution signature
+execute_method: "execute_reduction"
+contract_type: "ModelContractReducer"
+
+# Subcontract composition (ONEX v2.0 pattern)
+subcontracts:
+  aggregation:
+    $ref: "./aggregation.yaml"
+    description: "Streaming aggregation strategies and windowing"
+    required: true
+
+  state_transitions:
+    $ref: "./fsm.yaml"
+    description: "FSM state tracking and transition management"
+    required: true
+
+  state_management:
+    $ref: "./state_management.yaml"
+    description: "Intent-based state persistence to PostgreSQL"
+    required: true
+
+# Input/Output contracts
+input_contract:
+  type: "ModelReducerInputState"
+  description: "Stream of stamping metadata for aggregation"
+  required_fields:
+    - name: "items"
+      type: "AsyncIterator[dict] | list[dict]"
+      description: "Stream of stamp metadata items to aggregate"
+    - name: "aggregation_type"
+      type: "EnumAggregationType"
+      description: "Aggregation strategy to apply"
+      enum:
+        - "NAMESPACE_GROUPING"
+        - "TIME_WINDOW"
+        - "FILE_TYPE_GROUPING"
+        - "SIZE_BUCKETS"
+        - "WORKFLOW_GROUPING"
+        - "CUSTOM"
+      default: "NAMESPACE_GROUPING"
+  optional_fields:
+    - name: "namespace"
+      type: "string"
+      description: "Filter aggregation to specific namespace"
+      default: null
+    - name: "workflow_id"
+      type: "UUID"
+      description: "Correlation ID for workflow tracking"
+      default: null
+    - name: "window_duration_ms"
+      type: "integer"
+      description: "Time window duration for TIME_WINDOW aggregation"
+      default: 5000
+    - name: "batch_size"
+      type: "integer"
+      description: "Batch size for processing"
+      default: 100
+
+output_contract:
+  type: "ModelReducerOutputState"
+  fields:
+    - name: "aggregated_data"
+      type: "dict[str, Any]"
+      description: "Aggregated results by grouping key"
+    - name: "aggregation_type"
+      type: "EnumAggregationType"
+      description: "Aggregation strategy used"
+    - name: "total_items_processed"
+      type: "integer"
+      description: "Total number of items aggregated"
+    - name: "unique_groups"
+      type: "integer"
+      description: "Number of unique aggregation groups"
+    - name: "processing_time_ms"
+      type: "float"
+      description: "Total aggregation processing time"
+    - name: "fsm_state_summary"
+      type: "dict[str, int]"
+      description: "Summary of workflow FSM states"
+    - name: "namespace_summary"
+      type: "dict[str, int]"
+      description: "Summary by namespace"
+    - name: "pending_intents"
+      type: "list[ModelIntent]"
+      description: "Intents generated for EFFECT node execution"
+
+# Dependencies and service requirements
+dependencies:
+  services:
+    - name: "kafka_client"
+      type: "KafkaClient"
+      required: false
+      description: "Kafka client for event consumption (optional)"
+    - name: "store_effect_node"
+      type: "NodeBridgeStoreEffect"
+      required: false
+      description: "EFFECT node for intent execution (persistence)"
+
+  internal_components:
+    - name: "FSMStateManager"
+      type: "FSMStateManager"
+      required: true
+      description: "FSM state tracking and transition management"
+      initialization: "container-based"
+      config_source: "fsm_subcontract"
+
+# Performance requirements
+performance:
+  target_throughput_items_per_second: 1000
+  target_latency_per_item_ms: 1.0
+  target_latency_per_batch_ms: 100
+  max_aggregation_delay_ms: 5000
+  max_concurrent_aggregations: 10
+  max_buffer_size: 10000
+  resource_limits:
+    max_memory_mb: 1024
+    max_cpu_percent: 75
+
+# Operational configuration
+operational:
+  lifecycle_hooks:
+    - "startup"
+    - "shutdown"
+  health_checks:
+    enabled: true
+    components:
+      - "node_runtime"
+      - "fsm_state_manager"
+      - "aggregation_engine"
+      - "state_persistence"
+  introspection:
+    enabled: true
+    broadcast_on_startup: true
+    heartbeat_interval_seconds: 30
+
+# Error handling
+error_handling:
+  retry_policy: "exponential_backoff"
+  max_retries: 3
+  circuit_breaker_enabled: true
+  graceful_degradation:
+    - component: "state_persistence"
+      fallback: "queue_intents_for_later_execution"
+    - component: "fsm_state_manager"
+      fallback: "continue_without_fsm_tracking"
+
+# Streaming configuration
+streaming:
+  enabled: true
+  windowing_strategy: "tumbling"  # Options: tumbling, sliding, session
+  window_duration_ms: 5000
+  watermark_strategy: "event_time"
+  late_arrival_grace_period_ms: 1000
+  backpressure_handling: "throttle"
+
+# Intent-based architecture (ONEX v2.0 Pure Function Pattern)
+intent_architecture:
+  enabled: true
+  intent_queue_max_size: 10000
+  intent_batch_size: 100
+  intent_flush_interval_ms: 1000
+  intent_targets:
+    - "store_effect"  # NodeBridgeStoreEffect for persistence
+  intent_priority_levels:
+    - level: 0
+      name: "normal"
+      description: "Normal priority intents (state persistence)"
+    - level: 1
+      name: "high"
+      description: "High priority intents (FSM transitions)"
+    - level: 2
+      name: "critical"
+      description: "Critical priority intents (recovery)"
+
+# Monitoring and metrics
+monitoring:
+  track_aggregation_latency: true
+  track_throughput: true
+  track_buffer_usage: true
+  track_fsm_state_distribution: true
+  track_intent_queue_depth: true
+  track_backpressure_events: true
+  alert_on_buffer_full: true
+  alert_threshold_percent: 90
+
+# Compliance and standards
+compliance:
+  onex_version: "2.0"
+  one_protocol_version: "0.1"
+  standards:
+    - "ONEX v2.0 suffix-based naming"
+    - "Subcontract composition architecture"
+    - "ModelContainer dependency injection"
+    - "Intent-based persistence (Pure Function Pattern)"
+    - "FSM-driven state management"
+    - "Streaming data aggregation"

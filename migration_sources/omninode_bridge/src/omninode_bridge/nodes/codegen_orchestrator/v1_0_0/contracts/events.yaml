@@ -1,0 +1,19 @@
+# Event Type Subcontract
+# Event publishing and consumption configuration for code generation orchestration
+
+publisher: true
+consumer: true
+topics:
+  publishes:
+    - "dev.omninode-bridge.codegen.generation-started.v1"
+    - "dev.omninode-bridge.codegen.stage-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-failed.v1"
+    - "dev.omniarchon.intelligence.query-requested.v1"
+    - "dev.omniarchon.intelligence.pattern-storage-requested.v1"
+  consumes:
+    - "dev.omninode-bridge.codegen.generation-requested.v1"
+    - "dev.omniarchon.intelligence.query-completed.v1"
+    - "dev.omninode-bridge.codegen.checkpoint-response.v1"
+event_format: "OnexEnvelopeV1"
+correlation_tracking: true

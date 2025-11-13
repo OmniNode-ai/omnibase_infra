@@ -1,0 +1,90 @@
+name: type_hints
+description: "Comprehensive type hints for methods, attributes, and return values"
+category: structure
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: medium
+code_template: |
+  from typing import Any, Optional, cast
+  from uuid import UUID
+  from datetime import datetime
+  from pathlib import Path
+
+  # Method signatures
+  async def execute_orchestration(
+      self, contract: ModelContractOrchestrator
+  ) -> ModelOutputState:
+      """Execute orchestration."""
+      pass
+
+  # Optional types
+  self._kafka_client: Optional[KafkaClient] = None
+
+  # Dict types
+  config: dict[str, Any] = {}
+  metrics: dict[str, float] = {}
+
+  # Cast for type narrowing
+  config_value = cast(str, container.config.get("key"))
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - codegen_metrics_reducer
+
+configuration:
+  python_version: "3.11+"
+  type_checking: true
+  strict_optional: true
+
+type_categories:
+  primitives:
+    - int, float, str, bool
+    - None (for Optional types)
+
+  collections:
+    - list[T]
+    - dict[K, V]
+    - set[T]
+    - tuple[T, ...]
+
+  standard_library:
+    - Path (from pathlib)
+    - datetime (from datetime)
+    - UUID (from uuid)
+
+  typing_module:
+    - Any (for unknown types)
+    - Optional[T] (for nullable types)
+    - cast (for type narrowing)
+
+  omnibase_core:
+    - ModelContract{Type}
+    - ModelOnexError
+    - EnumCoreErrorCode
+    - ModelContainer
+
+prerequisites:
+  - typing module imported
+  - Python 3.11+ for modern syntax (dict[K, V] instead of Dict[K, V])
+
+metrics:
+  overhead_ms: 0
+  memory_bytes: 0
+
+best_practices:
+  - "Use modern dict[K, V] syntax (Python 3.11+)"
+  - "Use Optional[T] for nullable types"
+  - "Use Any for unknown/dynamic types"
+  - "Use cast() for type narrowing"
+  - "Type hint all method parameters"
+  - "Type hint all method return values"
+  - "Type hint instance attributes"
+  - "Use -> None for methods without return"
+  - "Use -> int for main() exit codes"
+
+validation_rules:
+  - "All methods must have type hints"
+  - "All parameters must be typed"
+  - "All return values must be typed"
+  - "Use Optional[T] not T | None (for consistency)"
+  - "Use modern syntax for Python 3.11+"

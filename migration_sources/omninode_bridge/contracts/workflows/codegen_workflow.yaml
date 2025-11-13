@@ -1,0 +1,487 @@
+# ONEX v2.0 Contract - Code Generation Workflow
+# Orchestrator workflow for 6-stage ONEX node generation pipeline
+
+schema_version: "2.0"
+contract_version: "1.0.0"
+last_updated: "2025-10-24"
+
+# Node Identity
+node_identity:
+  name: "codegen_workflow"
+  display_name: "Code Generation Workflow"
+  node_type: "orchestrator"
+  version: "1.0.0"
+  description: |
+    Orchestrator workflow for ONEX node code generation using 6-stage pipeline.
+    Coordinates contract creation, model generation, implementation, testing, integration,
+    and documentation with LlamaIndex Workflows and event-driven coordination.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-24"
+  tags:
+    - "workflow-orchestration"
+    - "code-generation"
+    - "llama-index"
+    - "event-driven"
+    - "multi-stage"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/LLAMAINDEX_WORKFLOWS_GUIDE.md"
+    type: "guide"
+    description: "LlamaIndex Workflows integration guide"
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/ONEX_ARCHITECTURE_PATTERNS_COMPLETE.md"
+    type: "reference"
+    description: "Complete ONEX architecture patterns"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 53000     # 53 seconds total pipeline
+    max_ms: 120000       # 2 minutes max
+  memory_usage:
+    target_mb: 512
+    max_mb: 2048
+  throughput:
+    target_workflows_per_minute: 2
+    max_concurrent_workflows: 10
+
+# Workflow Stages
+workflow_stages:
+  - stage_number: 1
+    stage_name: "contract_generation"
+    description: "Generate ONEX v2.0 contract YAML"
+    target_duration_ms: 8000
+    dependencies: []
+    output_artifacts:
+      - "contract.yaml"
+
+  - stage_number: 2
+    stage_name: "model_generation"
+    description: "Generate Pydantic v2 data models"
+    target_duration_ms: 6000
+    dependencies: ["contract_generation"]
+    output_artifacts:
+      - "models/*.py"
+
+  - stage_number: 3
+    stage_name: "node_implementation"
+    description: "Generate node implementation code"
+    target_duration_ms: 12000
+    dependencies: ["contract_generation", "model_generation"]
+    output_artifacts:
+      - "node.py"
+      - "__init__.py"
+
+  - stage_number: 4
+    stage_name: "test_generation"
+    description: "Generate unit and integration tests"
+    target_duration_ms: 8000
+    dependencies: ["node_implementation"]
+    output_artifacts:
+      - "tests/test_*.py"
+
+  - stage_number: 5
+    stage_name: "integration_generation"
+    description: "Generate integration scaffolding"
+    target_duration_ms: 5000
+    dependencies: ["node_implementation", "test_generation"]
+    output_artifacts:
+      - "examples/*.py"
+      - "integration/*.py"
+
+  - stage_number: 6
+    stage_name: "documentation_generation"
+    description: "Generate node documentation"
+    target_duration_ms: 4000
+    dependencies: ["contract_generation", "node_implementation"]
+    output_artifacts:
+      - "README.md"
+      - "API.md"
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - prompt
+  properties:
+    prompt:
+      type: "string"
+      description: "Natural language description of node to generate"
+      minLength: 10
+      maxLength: 10000
+      example: "Create PostgreSQL CRUD Effect node with connection pooling"
+    output_directory:
+      type: "string"
+      description: "Target directory for generated files"
+      default: "./generated_nodes"
+    node_type_hint:
+      type: "string"
+      enum: ["effect", "orchestrator", "reducer", "compute"]
+      description: "Optional node type hint"
+    interactive_mode:
+      type: "boolean"
+      default: false
+      description: "Enable interactive checkpoints between stages"
+    enable_intelligence:
+      type: "boolean"
+      default: true
+      description: "Use RAG intelligence gathering"
+    enable_quorum:
+      type: "boolean"
+      default: false
+      description: "Use AI quorum validation for critical decisions"
+    skip_stages:
+      type: "array"
+      items:
+        type: "string"
+      description: "Optional stages to skip"
+    workflow_id:
+      type: "string"
+      format: "uuid"
+      description: "Optional workflow ID (auto-generated if not provided)"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - workflow_id
+    - success
+    - total_duration_ms
+  properties:
+    workflow_id:
+      type: "string"
+      format: "uuid"
+      description: "Unique workflow identifier"
+    success:
+      type: "boolean"
+      description: "Overall workflow success status"
+    total_duration_ms:
+      type: "integer"
+      minimum: 0
+      description: "Total workflow execution time"
+    stages_completed:
+      type: "array"
+      description: "List of completed stage names"
+      items:
+        type: "string"
+    stages_failed:
+      type: "array"
+      description: "List of failed stage names"
+      items:
+        type: "string"
+    generated_files:
+      type: "array"
+      description: "All generated file paths"
+      items:
+        type: "string"
+    node_type:
+      type: "string"
+      description: "Inferred or specified node type"
+    node_name:
+      type: "string"
+      description: "Generated node name"
+    quality_metrics:
+      type: "object"
+      description: "Aggregate quality metrics"
+      properties:
+        overall_quality_score:
+          type: "number"
+          minimum: 0.0
+          maximum: 1.0
+        onex_compliance:
+          type: "boolean"
+        test_coverage:
+          type: "number"
+        type_safety_score:
+          type: "number"
+    cost_metrics:
+      type: "object"
+      description: "Cost and resource metrics"
+      properties:
+        total_tokens:
+          type: "integer"
+        total_cost_usd:
+          type: "number"
+        stages_cost_breakdown:
+          type: "object"
+    stage_results:
+      type: "array"
+      description: "Individual stage results"
+      items:
+        type: "object"
+        properties:
+          stage_name:
+            type: "string"
+          success:
+            type: "boolean"
+          duration_ms:
+            type: "integer"
+          artifacts:
+            type: "array"
+          error_message:
+            type: "string"
+    error_message:
+      type: "string"
+      description: "Error message if workflow failed"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/workflow_coordination.yaml"
+    - "./contracts/fsm_states.yaml"
+    - "./contracts/event_handling.yaml"
+    - "./contracts/dependency_tracking.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+    - name: "node_generation_effect"
+      type: "effect_node"
+      required: true
+    - name: "onextree_intelligence"
+      type: "intelligence_service"
+      required: false
+  libraries:
+    - name: "llama-index-core"
+      version: ">=0.10.0"
+      description: "LlamaIndex Workflows framework"
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation"
+    - name: "aiokafka"
+      version: ">=0.11.0"
+      description: "Async Kafka client"
+
+# FSM State Management
+fsm_states:
+  states:
+    - name: "PENDING"
+      description: "Workflow created, not yet started"
+      transitions: ["INTELLIGENCE_GATHERING", "FAILED"]
+
+    - name: "INTELLIGENCE_GATHERING"
+      description: "Gathering RAG intelligence (if enabled)"
+      transitions: ["CONTRACT_GENERATION", "FAILED"]
+
+    - name: "CONTRACT_GENERATION"
+      description: "Generating ONEX v2.0 contract"
+      transitions: ["MODEL_GENERATION", "FAILED"]
+
+    - name: "MODEL_GENERATION"
+      description: "Generating Pydantic models"
+      transitions: ["NODE_IMPLEMENTATION", "FAILED"]
+
+    - name: "NODE_IMPLEMENTATION"
+      description: "Generating node implementation"
+      transitions: ["TEST_GENERATION", "FAILED"]
+
+    - name: "TEST_GENERATION"
+      description: "Generating tests"
+      transitions: ["INTEGRATION_GENERATION", "FAILED"]
+
+    - name: "INTEGRATION_GENERATION"
+      description: "Generating integration scaffolding"
+      transitions: ["DOCUMENTATION_GENERATION", "FAILED"]
+
+    - name: "DOCUMENTATION_GENERATION"
+      description: "Generating documentation"
+      transitions: ["VALIDATION", "FAILED"]
+
+    - name: "VALIDATION"
+      description: "Validating all generated artifacts"
+      transitions: ["COMPLETED", "FAILED"]
+
+    - name: "COMPLETED"
+      description: "Workflow completed successfully"
+      transitions: []
+
+    - name: "FAILED"
+      description: "Workflow failed"
+      transitions: []
+
+  initial_state: "PENDING"
+  final_states: ["COMPLETED", "FAILED"]
+
+# Kafka Integration
+kafka:
+  consumer_topics: []  # Orchestrator initiates, doesn't consume
+  producer_topics:
+    - "dev.omninode-bridge.codegen.generation-started.v1"
+    - "dev.omninode-bridge.codegen.stage-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-failed.v1"
+  event_envelope: "OnexEnvelopeV1"
+  event_types:
+    - "NODE_GENERATION_STARTED"
+    - "NODE_GENERATION_STAGE_COMPLETED"
+    - "NODE_GENERATION_COMPLETED"
+    - "NODE_GENERATION_FAILED"
+
+# Coordination Strategy
+coordination:
+  execution_mode: "sequential_with_checkpoints"
+  parallel_stages: []  # All stages are sequential
+  checkpoint_stages:
+    - "contract_generation"
+    - "node_implementation"
+    - "validation"
+  rollback_strategy: "cleanup_artifacts"
+  state_persistence: "kafka_events"
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 2
+    backoff_multiplier: 1.5
+    timeout_ms: 300000  # 5 minutes total
+  fallback_strategy: "partial_completion"
+  error_codes:
+    - code: "STAGE_TIMEOUT"
+      description: "Stage execution timeout"
+      severity: "error"
+      action: "retry_stage"
+    - code: "STAGE_FAILED"
+      description: "Stage execution failed"
+      severity: "error"
+      action: "abort_workflow"
+    - code: "VALIDATION_FAILED"
+      description: "Artifact validation failed"
+      severity: "error"
+      action: "retry_failed_stages"
+    - code: "DEPENDENCY_MISSING"
+      description: "Required dependency not available"
+      severity: "error"
+      action: "abort_workflow"
+
+# Quality Gates
+quality_gates:
+  - name: "stage_completion"
+    description: "Verify all non-skipped stages completed"
+    threshold: 1.0
+    stage: "all"
+
+  - name: "artifact_generation"
+    description: "Verify all expected artifacts generated"
+    threshold: 1.0
+    stage: "all"
+
+  - name: "quality_score"
+    description: "Verify minimum quality score >0.80"
+    threshold: 0.80
+    stage: "validation"
+
+  - name: "onex_compliance"
+    description: "Verify ONEX v2.0 compliance"
+    threshold: 1.0
+    stage: "validation"
+
+  - name: "total_duration"
+    description: "Verify total duration within target"
+    threshold: 0.85
+    stage: "completed"
+
+# Health Checks
+health_checks:
+  - name: "workflow_engine"
+    type: "internal"
+    interval_seconds: 60
+    critical: true
+
+  - name: "kafka_connectivity"
+    type: "network"
+    interval_seconds: 60
+    timeout_seconds: 5
+    critical: false
+
+  - name: "generation_service"
+    type: "internal"
+    interval_seconds: 30
+    critical: true
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 85
+    required: true
+    critical_paths:
+      - "workflow_coordination"
+      - "stage_execution"
+      - "fsm_transitions"
+      - "error_handling"
+
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "full_pipeline_execution"
+      - "stage_failure_recovery"
+      - "interactive_checkpoints"
+      - "intelligence_integration"
+      - "partial_completion"
+
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "total_duration"
+        target: 53.0
+        unit: "seconds"
+      - metric: "stage_transition_time"
+        target: 100
+        unit: "milliseconds"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "workflows_started_total"
+      type: "counter"
+      description: "Total workflows started"
+
+    - name: "workflows_completed_total"
+      type: "counter"
+      description: "Total workflows completed successfully"
+
+    - name: "workflows_failed_total"
+      type: "counter"
+      description: "Total workflows failed"
+      labels: ["failure_stage"]
+
+    - name: "workflow_duration_seconds"
+      type: "histogram"
+      description: "Total workflow duration"
+      buckets: [30.0, 45.0, 60.0, 90.0, 120.0]
+
+    - name: "stage_duration_seconds"
+      type: "histogram"
+      description: "Individual stage duration"
+      buckets: [5.0, 10.0, 15.0, 30.0, 60.0]
+      labels: ["stage_name"]
+
+    - name: "current_workflow_state"
+      type: "gauge"
+      description: "Current workflow FSM state"
+      labels: ["workflow_id", "state"]
+
+    - name: "quality_score_distribution"
+      type: "histogram"
+      description: "Generated code quality scores"
+      buckets: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+    log_stage_transitions: true
+
+  traces:
+    enabled: true
+    sampling_rate: 0.5
+    trace_stage_execution: true
+    trace_kafka_events: true

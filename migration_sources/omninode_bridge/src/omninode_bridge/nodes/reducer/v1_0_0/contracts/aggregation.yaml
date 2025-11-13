@@ -1,0 +1,192 @@
+# Aggregation Subcontract
+# Data aggregation strategies and windowing configuration
+# References: NodeBridgeReducer.execute_reduction(), EnumAggregationType
+
+type: "streaming_aggregation"
+aggregation_name: "reducer_metadata_aggregation"
+description: "Streaming aggregation of stamping metadata across workflows with namespace-based grouping"
+
+# Primary aggregation strategy
+primary_strategy: "NAMESPACE_GROUPING"
+
+# Aggregation strategies
+strategies:
+  - strategy_name: "NAMESPACE_GROUPING"
+    type: "namespace_grouping"
+    description: "Group stamps by namespace for multi-tenant aggregation"
+    enabled: true
+    priority: 1
+    grouping_key: "namespace"
+    aggregation_functions:
+      - "count"
+      - "distinct_file_hashes"
+      - "distinct_workflows"
+      - "total_processing_time_ms"
+      - "avg_processing_time_ms"
+    output_fields:
+      - "namespace"
+      - "total_stamps"
+      - "unique_file_hashes"
+      - "unique_workflows"
+      - "total_processing_time_ms"
+      - "avg_processing_time_ms"
+      - "first_stamp_timestamp"
+      - "last_stamp_timestamp"
+
+  - strategy_name: "TIME_WINDOW"
+    type: "time_window"
+    description: "Group stamps by time windows (configurable duration)"
+    enabled: true
+    priority: 2
+    window_duration_ms: 5000  # 5 second windows
+    window_overlap_ms: 1000   # 1 second overlap for smoothing
+    grouping_key: "window_start_timestamp"
+    aggregation_functions:
+      - "count"
+      - "rate_per_second"
+      - "avg_latency_ms"
+      - "p95_latency_ms"
+      - "p99_latency_ms"
+    output_fields:
+      - "window_start"
+      - "window_end"
+      - "stamps_count"
+      - "stamps_per_second"
+      - "avg_latency_ms"
+      - "p95_latency_ms"
+      - "p99_latency_ms"
+
+  - strategy_name: "FILE_TYPE_GROUPING"
+    type: "file_type_grouping"
+    description: "Group stamps by content_type for file type statistics"
+    enabled: true
+    priority: 3
+    grouping_key: "file_type"
+    aggregation_functions:
+      - "count"
+      - "total_size_bytes"
+      - "avg_size_bytes"
+      - "distinct_namespaces"
+    output_fields:
+      - "file_type"
+      - "total_stamps"
+      - "total_size_bytes"
+      - "avg_size_bytes"
+      - "unique_namespaces"
+
+  - strategy_name: "SIZE_BUCKETS"
+    type: "size_buckets"
+    description: "Group stamps by file size ranges"
+    enabled: true
+    priority: 4
+    size_buckets:
+      - name: "small"
+        min_bytes: 0
+        max_bytes: 1048576  # 1 MB
+      - name: "medium"
+        min_bytes: 1048577
+        max_bytes: 10485760  # 10 MB
+      - name: "large"
+        min_bytes: 10485761
+        max_bytes: 104857600  # 100 MB
+      - name: "xlarge"
+        min_bytes: 104857601
+        max_bytes: null  # No upper limit
+    aggregation_functions:
+      - "count"
+      - "avg_processing_time_ms"
+    output_fields:
+      - "size_bucket"
+      - "total_stamps"
+      - "avg_processing_time_ms"
+      - "min_size_bytes"
+      - "max_size_bytes"
+
+  - strategy_name: "WORKFLOW_GROUPING"
+    type: "workflow_grouping"
+    description: "Group stamps by workflow_id for workflow-level aggregation"
+    enabled: true
+    priority: 5
+    grouping_key: "workflow_id"
+    aggregation_functions:
+      - "sum_steps_executed"
+      - "avg_steps_executed"
+      - "total_processing_time_ms"
+      - "workflow_success_rate"
+    output_fields:
+      - "workflow_id"
+      - "total_steps"
+      - "avg_steps"
+      - "processing_time_ms"
+      - "success_rate"
+      - "fsm_state"
+
+  - strategy_name: "CUSTOM"
+    type: "custom"
+    description: "Custom aggregation strategy via configuration"
+    enabled: false
+    priority: 10
+    custom_config:
+      grouping_keys: []
+      aggregation_functions: []
+      custom_logic: null
+
+# Streaming configuration
+streaming:
+  enabled: true
+  batch_size: 100  # Process items in batches of 100
+  window_duration_ms: 5000  # 5 second aggregation windows
+  max_buffer_size: 10000  # Maximum items to buffer
+  flush_interval_ms: 1000  # Flush aggregated results every 1 second
+  backpressure_threshold: 8000  # Apply backpressure at 80% buffer capacity
+
+# Performance targets
+performance:
+  target_throughput_items_per_second: 1000
+  target_latency_per_item_ms: 1.0
+  target_latency_per_batch_ms: 100
+  max_aggregation_delay_ms: 5000
+
+# Aggregation computations
+computations:
+  - name: "count"
+    function: "sum"
+    description: "Total count of items in group"
+  - name: "distinct"
+    function: "set_cardinality"
+    description: "Count of distinct values"
+  - name: "sum"
+    function: "sum"
+    description: "Sum of numeric values"
+  - name: "avg"
+    function: "average"
+    description: "Average of numeric values"
+  - name: "min"
+    function: "minimum"
+    description: "Minimum value"
+  - name: "max"
+    function: "maximum"
+    description: "Maximum value"
+  - name: "p95"
+    function: "percentile_95"
+    description: "95th percentile"
+  - name: "p99"
+    function: "percentile_99"
+    description: "99th percentile"
+
+# State persistence
+state_persistence:
+  enabled: true
+  persist_interval_seconds: 60
+  checkpoint_enabled: true
+  checkpoint_interval_seconds: 300  # 5 minutes
+  recovery_enabled: true
+
+# Monitoring and metrics
+monitoring:
+  track_aggregation_latency: true
+  track_throughput: true
+  track_buffer_usage: true
+  track_backpressure_events: true
+  alert_on_buffer_full: true
+  alert_threshold_percent: 90

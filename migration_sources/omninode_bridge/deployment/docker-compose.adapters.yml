@@ -1,0 +1,465 @@
+# Docker Compose configuration for OmniNode Adapter Nodes
+# Domain-specific Effect nodes that integrate with external services
+#
+# Services:
+# - metadata-stamping: O.N.E. v0.1 Protocol metadata stamping service
+# - onextree: Fast project structure intelligence service
+# - hook-receiver: Webhook receiver for agent routing events
+# - model-metrics: AI Lab integration for model metrics collection
+# - llm-effect: LLM API integration (Z.ai, Ollama support)
+# - vault-effect: HashiCorp Vault secrets management
+#
+# Usage:
+#   Development: docker-compose -f docker-compose.adapters.yml up
+#   Production:  docker-compose -f docker-compose.adapters.yml up -d
+#   Build:       docker-compose -f docker-compose.adapters.yml build
+#   Scale:       docker-compose -f docker-compose.adapters.yml up --scale llm-effect=2
+
+version: '3.8'
+name: omninode_bridge
+
+networks:
+  omninode-bridge-network:
+    external: true
+    name: omninode-bridge-network
+
+volumes:
+  metadata_stamping_logs:
+    name: omninode-bridge-metadata-stamping-logs
+  onextree_logs:
+    name: omninode-bridge-onextree-logs
+  hook_receiver_logs:
+    name: omninode-bridge-hook-receiver-logs
+  model_metrics_logs:
+    name: omninode-bridge-model-metrics-logs
+  llm_effect_logs:
+    name: omninode-bridge-llm-effect-logs
+  vault_effect_logs:
+    name: omninode-bridge-vault-effect-logs
+
+services:
+  # ==========================================================================
+  # Metadata Stamping Service - O.N.E. v0.1 Protocol Compliance
+  # ==========================================================================
+  metadata-stamping:
+    build:
+      context: ..
+      dockerfile: docker/metadata-stamping/Dockerfile
+      target: development
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2025-11-02}
+        VCS_REF: ${VCS_REF:-dev}
+        VERSION: ${SERVICE_VERSION:-1.0.0}
+    container_name: omninode-bridge-metadata-stamping
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      # NOTE: Removed omninode-bridge-postgres from extra_hosts to allow Docker network resolution
+      # This enables connection to LOCAL postgres container instead of remote server
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    # NOTE: depends_on removed because postgres/redpanda are in docker-compose.yml
+    # Infrastructure services should be started first: docker compose up -d
+    environment:
+      # Service configuration
+      METADATA_STAMPING_SERVICE_HOST: 0.0.0.0
+      METADATA_STAMPING_SERVICE_PORT: 8053
+      METADATA_STAMPING_SERVICE_RELOAD: ${ENABLE_HOT_RELOAD:-false}
+      METADATA_STAMPING_LOG_LEVEL: ${LOG_LEVEL:-info}
+      METADATA_STAMPING_SERVICE_NAME: metadata-stamping-service
+
+      # Database configuration
+      METADATA_STAMPING_DB_HOST: omninode-bridge-postgres
+      METADATA_STAMPING_DB_PORT: 5432
+      METADATA_STAMPING_DB_NAME: omninode_bridge
+      METADATA_STAMPING_DB_USER: postgres
+      METADATA_STAMPING_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      METADATA_STAMPING_DB_POOL_MIN_SIZE: 5
+      METADATA_STAMPING_DB_POOL_MAX_SIZE: 20
+      METADATA_STAMPING_DB_COMMAND_TIMEOUT: 30.0
+      METADATA_STAMPING_DB_ENABLE_SSL: false
+
+      # Performance configuration for sub-2ms BLAKE3
+      METADATA_STAMPING_HASH_GENERATOR_POOL_SIZE: 100
+      METADATA_STAMPING_HASH_GENERATOR_MAX_WORKERS: 4
+      METADATA_STAMPING_ENABLE_BATCH_OPERATIONS: true
+      METADATA_STAMPING_ENABLE_PERFORMANCE_METRICS: true
+
+      # O.N.E. v0.1 Protocol Configuration
+      METADATA_STAMPING_PROTOCOL_VERSION: "0.1"
+      METADATA_STAMPING_NAMESPACE: "omninode.services.metadata"
+      METADATA_STAMPING_ENABLE_VALIDATION: true
+
+      # Kafka Configuration
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
+
+      # Application metadata
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-1.0.0}
+
+    ports:
+      - "${METADATA_STAMPING_PORT:-8057}:8053"
+      - "${METADATA_STAMPING_METRICS_PORT:-9191}:9090"
+
+    volumes:
+      - metadata_stamping_logs:/app/logs
+      - ../src:/app/src:${MOUNT_MODE:-ro}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8053/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ==========================================================================
+  # OnexTree Service - Fast Project Structure Intelligence
+  # ==========================================================================
+  onextree:
+    build:
+      context: ..
+      dockerfile: docker/onextree/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2025-11-02}
+        VCS_REF: ${VCS_REF:-dev}
+        VERSION: ${SERVICE_VERSION:-1.0.0}
+    container_name: omninode-bridge-onextree
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    environment:
+      # Service configuration
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PYTHONPATH: /app/src
+
+      # Application metadata
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-1.0.0}
+
+    ports:
+      - "${ONEXTREE_PORT:-8058}:8058"
+
+    volumes:
+      - onextree_logs:/app/logs
+      - ../src:/app/src:${MOUNT_MODE:-ro}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8058/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ==========================================================================
+  # Hook Receiver - Webhook Receiver for Agent Routing Events
+  # ==========================================================================
+  hook-receiver:
+    build:
+      context: ..
+      dockerfile: docker/hook-receiver/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2025-11-02}
+        VCS_REF: ${VCS_REF:-dev}
+        VERSION: ${SERVICE_VERSION:-0.1.0}
+    container_name: omninode-bridge-hook-receiver
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    environment:
+      # Service configuration
+      HOOK_RECEIVER_HOST: 0.0.0.0
+      HOOK_RECEIVER_PORT: 8001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
+
+      # PostgreSQL configuration
+      POSTGRES_HOST: ${POSTGRES_HOST:-192.168.86.200}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5436}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+
+      # API Authentication
+      API_KEY: ${API_KEY}
+
+      # Application metadata
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+
+    ports:
+      - "${HOOK_RECEIVER_PORT:-8001}:8001"
+
+    volumes:
+      - hook_receiver_logs:/app/logs
+      - ../src:/app/src:${MOUNT_MODE:-ro}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ==========================================================================
+  # Model Metrics API - AI Lab Integration for Model Metrics
+  # ==========================================================================
+  model-metrics:
+    build:
+      context: ..
+      dockerfile: docker/model-metrics/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2025-11-02}
+        VCS_REF: ${VCS_REF:-dev}
+        VERSION: ${SERVICE_VERSION:-0.2.0}
+    container_name: omninode-bridge-model-metrics
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    environment:
+      # Service configuration
+      MODEL_METRICS_HOST: 0.0.0.0
+      MODEL_METRICS_PORT: 8005
+      MODEL_METRICS_WORKERS: 1
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # AI Lab configuration (auto-detected from smart_responder_integration.py)
+      AI_LAB_MAC_STUDIO: ${AI_LAB_MAC_STUDIO:-192.168.86.200}
+      AI_LAB_MAC_MINI: ${AI_LAB_MAC_MINI:-192.168.86.101}
+      AI_LAB_AI_PC: ${AI_LAB_AI_PC:-192.168.86.201}
+      AI_LAB_MACBOOK_AIR: ${AI_LAB_MACBOOK_AIR:-192.168.86.105}
+      AI_LAB_OLLAMA_PORT: ${AI_LAB_OLLAMA_PORT:-11434}
+
+      # API Authentication
+      API_KEY: ${API_KEY}
+
+      # Port configurations for service discovery
+      CONSUL_PORT: ${CONSUL_PORT:-28500}
+      REDPANDA_PORT: ${REDPANDA_PORT:-29092}
+      REDPANDA_UI_PORT: ${REDPANDA_UI_PORT:-3839}
+
+      # Application metadata
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.2.0}
+
+    ports:
+      - "${MODEL_METRICS_PORT:-8005}:8005"
+
+    volumes:
+      - model_metrics_logs:/app/logs
+      - ../src:/app/src:${MOUNT_MODE:-ro}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ==========================================================================
+  # LLM Effect Node - Language Model API Integration
+  # ==========================================================================
+  llm-effect:
+    build:
+      context: ..
+      dockerfile: docker/adapter-nodes/Dockerfile.llm_effect
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2025-11-02}
+        VCS_REF: ${VCS_REF:-dev}
+        VERSION: ${SERVICE_VERSION:-1.0.0}
+    container_name: omninode-bridge-llm-effect
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    environment:
+      # LLM API Configuration
+      ZAI_API_KEY: ${ZAI_API_KEY:?ZAI_API_KEY must be set in environment}
+      ZAI_ENDPOINT: ${ZAI_ENDPOINT:-https://api.z.ai/api/anthropic/v1/messages}
+
+      # LLM Tier Configuration
+      DEFAULT_LLM_TIER: ${DEFAULT_LLM_TIER:-CLOUD_FAST}
+      DEFAULT_MAX_TOKENS: ${DEFAULT_MAX_TOKENS:-4000}
+      DEFAULT_TEMPERATURE: ${DEFAULT_TEMPERATURE:-0.7}
+
+      # Service Configuration
+      API_PORT: 8070
+      METRICS_PORT: 9091
+
+      # Logging and Monitoring
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-1.0.0}
+
+      # Kafka Configuration (for event publishing)
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
+
+      # Database Configuration (if needed for metrics/state)
+      POSTGRES_HOST: ${POSTGRES_HOST:-omninode-bridge-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+
+    ports:
+      - "${LLM_EFFECT_PORT:-8072}:8070"
+      - "${LLM_EFFECT_METRICS_PORT:-9191}:9091"
+
+    volumes:
+      - llm_effect_logs:/app/logs
+      # Mount source for development hot reload
+      - ../src:/app/src:${MOUNT_MODE:-ro}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8070/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ==========================================================================
+  # Vault Secrets Effect Node - HashiCorp Vault Integration
+  # ==========================================================================
+  vault-effect:
+    build:
+      context: ..
+      dockerfile: docker/adapter-nodes/Dockerfile.vault_effect
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2025-11-02}
+        VCS_REF: ${VCS_REF:-dev}
+        VERSION: ${SERVICE_VERSION:-1.0.0}
+    container_name: omninode-bridge-vault-effect
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    depends_on:
+      - llm-effect  # Ensure LLM starts first (optional dependency)
+    environment:
+      # Vault Configuration
+      VAULT_ADDR: ${VAULT_ADDR:-http://omninode-bridge-vault:8200}
+      VAULT_TOKEN: ${VAULT_TOKEN:?VAULT_TOKEN must be set in environment}
+      VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+      VAULT_MOUNT_POINT: ${VAULT_MOUNT_POINT:-secret}
+
+      # Service Configuration
+      API_PORT: 8071
+      METRICS_PORT: 9092
+
+      # Logging and Monitoring
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-1.0.0}
+
+      # Kafka Configuration (for event publishing)
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
+
+      # Database Configuration (if needed for metrics/state)
+      POSTGRES_HOST: ${POSTGRES_HOST:-omninode-bridge-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+
+    ports:
+      - "${VAULT_EFFECT_PORT:-8073}:8071"
+      - "${VAULT_EFFECT_METRICS_PORT:-9192}:9092"
+
+    volumes:
+      - vault_effect_logs:/app/logs
+      # Mount source for development hot reload
+      - ../src:/app/src:${MOUNT_MODE:-ro}
+      - ../generated_nodes/vault_secrets_effect:/app/generated_nodes/vault_secrets_effect:${MOUNT_MODE:-ro}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8071/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M

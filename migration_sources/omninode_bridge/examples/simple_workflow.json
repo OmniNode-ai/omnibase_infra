@@ -1,0 +1,47 @@
+{
+  "workflow_id": "simple_analysis_workflow",
+  "name": "Simple Project Analysis",
+  "description": "Basic project analysis workflow for quick insights",
+  "tasks": [
+    {
+      "task_id": "project_overview",
+      "task_type": "ai_task",
+      "prompt": "Provide a high-level overview of this project structure, main technologies used, and primary purpose based on the codebase.",
+      "config": {
+        "complexity": "simple",
+        "ai_task_type": "analysis",
+        "timeout": 120,
+        "retry_limit": 2
+      },
+      "validation_contract": {
+        "type": "content_length",
+        "min_length": 100,
+        "max_length": 2000
+      },
+      "definition_of_done": {
+        "min_content_length": 150,
+        "required_keywords": ["project", "technology", "purpose"],
+        "quality_threshold": 0.7
+      }
+    },
+    {
+      "task_id": "quick_recommendations",
+      "task_type": "ai_task",
+      "prompt": "Based on the project overview, provide 3-5 quick recommendations for improvement or areas that need attention.",
+      "config": {
+        "complexity": "simple",
+        "ai_task_type": "recommendations",
+        "timeout": 90,
+        "retry_limit": 2
+      },
+      "validation_contract": {
+        "type": "required_fields",
+        "fields": ["recommendations"],
+        "min_content_length": 80
+      }
+    }
+  ],
+  "dependencies": {
+    "quick_recommendations": ["project_overview"]
+  }
+}

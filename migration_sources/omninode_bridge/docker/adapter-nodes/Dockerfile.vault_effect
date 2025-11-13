@@ -1,0 +1,129 @@
+# Multi-stage Dockerfile for Vault Secrets Effect Node
+# Optimized for production with security hardening
+
+# ============================================================================
+# Stage 1: Builder - Install dependencies
+# ============================================================================
+FROM python:3.12-slim AS builder
+
+# Build arguments
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+
+# Set environment variables for build
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    POETRY_VERSION=2.1.3 \
+    POETRY_HOME="/opt/poetry" \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=true \
+    POETRY_VIRTUALENVS_CREATE=true
+
+# Install system dependencies and Poetry
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    git \
+    && pip install poetry==${POETRY_VERSION} \
+    && apt-get clean
+
+# Add Poetry to PATH
+ENV PATH="$POETRY_HOME/bin:$PATH"
+
+# Set working directory
+WORKDIR /app
+
+# Copy only dependency files first (for better layer caching)
+COPY pyproject.toml ./
+COPY poetry.lock ./
+
+# Install dependencies from GitHub repositories
+RUN --mount=type=cache,target=/root/.cache/pypoetry \
+    --mount=type=secret,id=github_token \
+    if [ -f /run/secrets/github_token ]; then \
+        export GITHUB_TOKEN=$(cat /run/secrets/github_token); \
+        git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; \
+    fi && \
+    if [ ! -f poetry.lock ]; then \
+        echo "poetry.lock not found, generating from pyproject.toml..."; \
+        poetry lock; \
+    fi && \
+    poetry install --only=main --no-root
+
+# ============================================================================
+# Stage 2: Runtime - Minimal production image
+# ============================================================================
+FROM python:3.12-slim AS runtime
+
+# Metadata labels
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.authors="OmniNode Team" \
+      org.opencontainers.image.url="https://github.com/omninode-ai/omninode_bridge" \
+      org.opencontainers.image.source="https://github.com/omninode-ai/omninode_bridge" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.title="OmniNode Bridge - Vault Secrets Effect Node" \
+      org.opencontainers.image.description="ONEX Effect Node for HashiCorp Vault integration" \
+      org.opencontainers.image.licenses="MIT"
+
+# Runtime environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src:/app/generated_nodes \
+    PATH="/app/.venv/bin:$PATH"
+
+# Install runtime dependencies only
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && apt-get clean
+
+# Create non-root user for security
+RUN groupadd -r vaulteffect && \
+    useradd -r -g vaulteffect -u 1000 vaulteffect
+
+# Set working directory
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy application source
+COPY --chown=vaulteffect:vaulteffect src/ /app/src/
+
+# Copy generated vault node
+COPY --chown=vaulteffect:vaulteffect generated_nodes/vault_secrets_effect/ /app/generated_nodes/vault_secrets_effect/
+
+# Copy entrypoint script
+COPY --chown=vaulteffect:vaulteffect docker/adapter-nodes/entrypoint.sh /app/entrypoint.sh
+
+# Create directories for logs and data
+RUN mkdir -p /app/logs /app/data && \
+    chown -R vaulteffect:vaulteffect /app && \
+    chmod +x /app/entrypoint.sh
+
+# Switch to non-root user
+USER vaulteffect
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8071/health || exit 1
+
+# Expose ports for REST API
+EXPOSE 8071 9092
+
+# Set entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Pragmatic approach: Use main_standalone.py for now (deployment needs REST API)
+# TODO: Migrate to proper ONEX v2.0 orchestration pattern in future
+# TODO: Update code generator to create main_standalone.py alongside node.py
+CMD ["python", "-m", "uvicorn", "vault_secrets_effect.main_standalone:app", "--host", "0.0.0.0", "--port", "8071", "--workers", "4"]

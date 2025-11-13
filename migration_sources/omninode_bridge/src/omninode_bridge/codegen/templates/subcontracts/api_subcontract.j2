@@ -1,0 +1,60 @@
+{#
+API Client Subcontract Template
+
+Generates API client methods for HTTP requests.
+
+Context variables:
+- endpoints: List of API endpoints to call
+- base_url: Base URL for API
+- use_auth: Boolean for authentication support
+- use_retry: Boolean for retry logic
+- timeout: Request timeout in seconds
+#}
+
+async def _call_api_endpoints(
+    self,
+    context: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Call external API endpoints.
+
+    Generated from API subcontract.
+    {% if endpoints %}Endpoints: {{ endpoints | join(', ') }}{% endif %}
+    """
+    results = {}
+
+    # Configure HTTP client
+    async with httpx.AsyncClient(
+        base_url="{{ base_url | default('http://localhost:8000') }}",
+        timeout={{ timeout | default(30) }},
+        {% if use_auth %}
+        headers={"Authorization": f"Bearer {context.get('token')}"},
+        {% endif %}
+    ) as client:
+        {% if endpoints %}
+        # Configured endpoints
+        {% for endpoint in endpoints %}
+        # Call endpoint: {{ endpoint }}
+        try:
+            response = await client.get("/{{ endpoint }}")
+            response.raise_for_status()
+            results['{{ endpoint }}'] = response.json()
+        {% if use_retry %}
+        except httpx.HTTPError as e:
+            logger.warning(f"API call failed for {{ endpoint }}: {e}, retrying...")
+            # Retry logic can be added here
+            results['{{ endpoint }}'] = {"error": str(e)}
+        {% else %}
+        except httpx.HTTPError as e:
+            logger.error(f"API call failed for {{ endpoint }}: {e}")
+            results['{{ endpoint }}'] = {"error": str(e)}
+        {% endif %}
+
+        {% endfor %}
+        {% else %}
+        # No specific endpoints configured - add your API calls here
+        response = await client.get("/health")
+        results['health'] = response.json()
+        {% endif %}
+
+    return results

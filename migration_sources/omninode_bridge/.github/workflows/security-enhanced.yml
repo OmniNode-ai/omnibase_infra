@@ -1,0 +1,319 @@
+# Simplified Security Scanning Workflow
+# Basic security validation for bridge project with proper error handling
+# Focuses on essential security checks that work reliably
+
+name: Simplified Security Scanning
+
+# Temporarily disabled for bridge project development - security scanning not needed for home lab
+on:
+  # push:
+  #   branches: [ main, develop, 'fix/*', 'feature/*' ]
+  # pull_request:
+  #   branches: [ main, develop ]
+  # schedule:
+  #   # Run security scans daily at 2 AM UTC
+  #   - cron: '0 2 * * *'
+  workflow_dispatch:
+  # Only run on manual dispatch for security scanning when needed
+
+env:
+  # Security scanning configuration
+  SECURITY_SCAN_TIMEOUT: 300
+  FAIL_ON_CRITICAL: false  # Don't fail build for bridge project
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  # ===============================================
+  # Basic Security Scanning
+  # ===============================================
+  basic-security:
+    name: Basic Security Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '1.8.3'
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      # Bandit - Python security linter with proper error handling
+      - name: Run Bandit security scan
+        run: |
+          echo "Running Bandit security scan..."
+
+          # Create reports directory
+          mkdir -p security-reports
+
+          # Run Bandit with different output formats, continue on error
+          poetry run bandit -r src -f json -o security-reports/bandit-results.json || echo "Bandit JSON scan completed with issues"
+          poetry run bandit -r src -f txt -o security-reports/bandit-results.txt || echo "Bandit text scan completed with issues"
+
+          # Create a summary report
+          echo "# Bandit Security Scan Results" > security-reports/bandit-summary.md
+          echo "Generated: $(date)" >> security-reports/bandit-summary.md
+          echo "" >> security-reports/bandit-summary.md
+
+          if [ -f "security-reports/bandit-results.json" ]; then
+            echo "✅ Bandit scan completed successfully" >> security-reports/bandit-summary.md
+            # Extract issue count if possible
+            if command -v jq >/dev/null 2>&1; then
+              issue_count=$(jq '.results | length' security-reports/bandit-results.json 2>/dev/null || echo "unknown")
+              echo "Issues found: $issue_count" >> security-reports/bandit-summary.md
+            fi
+          else
+            echo "❌ Bandit scan failed to generate results" >> security-reports/bandit-summary.md
+          fi
+
+      # Dependency vulnerability scanning with proper error handling
+      - name: Run dependency vulnerability scan
+        run: |
+          echo "Running dependency vulnerability scan..."
+
+          # pip-audit - Modern dependency vulnerability scanner
+          echo "Running pip-audit scan..."
+          poetry run pip-audit --format=json --output=security-reports/pip-audit-results.json || echo "pip-audit scan completed with issues"
+          poetry run pip-audit --format=cyclonedx-json --output=security-reports/pip-audit-sbom.json || echo "pip-audit SBOM generation completed"
+
+          # Create dependency scan summary
+          echo "# Dependency Vulnerability Scan Results" > security-reports/dependency-summary.md
+          echo "Generated: $(date)" >> security-reports/dependency-summary.md
+          echo "" >> security-reports/dependency-summary.md
+
+          if [ -f "security-reports/pip-audit-results.json" ]; then
+            echo "✅ pip-audit scan completed successfully" >> security-reports/dependency-summary.md
+            # Extract vulnerability count if possible
+            if command -v jq >/dev/null 2>&1; then
+              vuln_count=$(jq '.vulnerabilities | length' security-reports/pip-audit-results.json 2>/dev/null || echo "unknown")
+              echo "Vulnerabilities found: $vuln_count" >> security-reports/dependency-summary.md
+            fi
+          else
+            echo "❌ pip-audit scan failed to generate results" >> security-reports/dependency-summary.md
+          fi
+
+      # Secrets detection with proper error handling
+      - name: Run secrets detection
+        run: |
+          echo "Running secrets detection..."
+
+          # detect-secrets - Baseline secret scanning
+          if [ -f ".secrets.baseline" ]; then
+            echo "Updating existing secrets baseline..."
+            poetry run detect-secrets scan --all-files --baseline .secrets.baseline --update || echo "Secrets baseline update completed"
+          else
+            echo "Creating new secrets baseline..."
+            poetry run detect-secrets scan --all-files --baseline security-reports/secrets-baseline.json || echo "Secrets baseline creation completed"
+          fi
+
+          # Create secrets detection summary
+          echo "# Secrets Detection Results" > security-reports/secrets-summary.md
+          echo "Generated: $(date)" >> security-reports/secrets-summary.md
+          echo "" >> security-reports/secrets-summary.md
+
+          if [ -f ".secrets.baseline" ]; then
+            echo "✅ Secrets detection completed successfully" >> security-reports/secrets-summary.md
+            echo "Using existing baseline: .secrets.baseline" >> security-reports/secrets-summary.md
+          elif [ -f "security-reports/secrets-baseline.json" ]; then
+            echo "✅ Secrets detection completed successfully" >> security-reports/secrets-summary.md
+            echo "Created new baseline: security-reports/secrets-baseline.json" >> security-reports/secrets-summary.md
+          else
+            echo "❌ Secrets detection failed" >> security-reports/secrets-summary.md
+          fi
+
+      # Always upload results, even if some scans failed
+      - name: Upload security scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: basic-security-results
+          path: security-reports/
+          retention-days: 30
+
+  # ===============================================
+  # Container Security (Optional)
+  # ===============================================
+  container-security:
+    name: Container Security (Optional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name != 'schedule'  # Skip on scheduled runs to save resources
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Test with one representative service
+      - name: Build test Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.hook-receiver
+          tags: security-test/hook-receiver:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Trivy - Simple vulnerability scanner
+      - name: Run Trivy container scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: security-test/hook-receiver:latest
+          format: 'json'
+          output: 'trivy-results.json'
+          severity: 'HIGH,CRITICAL'
+        continue-on-error: true
+
+      - name: Create container security summary
+        run: |
+          mkdir -p security-reports
+          echo "# Container Security Scan Results" > security-reports/container-summary.md
+          echo "Generated: $(date)" >> security-reports/container-summary.md
+          echo "" >> security-reports/container-summary.md
+
+          if [ -f "trivy-results.json" ]; then
+            echo "✅ Trivy container scan completed" >> security-reports/container-summary.md
+            # Extract vulnerability count if possible
+            if command -v jq >/dev/null 2>&1; then
+              vuln_count=$(jq '.Results[].Vulnerabilities | length' trivy-results.json 2>/dev/null | head -1 || echo "unknown")
+              echo "Vulnerabilities found: $vuln_count" >> security-reports/container-summary.md
+            fi
+            mv trivy-results.json security-reports/
+          else
+            echo "❌ Trivy container scan failed" >> security-reports/container-summary.md
+          fi
+
+      - name: Upload container scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-security-results
+          path: security-reports/
+          retention-days: 30
+
+  # ===============================================
+  # Security Report Generation
+  # ===============================================
+  security-report:
+    name: Security Summary Report
+    runs-on: ubuntu-latest
+    needs: [basic-security, container-security]
+    if: always()
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all security artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+
+      - name: Generate comprehensive security report
+        run: |
+          echo "# 🔒 Security Scan Summary Report" > security-summary.md
+          echo "Generated: $(date)" >> security-summary.md
+          echo "Repository: ${{ github.repository }}" >> security-summary.md
+          echo "Branch: ${{ github.ref_name }}" >> security-summary.md
+          echo "Commit: ${{ github.sha }}" >> security-summary.md
+          echo "" >> security-summary.md
+
+          # Job status summary
+          echo "## 📊 Scan Status Summary" >> security-summary.md
+          echo "- Basic Security Checks: ${{ needs.basic-security.result }}" >> security-summary.md
+          echo "- Container Security: ${{ needs.container-security.result }}" >> security-summary.md
+          echo "" >> security-summary.md
+
+          # Include individual summaries if they exist
+          echo "## 🔍 Detailed Results" >> security-summary.md
+
+          if [ -f "basic-security-results/bandit-summary.md" ]; then
+            echo "### Bandit Security Scan" >> security-summary.md
+            cat basic-security-results/bandit-summary.md >> security-summary.md
+            echo "" >> security-summary.md
+          fi
+
+          if [ -f "basic-security-results/dependency-summary.md" ]; then
+            echo "### Dependency Vulnerability Scan" >> security-summary.md
+            cat basic-security-results/dependency-summary.md >> security-summary.md
+            echo "" >> security-summary.md
+          fi
+
+          if [ -f "basic-security-results/secrets-summary.md" ]; then
+            echo "### Secrets Detection" >> security-summary.md
+            cat basic-security-results/secrets-summary.md >> security-summary.md
+            echo "" >> security-summary.md
+          fi
+
+          if [ -f "container-security-results/container-summary.md" ]; then
+            echo "### Container Security" >> security-summary.md
+            cat container-security-results/container-summary.md >> security-summary.md
+            echo "" >> security-summary.md
+          fi
+
+          # Recommendations for bridge project
+          echo "## 💡 Recommendations for Bridge Project" >> security-summary.md
+          echo "- This is a simplified security scan appropriate for a bridge project" >> security-summary.md
+          echo "- Focus on fixing HIGH and CRITICAL vulnerabilities" >> security-summary.md
+          echo "- Consider enabling additional scans for production deployments" >> security-summary.md
+          echo "- Regular dependency updates are recommended" >> security-summary.md
+          echo "- Review secrets detection results carefully" >> security-summary.md
+          echo "" >> security-summary.md
+
+          echo "## 🏗️ Bridge Project Context" >> security-summary.md
+          echo "This security scanning is optimized for development velocity while maintaining essential security checks." >> security-summary.md
+          echo "Scans are configured to NOT fail the build to support rapid development cycles." >> security-summary.md
+
+      - name: Upload comprehensive security report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-summary-report
+          path: security-summary.md
+          retention-days: 90
+
+      - name: Comment security summary on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const report = fs.readFileSync('security-summary.md', 'utf8');
+              // Truncate report if too long for GitHub comment
+              const maxLength = 60000;
+              const truncatedReport = report.length > maxLength
+                ? report.substring(0, maxLength) + '\n\n*Report truncated - see artifacts for full details*'
+                : report;
+
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: truncatedReport
+              });
+            } catch (error) {
+              console.log('Could not read or post security report:', error);
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '## 🔒 Security Scan Results\n\nSecurity scans completed. Check the Actions artifacts for detailed results.'
+              });
+            }

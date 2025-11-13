@@ -1,0 +1,153 @@
+# Orchestrator Node Configuration
+# Base configuration for NodeBridgeOrchestratorOrchestrator
+# Environment-specific overrides are applied from development.yaml or production.yaml
+
+# Node identification
+node:
+  type: "orchestrator"
+  name: "bridge-orchestrator"
+  version: "0.1.0"
+  namespace: "omninode.bridge.orchestrator"
+
+# Orchestrator-specific settings
+orchestrator:
+  # Workflow coordination
+  max_concurrent_workflows: 100
+  workflow_timeout_seconds: 300
+  workflow_retry_attempts: 3
+  workflow_retry_delay_seconds: 5
+
+  # Task management
+  task_batch_size: 50
+  task_priority_levels: ["critical", "high", "medium", "low"]
+  default_task_priority: "medium"
+
+  # Dependency resolution
+  enable_dependency_tracking: true
+  max_dependency_depth: 10
+  circular_dependency_detection: true
+
+  # Performance tuning
+  worker_pool_size: 10
+  event_processing_buffer_size: 1000
+  state_sync_interval_seconds: 30
+
+# Service endpoints
+services:
+  onextree:
+    host: "localhost"
+    port: 8051
+    base_url: "http://localhost:8051"
+    health_check_path: "/health"
+    timeout_seconds: 30
+    retry_attempts: 3
+
+  metadata_stamping:
+    host: "localhost"
+    port: 8053
+    base_url: "http://localhost:8053"
+    health_check_path: "/health"
+    timeout_seconds: 30
+    retry_attempts: 3
+
+# Consul service discovery
+consul:
+  host: "192.168.86.200"
+  port: 28500
+  enable_registration: true
+  registration_timeout_seconds: 10
+  health_check_interval_seconds: 30
+  health_check_timeout_seconds: 5
+
+# Kafka event streaming
+kafka:
+  bootstrap_servers: "localhost:9092"
+
+  # Producer settings
+  producer:
+    compression_type: "snappy"
+    batch_size: 16384
+    linger_ms: 5
+    acks: "all"
+    max_in_flight_requests: 5
+
+  # Consumer settings
+  consumer:
+    group_id: "bridge-orchestrator-consumer"
+    auto_offset_reset: "latest"
+    enable_auto_commit: true
+    auto_commit_interval_ms: 5000
+    max_poll_records: 500
+
+  # Topics
+  topics:
+    workflow_commands: "omninode.bridge.workflow.commands.v1"
+    workflow_events: "omninode.bridge.workflow.events.v1"
+    task_events: "omninode.bridge.task.events.v1"
+    state_sync: "omninode.bridge.state.sync.v1"
+
+# Database configuration
+database:
+  host: "localhost"
+  port: 5432
+  database: "omninode_bridge"
+  user: "postgres"
+  # Password should be set via environment variable: POSTGRES_PASSWORD
+
+  # Connection pooling
+  pool_min_size: 5
+  pool_max_size: 20
+  pool_timeout_seconds: 10
+
+  # Performance
+  query_timeout_seconds: 30
+  command_timeout_seconds: 60
+  statement_cache_size: 100
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "json"
+  enable_structured_logging: true
+  log_requests: true
+  log_responses: false
+
+  # Log destinations
+  outputs:
+    - type: "console"
+      enabled: true
+    - type: "file"
+      enabled: true
+      path: "logs/orchestrator.log"
+      max_size_mb: 100
+      backup_count: 5
+
+# Monitoring and metrics
+monitoring:
+  enable_prometheus: true
+  prometheus_port: 9090
+  metrics_interval_seconds: 15
+
+  # Health checks
+  health_check_interval_seconds: 30
+  service_health_timeout_seconds: 5
+
+  # Performance metrics
+  track_workflow_latency: true
+  track_task_latency: true
+  track_dependency_resolution_time: true
+
+# Circuit breaker configuration
+circuit_breaker:
+  enabled: true
+  failure_threshold: 5
+  recovery_timeout_seconds: 60
+  half_open_max_requests: 3
+
+# Caching configuration
+cache:
+  enabled: true
+  workflow_state_ttl_seconds: 3600
+  task_result_ttl_seconds: 1800
+  dependency_graph_ttl_seconds: 7200
+  max_cache_size_mb: 256

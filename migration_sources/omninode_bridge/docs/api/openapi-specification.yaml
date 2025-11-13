@@ -1,0 +1,2387 @@
+openapi: 3.0.3
+info:
+  title: OmniNode Bridge API
+  description: |
+    Comprehensive API documentation for OmniNode Bridge -
+    Intelligent service lifecycle management and adaptive event
+    processing.
+
+    ## Security
+    All endpoints require API key authentication via:
+    - `Authorization: Bearer <api-key>` header, or
+    - `X-API-Key: <api-key>` header
+
+    ## Rate Limiting
+    All endpoints implement rate limiting for security and performance:
+    - Hook endpoints: 100 requests/minute per IP
+    - Session management: 30 requests/minute per IP
+    - Model execution: 20 requests/minute per IP
+    - Model comparison: 5 requests/minute per IP (resource intensive)
+
+    ## Services
+    - **HookReceiver**: Webhook processing and event management
+    - **ModelMetrics**: AI model performance tracking and intelligent routing
+    - **WorkflowCoordinator**: Complex multi-step workflow orchestration
+  version: 0.1.0
+  contact:
+    name: OmniNode Team
+    email: team@omninode.ai
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8001
+    description: HookReceiver Service (Development)
+  - url: http://localhost:8002
+    description: ModelMetrics API (Development)
+  - url: http://localhost:8003
+    description: WorkflowCoordinator API (Development)
+  - url: https://api.omninode.ai
+    description: Production Environment
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+paths:
+  # ========================================
+  # HookReceiver Service Endpoints
+  # ========================================
+  /hooks:
+    post:
+      tags:
+        - HookReceiver
+      summary: Receive and process webhook events
+      description: |
+        Process incoming webhook events from various services with
+        intelligent event processing,
+        correlation tracking, and automatic conversion to internal event types.
+
+        Features:
+        - Circuit breaker protection for reliability
+        - Automatic event type detection and conversion
+        - Correlation ID tracking for distributed tracing
+        - Prometheus metrics collection
+        - PostgreSQL persistence with health checks
+      operationId: receiveHook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HookEvent'
+            examples:
+              service_startup:
+                summary: Service startup event
+                value:
+                  source: "omnibase-core"
+                  version: "1.0.0"
+                  environment: "production"
+                  correlation_id: "550e8400-e29b-41d4-a716-446655440000"
+                  action: "startup"
+                  resource: "service"
+                  resource_id: "omnibase-core-instance-1"
+                  data:
+                    version: "1.0.0"
+                    port: 8080
+                    health_endpoint: "/health"
+              tool_execution:
+                summary: Tool execution event
+                value:
+                  source: "smart-responder"
+                  action: "execute"
+                  resource: "tool"
+                  resource_id: "code_analysis_tool"
+                  data:
+                    tool_name: "code_analysis_tool"
+                    execution_time_ms: 250
+                    success: true
+                    output: "Analysis completed successfully"
+      responses:
+        '200':
+          description: Hook processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookResponse'
+              examples:
+                success:
+                  summary: Successful processing
+                  value:
+                    success: true
+                    message: "Hook processed successfully"
+                    event_id: "123e4567-e89b-12d3-a456-426614174000"
+                    processing_time_ms: 45.2
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      tags:
+        - HookReceiver
+        - Health
+      summary: Comprehensive health check
+      description: |
+        Performs comprehensive health checks for all dependencies including:
+        - Kafka connectivity and health
+        - PostgreSQL connectivity and health
+        - Overall service status determination
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: All systems healthy
+                  value:
+                    status: "healthy"
+                    timestamp: 1640995200.0
+                    version: "0.1.0"
+                    uptime: 3600.0
+                    dependencies:
+                      kafka:
+                        status: "healthy"
+                        response_time_ms: 15
+                        last_check: "2024-01-01T12:00:00Z"
+                      postgres:
+                        status: "healthy"
+                        response_time_ms: 8
+                        last_check: "2024-01-01T12:00:00Z"
+        '503':
+          description: Service is degraded or unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                degraded:
+                  summary: Degraded service health
+                  value:
+                    status: "degraded"
+                    timestamp: 1640995200.0
+                    version: "0.1.0"
+                    uptime: 3600.0
+                    dependencies:
+                      kafka:
+                        status: "unhealthy"
+                        error: "Connection timeout"
+                        last_check: "2024-01-01T12:00:00Z"
+                      postgres:
+                        status: "healthy"
+                        response_time_ms: 8
+                        last_check: "2024-01-01T12:00:00Z"
+
+  /metrics:
+    get:
+      tags:
+        - HookReceiver
+        - Monitoring
+      summary: Prometheus metrics endpoint
+      description: |
+        Exposes Prometheus-formatted metrics for monitoring and
+        alerting including:
+        - Hook event counters by source and action
+        - Processing time histograms
+        - Error rate counters (Kafka, Database)
+        - Rate limiting metrics
+      operationId: getMetrics
+      security: []
+      responses:
+        '200':
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP hook_events_total Total hook events received
+                  # TYPE hook_events_total counter
+                  hook_events_total{source="omnibase-core",action="startup"} 12
+                  hook_events_total{source="smart-responder",
+                                     action="execute"} 45
+
+                  # HELP hook_processing_seconds Hook processing time
+                  # TYPE hook_processing_seconds histogram
+                  hook_processing_seconds_bucket{le="0.1"} 150
+                  hook_processing_seconds_bucket{le="0.5"} 280
+                  hook_processing_seconds_bucket{le="1.0"} 290
+                  hook_processing_seconds_bucket{le="+Inf"} 295
+
+  /sessions:
+    get:
+      tags:
+        - HookReceiver
+        - Sessions
+      summary: Get active service sessions
+      description: |
+        Retrieve all currently active service sessions with metadata
+        and status information.
+        Useful for monitoring service lifecycle and debugging
+        session-related issues.
+      operationId: getActiveSessions
+      responses:
+        '200':
+          description: List of active sessions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionsResponse'
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '503':
+          description: Database not available
+
+  /sessions/{sessionId}/end:
+    post:
+      tags:
+        - HookReceiver
+        - Sessions
+      summary: End a service session
+      description: |
+        Manually end a specific service session. Useful for cleanup
+        or forced session termination.
+      operationId: endSession
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          description: UUID of the session to end
+          schema:
+            type: string
+            format: uuid
+            example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Session ended successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '404':
+          description: Session not found
+        '503':
+          description: Database not available
+
+  # ========================================
+  # ModelMetrics API Endpoints
+  # ========================================
+  /execute:
+    post:
+      tags:
+        - ModelMetrics
+        - Execution
+      summary: Execute task with intelligent model selection
+      description: |
+        Execute a task using intelligent model selection based on:
+        - Task type requirements and complexity
+        - Historical performance data
+        - Latency requirements and preferences
+        - Context size optimization
+
+        Features:
+        - Automatic model tier escalation on failures
+        - Performance metrics tracking
+        - Circuit breaker protection
+        - Quality scoring and recommendations
+      operationId: executeTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskRequest'
+            examples:
+              code_generation:
+                summary: Code generation task
+                value:
+                  task_type: "code_generation"
+                  prompt:
+                    "Create a Python function to calculate fibonacci numbers"
+                  context_size: 1000
+                  complexity: "moderate"
+                  max_latency_ms: 5000
+                  track_metrics: true
+              debugging_task:
+                summary: Debugging task with preferred model
+                value:
+                  task_type: "debugging"
+                  prompt: >-
+                    Analyze this error:
+                    TypeError: 'NoneType' object is not callable
+                  complexity: "high"
+                  preferred_model: "claude-3-sonnet"
+                  track_metrics: true
+      responses:
+        '200':
+          description: Task executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+              examples:
+                successful_execution:
+                  summary: Successful task execution
+                  value:
+                    success: true
+                    response: >-
+                      def fibonacci(n):
+                          if n <= 1:
+                              return n
+                          return fibonacci(n-1) + fibonacci(n-2)
+                    model_used: "claude-3-haiku"
+                    node_location: "us-west-2"
+                    execution_metrics:
+                      execution_id: "exec_123456789"
+                      latency_ms: 1250
+                      tokens_per_second: 45.2
+                      quality_score: 0.89
+                      success: true
+                      context_size: 1000
+                      model_tier: "small"
+                      retry_count: 0
+                    recommendations:
+                      - model: "claude-3-haiku"
+                        tier: "small"
+                        confidence: 0.95
+                        expected_latency_ms: 1200
+                        expected_success_rate: 0.92
+                        reason: >-
+                          Optimal for moderate complexity code generation
+                    escalated: false
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '429':
+          description: Rate limit exceeded
+        '500':
+          description: Task execution failed
+
+  /compare:
+    post:
+      tags:
+        - ModelMetrics
+        - Comparison
+      summary: Compare model performance on specific task
+      description: |
+        Compare performance of multiple models on the same task to identify:
+        - Best performing model for specific task types
+        - Latency vs quality tradeoffs
+        - Model tier effectiveness analysis
+        - Cost-performance optimization opportunities
+      operationId: compareModels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelComparisonRequest'
+            examples:
+              architecture_comparison:
+                summary: Architecture task comparison
+                value:
+                  task_type: "architecture"
+                  prompt: >-
+                    Design a microservices architecture for an
+                    e-commerce platform
+                  models_to_compare:
+                    - "claude-3-opus"
+                    - "claude-3-sonnet"
+                    - "claude-3-haiku"
+                  complexity: "high"
+      responses:
+        '200':
+          description: Model comparison completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelComparisonResult'
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '429':
+          description: Rate limit exceeded
+        '500':
+          description: Model comparison failed
+
+  /metrics/performance:
+    get:
+      tags:
+        - ModelMetrics
+        - Analytics
+      summary: Get performance metrics with filtering
+      description: |
+        Retrieve comprehensive performance metrics with flexible
+        filtering options:
+        - Filter by task type, model tier, or time window
+        - Aggregate statistics and success rates
+        - Per-model performance breakdown
+        - Historical trend analysis
+      operationId: getPerformanceMetrics
+      parameters:
+        - name: task_type
+          in: query
+          description: Filter by specific task type
+          schema:
+            $ref: '#/components/schemas/TaskType'
+        - name: model_tier
+          in: query
+          description: Filter by model tier
+          schema:
+            $ref: '#/components/schemas/ModelTier'
+        - name: hours
+          in: query
+          description: Time window in hours (default 24)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 168
+            default: 24
+            example: 24
+      responses:
+        '200':
+          description: Performance metrics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceMetrics'
+
+  /metrics/recommendations:
+    get:
+      tags:
+        - ModelMetrics
+        - Recommendations
+      summary: Get model recommendations for task configuration
+      description: |
+        Get intelligent model recommendations based on:
+        - Historical performance data for similar tasks
+        - Task complexity and context size requirements
+        - Success rate and latency optimization
+        - Cost-effectiveness analysis
+      operationId: getModelRecommendations
+      parameters:
+        - name: task_type
+          in: query
+          required: true
+          description: Type of task for recommendations
+          schema:
+            $ref: '#/components/schemas/TaskType'
+        - name: context_size
+          in: query
+          description: Expected context size in tokens
+          schema:
+            type: integer
+            minimum: 1
+            default: 1000
+            example: 1000
+        - name: complexity
+          in: query
+          description: Task complexity level
+          schema:
+            type: string
+            enum: [simple, moderate, high, extreme]
+            default: moderate
+            example: moderate
+      responses:
+        '200':
+          description: Model recommendations generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelRecommendations'
+
+  /models/available:
+    get:
+      tags:
+        - ModelMetrics
+        - Models
+      summary: List all available models
+      description: |
+        Get comprehensive information about all available AI models including:
+        - Model specifications and capabilities
+        - Node location and endpoint information
+        - Specialized task types and optimization
+        - Current availability status
+      operationId: listAvailableModels
+      security: []
+      responses:
+        '200':
+          description: List of available models
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailableModels'
+
+  /lab/health:
+    get:
+      tags:
+        - ModelMetrics
+        - Health
+      summary: Check AI lab node health
+      description: |
+        Comprehensive health check for all AI lab nodes including:
+        - Individual node status and response times
+        - Model availability per node
+        - Load balancing status
+        - Circuit breaker states
+      operationId: checkLabHealth
+      responses:
+        '200':
+          description: Lab health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabHealthResponse'
+
+  /lab/performance-report:
+    get:
+      tags:
+        - ModelMetrics
+        - Analytics
+      summary: Get comprehensive lab performance report
+      description: |
+        Detailed performance analysis across the entire AI lab including:
+        - Node utilization and efficiency metrics
+        - Model performance comparisons
+        - Resource usage optimization recommendations
+        - Trend analysis and capacity planning insights
+      operationId: getLabPerformanceReport
+      responses:
+        '200':
+          description: Comprehensive performance report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabPerformanceReport'
+
+  # ========================================
+  # WorkflowCoordinator Service Endpoints
+  # ========================================
+  /workflows/execute:
+    post:
+      tags:
+        - WorkflowCoordinator
+        - Execution
+      summary: Execute a new workflow
+      description: |
+        Submit and execute a complex multi-step workflow with
+        intelligent orchestration.
+
+        Features:
+        - Parallel and sequential task execution
+        - Dependency management and validation
+        - Real-time status monitoring
+        - Automatic rollback on failures
+        - Resource allocation optimization
+        - Scheduled execution support
+      operationId: executeWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowExecutionRequest'
+            examples:
+              simple_workflow:
+                summary: Simple sequential workflow
+                value:
+                  workflow_definition:
+                    workflow_id: "deploy_microservice_v1"
+                    name: "Deploy Microservice"
+                    description: "Deploy a microservice to production"
+                    global_timeout_seconds: 3600
+                    max_parallel_tasks: 3
+                    tasks:
+                      - task_id: "build_image"
+                        name: "Build Docker Image"
+                        task_type: "build"
+                        dependencies: []
+                        timeout_seconds: 600
+                        retry_config:
+                          max_retries: 2
+                          retry_delay_seconds: 30
+                        parameters:
+                          dockerfile_path: "Dockerfile"
+                          tag: "latest"
+                      - task_id: "deploy_service"
+                        name: "Deploy to Kubernetes"
+                        task_type: "deploy"
+                        dependencies: ["build_image"]
+                        timeout_seconds: 300
+                        retry_config:
+                          max_retries: 3
+                          retry_delay_seconds: 60
+                        parameters:
+                          namespace: "production"
+                          replicas: 3
+                  priority: "high"
+                  input_data:
+                    repository_url: "https://github.com/example/microservice"
+                    environment: "production"
+                  notification_config:
+                    on_success: "webhook"
+                    on_failure: "email"
+              parallel_workflow:
+                summary: Parallel workflow execution
+                value:
+                  workflow_definition:
+                    workflow_id: "parallel_tests_v1"
+                    name: "Run Parallel Tests"
+                    description: "Execute multiple test suites in parallel"
+                    global_timeout_seconds: 1800
+                    max_parallel_tasks: 5
+                    tasks:
+                      - task_id: "unit_tests"
+                        name: "Unit Tests"
+                        task_type: "test"
+                        dependencies: []
+                        timeout_seconds: 300
+                        parameters:
+                          test_suite: "unit"
+                      - task_id: "integration_tests"
+                        name: "Integration Tests"
+                        task_type: "test"
+                        dependencies: []
+                        timeout_seconds: 600
+                        parameters:
+                          test_suite: "integration"
+                      - task_id: "performance_tests"
+                        name: "Performance Tests"
+                        task_type: "test"
+                        dependencies: []
+                        timeout_seconds: 900
+                        parameters:
+                          test_suite: "performance"
+                      - task_id: "generate_report"
+                        name: "Generate Test Report"
+                        task_type: "report"
+                        dependencies:
+                          - "unit_tests"
+                          - "integration_tests"
+                          - "performance_tests"
+                        timeout_seconds: 120
+                        parameters:
+                          output_format: "html"
+                  priority: "medium"
+      responses:
+        '200':
+          description: Workflow execution started successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowExecutionResponse'
+              examples:
+                execution_started:
+                  summary: Workflow execution started
+                  value:
+                    workflow_id: "wf_550e8400-e29b-41d4-a716-446655440000"
+                    status: "started"
+                    message: "Workflow 'Deploy Microservice' execution started"
+        '400':
+          description: Workflow validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '429':
+          description: Rate limit exceeded
+        '500':
+          description: Workflow execution failed
+
+  /workflows/{workflowId}/status:
+    get:
+      tags:
+        - WorkflowCoordinator
+        - Monitoring
+      summary: Get workflow execution status
+      description: |
+        Retrieve detailed status information for a specific workflow including:
+        - Overall workflow status and progress
+        - Individual task statuses and results
+        - Execution metrics and timing
+        - Error details and troubleshooting information
+        - Resource utilization statistics
+      operationId: getWorkflowStatus
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique workflow execution identifier
+          schema:
+            type: string
+            example: "wf_550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Workflow status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowStatusResponse'
+              examples:
+                running_workflow:
+                  summary: Workflow currently running
+                  value:
+                    workflow_id: "wf_550e8400-e29b-41d4-a716-446655440000"
+                    name: "Deploy Microservice"
+                    status: "running"
+                    progress: 0.67
+                    started_at: "2024-01-01T12:00:00Z"
+                    updated_at: "2024-01-01T12:15:30Z"
+                    estimated_completion: "2024-01-01T12:45:00Z"
+                    tasks:
+                      - task_id: "build_image"
+                        name: "Build Docker Image"
+                        status: "completed"
+                        started_at: "2024-01-01T12:00:00Z"
+                        completed_at: "2024-01-01T12:08:45Z"
+                        duration_seconds: 525
+                        result:
+                          success: true
+                          output: "Image built successfully: myapp:latest"
+                      - task_id: "deploy_service"
+                        name: "Deploy to Kubernetes"
+                        status: "running"
+                        started_at: "2024-01-01T12:08:45Z"
+                        progress: 0.4
+                        estimated_completion: "2024-01-01T12:18:45Z"
+                completed_workflow:
+                  summary: Successfully completed workflow
+                  value:
+                    workflow_id: "wf_550e8400-e29b-41d4-a716-446655440000"
+                    name: "Deploy Microservice"
+                    status: "completed"
+                    progress: 1.0
+                    started_at: "2024-01-01T12:00:00Z"
+                    completed_at: "2024-01-01T12:22:15Z"
+                    duration_seconds: 1335
+                    success: true
+                    tasks:
+                      - task_id: "build_image"
+                        name: "Build Docker Image"
+                        status: "completed"
+                        success: true
+                        duration_seconds: 525
+                        result:
+                          success: true
+                          output: "Image built successfully: myapp:latest"
+                      - task_id: "deploy_service"
+                        name: "Deploy to Kubernetes"
+                        status: "completed"
+                        success: true
+                        duration_seconds: 810
+                        result:
+                          success: true
+                          output: "Service deployed to production namespace"
+                failed_workflow:
+                  summary: Failed workflow with error details
+                  value:
+                    workflow_id: "wf_550e8400-e29b-41d4-a716-446655440000"
+                    name: "Deploy Microservice"
+                    status: "failed"
+                    progress: 0.5
+                    started_at: "2024-01-01T12:00:00Z"
+                    failed_at: "2024-01-01T12:12:30Z"
+                    duration_seconds: 750
+                    success: false
+                    error: >-
+                      Deployment validation failed:
+                      insufficient resources
+                    tasks:
+                      - task_id: "build_image"
+                        name: "Build Docker Image"
+                        status: "completed"
+                        success: true
+                        duration_seconds: 525
+                        result:
+                          success: true
+                          output: "Image built successfully: myapp:latest"
+                      - task_id: "deploy_service"
+                        name: "Deploy to Kubernetes"
+                        status: "failed"
+                        success: false
+                        duration_seconds: 225
+                        error: >-
+                          Deployment validation failed:
+                          insufficient resources
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '404':
+          description: Workflow not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                workflow_not_found:
+                  summary: Workflow ID not found
+                  value:
+                    error: "WORKFLOW_NOT_FOUND"
+                    message: >-
+                      Workflow wf_550e8400-e29b-41d4-a716-446655440000
+                      not found
+                    timestamp: "2024-01-01T12:00:00Z"
+        '500':
+          description: Failed to retrieve workflow status
+
+  /workflows/{workflowId}/pause:
+    post:
+      tags:
+        - WorkflowCoordinator
+        - Control
+      summary: Pause workflow execution
+      description: |
+        Pause an active workflow execution. This will:
+        - Stop scheduling new tasks
+        - Allow currently running tasks to complete
+        - Preserve workflow state for later resumption
+        - Maintain resource allocations where possible
+      operationId: pauseWorkflow
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique workflow execution identifier
+          schema:
+            type: string
+            example: "wf_550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Workflow paused successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowControlResponse'
+              examples:
+                pause_success:
+                  summary: Workflow paused
+                  value:
+                    status: "paused"
+                    workflow_id: "wf_550e8400-e29b-41d4-a716-446655440000"
+                    message: "Workflow paused successfully"
+                    timestamp: "2024-01-01T12:15:00Z"
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '404':
+          description: Workflow not found
+        '409':
+          description: >-
+            Workflow cannot be paused
+            (e.g., already completed or failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to pause workflow
+
+  /workflows/{workflowId}/resume:
+    post:
+      tags:
+        - WorkflowCoordinator
+        - Control
+      summary: Resume paused workflow execution
+      description: |
+        Resume a previously paused workflow execution. This will:
+        - Continue task execution from the paused state
+        - Respect original workflow configuration and dependencies
+        - Resume monitoring and progress tracking
+        - Reestablish resource allocations as needed
+      operationId: resumeWorkflow
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique workflow execution identifier
+          schema:
+            type: string
+            example: "wf_550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Workflow resumed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowControlResponse'
+              examples:
+                resume_success:
+                  summary: Workflow resumed
+                  value:
+                    status: "resumed"
+                    workflow_id: "wf_550e8400-e29b-41d4-a716-446655440000"
+                    message: "Workflow resumed successfully"
+                    timestamp: "2024-01-01T12:20:00Z"
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '404':
+          description: Workflow not found
+        '409':
+          description: >-
+            Workflow cannot be resumed
+            (e.g., not paused or already completed)
+        '500':
+          description: Failed to resume workflow
+
+  /workflows/{workflowId}/cancel:
+    post:
+      tags:
+        - WorkflowCoordinator
+        - Control
+      summary: Cancel workflow execution
+      description: |
+        Cancel an active workflow execution. This will:
+        - Stop all running tasks gracefully where possible
+        - Mark the workflow as cancelled
+        - Clean up allocated resources
+        - Trigger any configured failure notifications
+
+        **Warning**: Cancelled workflows cannot be resumed.
+      operationId: cancelWorkflow
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique workflow execution identifier
+          schema:
+            type: string
+            example: "wf_550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Workflow cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowControlResponse'
+              examples:
+                cancel_success:
+                  summary: Workflow cancelled
+                  value:
+                    status: "cancelled"
+                    workflow_id: "wf_550e8400-e29b-41d4-a716-446655440000"
+                    message: "Workflow cancelled successfully"
+                    timestamp: "2024-01-01T12:25:00Z"
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '404':
+          description: Workflow not found
+        '409':
+          description: >-
+            Workflow cannot be cancelled (e.g., already completed)
+        '500':
+          description: Failed to cancel workflow
+
+  /workflows/active:
+    get:
+      tags:
+        - WorkflowCoordinator
+        - Monitoring
+      summary: List all active workflows
+      description: |
+        Retrieve a list of all currently active workflows including:
+        - Running, paused, and pending workflows
+        - Basic status and progress information
+        - Execution timing and priorities
+        - Resource utilization summary
+      operationId: listActiveWorkflows
+      responses:
+        '200':
+          description: Active workflows retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveWorkflowsResponse'
+              examples:
+                active_workflows:
+                  summary: List of active workflows
+                  value:
+                    active_workflows:
+                      - workflow_id: "wf_550e8400-e29b-41d4-a716-446655440000"
+                        name: "Deploy Microservice A"
+                        status: "running"
+                        progress: 0.67
+                        started_at: "2024-01-01T12:00:00Z"
+                        priority: "high"
+                        estimated_completion: "2024-01-01T12:30:00Z"
+                      - workflow_id: "wf_661f9511-f3ac-523e-b827-557766551111"
+                        name: "Run Integration Tests"
+                        status: "paused"
+                        progress: 0.25
+                        started_at: "2024-01-01T11:30:00Z"
+                        priority: "medium"
+                      - workflow_id: "wf_772fa622-04bd-634f-c938-668877662222"
+                        name: "Database Backup"
+                        status: "pending"
+                        progress: 0.0
+                        scheduled_at: "2024-01-01T13:00:00Z"
+                        priority: "low"
+                    total_count: 3
+                    summary:
+                      running: 1
+                      paused: 1
+                      pending: 1
+                      total_active: 3
+        '401':
+          description: Unauthorized - Invalid or missing API key
+        '500':
+          description: Failed to retrieve active workflows
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key authentication via X-API-Key header
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: API key authentication via Authorization Bearer token
+
+  schemas:
+    # ========================================
+    # HookReceiver Schemas
+    # ========================================
+    HookEvent:
+      type: object
+      required:
+        - source
+        - action
+        - resource
+        - resource_id
+      properties:
+        source:
+          type: string
+          description: Source service or system generating the event
+          example: "omnibase-core"
+        version:
+          type: string
+          description: Version of the source service
+          default: "1.0.0"
+          example: "1.0.0"
+        environment:
+          type: string
+          description: Environment where event originated
+          default: "development"
+          example: "production"
+        correlation_id:
+          type: string
+          format: uuid
+          description: Correlation ID for distributed tracing
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        action:
+          type: string
+          description: Action or event type
+          example: "startup"
+        resource:
+          type: string
+          description: Resource type being acted upon
+          example: "service"
+        resource_id:
+          type: string
+          description: Unique identifier for the resource
+          example: "omnibase-core-instance-1"
+        data:
+          type: object
+          description: Event-specific payload data
+          additionalProperties: true
+          example:
+            version: "1.0.0"
+            port: 8080
+            health_endpoint: "/health"
+        previous_state:
+          type: object
+          description: Previous state of the resource (for state change events)
+          additionalProperties: true
+        current_state:
+          type: object
+          description: Current state of the resource (for state change events)
+          additionalProperties: true
+
+    HookResponse:
+      type: object
+      required:
+        - success
+        - message
+        - event_id
+        - processing_time_ms
+      properties:
+        success:
+          type: boolean
+          description: Whether the hook was processed successfully
+          example: true
+        message:
+          type: string
+          description: Human-readable status message
+          example: "Hook processed successfully"
+        event_id:
+          type: string
+          format: uuid
+          description: Unique identifier for the processed event
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        processing_time_ms:
+          type: number
+          format: float
+          description: Processing time in milliseconds
+          example: 45.2
+        errors:
+          type: array
+          items:
+            type: string
+          description: List of errors encountered during processing
+          example: []
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+        - version
+        - dependencies
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall health status
+          example: "healthy"
+        timestamp:
+          type: number
+          format: float
+          description: Unix timestamp of health check
+          example: 1640995200.0
+        version:
+          type: string
+          description: Service version
+          example: "0.1.0"
+        uptime:
+          type: number
+          format: float
+          description: Service uptime in seconds
+          example: 3600.0
+        dependencies:
+          type: object
+          description: Health status of service dependencies
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [healthy, degraded, unhealthy]
+              response_time_ms:
+                type: number
+                format: float
+              last_check:
+                type: string
+                format: date-time
+              error:
+                type: string
+          example:
+            kafka:
+              status: "healthy"
+              response_time_ms: 15
+              last_check: "2024-01-01T12:00:00Z"
+            postgres:
+              status: "healthy"
+              response_time_ms: 8
+              last_check: "2024-01-01T12:00:00Z"
+
+    SessionsResponse:
+      type: object
+      required:
+        - active_sessions
+        - count
+      properties:
+        active_sessions:
+          type: array
+          items:
+            type: object
+            properties:
+              session_id:
+                type: string
+                format: uuid
+              service_name:
+                type: string
+              instance_id:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+              last_activity:
+                type: string
+                format: date-time
+              metadata:
+                type: object
+                additionalProperties: true
+        count:
+          type: integer
+          description: Total number of active sessions
+          example: 5
+
+    # ========================================
+    # ModelMetrics Schemas
+    # ========================================
+    TaskType:
+      type: string
+      enum:
+        - code_generation
+        - debugging
+        - architecture
+        - documentation
+        - analysis
+        - review
+        - optimization
+        - testing
+      description: Type of task to be executed
+      example: "code_generation"
+
+    ModelTier:
+      type: string
+      enum:
+        - tiny
+        - small
+        - medium
+        - large
+        - xlarge
+        - huge
+      description: Model tier based on capability and resource requirements
+      example: "small"
+
+    TaskRequest:
+      type: object
+      required:
+        - task_type
+        - prompt
+      properties:
+        task_type:
+          $ref: '#/components/schemas/TaskType'
+        prompt:
+          type: string
+          description: The task prompt or instruction
+          example: "Create a Python function to calculate fibonacci numbers"
+        context_size:
+          type: integer
+          minimum: 1
+          description: Expected context size in tokens
+          example: 1000
+        complexity:
+          type: string
+          enum: [simple, moderate, high, extreme]
+          default: moderate
+          description: Task complexity level
+          example: "moderate"
+        max_latency_ms:
+          type: number
+          format: float
+          minimum: 0
+          description: Maximum acceptable latency in milliseconds
+          example: 5000
+        preferred_model:
+          type: string
+          description: Preferred model identifier
+          example: "claude-3-haiku"
+        track_metrics:
+          type: boolean
+          default: true
+          description: Whether to track execution metrics
+          example: true
+
+    TaskResponse:
+      type: object
+      required:
+        - success
+        - response
+        - model_used
+        - node_location
+        - execution_metrics
+        - recommendations
+      properties:
+        success:
+          type: boolean
+          description: Whether the task executed successfully
+          example: true
+        response:
+          type: string
+          description: The model's response to the task
+          example: >-
+            def fibonacci(n):
+                if n <= 1:
+                    return n
+                return fibonacci(n-1) + fibonacci(n-2)
+        model_used:
+          type: string
+          description: Identifier of the model that executed the task
+          example: "claude-3-haiku"
+        node_location:
+          type: string
+          description: Geographic location of the execution node
+          example: "us-west-2"
+        execution_metrics:
+          type: object
+          required:
+            - execution_id
+            - latency_ms
+            - success
+            - model_tier
+          properties:
+            execution_id:
+              type: string
+              description: Unique execution identifier
+              example: "exec_123456789"
+            latency_ms:
+              type: number
+              format: float
+              description: Execution latency in milliseconds
+              example: 1250
+            tokens_per_second:
+              type: number
+              format: float
+              description: Token generation rate
+              example: 45.2
+            quality_score:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+              description: Quality score of the response
+              example: 0.89
+            success:
+              type: boolean
+              description: Whether execution was successful
+              example: true
+            context_size:
+              type: integer
+              description: Actual context size used
+              example: 1000
+            model_tier:
+              type: string
+              description: Tier of the model used
+              example: "small"
+            retry_count:
+              type: integer
+              description: Number of retries performed
+              example: 0
+        recommendations:
+          type: array
+          items:
+            type: object
+            properties:
+              model:
+                type: string
+                description: Recommended model endpoint
+              tier:
+                type: string
+                description: Model tier
+              confidence:
+                type: number
+                format: float
+                minimum: 0
+                maximum: 1
+                description: Confidence in recommendation
+              expected_latency_ms:
+                type: number
+                format: float
+                description: Expected latency for this model
+              expected_success_rate:
+                type: number
+                format: float
+                minimum: 0
+                maximum: 1
+                description: Expected success rate
+              reason:
+                type: string
+                description: Explanation for recommendation
+        escalated:
+          type: boolean
+          description: Whether the task was escalated to a higher tier
+          example: false
+
+    ModelComparisonRequest:
+      type: object
+      required:
+        - task_type
+        - prompt
+      properties:
+        task_type:
+          $ref: '#/components/schemas/TaskType'
+        prompt:
+          type: string
+          description: The task prompt for comparison
+          example: >-
+            Design a microservices architecture for an
+            e-commerce platform
+        models_to_compare:
+          type: array
+          items:
+            type: string
+          description: >-
+            Specific models to compare (if null, compares representative
+            models from each tier)
+          example:
+            - "claude-3-opus"
+            - "claude-3-sonnet"
+            - "claude-3-haiku"
+        context_size:
+          type: integer
+          minimum: 1
+          description: Context size for comparison
+          example: 2000
+        complexity:
+          type: string
+          enum: [simple, moderate, high, extreme]
+          default: moderate
+          description: Task complexity level
+          example: "high"
+
+    ModelComparisonResult:
+      type: object
+      required:
+        - task_type
+        - prompt_summary
+        - comparison_results
+        - best_model
+        - worst_model
+        - analysis
+      properties:
+        task_type:
+          $ref: '#/components/schemas/TaskType'
+        prompt_summary:
+          type: string
+          description: Truncated version of the comparison prompt
+          example: >-
+            Design a microservices architecture for an
+            e-commerce platform
+        comparison_results:
+          type: array
+          items:
+            type: object
+            properties:
+              model_id:
+                type: string
+              model_tier:
+                type: string
+              success:
+                type: boolean
+              latency_ms:
+                type: number
+                format: float
+              tokens_per_second:
+                type: number
+                format: float
+              quality_score:
+                type: number
+                format: float
+              response_length:
+                type: integer
+              error:
+                type: string
+        best_model:
+          type: object
+          description: Best performing model in the comparison
+          additionalProperties: true
+        worst_model:
+          type: object
+          description: Worst performing model in the comparison
+          additionalProperties: true
+        analysis:
+          type: string
+          description: Detailed analysis of the comparison results
+          example: >-
+            Successfully executed on 3/3 models. Latency range:
+            1200ms to 3500ms. Quality scores: 0.75 to 0.92.
+            Small models performed surprisingly well.
+
+    PerformanceMetrics:
+      type: object
+      required:
+        - summary
+        - model_performance
+        - filters
+        - time_range
+      properties:
+        summary:
+          type: object
+          properties:
+            total_executions:
+              type: integer
+            success_rate:
+              type: number
+              format: float
+            avg_latency_ms:
+              type: number
+              format: float
+            avg_quality_score:
+              type: number
+              format: float
+        model_performance:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              executions:
+                type: integer
+              success_rate:
+                type: number
+                format: float
+              avg_latency_ms:
+                type: number
+                format: float
+              avg_quality_score:
+                type: number
+                format: float
+        filters:
+          type: object
+          properties:
+            task_type:
+              type: string
+            model_tier:
+              type: string
+            hours:
+              type: integer
+        time_range:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+
+    ModelRecommendations:
+      type: object
+      required:
+        - task_configuration
+        - recommendations
+        - available_models
+        - total_historical_executions
+      properties:
+        task_configuration:
+          type: object
+          properties:
+            task_type:
+              type: string
+            context_size:
+              type: integer
+            complexity:
+              type: string
+        recommendations:
+          type: array
+          items:
+            type: object
+            properties:
+              rank:
+                type: integer
+              model_endpoint:
+                type: string
+              model_tier:
+                type: string
+              confidence_score:
+                type: number
+                format: float
+              expected_latency_ms:
+                type: number
+                format: float
+              expected_success_rate:
+                type: number
+                format: float
+              expected_quality_score:
+                type: number
+                format: float
+              reason:
+                type: string
+        available_models:
+          type: integer
+        total_historical_executions:
+          type: integer
+
+    AvailableModels:
+      type: object
+      required:
+        - total_models
+        - models
+        - nodes
+      properties:
+        total_models:
+          type: integer
+          description: Total number of available models
+          example: 12
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              model_id:
+                type: string
+              model_name:
+                type: string
+              tier:
+                type: string
+              node_location:
+                type: string
+              max_context_tokens:
+                type: integer
+              specialized_for:
+                type: array
+                items:
+                  type: string
+              endpoint_url:
+                type: string
+        nodes:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: Models available per node location
+
+    LabHealthResponse:
+      type: object
+      required:
+        - overall_status
+        - nodes
+        - summary
+      properties:
+        overall_status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        nodes:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [healthy, degraded, unhealthy]
+              models_available:
+                type: integer
+              response_time_ms:
+                type: number
+                format: float
+              load_percentage:
+                type: number
+                format: float
+              last_check:
+                type: string
+                format: date-time
+              error:
+                type: string
+        summary:
+          type: object
+          properties:
+            total_nodes:
+              type: integer
+            healthy_nodes:
+              type: integer
+            total_models:
+              type: integer
+            available_models:
+              type: integer
+
+    LabPerformanceReport:
+      type: object
+      required:
+        - report_generated_at
+        - summary
+        - node_utilization
+        - model_performance
+        - recommendations
+      properties:
+        report_generated_at:
+          type: string
+          format: date-time
+        summary:
+          type: object
+          properties:
+            total_executions_24h:
+              type: integer
+            avg_response_time_ms:
+              type: number
+              format: float
+            overall_success_rate:
+              type: number
+              format: float
+            peak_utilization_percentage:
+              type: number
+              format: float
+        node_utilization:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              utilization_percentage:
+                type: number
+                format: float
+              executions_24h:
+                type: integer
+              avg_response_time_ms:
+                type: number
+                format: float
+              error_rate:
+                type: number
+                format: float
+        model_performance:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              executions:
+                type: integer
+              success_rate:
+                type: number
+                format: float
+              avg_latency_ms:
+                type: number
+                format: float
+              quality_score:
+                type: number
+                format: float
+        recommendations:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [capacity, optimization, maintenance]
+              priority:
+                type: string
+                enum: [low, medium, high, critical]
+              description:
+                type: string
+              action_required:
+                type: string
+
+    # ========================================
+    # WorkflowCoordinator Schemas
+    # ========================================
+    WorkflowExecutionRequest:
+      type: object
+      required:
+        - workflow_definition
+      properties:
+        workflow_definition:
+          $ref: '#/components/schemas/WorkflowDefinition'
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+          description: Workflow execution priority
+          example: "high"
+        input_data:
+          type: object
+          description: Input data for workflow execution
+          additionalProperties: true
+          example:
+            repository_url: "https://github.com/example/microservice"
+            environment: "production"
+        scheduled_at:
+          type: string
+          format: date-time
+          description: Optional scheduled execution time
+          example: "2024-01-01T13:00:00Z"
+        notification_config:
+          type: object
+          description: Notification configuration for workflow events
+          properties:
+            on_success:
+              type: string
+              enum: [none, email, webhook, slack]
+              default: none
+            on_failure:
+              type: string
+              enum: [none, email, webhook, slack]
+              default: email
+            webhook_url:
+              type: string
+              format: uri
+            email_recipients:
+              type: array
+              items:
+                type: string
+                format: email
+
+    WorkflowDefinition:
+      type: object
+      required:
+        - workflow_id
+        - name
+        - tasks
+      properties:
+        workflow_id:
+          type: string
+          description: Unique workflow identifier
+          example: "deploy_microservice_v1"
+        name:
+          type: string
+          description: Human-readable workflow name
+          example: "Deploy Microservice"
+        description:
+          type: string
+          description: Detailed workflow description
+          example: "Deploy a microservice to production environment"
+        global_timeout_seconds:
+          type: integer
+          minimum: 1
+          default: 3600
+          description: Maximum time for entire workflow execution
+          example: 3600
+        max_parallel_tasks:
+          type: integer
+          minimum: 1
+          default: 5
+          description: Maximum number of tasks to execute in parallel
+          example: 3
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowTask'
+          description: List of tasks to execute
+        retry_policy:
+          type: object
+          description: Global retry policy for failed tasks
+          properties:
+            max_retries:
+              type: integer
+              minimum: 0
+              default: 0
+            retry_delay_seconds:
+              type: integer
+              minimum: 1
+              default: 30
+            backoff_multiplier:
+              type: number
+              format: float
+              minimum: 1.0
+              default: 2.0
+
+    WorkflowTask:
+      type: object
+      required:
+        - task_id
+        - name
+        - task_type
+      properties:
+        task_id:
+          type: string
+          description: Unique task identifier within workflow
+          example: "build_image"
+        name:
+          type: string
+          description: Human-readable task name
+          example: "Build Docker Image"
+        description:
+          type: string
+          description: Detailed task description
+          example: "Build and tag Docker image for deployment"
+        task_type:
+          type: string
+          description: Type of task to execute
+          example: "build"
+        dependencies:
+          type: array
+          items:
+            type: string
+          description: List of task IDs that must complete before this task
+          example: ["prepare_environment"]
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          default: 300
+          description: Maximum time for task execution
+          example: 600
+        retry_config:
+          type: object
+          description: Task-specific retry configuration
+          properties:
+            max_retries:
+              type: integer
+              minimum: 0
+              default: 2
+            retry_delay_seconds:
+              type: integer
+              minimum: 1
+              default: 30
+            retry_on_failure_codes:
+              type: array
+              items:
+                type: integer
+              description: HTTP status codes that should trigger retries
+        parameters:
+          type: object
+          description: Task-specific parameters
+          additionalProperties: true
+          example:
+            dockerfile_path: "Dockerfile"
+            tag: "latest"
+        conditions:
+          type: object
+          description: Conditions for task execution
+          properties:
+            skip_if:
+              type: string
+              description: Condition expression to skip task execution
+            fail_if:
+              type: string
+              description: Condition expression to fail task execution
+
+    WorkflowExecutionResponse:
+      type: object
+      required:
+        - workflow_id
+        - status
+        - message
+      properties:
+        workflow_id:
+          type: string
+          description: Unique workflow execution identifier
+          example: "wf_550e8400-e29b-41d4-a716-446655440000"
+        status:
+          type: string
+          enum: [started, scheduled, failed]
+          description: Initial execution status
+          example: "started"
+        message:
+          type: string
+          description: Human-readable status message
+          example: "Workflow 'Deploy Microservice' execution started"
+        scheduled_at:
+          type: string
+          format: date-time
+          description: Scheduled execution time (if applicable)
+        estimated_duration_seconds:
+          type: integer
+          description: Estimated workflow completion time
+          example: 1800
+
+    WorkflowStatusResponse:
+      type: object
+      required:
+        - workflow_id
+        - name
+        - status
+        - progress
+      properties:
+        workflow_id:
+          type: string
+          description: Unique workflow execution identifier
+          example: "wf_550e8400-e29b-41d4-a716-446655440000"
+        name:
+          type: string
+          description: Workflow name
+          example: "Deploy Microservice"
+        status:
+          type: string
+          enum: [pending, running, paused, completed, failed, cancelled]
+          description: Current workflow status
+          example: "running"
+        progress:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Workflow completion progress (0.0 to 1.0)
+          example: 0.67
+        started_at:
+          type: string
+          format: date-time
+          description: Workflow start time
+          example: "2024-01-01T12:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: Last status update time
+          example: "2024-01-01T12:15:30Z"
+        completed_at:
+          type: string
+          format: date-time
+          description: Workflow completion time (if completed)
+          example: "2024-01-01T12:22:15Z"
+        failed_at:
+          type: string
+          format: date-time
+          description: Workflow failure time (if failed)
+        duration_seconds:
+          type: integer
+          description: Total execution time in seconds
+          example: 1335
+        estimated_completion:
+          type: string
+          format: date-time
+          description: Estimated completion time
+          example: "2024-01-01T12:45:00Z"
+        success:
+          type: boolean
+          description: Whether workflow completed successfully
+          example: true
+        error:
+          type: string
+          description: Error message (if failed)
+          example: >-
+            Deployment validation failed: insufficient resources
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskStatus'
+          description: Status of individual tasks
+        resource_usage:
+          type: object
+          description: Resource utilization statistics
+          properties:
+            cpu_usage:
+              type: number
+              format: float
+            memory_usage_mb:
+              type: integer
+            network_io_mb:
+              type: integer
+            storage_io_mb:
+              type: integer
+        metadata:
+          type: object
+          description: Additional workflow metadata
+          additionalProperties: true
+
+    TaskStatus:
+      type: object
+      required:
+        - task_id
+        - name
+        - status
+      properties:
+        task_id:
+          type: string
+          description: Unique task identifier
+          example: "build_image"
+        name:
+          type: string
+          description: Task name
+          example: "Build Docker Image"
+        status:
+          type: string
+          enum: [pending, running, completed, failed, skipped, cancelled]
+          description: Current task status
+          example: "completed"
+        progress:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Task completion progress
+          example: 1.0
+        started_at:
+          type: string
+          format: date-time
+          description: Task start time
+          example: "2024-01-01T12:00:00Z"
+        completed_at:
+          type: string
+          format: date-time
+          description: Task completion time
+          example: "2024-01-01T12:08:45Z"
+        failed_at:
+          type: string
+          format: date-time
+          description: Task failure time (if failed)
+        duration_seconds:
+          type: integer
+          description: Task execution time in seconds
+          example: 525
+        estimated_completion:
+          type: string
+          format: date-time
+          description: Estimated completion time (if running)
+          example: "2024-01-01T12:18:45Z"
+        success:
+          type: boolean
+          description: Whether task completed successfully
+          example: true
+        error:
+          type: string
+          description: Error message (if failed)
+          example: "Build failed: missing dependency"
+        result:
+          type: object
+          description: Task execution result
+          properties:
+            success:
+              type: boolean
+            output:
+              type: string
+            artifacts:
+              type: array
+              items:
+                type: string
+            metrics:
+              type: object
+              additionalProperties: true
+          example:
+            success: true
+            output: "Image built successfully: myapp:latest"
+            artifacts: ["myapp:latest"]
+        retry_count:
+          type: integer
+          description: Number of retry attempts made
+          example: 0
+        logs:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+              level:
+                type: string
+                enum: [debug, info, warn, error]
+              message:
+                type: string
+          description: Task execution logs
+
+    WorkflowControlResponse:
+      type: object
+      required:
+        - status
+        - workflow_id
+        - message
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [paused, resumed, cancelled]
+          description: Action performed on workflow
+          example: "paused"
+        workflow_id:
+          type: string
+          description: Workflow execution identifier
+          example: "wf_550e8400-e29b-41d4-a716-446655440000"
+        message:
+          type: string
+          description: Human-readable action result message
+          example: "Workflow paused successfully"
+        timestamp:
+          type: string
+          format: date-time
+          description: Action timestamp
+          example: "2024-01-01T12:15:00Z"
+        affected_tasks:
+          type: array
+          items:
+            type: string
+          description: List of task IDs affected by the action
+          example: ["deploy_service", "run_tests"]
+
+    ActiveWorkflowsResponse:
+      type: object
+      required:
+        - active_workflows
+        - total_count
+        - summary
+      properties:
+        active_workflows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActiveWorkflowSummary'
+          description: List of active workflows
+        total_count:
+          type: integer
+          description: Total number of active workflows
+          example: 3
+        summary:
+          type: object
+          description: Summary statistics of active workflows
+          properties:
+            running:
+              type: integer
+              description: Number of currently running workflows
+              example: 1
+            paused:
+              type: integer
+              description: Number of paused workflows
+              example: 1
+            pending:
+              type: integer
+              description: Number of pending workflows
+              example: 1
+            total_active:
+              type: integer
+              description: Total active workflows
+              example: 3
+        resource_utilization:
+          type: object
+          description: Overall resource utilization across all workflows
+          properties:
+            total_cpu_usage:
+              type: number
+              format: float
+            total_memory_usage_mb:
+              type: integer
+            active_tasks:
+              type: integer
+
+    ActiveWorkflowSummary:
+      type: object
+      required:
+        - workflow_id
+        - name
+        - status
+        - progress
+      properties:
+        workflow_id:
+          type: string
+          description: Workflow execution identifier
+          example: "wf_550e8400-e29b-41d4-a716-446655440000"
+        name:
+          type: string
+          description: Workflow name
+          example: "Deploy Microservice A"
+        status:
+          type: string
+          enum: [pending, running, paused]
+          description: Current workflow status
+          example: "running"
+        progress:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Workflow completion progress
+          example: 0.67
+        started_at:
+          type: string
+          format: date-time
+          description: Workflow start time
+          example: "2024-01-01T12:00:00Z"
+        scheduled_at:
+          type: string
+          format: date-time
+          description: Scheduled execution time (for pending workflows)
+          example: "2024-01-01T13:00:00Z"
+        estimated_completion:
+          type: string
+          format: date-time
+          description: Estimated completion time
+          example: "2024-01-01T12:30:00Z"
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          description: Workflow priority
+          example: "high"
+        active_tasks:
+          type: integer
+          description: Number of currently active tasks
+          example: 2
+        completed_tasks:
+          type: integer
+          description: Number of completed tasks
+          example: 4
+        total_tasks:
+          type: integer
+          description: Total number of tasks in workflow
+          example: 6
+
+    # ========================================
+    # Common Schemas
+    # ========================================
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type or code
+          example: "INVALID_API_KEY"
+        message:
+          type: string
+          description: Human-readable error message
+          example: >-
+            Invalid or missing API key. Provide via Authorization:
+            Bearer <key> or X-API-Key header
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+          description: Error timestamp
+          example: "2024-01-01T12:00:00Z"
+        request_id:
+          type: string
+          description: Unique request identifier for debugging
+          example: "req_123456789"
+
+    SuccessResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Success message
+          example: "Operation completed successfully"
+        data:
+          type: object
+          description: Additional response data
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+          example: "2024-01-01T12:00:00Z"
+
+tags:
+  - name: HookReceiver
+    description: Webhook processing and event management service
+  - name: ModelMetrics
+    description: AI model performance tracking and intelligent routing
+  - name: WorkflowCoordinator
+    description: Complex multi-step workflow orchestration
+  - name: Health
+    description: Health check and monitoring endpoints
+  - name: Sessions
+    description: Service session management
+  - name: Execution
+    description: Task execution endpoints
+  - name: Comparison
+    description: Model comparison and analysis
+  - name: Analytics
+    description: Performance analytics and metrics
+  - name: Recommendations
+    description: Intelligent recommendations and optimization
+  - name: Models
+    description: Model information and availability
+  - name: Monitoring
+    description: System monitoring and observability
+
+externalDocs:
+  description: Find more information about OmniNode Bridge
+  url: https://github.com/OmniNode-ai/omninode_bridge

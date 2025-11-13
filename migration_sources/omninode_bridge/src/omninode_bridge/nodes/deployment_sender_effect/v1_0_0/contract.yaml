@@ -1,0 +1,583 @@
+# ONEX v2.0 Contract - Deployment Sender Effect
+# Effect node for Docker container packaging and remote deployment operations
+
+name: "deployment_sender_effect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT"
+
+schema_version: "2.0"
+last_updated: "2025-10-25"
+
+description: |
+  Effect node for Docker container deployment operations. Builds Docker images,
+  creates deployment packages, and transfers them to remote receiver nodes via
+  HTTP or rsync. Publishes transfer lifecycle events to Kafka for observability.
+  Integrates with Docker daemon and remote deployment receiver services.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-25"
+  display_name: "Deployment Sender Effect"
+  tags:
+    - "deployment"
+    - "docker-packaging"
+    - "effect-node"
+    - "container-transfer"
+    - "kafka-events"
+    - "remote-deployment"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/deployment/REMOTE_MIGRATION_GUIDE.md"
+    type: "guide"
+    description: "Complete migration and deployment procedures"
+  - path: "docs/deployment/PRE_DEPLOYMENT_CHECKLIST.md"
+    type: "checklist"
+    description: "Deployment readiness verification"
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/architecture/ARCHITECTURE.md"
+    type: "architecture"
+    description: "System architecture and ONEX v2.0 compliance"
+
+# Performance Requirements
+performance_requirements:
+  image_build:
+    target_seconds: 15       # <15s for typical container build
+    max_seconds: 20          # Max acceptable build time
+  package_transfer:
+    target_seconds: 8        # <8s for 1GB package transfer (125MB/s)
+    max_seconds: 10          # Max acceptable transfer time
+  throughput:
+    target_deployments_per_hour: 100
+    max_concurrent_transfers: 5
+  memory_usage:
+    target_mb: 256
+    max_mb: 1024             # Peak during image build
+  network_bandwidth:
+    target_mbps: 125         # ~1Gbps
+    max_package_size_gb: 5
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - container_name
+    - image_tag
+    - remote_receiver_url
+  properties:
+    container_name:
+      type: "string"
+      description: "Name of the Docker container to build/deploy"
+      pattern: "^[a-z0-9][a-z0-9_-]*$"
+      example: "omninode-bridge-orchestrator"
+    image_tag:
+      type: "string"
+      description: "Docker image tag (version)"
+      pattern: "^[a-z0-9][a-z0-9._-]*$"
+      example: "1.0.0"
+    dockerfile_path:
+      type: "string"
+      description: "Path to Dockerfile (relative to build context)"
+      default: "Dockerfile"
+      example: "deployment/Dockerfile.orchestrator"
+    build_context:
+      type: "string"
+      description: "Build context directory path"
+      default: "."
+      example: "/Volumes/PRO-G40/Code/omninode_bridge"
+    build_args:
+      type: "object"
+      description: "Docker build arguments (ARG directives)"
+      additionalProperties:
+        type: "string"
+      example:
+        PYTHON_VERSION: "3.11"
+        SERVICE_NAME: "orchestrator"
+    remote_receiver_url:
+      type: "string"
+      format: "uri"
+      description: "Remote deployment receiver endpoint"
+      example: "http://192.168.86.200:8001/deploy"
+    transfer_method:
+      type: "string"
+      enum: ["http", "rsync"]
+      default: "http"
+      description: "Transfer method for deployment package"
+    compression:
+      type: "string"
+      enum: ["gzip", "zstd", "none"]
+      default: "gzip"
+      description: "Compression algorithm for package"
+    verify_checksum:
+      type: "boolean"
+      default: true
+      description: "Verify package integrity with BLAKE3 checksum"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Optional correlation ID for tracking"
+    deployment_metadata:
+      type: "object"
+      description: "Additional deployment metadata"
+      properties:
+        environment:
+          type: "string"
+          enum: ["development", "staging", "production"]
+        target_host:
+          type: "string"
+        deployment_strategy:
+          type: "string"
+          enum: ["replace", "blue_green", "canary"]
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - success
+    - package_id
+    - execution_time_ms
+  properties:
+    success:
+      type: "boolean"
+      description: "Overall deployment operation success status"
+    package_id:
+      type: "string"
+      format: "uuid"
+      description: "Unique deployment package identifier"
+    transfer_success:
+      type: "boolean"
+      description: "Package transfer success status"
+    image_id:
+      type: "string"
+      description: "Docker image ID (sha256:...)"
+      pattern: "^sha256:[a-f0-9]{64}$"
+    package_size_mb:
+      type: "number"
+      minimum: 0
+      description: "Deployment package size in megabytes"
+    package_checksum:
+      type: "string"
+      pattern: "^[a-f0-9]{64}$"
+      description: "BLAKE3 checksum of deployment package"
+    transfer_duration_ms:
+      type: "integer"
+      minimum: 0
+      description: "Package transfer duration in milliseconds"
+    build_duration_ms:
+      type: "integer"
+      minimum: 0
+      description: "Docker image build duration in milliseconds"
+    execution_time_ms:
+      type: "integer"
+      minimum: 0
+      description: "Total execution time in milliseconds"
+    kafka_events_published:
+      type: "array"
+      items:
+        type: "string"
+        enum: ["BUILD_STARTED", "BUILD_COMPLETED", "TRANSFER_STARTED", "TRANSFER_COMPLETED", "DEPLOYMENT_FAILED"]
+      description: "List of successfully published Kafka events"
+    remote_deployment_id:
+      type: "string"
+      description: "Deployment ID returned by remote receiver"
+    error_message:
+      type: "string"
+      description: "Error message if operation failed"
+    error_code:
+      type: "string"
+      description: "Error code for failed operations"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/effect_operations.yaml"
+    - "./contracts/kafka_events.yaml"
+    - "./contracts/state_management.yaml"
+    - "./contracts/docker_operations.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "docker_daemon"
+      type: "docker_engine"
+      required: true
+      socket: "unix:///var/run/docker.sock"
+      min_version: "20.10.0"
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+    - name: "remote_receiver"
+      type: "http_service"
+      required: true
+      description: "Remote deployment receiver endpoint"
+  libraries:
+    - name: "docker"
+      version: ">=7.0.0"
+      description: "Docker SDK for Python"
+    - name: "httpx"
+      version: ">=0.27.0"
+      description: "Async HTTP client for transfers"
+    - name: "blake3"
+      version: ">=0.4.0"
+      description: "BLAKE3 checksum generation"
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation and settings management"
+    - name: "aiokafka"
+      version: ">=0.11.0"
+      description: "Async Kafka client"
+    - name: "aiofiles"
+      version: ">=24.0.0"
+      description: "Async file I/O for package handling"
+
+# IO Operations (Effect Node Specific)
+io_operations:
+  - name: "package_container"
+    description: "Build Docker image and create deployment package"
+    target_ms: 15000
+    input_model: "ModelContainerPackageInput"
+    output_model: "ModelContainerPackageOutput"
+    side_effects:
+      - "docker_image_build"
+      - "filesystem_write"
+      - "disk_io"
+      - "cpu_intensive_operation"
+      - "memory_allocation"
+    operations:
+      - step: "docker_build"
+        description: "Build Docker image from Dockerfile"
+        timeout_seconds: 20
+      - step: "docker_save"
+        description: "Export image to tar archive"
+        timeout_seconds: 10
+      - step: "compress_package"
+        description: "Compress package with gzip/zstd"
+        timeout_seconds: 5
+      - step: "generate_checksum"
+        description: "Generate BLAKE3 checksum"
+        timeout_seconds: 2
+
+  - name: "transfer_package"
+    description: "Send deployment package to remote receiver"
+    target_ms: 8000
+    input_model: "ModelPackageTransferInput"
+    output_model: "ModelPackageTransferOutput"
+    side_effects:
+      - "network_io"
+      - "http_request"
+      - "disk_read"
+      - "streaming_upload"
+    operations:
+      - step: "validate_receiver"
+        description: "Verify remote receiver connectivity"
+        timeout_seconds: 5
+      - step: "stream_upload"
+        description: "Stream package to receiver (chunked)"
+        timeout_seconds: 10
+      - step: "verify_transfer"
+        description: "Verify checksum on receiver"
+        timeout_seconds: 3
+
+  - name: "publish_transfer_event"
+    description: "Publish deployment lifecycle event to Kafka"
+    target_ms: 50
+    input_model: "ModelKafkaPublishInput"
+    output_model: "ModelKafkaPublishOutput"
+    side_effects:
+      - "network_io"
+      - "kafka_producer_call"
+    operations:
+      - step: "create_envelope"
+        description: "Create OnexEnvelopeV1 event envelope"
+        timeout_seconds: 1
+      - step: "publish_event"
+        description: "Publish event to Kafka topic"
+        timeout_seconds: 3
+
+# Kafka Integration
+kafka:
+  producer_topics:
+    - "dev.omninode-bridge.deployment.build-started.v1"
+    - "dev.omninode-bridge.deployment.build-completed.v1"
+    - "dev.omninode-bridge.deployment.transfer-started.v1"
+    - "dev.omninode-bridge.deployment.transfer-completed.v1"
+    - "dev.omninode-bridge.deployment.deployment-failed.v1"
+  event_envelope: "OnexEnvelopeV1"
+  event_types:
+    - "BUILD_STARTED"
+    - "BUILD_COMPLETED"
+    - "TRANSFER_STARTED"
+    - "TRANSFER_COMPLETED"
+    - "DEPLOYMENT_FAILED"
+  batch_size: 1
+  acks: "all"
+  compression: "snappy"
+  idempotence: true
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    timeout_ms: 120000  # 2 minutes total
+    retry_on_errors:
+      - "DOCKER_UNAVAILABLE"
+      - "TRANSFER_TIMEOUT"
+      - "REMOTE_UNREACHABLE"
+  fallback_strategy: "fail_fast"
+  error_codes:
+    - code: "BUILD_FAILED"
+      description: "Docker image build failed"
+      severity: "error"
+      retry: false
+    - code: "TRANSFER_FAILED"
+      description: "Package transfer to remote failed"
+      severity: "error"
+      retry: true
+    - code: "REMOTE_UNREACHABLE"
+      description: "Remote receiver not accessible"
+      severity: "error"
+      retry: true
+    - code: "DOCKER_UNAVAILABLE"
+      description: "Docker daemon not available"
+      severity: "critical"
+      retry: true
+    - code: "CHECKSUM_MISMATCH"
+      description: "Package checksum verification failed"
+      severity: "error"
+      retry: false
+    - code: "PACKAGE_TOO_LARGE"
+      description: "Package exceeds size limit"
+      severity: "error"
+      retry: false
+    - code: "KAFKA_PUBLISH_FAILED"
+      description: "Kafka event publish failed"
+      severity: "warning"
+      retry: true
+    - code: "VALIDATION_ERROR"
+      description: "Input validation failed"
+      severity: "error"
+      retry: false
+
+# Quality Gates
+quality_gates:
+  - name: "build_performance"
+    description: "Verify Docker build completes <20s"
+    threshold: 0.90
+  - name: "transfer_performance"
+    description: "Verify package transfer completes <10s for 1GB"
+    threshold: 0.90
+  - name: "transfer_reliability"
+    description: "Verify transfer success rate >95%"
+    threshold: 0.95
+  - name: "checksum_validation"
+    description: "Verify all packages have valid checksums"
+    threshold: 1.0
+  - name: "kafka_event_reliability"
+    description: "Verify Kafka event publishing >99% success"
+    threshold: 0.99
+  - name: "docker_availability"
+    description: "Verify Docker daemon availability >99.9%"
+    threshold: 0.999
+
+# Health Checks
+health_checks:
+  - name: "docker_daemon"
+    type: "docker"
+    check: "ping"
+    interval_seconds: 30
+    timeout_seconds: 5
+    critical: true
+    description: "Verify Docker daemon is running and accessible"
+
+  - name: "remote_receiver_connectivity"
+    type: "http"
+    endpoint: "/health"
+    interval_seconds: 60
+    timeout_seconds: 10
+    critical: true
+    description: "Verify remote deployment receiver is reachable"
+
+  - name: "kafka_connectivity"
+    type: "network"
+    interval_seconds: 60
+    timeout_seconds: 3
+    critical: false
+    description: "Verify Kafka broker connectivity"
+
+  - name: "disk_space"
+    type: "system"
+    check: "disk_usage"
+    threshold_percent: 90
+    interval_seconds: 300
+    critical: true
+    description: "Verify sufficient disk space for package creation"
+
+  - name: "network_bandwidth"
+    type: "system"
+    check: "network_throughput"
+    minimum_mbps: 100
+    interval_seconds: 120
+    critical: false
+    description: "Verify network bandwidth for transfers"
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 90
+    required: true
+    critical_paths:
+      - "docker_image_building"
+      - "package_creation"
+      - "checksum_generation"
+      - "package_transfer"
+      - "kafka_event_publishing"
+      - "error_handling"
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "end_to_end_deployment"
+      - "http_transfer_flow"
+      - "rsync_transfer_flow"
+      - "kafka_event_lifecycle"
+      - "remote_receiver_integration"
+      - "checksum_verification"
+      - "error_recovery"
+      - "retry_logic"
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "image_build_time"
+        target: 15.0
+        unit: "seconds"
+      - metric: "package_transfer_time"
+        target: 8.0
+        unit: "seconds"
+        package_size_gb: 1.0
+      - metric: "transfer_throughput"
+        target: 125.0
+        unit: "megabytes_per_second"
+      - metric: "concurrent_deployments"
+        target: 5
+        unit: "simultaneous_transfers"
+  load_tests:
+    required: true
+    scenarios:
+      - name: "sustained_deployment_rate"
+        duration_minutes: 10
+        target_deployments_per_hour: 100
+      - name: "burst_deployments"
+        concurrent_transfers: 5
+        duration_minutes: 5
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "deployments_started_total"
+      type: "counter"
+      description: "Total deployments started"
+      labels: ["container_name", "environment"]
+
+    - name: "deployments_completed_total"
+      type: "counter"
+      description: "Total deployments completed successfully"
+      labels: ["container_name", "environment", "transfer_method"]
+
+    - name: "deployments_failed_total"
+      type: "counter"
+      description: "Total deployments failed"
+      labels: ["container_name", "error_code"]
+
+    - name: "image_build_duration_seconds"
+      type: "histogram"
+      description: "Docker image build duration"
+      buckets: [5, 10, 15, 20, 30, 60]
+
+    - name: "package_transfer_duration_seconds"
+      type: "histogram"
+      description: "Package transfer duration"
+      buckets: [2, 5, 8, 10, 15, 30]
+
+    - name: "package_size_megabytes"
+      type: "histogram"
+      description: "Deployment package size distribution"
+      buckets: [100, 250, 500, 1000, 2000, 5000]
+
+    - name: "transfer_throughput_mbps"
+      type: "gauge"
+      description: "Current transfer throughput in MB/s"
+
+    - name: "active_transfers"
+      type: "gauge"
+      description: "Number of currently active transfers"
+
+    - name: "kafka_events_published_total"
+      type: "counter"
+      description: "Total Kafka events published by type"
+      labels: ["event_type"]
+
+    - name: "checksum_verification_failures_total"
+      type: "counter"
+      description: "Total checksum verification failures"
+
+    - name: "docker_daemon_availability"
+      type: "gauge"
+      description: "Docker daemon availability (0 or 1)"
+
+    - name: "remote_receiver_availability"
+      type: "gauge"
+      description: "Remote receiver availability (0 or 1)"
+      labels: ["receiver_url"]
+
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+    sensitive_fields:
+      - "build_args"
+      - "remote_receiver_url"
+
+  traces:
+    enabled: true
+    sampling_rate: 0.2
+    trace_docker_operations: true
+    trace_network_transfers: true
+    trace_kafka_events: true
+
+# Security Considerations
+security:
+  - description: "Validate Docker build context paths to prevent directory traversal"
+    control: "path_validation"
+  - description: "Sanitize build args to prevent injection attacks"
+    control: "input_sanitization"
+  - description: "Use TLS for remote receiver communication in production"
+    control: "transport_encryption"
+  - description: "Verify remote receiver certificates"
+    control: "certificate_validation"
+  - description: "Implement rate limiting for deployment requests"
+    control: "rate_limiting"
+  - description: "Audit all deployment operations with correlation IDs"
+    control: "audit_logging"
+  - description: "Use secure credential management for remote authentication"
+    control: "secrets_management"
+
+# Operational Considerations
+operations:
+  - description: "Monitor disk space before package creation"
+    recommendation: "Implement disk space checks before builds"
+  - description: "Cleanup old packages to prevent disk exhaustion"
+    recommendation: "Implement automatic cleanup of packages >7 days old"
+  - description: "Archive deployment packages for rollback capability"
+    recommendation: "Retain last 5 successful deployments per container"
+  - description: "Implement deployment rollback mechanism"
+    recommendation: "Store previous package checksums for rollback"
+  - description: "Monitor network bandwidth during transfers"
+    recommendation: "Implement transfer rate limiting if bandwidth constrained"
+  - description: "Log all deployment metadata for audit trail"
+    recommendation: "Store deployment history in PostgreSQL"

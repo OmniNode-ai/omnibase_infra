@@ -1,0 +1,76 @@
+# Circuit Breaker Pattern
+name: circuit_breaker
+category: resilience
+description: Circuit breaker pattern for fault tolerance and graceful degradation
+
+# Applicability
+node_types:
+  - effect
+  - orchestrator
+
+complexity: 5
+recommended_for:
+  - external_apis
+  - database_connections
+  - microservices
+
+# Pattern Definition
+code_template: |
+  class CircuitBreaker:
+      """Circuit breaker for fault tolerance."""
+
+      def __init__(self, failure_threshold: int = 5, timeout_seconds: int = 60):
+          self._failure_count = 0
+          self._failure_threshold = failure_threshold
+          self._timeout_seconds = timeout_seconds
+          self._last_failure_time = None
+          self._state = "closed"  # closed, open, half_open
+
+      async def call(self, func, *args, **kwargs):
+          """Execute function with circuit breaker protection."""
+          if self._state == "open":
+              if self._should_attempt_reset():
+                  self._state = "half_open"
+              else:
+                  raise Exception("Circuit breaker is OPEN")
+
+          try:
+              result = await func(*args, **kwargs)
+              self._on_success()
+              return result
+          except Exception as e:
+              self._on_failure()
+              raise e
+
+      def _on_success(self):
+          """Handle successful call."""
+          self._failure_count = 0
+          self._state = "closed"
+
+      def _on_failure(self):
+          """Handle failed call."""
+          self._failure_count += 1
+          if self._failure_count >= self._failure_threshold:
+              self._state = "open"
+              self._last_failure_time = time.time()
+
+      def _should_attempt_reset(self) -> bool:
+          """Check if should attempt reset."""
+          return (time.time() - self._last_failure_time) >= self._timeout_seconds
+
+dependencies:
+  - time
+
+imports:
+  - import time
+
+# Usage Example
+example: |
+  # Initialize circuit breaker
+  circuit_breaker = CircuitBreaker(failure_threshold=5, timeout_seconds=60)
+
+  # Use with external call
+  try:
+      result = await circuit_breaker.call(external_api_call, param1, param2)
+  except Exception as e:
+      logger.error(f"Circuit breaker prevented call: {e}")

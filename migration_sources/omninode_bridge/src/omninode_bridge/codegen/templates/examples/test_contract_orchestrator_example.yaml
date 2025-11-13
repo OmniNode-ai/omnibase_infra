@@ -1,0 +1,509 @@
+# Test Contract Example - Orchestrator Node (ONEX Standards Compliant)
+#
+# This example demonstrates comprehensive testing for an Orchestrator node
+# that coordinates multi-stage workflows with FSM state management.
+#
+# Orchestrator nodes handle workflow coordination, event publishing,
+# and stage orchestration with proper state transitions.
+#
+# VERSION: 1.0.0
+
+# === CORE TEST CONTRACT IDENTIFICATION ===
+
+name: workflow_coordinator_orchestrator_tests
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: |
+  Comprehensive test contract for Workflow Coordinator Orchestrator node.
+
+  Tests multi-stage workflow coordination including:
+  - Workflow initiation and state management
+  - FSM state transitions (PENDING → PROCESSING → COMPLETED/FAILED)
+  - Event publishing to Kafka/message bus
+  - Stage execution and dependency management
+  - Parallel stage execution
+  - Error handling and workflow recovery
+
+  Orchestrator nodes must ensure:
+  - Proper FSM state transitions
+  - Event publishing at all lifecycle stages
+  - Stage dependency resolution
+  - Parallel execution where possible
+  - Workflow state persistence
+  - Graceful error handling and recovery
+
+# === TEST TARGET IDENTIFICATION ===
+
+target_node: NodeWorkflowCoordinatorOrchestrator
+target_version: "1.0.0"
+target_node_type: orchestrator
+
+test_suite_name: test_node_workflow_coordinator_orchestrator
+test_file_path: tests/nodes/orchestrator/workflow_coordinator/
+
+# === COVERAGE REQUIREMENTS ===
+
+coverage_minimum: 90
+coverage_target: 95
+coverage_by_file: true
+coverage_by_function: true
+
+# === TEST TYPE SPECIFICATIONS ===
+
+test_types:
+  - unit
+  - integration
+  - contract
+  - performance
+  - e2e
+
+# === TEST TARGETS AND SCENARIOS ===
+
+test_targets:
+  # Test workflow orchestration
+  - target_name: execute_orchestration
+    target_type: method
+    test_scenarios:
+      - "orchestrate 3-stage linear workflow"
+      - "orchestrate 5-stage complex workflow"
+      - "orchestrate workflow with parallel stages"
+      - "orchestrate workflow with conditional stages"
+      - "orchestrate workflow with stage dependencies"
+      - "orchestrate workflow with stage failures"
+      - "orchestrate concurrent workflows"
+    expected_behaviors:
+      - "initiates workflow in PENDING state"
+      - "transitions to PROCESSING state"
+      - "executes stages in dependency order"
+      - "publishes events at each stage"
+      - "transitions to COMPLETED on success"
+      - "transitions to FAILED on error"
+      - "persists workflow state"
+    input_parameters:
+      contract:
+        type: ModelContractOrchestrator
+        required: true
+        fields:
+          workflow_definition:
+            type: dict
+            required: true
+          execution_mode:
+            type: str
+            values: ["sequential", "parallel", "conditional"]
+    expected_outputs:
+      result:
+        type: WorkflowResult
+        success: true
+        data:
+          type: dict
+          fields:
+            - workflow_id
+            - final_state
+            - stage_results
+            - execution_time_ms
+    edge_cases:
+      - "empty workflow definition"
+      - "single-stage workflow"
+      - "workflow with circular dependencies"
+      - "workflow with all stages in parallel"
+      - "workflow with failed stage recovery"
+    error_conditions:
+      - "invalid workflow definition"
+      - "stage execution timeout"
+      - "stage dependency cycle"
+      - "event publishing failure"
+      - "state persistence failure"
+    assertions:
+      - "assert result.success is True"
+      - "assert result.workflow_id is not None"
+      - "assert all_stages_executed(result.stage_results)"
+      - "assert final_state in [FSMState.COMPLETED, FSMState.FAILED]"
+    test_priority: 1
+
+  # Test FSM state transitions
+  - target_name: _transition_workflow_state
+    target_type: method
+    test_scenarios:
+      - "valid transition: PENDING → PROCESSING"
+      - "valid transition: PROCESSING → COMPLETED"
+      - "valid transition: PROCESSING → FAILED"
+      - "invalid transition: PENDING → COMPLETED"
+      - "invalid transition: COMPLETED → PROCESSING"
+      - "transition from terminal state"
+    expected_behaviors:
+      - "validates transition is allowed"
+      - "updates workflow state"
+      - "publishes state_transition event"
+      - "persists state change"
+      - "rejects invalid transitions"
+    edge_cases:
+      - "transition to same state (idempotent)"
+      - "concurrent state transitions"
+      - "rapid state transitions"
+    error_conditions:
+      - "invalid state transition"
+      - "state persistence failure"
+      - "event publishing failure"
+    assertions:
+      - "assert new_state in valid_transitions[current_state]"
+      - "assert state_persisted(new_state)"
+      - "assert event_published('state_transition')"
+    test_priority: 1
+
+  # Test stage execution
+  - target_name: _execute_workflow_stage
+    target_type: method
+    test_scenarios:
+      - "execute single stage successfully"
+      - "execute stage with dependencies"
+      - "execute stage with timeout"
+      - "execute stage with retry on failure"
+      - "execute stage with partial failure"
+    expected_behaviors:
+      - "executes stage logic"
+      - "waits for dependencies to complete"
+      - "respects timeout settings"
+      - "retries on transient failures"
+      - "publishes stage events"
+    edge_cases:
+      - "stage with no dependencies"
+      - "stage depends on failed stage"
+      - "stage timeout exactly at limit"
+    error_conditions:
+      - "stage execution timeout"
+      - "stage dependency failure"
+      - "stage executor unavailable"
+    assertions:
+      - "assert stage_executed(stage_id)"
+      - "assert dependencies_satisfied(stage_id)"
+      - "assert execution_time < timeout"
+    test_priority: 1
+
+  # Test parallel stage execution
+  - target_name: _execute_parallel_stages
+    target_type: method
+    test_scenarios:
+      - "execute 2 stages in parallel"
+      - "execute 5 stages in parallel"
+      - "execute parallel stages with different durations"
+      - "execute parallel stages with one failure"
+    expected_behaviors:
+      - "launches stages concurrently"
+      - "waits for all stages to complete"
+      - "collects results from all stages"
+      - "handles partial failures"
+    edge_cases:
+      - "all parallel stages fail"
+      - "single parallel stage succeeds"
+      - "stages complete in different order"
+    assertions:
+      - "assert all_stages_started_concurrently()"
+      - "assert execution_time < sum(stage_durations)"
+      - "assert parallelism_achieved()"
+    test_priority: 1
+
+  # Test event publishing
+  - target_name: _publish_workflow_event
+    target_type: method
+    test_scenarios:
+      - "publish workflow_initiated event"
+      - "publish workflow_completed event"
+      - "publish workflow_failed event"
+      - "publish stage_started event"
+      - "publish stage_completed event"
+      - "publish event with Kafka unavailable"
+    expected_behaviors:
+      - "serializes event to OnexEnvelopeV1"
+      - "publishes to correct Kafka topic"
+      - "includes correlation_id"
+      - "retries on transient failures"
+      - "handles publishing failures gracefully"
+    edge_cases:
+      - "event payload exceeds size limit"
+      - "Kafka topic does not exist"
+      - "multiple events published simultaneously"
+    error_conditions:
+      - "Kafka broker timeout"
+      - "serialization error"
+      - "topic authorization failure"
+    assertions:
+      - "assert event.envelope.version == 'v1'"
+      - "assert event.correlation_id is not None"
+      - "assert kafka_producer.send.called_with(topic, event)"
+    test_priority: 1
+
+  # Test dependency resolution
+  - target_name: _resolve_stage_dependencies
+    target_type: method
+    test_scenarios:
+      - "resolve linear dependencies (A→B→C)"
+      - "resolve parallel dependencies (A→[B,C]→D)"
+      - "resolve complex DAG dependencies"
+      - "detect circular dependencies"
+      - "handle missing dependencies"
+    expected_behaviors:
+      - "builds dependency graph"
+      - "topologically sorts stages"
+      - "identifies parallel execution opportunities"
+      - "detects cycles"
+    edge_cases:
+      - "no dependencies"
+      - "all stages depend on single stage"
+      - "single stage depends on all others"
+    error_conditions:
+      - "circular dependency detected"
+      - "missing dependency reference"
+    assertions:
+      - "assert dependency_order_valid(resolved_order)"
+      - "assert no_circular_dependencies(dependency_graph)"
+    test_priority: 2
+
+  # Test workflow recovery
+  - target_name: _recover_workflow_from_failure
+    target_type: method
+    test_scenarios:
+      - "recover from stage timeout"
+      - "recover from stage exception"
+      - "recover from event publishing failure"
+      - "recover from state persistence failure"
+      - "resume workflow from checkpoint"
+    expected_behaviors:
+      - "detects failure point"
+      - "restores workflow state"
+      - "retries failed stage"
+      - "continues from checkpoint"
+    edge_cases:
+      - "recovery fails multiple times"
+      - "workflow state corrupted"
+      - "no checkpoint available"
+    error_conditions:
+      - "recovery timeout"
+      - "unrecoverable failure"
+    assertions:
+      - "assert workflow_recovered(workflow_id)"
+      - "assert state_consistent_after_recovery()"
+    test_priority: 2
+
+  # Test workflow performance
+  - target_name: execute_orchestration
+    target_type: method
+    test_scenarios:
+      - "3-stage workflow completes in <2 seconds"
+      - "5-stage workflow completes in <5 seconds"
+      - "parallel stages execute 2-3x faster"
+      - "100 concurrent workflows"
+    expected_behaviors:
+      - "meets performance targets"
+      - "achieves parallelism benefits"
+      - "handles concurrent workflows"
+    assertions:
+      - "assert execution_time < performance_target"
+      - "assert parallel_speedup >= 2.0"
+      - "assert concurrent_workflows_completed(100)"
+    test_priority: 1
+
+# === MOCK REQUIREMENTS ===
+
+mock_requirements:
+  # Dependencies to mock
+  mock_dependencies:
+    - "omninode_bridge.infrastructure.database.PostgreSQLClient"
+    - "omninode_bridge.infrastructure.kafka.KafkaProducer"
+    - "omninode_bridge.nodes.stage_executor.StageExecutor"
+
+  mock_external_services:
+    - "PostgreSQL workflow state store"
+    - "Kafka event bus"
+    - "Stage execution services"
+
+  # Database mocking
+  mock_database: true
+  database_mock_config:
+    use_in_memory: true
+    preload_data: false
+
+  # HTTP/API mocking
+  mock_http_clients: false
+
+  # Kafka mocking
+  mock_kafka_producer: true
+  mock_kafka_consumer: false
+  kafka_mock_config:
+    simulate_failures: true
+    failure_rate: 0.05
+
+  # Mock return values
+  mock_return_values:
+    StageExecutor.execute:
+      success: true
+      duration_ms: 100
+    KafkaProducer.send:
+      success: true
+      offset: 12345
+
+  # Mock exceptions
+  mock_exceptions:
+    - "asyncpg.exceptions.PostgresConnectionError"
+    - "kafka.errors.KafkaTimeoutError"
+    - "asyncio.TimeoutError"
+
+  # Fixture configuration
+  use_fixtures: true
+  fixture_scope: function
+
+  # Workflow definition generators (configured via custom_mocks)
+  # Note: Workflow generators implemented as pytest fixtures
+  # Available generators: linear_3_stage, parallel_5_stage, complex_dag
+  custom_mocks:
+    - name: "linear_3_stage"
+      type: "workflow_generator"
+      config: "stages=3, dependencies=linear"
+    - name: "parallel_5_stage"
+      type: "workflow_generator"
+      config: "stages=5, dependencies=parallel"
+    - name: "complex_dag"
+      type: "workflow_generator"
+      config: "stages=8, dependencies=dag"
+
+# === ASSERTION REQUIREMENTS ===
+
+assertion_types:
+  - "equality"
+  - "type"
+  - "exception"
+  - "state_verification"
+  - "event_verification"
+  - "performance"
+
+custom_assertions:
+  - "assert_workflow_state_valid"
+  - "assert_event_published"
+  - "assert_stage_executed"
+  - "assert_dependencies_satisfied"
+  - "assert_parallelism_achieved"
+  - "assert_fsm_transition_valid"
+
+# === TEST CONFIGURATION ===
+
+test_configuration:
+  # Pytest configuration
+  pytest_markers:
+    - "unit"
+    - "integration"
+    - "asyncio"
+    - "e2e"
+
+  pytest_plugins:
+    - "pytest-asyncio"
+    - "pytest-mock"
+    - "pytest-cov"
+    - "pytest-timeout"
+    - "pytest-benchmark"
+
+  pytest_options:
+    verbose: true
+    capture: "no"
+
+  # Test execution settings
+  parallel_execution: true
+  parallel_workers: 4
+  timeout_seconds: 600
+
+  # Coverage configuration
+  coverage_enabled: true
+  coverage_threshold: 90
+  coverage_fail_under: true
+
+  # Fixtures
+  required_fixtures:
+    - "mock_postgres_client"
+    - "mock_kafka_producer"
+    - "mock_stage_executor"
+    - "workflow_definition"
+    - "fsm_validator"
+
+  # Test data
+  test_data_directory: "tests/data/workflow_coordinator"
+  use_test_database: true
+  test_database_config:
+    database: "test_omninode_bridge"
+    recreate: true
+
+  # Output configuration
+  verbose_output: true
+  generate_html_report: true
+  report_output_directory: "htmlcov"
+
+  # Retry configuration
+  retry_failed_tests: true
+  max_retries: 3
+
+  # Environment setup
+  setup_commands:
+    - "docker compose up -d postgres kafka"
+  teardown_commands:
+    - "docker compose down"
+
+  environment_variables:
+    TESTING: "true"
+    LOG_LEVEL: "DEBUG"
+    POSTGRES_HOST: "localhost"
+    KAFKA_BOOTSTRAP_SERVERS: "localhost:9092"
+    WORKFLOW_STAGE_TIMEOUT: "30"
+    MAX_PARALLEL_STAGES: "10"
+
+  # Quality gates
+  enforce_type_checking: true
+  enforce_linting: true
+  allowed_warnings:
+    - "DeprecationWarning"
+
+  # Performance benchmarks (configured via pytest-benchmark)
+  # Target benchmarks documented in test docstrings:
+  #   - orchestrate_3_stage_workflow: <2000ms (P95)
+  #   - orchestrate_5_stage_workflow: <5000ms (P95)
+  #   - execute_single_stage: <200ms (P95)
+  #   - parallel_2_stages: 1.8x speedup vs sequential
+  #   - parallel_5_stages: 3.0x speedup vs sequential
+  #   - fsm_state_transition: <10ms (P99)
+  #   - publish_workflow_event: <50ms (P95)
+  #
+  # E2E test configuration (via pytest markers and fixtures):
+  # Workflow scenarios:
+  #   - simple_linear: 3 stages, <2000ms expected
+  #   - parallel_execution: 5 stages, 2.5x speedup expected
+  #   - complex_dag: 8 stages, <5000ms expected
+
+# === TEST GENERATION OPTIONS ===
+
+include_docstrings: true
+include_type_hints: true
+use_async_tests: true
+parametrize_tests: true
+
+# === QUALITY GATES ===
+
+enforce_test_naming: true
+enforce_test_isolation: true
+enforce_deterministic_tests: true
+
+# Additional quality gates for orchestrator nodes
+enforce_fsm_validation: true
+enforce_event_publishing: true
+enforce_stage_dependency_resolution: true
+
+# === METADATA ===
+
+author: "OmniNode Bridge Team"
+documentation_url: "https://docs.omninode.dev/testing/orchestrator-nodes"
+tags:
+  - "orchestrator"
+  - "workflow"
+  - "fsm"
+  - "event-driven"
+  - "parallel-execution"
+  - "kafka"
+  - "state-management"

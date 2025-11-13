@@ -1,0 +1,244 @@
+# Development Environment Configuration
+# Overrides base node configuration for local development
+# Applied on top of orchestrator.yaml, reducer.yaml, or registry.yaml
+
+# Environment identification
+environment: "development"
+
+# Node identification (default for registry)
+node:
+  type: "registry"
+  name: "bridge-registry"
+  version: "0.1.0"
+  namespace: "omninode.bridge.registry"
+
+# Registry-specific settings (development overrides)
+registry:
+  # Node registration
+  enable_auto_registration: true
+  registration_interval_seconds: 30
+  heartbeat_interval_seconds: 15
+  heartbeat_timeout_seconds: 60
+
+  # Service discovery
+  enable_service_discovery: true
+  discovery_refresh_interval_seconds: 60
+
+  # Health checking
+  enable_health_checks: true
+  health_check_interval_seconds: 30
+  health_check_timeout_seconds: 5
+
+  # Node lifecycle
+  node_ttl_seconds: 300
+  enable_automatic_deregistration: true
+
+  # Performance tuning (smaller for development)
+  max_registered_nodes: 100
+  node_cache_ttl_seconds: 60
+  event_processing_buffer_size: 100
+
+# Orchestrator development overrides
+orchestrator:
+  # Lower concurrency for easier debugging
+  max_concurrent_workflows: 10
+  workflow_timeout_seconds: 600  # Longer timeout for debugging
+  task_batch_size: 10
+
+  # More verbose for development
+  worker_pool_size: 2
+  event_processing_buffer_size: 100
+
+# Reducer development overrides
+reducer:
+  # Smaller batches for faster feedback
+  aggregation_batch_size: 20
+  batch_size: 10
+  max_aggregation_buffer_size: 1000
+
+  # More frequent persistence for debugging
+  state_persistence_interval_seconds: 10
+  state_snapshot_interval_seconds: 60
+
+  # Lower worker counts for development
+  worker_pool_size: 2
+  aggregation_worker_threads: 2
+  io_worker_threads: 2
+  event_processing_buffer_size: 100
+
+# Service endpoints (localhost)
+services:
+  onextree:
+    host: "localhost"
+    port: 8051
+    base_url: "http://localhost:8051"
+    timeout_seconds: 60  # Longer timeout for debugging
+
+  metadata_stamping:
+    host: "localhost"
+    port: 8053
+    base_url: "http://localhost:8053"
+    timeout_seconds: 60  # Longer timeout for debugging
+
+# Consul service discovery (local for development)
+consul:
+  host: "localhost"
+  port: 8500
+  # Enable service registration
+  enable_registration: true
+  registration_timeout_seconds: 10
+  # Health check configuration
+  health_check_interval_seconds: 30
+  health_check_timeout_seconds: 5
+
+# Kafka configuration (local RedPanda/Kafka)
+kafka:
+  bootstrap_servers: "${KAFKA_BOOTSTRAP:-localhost:9092}"
+
+  # Development producer settings
+  producer:
+    compression_type: "none"  # Disable compression for easier debugging
+    batch_size: 1024
+    linger_ms: 0  # Send immediately
+    acks: "1"  # Faster acknowledgment
+
+  # Development consumer settings
+  consumer:
+    group_id: "bridge-registry-consumer-dev"
+    auto_offset_reset: "latest"
+    enable_auto_commit: true
+    auto_commit_interval_ms: 5000
+    max_poll_records: 100
+    fetch_min_bytes: 1
+
+  # Development topics with 'dev' prefix
+  topics:
+    workflow_commands: "dev.omninode.bridge.workflow.commands.v1"
+    workflow_events: "dev.omninode.bridge.workflow.events.v1"
+    task_events: "dev.omninode.bridge.task.events.v1"
+    state_sync: "dev.omninode.bridge.state.sync.v1"
+    aggregated_metrics: "dev.omninode.bridge.metrics.aggregated.v1"
+    state_snapshots: "dev.omninode.bridge.state.snapshots.v1"
+
+# Database configuration (local PostgreSQL)
+database:
+  host: "localhost"
+  port: 5432
+  database: "omninode_bridge_dev"
+  user: "postgres"
+  # Password via POSTGRES_PASSWORD env var
+
+  # Smaller pool for development
+  pool_min_size: 2
+  pool_max_size: 5
+  pool_timeout_seconds: 30
+
+  # More relaxed timeouts
+  query_timeout_seconds: 60
+  command_timeout_seconds: 120
+
+# Logging configuration
+logging:
+  level: "DEBUG"  # Verbose logging
+  format: "pretty"  # Human-readable format
+  enable_structured_logging: false  # Simpler logs for dev
+  log_requests: true
+  log_responses: true  # Enable response logging for debugging
+
+  # Console logging only
+  outputs:
+    - type: "console"
+      enabled: true
+    - type: "file"
+      enabled: true
+      path: "logs/development.log"
+      max_size_mb: 50
+      backup_count: 3
+
+# Monitoring configuration
+monitoring:
+  enable_prometheus: true
+  prometheus_port: 9090
+  metrics_interval_seconds: 30  # Less frequent updates
+
+  # Health checks
+  health_check_interval_seconds: 60
+  service_health_timeout_seconds: 10
+
+# Circuit breaker (more lenient)
+circuit_breaker:
+  enabled: true
+  failure_threshold: 10  # Higher threshold for development
+  recovery_timeout_seconds: 30  # Faster recovery
+  half_open_max_requests: 5
+
+# Caching (smaller limits)
+cache:
+  enabled: true
+  workflow_state_ttl_seconds: 600
+  task_result_ttl_seconds: 300
+  aggregation_state_ttl_seconds: 300
+  max_cache_size_mb: 64
+
+# Aggregation (development settings)
+aggregation:
+  metrics:
+    enabled: true
+    window_seconds: 30  # Shorter windows
+    functions: ["count", "sum", "avg"]  # Fewer functions
+
+  events:
+    enabled: true
+    window_seconds: 15
+
+  workflow_state:
+    enabled: true
+    window_seconds: 60
+
+# Windowing (simpler configuration)
+windowing:
+  tumbling:
+    enabled: true
+    sizes: [60, 300]  # 1min, 5min only
+
+  sliding:
+    enabled: false
+
+  session:
+    enabled: false
+
+# Batch sizes (smaller for development)
+batch_sizes:
+  # Database operations
+  database_batch_size: 10
+  database_query_limit: 100
+
+  # Kafka operations
+  kafka_producer_batch_size: 1024
+  kafka_consumer_max_poll_records: 100
+
+  # Node operations
+  reducer_batch_size: 25
+  orchestrator_batch_size: 10
+
+  # Performance optimization
+  processing_buffer_size: 100
+
+  # Cleanup operations
+  cleanup_batch_size: 50
+
+# Development-specific features
+development:
+  # Enable hot reload for configuration
+  enable_config_reload: true
+  config_reload_interval_seconds: 60
+
+  # Enable debug endpoints
+  enable_debug_endpoints: true
+  debug_endpoints_port: 8099
+
+  # Enable test data generation
+  enable_test_data_generator: false
+
+  # Enable mock mode for external services
+  enable_mock_services: false

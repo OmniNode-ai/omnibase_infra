@@ -1,0 +1,81 @@
+name: consul_deregistration
+description: "Clean Consul deregistration on node shutdown"
+category: integration
+applicable_to: [effect, orchestrator, reducer]
+priority: medium
+code_template: |
+  def _deregister_from_consul(self) -> None:
+      """
+      Deregister {node} from Consul on shutdown (synchronous).
+
+      Removes the service registration from Consul to prevent stale entries
+      in the service catalog.
+
+      Note:
+          This is called during node shutdown. Failures are logged but don't
+          prevent shutdown from completing.
+      """
+      try:
+          if not hasattr(self, "_consul_service_id"):
+              # Not registered, nothing to deregister
+              return
+
+          import consul
+
+          consul_client = consul.Consul(host=self.consul_host, port=self.consul_port)
+          consul_client.agent.service.deregister(self._consul_service_id)
+
+          emit_log_event(
+              LogLevel.INFO,
+              "Deregistered from Consul successfully",
+              {
+                  "node_id": self.node_id,
+                  "service_id": self._consul_service_id,
+              },
+          )
+
+      except ImportError:
+          # python-consul not installed, silently skip
+          pass
+      except Exception as e:
+          emit_log_event(
+              LogLevel.WARNING,
+              "Failed to deregister from Consul",
+              {
+                  "node_id": self.node_id,
+                  "error": str(e),
+                  "error_type": type(e).__name__,
+              },
+          )
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - store_effect
+
+configuration:
+  cleanup_on_shutdown: true
+  fail_silently: true
+
+prerequisites:
+  - python-consul library
+  - _consul_service_id stored during registration
+  - consul_host and consul_port configured
+
+metrics:
+  deregistration_time_ms: 30
+  memory_bytes: 1024
+
+best_practices:
+  - "Always call during shutdown lifecycle"
+  - "Check for _consul_service_id existence first"
+  - "Handle ImportError silently (pass)"
+  - "Log failures at WARNING level (not ERROR)"
+  - "Don't prevent shutdown on failure"
+  - "Return early if not registered"
+
+validation_rules:
+  - "Must check hasattr for _consul_service_id"
+  - "Must wrap in try/except"
+  - "Must not raise exceptions"
+  - "Must handle ImportError gracefully"

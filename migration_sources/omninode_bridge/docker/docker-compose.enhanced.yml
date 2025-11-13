@@ -1,0 +1,472 @@
+# Enhanced Docker Compose Configuration for OmniNode Bridge
+# Provides comprehensive development, testing, and production environments
+# with improved security, monitoring, and reliability
+
+version: '3.9'
+
+# ===============================================
+# Shared Configuration
+# ===============================================
+x-common-environment: &common-environment
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  SERVICE_VERSION: ${SERVICE_VERSION:-latest}
+
+  # Security Configuration
+  SECURITY_MODE: ${SECURITY_MODE:-strict}
+  API_KEY: ${API_KEY:-dev-api-key}
+  JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-minimum-32-characters-long}
+  WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET:-dev-webhook-secret}
+
+  # Database Configuration
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in environment}
+
+  # Kafka Configuration
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+  KAFKA_WORKFLOW_TOPIC: ${KAFKA_WORKFLOW_TOPIC:-omninode_bridge.onex.workflows.v1}
+  KAFKA_TASK_EVENTS_TOPIC: ${KAFKA_TASK_EVENTS_TOPIC:-omninode_bridge.onex.task-events.v1}
+
+  # Service Discovery
+  CONSUL_HOST: consul
+  CONSUL_PORT: 8500
+
+  # Vault Configuration
+  VAULT_ADDR: ${VAULT_ADDR:-http://vault:8200}
+  VAULT_TOKEN: ${VAULT_TOKEN:-dev-vault-token}
+
+  # Monitoring
+  PROMETHEUS_ENDPOINT: http://prometheus:9090
+  GRAFANA_ENDPOINT: http://grafana:3000
+
+x-common-healthcheck: &common-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+x-common-restart: &common-restart
+  restart: unless-stopped
+
+x-common-security: &common-security
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  cap_add:
+    - NET_BIND_SERVICE
+
+# ===============================================
+# Networks
+# ===============================================
+networks:
+  omninode-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: omninode-br0
+
+  monitoring-network:
+    driver: bridge
+    internal: false
+
+  database-network:
+    driver: bridge
+    internal: true
+
+# ===============================================
+# Volumes
+# ===============================================
+volumes:
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${POSTGRES_DATA_PATH:-./data/postgres}
+      o: bind
+
+  redpanda-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${REDPANDA_DATA_PATH:-./data/redpanda}
+      o: bind
+
+  consul-data:
+    driver: local
+
+  vault-data:
+    driver: local
+
+  prometheus-data:
+    driver: local
+
+  grafana-data:
+    driver: local
+
+  logs-volume:
+    driver: local
+
+# ===============================================
+# Services
+# ===============================================
+services:
+  # ===============================================
+  # Infrastructure Services
+  # ===============================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: omninode-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in environment}
+      POSTGRES_INITDB_ARGS: "--auth-host=md5"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./config/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT:-5432}:5432"
+    networks:
+      - database-network
+      - omninode-network
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DATABASE:-omninode_bridge}"]
+    <<: *common-restart
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c log_statement=all
+      -c log_destination=stderr
+      -c logging_collector=on
+      -c log_directory=/var/log/postgresql
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --node-id 0
+      - --check=false
+    environment:
+      REDPANDA_AUTO_CREATE_TOPICS_ENABLED: "true"
+      REDPANDA_KAFKA_ENABLE_AUTHORIZATION: "false"
+      REDPANDA_KAFKA_AUTO_CREATE_TOPICS_ENABLED: "true"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    ports:
+      - "${KAFKA_EXTERNAL_PORT:-19092}:19092"
+      - "${REDPANDA_PROXY_PORT:-18082}:18082"
+      - "${REDPANDA_SCHEMA_PORT:-18081}:18081"
+    networks:
+      - omninode-network
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD-SHELL", "rpk cluster info || exit 1"]
+    <<: *common-restart
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  consul:
+    image: consul:1.18-alpine
+    container_name: omninode-consul
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+      CONSUL_CLIENT_INTERFACE: eth0
+    command: >
+      consul agent
+      -dev
+      -client=0.0.0.0
+      -log-level=INFO
+      -datacenter=dc1
+      -data-dir=/consul/data
+      -config-dir=/consul/config
+    volumes:
+      - consul-data:/consul/data
+      - ./config/consul:/consul/config:ro
+    ports:
+      - "${CONSUL_PORT:-8500}:8500"
+    networks:
+      - omninode-network
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD", "consul", "members"]
+    <<: *common-restart
+
+  # ===============================================
+  # Application Services
+  # ===============================================
+
+  hook-receiver:
+    build:
+      context: .
+      dockerfile: Dockerfile.hook-receiver.enhanced
+      target: ${BUILD_TARGET:-runtime}
+      args:
+        BUILD_VERSION: ${SERVICE_VERSION:-latest}
+    image: omninode-bridge/hook-receiver:${SERVICE_VERSION:-latest}
+    container_name: omninode-hook-receiver
+    environment:
+      <<: *common-environment
+      SERVICE_NAME: hook-receiver
+      HOOK_RECEIVER_PORT: 8001
+    ports:
+      - "${HOOK_RECEIVER_PORT:-8001}:8001"
+    volumes:
+      - logs-volume:/app/logs
+      - ./config/hook-receiver:/app/config:ro
+    networks:
+      - omninode-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+    <<: [*common-restart, *common-security]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  model-metrics:
+    build:
+      context: .
+      dockerfile: Dockerfile.model-metrics.enhanced
+      target: ${BUILD_TARGET:-runtime}
+      args:
+        BUILD_VERSION: ${SERVICE_VERSION:-latest}
+    image: omninode-bridge/model-metrics:${SERVICE_VERSION:-latest}
+    container_name: omninode-model-metrics
+    environment:
+      <<: *common-environment
+      SERVICE_NAME: model-metrics
+      MODEL_METRICS_PORT: 8005
+    ports:
+      - "${MODEL_METRICS_PORT:-8005}:8005"
+    volumes:
+      - logs-volume:/app/logs
+      - ./config/model-metrics:/app/config:ro
+    networks:
+      - omninode-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+    <<: [*common-restart, *common-security]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  workflow-coordinator:
+    build:
+      context: .
+      dockerfile: Dockerfile.workflow-coordinator.enhanced
+      target: ${BUILD_TARGET:-runtime}
+      args:
+        BUILD_VERSION: ${SERVICE_VERSION:-latest}
+    image: omninode-bridge/workflow-coordinator:${SERVICE_VERSION:-latest}
+    container_name: omninode-workflow-coordinator
+    environment:
+      <<: *common-environment
+      SERVICE_NAME: workflow-coordinator
+      WORKFLOW_COORDINATOR_PORT: 8006
+    ports:
+      - "${WORKFLOW_COORDINATOR_PORT:-8006}:8006"
+    volumes:
+      - logs-volume:/app/logs
+      - ./config/workflow-coordinator:/app/config:ro
+    networks:
+      - omninode-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+    <<: [*common-restart, *common-security]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # ===============================================
+  # Monitoring and Observability
+  # ===============================================
+
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: omninode-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - monitoring-network
+      - omninode-network
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+    <<: *common-restart
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: omninode-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - monitoring-network
+    depends_on:
+      - prometheus
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health"]
+    <<: *common-restart
+
+  # ===============================================
+  # Development Tools (Profile: dev)
+  # ===============================================
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: omninode-mailhog
+    profiles: ["dev", "test"]
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_UI_PORT:-8025}:8025"
+    networks:
+      - omninode-network
+    <<: *common-restart
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: omninode-redis
+    profiles: ["dev", "cache"]
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis-password}
+    volumes:
+      - ./data/redis:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - omninode-network
+    healthcheck:
+      <<: *common-healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+    <<: *common-restart
+
+  # ===============================================
+  # Testing Services (Profile: test)
+  # ===============================================
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-runner
+      target: testing
+    image: omninode-bridge/test-runner:${SERVICE_VERSION:-latest}
+    container_name: omninode-test-runner
+    profiles: ["test"]
+    environment:
+      <<: *common-environment
+      ENVIRONMENT: test
+      POSTGRES_DATABASE: omninode_bridge_test
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./test-results:/app/test-results
+    networks:
+      - omninode-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    command: >
+      sh -c "
+        poetry run pytest tests/ -v
+        --cov=src/omninode_bridge
+        --cov-report=html:/app/test-results/htmlcov
+        --cov-report=xml:/app/test-results/coverage.xml
+        --junit-xml=/app/test-results/junit.xml
+      "
+
+# ===============================================
+# Extension for Production (docker-compose.prod.yml)
+# ===============================================

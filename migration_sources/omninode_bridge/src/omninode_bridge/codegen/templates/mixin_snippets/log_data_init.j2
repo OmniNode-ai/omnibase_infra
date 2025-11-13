@@ -1,0 +1,9 @@
+{# Log Data Mixin Initialization Snippet #}
+{# Usage: Include in __init__() method when MixinLogData is enabled #}
+{% if 'MixinLogData' in enabled_mixins %}
+        # Setup structured logging
+        self.configure_logging(
+            log_level="{{ log_level | default('INFO') }}",
+            include_context=True,
+        )
+{% endif %}

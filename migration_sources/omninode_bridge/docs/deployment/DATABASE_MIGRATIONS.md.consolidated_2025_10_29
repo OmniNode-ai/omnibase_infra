@@ -1,0 +1,781 @@
+# Database Migration Deployment Guide
+
+## Overview
+
+This guide provides operational procedures for deploying database migrations in the OmniNode Bridge system. All schema changes **must** be applied before deploying code that depends on them.
+
+**Target Audience**: DevOps engineers, SREs, deployment operators
+
+**Related Documentation**:
+- [Technical Migration Guide](../../migrations/README.md) - Developer-focused migration documentation
+- [Database Guide](../database/DATABASE_GUIDE.md) - Complete database architecture
+- [Pre-Deployment Checklist](./PRE_DEPLOYMENT_CHECKLIST.md) - Full deployment checklist
+
+## Prerequisites
+
+### System Requirements
+
+- **PostgreSQL**: Version 13+ running and accessible
+- **Database**: `omninode_bridge` created with proper encoding (UTF-8)
+- **User Privileges**: CREATE TABLE, CREATE INDEX, CREATE EXTENSION
+- **Network Access**: Connectivity to PostgreSQL host/port
+- **Disk Space**: Minimum 500MB available for database growth
+
+### Required Extensions
+
+Ensure PostgreSQL extensions are enabled:
+
+```sql
+-- Connect as superuser or user with extension creation privileges
+psql -h <host> -U postgres -d omninode_bridge
+
+-- Create required extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
+
+-- Verify extensions
+\dx
+```
+
+Expected output:
+```
+                                     List of installed extensions
+        Name        | Version |   Schema   |                        Description
+--------------------+---------+------------+-----------------------------------------------------------
+ pg_stat_statements | 1.9     | public     | track planning and execution statistics of all SQL statements
+ plpgsql            | 1.0     | pg_catalog | PL/pgSQL procedural language
+ uuid-ossp          | 1.1     | public     | generate universally unique identifiers (UUIDs)
+```
+
+## Migration Inventory
+
+### Current Migrations (v1.0.0)
+
+| Migration | Description | Dependencies | Critical For |
+|-----------|-------------|--------------|--------------|
+| 001 | workflow_executions table | None | Orchestrator workflows |
+| 002 | workflow_steps table | 001 (FK) | Workflow step tracking |
+| 003 | fsm_transitions table | None | State transition history |
+| 004 | bridge_states table | None | Reducer aggregation state |
+| **005** | **node_registrations table** | **None** | **Dual registration system** |
+| 006 | metadata_stamps table | 001 (FK, nullable) | Stamping audit trail |
+| 007 | workflow indexes | 001, 002 | Query performance |
+| 008 | composite indexes | Various | Advanced queries |
+| 009 | workflow enhancements | 001 | Extended workflow features |
+| 010 | bridge state enhancements | 004 | Enhanced reducer state |
+| 011 | canonical state + dedup | Various | Event processing |
+
+**Total Migrations**: 11 (plus rollbacks)
+
+### Critical Migration: 005 - Node Registrations
+
+**Status**: ⚠️ **REQUIRED for dual registration system**
+
+**What It Creates**:
+- `node_registrations` table - Node registry with capabilities and health tracking
+- Performance indexes (health_status, node_type, last_heartbeat)
+- Composite index (node_type + health_status)
+
+**Required Before**:
+- Starting NodeBridgeRegistry service
+- Using service discovery features
+- Health monitoring and heartbeat tracking
+
+**Table Schema**:
+```sql
+CREATE TABLE node_registrations (
+    node_id VARCHAR(255) PRIMARY KEY,
+    node_type VARCHAR(100) NOT NULL,
+    node_version VARCHAR(50) NOT NULL,
+    capabilities JSONB DEFAULT '{}',
+    endpoints JSONB DEFAULT '{}',
+    metadata JSONB DEFAULT '{}',
+    health_status VARCHAR(50) NOT NULL DEFAULT 'UNKNOWN',
+    last_heartbeat TIMESTAMP WITH TIME ZONE,
+    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+## Deployment Procedures
+
+### Development Environment
+
+#### Quick Start
+
+```bash
+# Navigate to project root
+cd /Volumes/PRO-G40/Code/omninode_bridge
+
+# Apply all migrations in order
+for migration in migrations/00*.sql migrations/01*.sql; do
+    if [[ ! $migration =~ rollback ]]; then
+        echo "Applying: $migration"
+        psql -h localhost -U postgres -d omninode_bridge -f "$migration"
+    fi
+done
+
+# Verify tables created
+psql -h localhost -U postgres -d omninode_bridge -c "\dt"
+```
+
+#### Using Docker Container
+
+```bash
+# If PostgreSQL is running in Docker
+for migration in migrations/00*.sql migrations/01*.sql; do
+    if [[ ! $migration =~ rollback ]]; then
+        echo "Applying: $migration"
+        docker exec -i postgres psql -U postgres -d omninode_bridge < "$migration"
+    fi
+done
+```
+
+#### Individual Migration Application
+
+```bash
+# Apply specific migration (e.g., migration 005)
+psql -h localhost -U postgres -d omninode_bridge -f migrations/005_create_node_registrations.sql
+
+# Verify table created
+psql -h localhost -U postgres -d omninode_bridge -c "\d node_registrations"
+```
+
+### Staging Environment
+
+#### Pre-Deployment
+
+```bash
+# 1. Create backup
+pg_dump -h staging-db-host -U postgres omninode_bridge > \
+    backup_staging_$(date +%Y%m%d_%H%M%S).sql
+
+# 2. Verify backup
+ls -lh backup_staging_*.sql
+
+# 3. Test connection
+psql -h staging-db-host -U postgres -d omninode_bridge -c "SELECT version();"
+```
+
+#### Migration Execution
+
+```bash
+# Run migrations with logging
+for migration in migrations/00*.sql migrations/01*.sql; do
+    if [[ ! $migration =~ rollback ]]; then
+        echo "Applying: $migration"
+        psql -h staging-db-host -U postgres -d omninode_bridge -f "$migration" \
+            2>&1 | tee -a migration_staging_$(date +%Y%m%d_%H%M%S).log
+    fi
+done
+```
+
+#### Post-Deployment Verification
+
+```bash
+# Verify all tables exist
+psql -h staging-db-host -U postgres -d omninode_bridge << 'EOF'
+SELECT tablename
+FROM pg_tables
+WHERE schemaname = 'public'
+ORDER BY tablename;
+EOF
+
+# Expected tables:
+# - bridge_states
+# - fsm_transitions
+# - metadata_stamps
+# - node_registrations
+# - workflow_executions
+# - workflow_steps
+```
+
+### Production Environment
+
+#### ⚠️ Critical Production Deployment Steps
+
+**MANDATORY CHECKLIST**:
+
+1. **Backup Database** (CRITICAL)
+   ```bash
+   # Create full backup with compression
+   pg_dump -h production-db-host -U postgres -Fc omninode_bridge > \
+       backup_production_$(date +%Y%m%d_%H%M%S).dump
+
+   # Verify backup size (should be >0 bytes)
+   ls -lh backup_production_*.dump
+
+   # Store backup in secure location
+   aws s3 cp backup_production_*.dump s3://backups/omninode-bridge/
+   ```
+
+2. **Schedule Maintenance Window**
+   - Notify stakeholders of migration window
+   - Estimate downtime (typically <5 minutes for schema-only migrations)
+   - Prepare rollback plan
+
+3. **Dry-Run on Staging**
+   - Apply migrations to staging environment first
+   - Run full integration test suite
+   - Verify application functionality
+
+4. **Production Migration with Transaction**
+
+   ```bash
+   # Execute migrations within transaction for safety
+   psql -h production-db-host -U postgres -d omninode_bridge << 'EOF'
+   BEGIN;
+
+   -- Apply migrations
+   \i migrations/001_create_workflow_executions.sql
+   \i migrations/002_create_workflow_steps.sql
+   \i migrations/003_create_fsm_transitions.sql
+   \i migrations/004_create_bridge_states.sql
+   \i migrations/005_create_node_registrations.sql
+   \i migrations/006_create_metadata_stamps.sql
+   \i migrations/007_add_missing_workflow_indexes.sql
+   \i migrations/008_add_composite_indexes.sql
+   \i migrations/009_enhance_workflow_executions.sql
+   \i migrations/010_enhance_bridge_states.sql
+   \i migrations/011_canonical_workflow_state.sql
+   \i migrations/011_create_action_dedup.sql
+   \i migrations/011_projection_and_watermarks.sql
+
+   -- Verify critical tables
+   SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public';
+
+   -- Check for errors in output above
+   -- If any errors occurred: ROLLBACK;
+   -- If all successful: COMMIT;
+
+   COMMIT;
+   EOF
+   ```
+
+5. **Post-Migration Verification**
+
+   ```bash
+   # Verify table creation
+   psql -h production-db-host -U postgres -d omninode_bridge -c "
+   SELECT tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+   FROM pg_tables
+   WHERE schemaname = 'public'
+   ORDER BY tablename;
+   "
+
+   # Verify indexes
+   psql -h production-db-host -U postgres -d omninode_bridge -c "
+   SELECT schemaname, tablename, indexname
+   FROM pg_indexes
+   WHERE schemaname = 'public'
+   ORDER BY tablename, indexname;
+   "
+
+   # Check foreign key constraints
+   psql -h production-db-host -U postgres -d omninode_bridge -c "
+   SELECT
+       tc.table_name,
+       kcu.column_name,
+       ccu.table_name AS foreign_table_name,
+       ccu.column_name AS foreign_column_name
+   FROM information_schema.table_constraints AS tc
+   JOIN information_schema.key_column_usage AS kcu
+     ON tc.constraint_name = kcu.constraint_name
+   JOIN information_schema.constraint_column_usage AS ccu
+     ON ccu.constraint_name = tc.constraint_name
+   WHERE tc.constraint_type = 'FOREIGN KEY';
+   "
+   ```
+
+6. **Application Deployment**
+   - Deploy application code that depends on new schema
+   - Monitor error logs for database-related issues
+   - Verify health endpoints
+
+## Migration Verification
+
+### Quick Verification Script
+
+```bash
+#!/bin/bash
+# verify-migrations.sh
+
+DB_HOST="${POSTGRES_HOST:-localhost}"
+DB_USER="${POSTGRES_USER:-postgres}"
+DB_NAME="${POSTGRES_DATABASE:-omninode_bridge}"
+
+echo "Verifying migrations on $DB_HOST..."
+
+# Check table count
+TABLE_COUNT=$(psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -t -c "
+SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public';
+")
+
+echo "Tables found: $TABLE_COUNT"
+
+if [ "$TABLE_COUNT" -lt 6 ]; then
+    echo "❌ ERROR: Expected at least 6 tables, found $TABLE_COUNT"
+    exit 1
+fi
+
+# Check critical tables
+CRITICAL_TABLES=(
+    "workflow_executions"
+    "workflow_steps"
+    "fsm_transitions"
+    "bridge_states"
+    "node_registrations"
+    "metadata_stamps"
+)
+
+for table in "${CRITICAL_TABLES[@]}"; do
+    EXISTS=$(psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -t -c "
+    SELECT EXISTS (
+        SELECT FROM pg_tables
+        WHERE schemaname = 'public' AND tablename = '$table'
+    );
+    ")
+
+    if [[ "$EXISTS" == *"t"* ]]; then
+        echo "✅ $table exists"
+    else
+        echo "❌ ERROR: $table does not exist"
+        exit 1
+    fi
+done
+
+echo "✅ All migrations verified successfully"
+```
+
+### Manual Verification
+
+```sql
+-- Connect to database
+psql -h <host> -U postgres -d omninode_bridge
+
+-- List all tables
+\dt
+
+-- Describe critical table (node_registrations)
+\d+ node_registrations
+
+-- Check row counts (should be 0 for new deployment)
+SELECT
+    schemaname,
+    tablename,
+    n_live_tup AS row_count
+FROM pg_stat_user_tables
+ORDER BY tablename;
+
+-- Verify indexes exist
+SELECT
+    schemaname,
+    tablename,
+    indexname,
+    indexdef
+FROM pg_indexes
+WHERE schemaname = 'public' AND tablename = 'node_registrations'
+ORDER BY indexname;
+
+-- Expected indexes for node_registrations:
+-- - node_registrations_pkey (PRIMARY KEY)
+-- - idx_node_registrations_health
+-- - idx_node_registrations_type
+-- - idx_node_registrations_last_heartbeat
+-- - idx_node_registrations_type_health
+```
+
+## Rollback Procedures
+
+### Development Rollback
+
+```bash
+# Rollback all migrations in reverse order
+for migration in $(ls -r migrations/*_rollback_*.sql); do
+    echo "Rolling back: $migration"
+    psql -h localhost -U postgres -d omninode_bridge -f "$migration"
+done
+```
+
+### Production Rollback
+
+**⚠️ ONLY USE IF MIGRATION FAILED**
+
+```bash
+# Rollback specific migration (e.g., migration 005)
+psql -h production-db-host -U postgres -d omninode_bridge << 'EOF'
+BEGIN;
+
+\i migrations/005_rollback_node_registrations.sql
+
+-- Verify table dropped
+SELECT tablename FROM pg_tables WHERE tablename = 'node_registrations';
+
+COMMIT;
+EOF
+```
+
+### Full Rollback (Nuclear Option)
+
+```bash
+# DANGER: This drops all tables!
+# Only use in development or emergency recovery
+
+psql -h <host> -U postgres -d omninode_bridge << 'EOF'
+BEGIN;
+
+-- Rollback in reverse order (respect foreign keys)
+\i migrations/011_rollback_projection_and_watermarks.sql
+\i migrations/011_rollback_action_dedup.sql
+\i migrations/011_rollback_canonical_workflow_state.sql
+\i migrations/010_rollback_bridge_states.sql
+\i migrations/009_rollback_workflow_executions.sql
+\i migrations/008_rollback_composite_indexes.sql
+\i migrations/007_rollback_workflow_indexes.sql
+\i migrations/006_rollback_metadata_stamps.sql
+\i migrations/005_rollback_node_registrations.sql
+\i migrations/004_rollback_bridge_states.sql
+\i migrations/003_rollback_fsm_transitions.sql
+\i migrations/002_rollback_workflow_steps.sql
+\i migrations/001_rollback_workflow_executions.sql
+
+COMMIT;
+EOF
+```
+
+## Troubleshooting
+
+### Common Errors
+
+#### Error: "extension uuid-ossp does not exist"
+
+**Cause**: Required PostgreSQL extension not installed
+
+**Solution**:
+```sql
+-- Connect as superuser
+psql -h <host> -U postgres -d omninode_bridge
+
+-- Create extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Retry migration
+\i migrations/001_create_workflow_executions.sql
+```
+
+#### Error: "relation already exists"
+
+**Cause**: Migration already applied (expected with `IF NOT EXISTS`)
+
+**Solution**: This is **not an error**. Migrations are idempotent.
+
+**Verification**:
+```sql
+SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'node_registrations';
+```
+
+If table exists, migration was already applied successfully.
+
+#### Error: "permission denied for schema public"
+
+**Cause**: Database user lacks CREATE TABLE privileges
+
+**Solution**:
+```sql
+-- Connect as superuser
+psql -h <host> -U postgres -d omninode_bridge
+
+-- Grant privileges
+GRANT ALL PRIVILEGES ON DATABASE omninode_bridge TO your_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO your_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO your_user;
+GRANT USAGE ON SCHEMA public TO your_user;
+GRANT CREATE ON SCHEMA public TO your_user;
+```
+
+#### Error: "could not connect to server"
+
+**Cause**: PostgreSQL not running or network issue
+
+**Solution**:
+```bash
+# Check PostgreSQL is running
+docker ps | grep postgres
+# OR
+systemctl status postgresql
+
+# Verify network connectivity
+nc -zv <host> 5432
+
+# Check environment variables
+echo $POSTGRES_HOST
+echo $POSTGRES_PORT
+```
+
+#### Error: "database omninode_bridge does not exist"
+
+**Cause**: Database not created
+
+**Solution**:
+```bash
+# Create database
+psql -h <host> -U postgres -c "CREATE DATABASE omninode_bridge ENCODING 'UTF8';"
+
+# Retry migrations
+```
+
+### Migration-Specific Issues
+
+#### Migration 005 Not Applied
+
+**Detection**:
+```bash
+docker exec postgres psql -U postgres -d omninode_bridge -c "\d node_registrations"
+# Output: "Did not find any relation named 'node_registrations'."
+```
+
+**Solution**:
+```bash
+# Apply migration 005
+docker exec -i postgres psql -U postgres -d omninode_bridge < \
+    migrations/005_create_node_registrations.sql
+
+# Verify
+docker exec postgres psql -U postgres -d omninode_bridge -c "\d node_registrations"
+```
+
+#### Foreign Key Constraint Errors
+
+**Cause**: Migrations applied out of order
+
+**Solution**:
+```bash
+# Check migration dependencies
+# Correct order:
+# 001 - workflow_executions (no dependencies)
+# 002 - workflow_steps (depends on 001)
+# 003 - fsm_transitions (no dependencies)
+# 004 - bridge_states (no dependencies)
+# 005 - node_registrations (no dependencies)
+# 006 - metadata_stamps (depends on 001, nullable)
+
+# Rollback and reapply in correct order
+```
+
+## Performance Considerations
+
+### Migration Performance
+
+| Migration | Typical Duration | Notes |
+|-----------|------------------|-------|
+| 001-006 | <1s each | Schema creation only |
+| 007-008 | <2s each | Index creation |
+| 009-010 | <1s each | ALTER TABLE operations |
+| 011 | <3s | Multiple tables/indexes |
+
+**Total Migration Time**: ~10-15 seconds for clean database
+
+### Post-Migration Performance
+
+**Index Usage Monitoring**:
+```sql
+-- Enable pg_stat_statements
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- Monitor index usage (run after application is deployed)
+SELECT
+    schemaname,
+    tablename,
+    indexname,
+    idx_scan AS index_scans,
+    idx_tup_read AS tuples_read,
+    idx_tup_fetch AS tuples_fetched
+FROM pg_stat_user_indexes
+WHERE schemaname = 'public'
+ORDER BY idx_scan DESC;
+```
+
+**Table Growth Monitoring**:
+```sql
+SELECT
+    tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS total_size,
+    pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) AS table_size,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) AS index_size
+FROM pg_tables
+WHERE schemaname = 'public'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+```
+
+## Automated Deployment Integration
+
+### CI/CD Integration
+
+**Example GitHub Actions Workflow**:
+
+```yaml
+name: Deploy Database Migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'migrations/*.sql'
+
+jobs:
+  deploy-migrations:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install PostgreSQL Client
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Create Backup
+        env:
+          PGPASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          pg_dump -h ${{ secrets.POSTGRES_HOST }} \
+                  -U postgres \
+                  -d omninode_bridge \
+                  > backup_$(date +%Y%m%d_%H%M%S).sql
+
+      - name: Apply Migrations
+        env:
+          PGPASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          for migration in migrations/00*.sql migrations/01*.sql; do
+              if [[ ! $migration =~ rollback ]]; then
+                  echo "Applying: $migration"
+                  psql -h ${{ secrets.POSTGRES_HOST }} \
+                       -U postgres \
+                       -d omninode_bridge \
+                       -f "$migration"
+              fi
+          done
+
+      - name: Verify Migrations
+        env:
+          PGPASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          bash verify-migrations.sh
+```
+
+### Docker Compose Integration
+
+```yaml
+# deployment/docker-compose.yml
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: omninode_bridge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro  # Auto-apply on first run
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migration-runner:
+    image: postgres:15
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./migrations:/migrations:ro
+    command: >
+      bash -c "
+        for migration in /migrations/00*.sql /migrations/01*.sql; do
+          if [[ ! $$migration =~ rollback ]]; then
+            echo 'Applying: '$$migration
+            psql -h postgres -U postgres -d omninode_bridge -f $$migration
+          fi
+        done
+      "
+
+volumes:
+  postgres_data:
+```
+
+## Best Practices
+
+### Pre-Deployment
+
+- ✅ **Always backup production database before migrations**
+- ✅ **Test migrations on staging environment first**
+- ✅ **Verify migrations are idempotent (can run multiple times)**
+- ✅ **Review migration dependencies and order**
+- ✅ **Schedule maintenance window for production**
+
+### During Deployment
+
+- ✅ **Use transactions for production migrations**
+- ✅ **Monitor migration execution logs**
+- ✅ **Verify each migration step before proceeding**
+- ✅ **Keep rollback scripts ready**
+- ✅ **Document any manual intervention needed**
+
+### Post-Deployment
+
+- ✅ **Verify all tables and indexes exist**
+- ✅ **Check application logs for database errors**
+- ✅ **Monitor query performance**
+- ✅ **Validate foreign key constraints**
+- ✅ **Update documentation with migration status**
+
+### Never
+
+- ❌ **Don't modify existing migration files after deployment**
+- ❌ **Don't skip migration numbers**
+- ❌ **Don't run migrations on production without testing**
+- ❌ **Don't delete old migration files**
+- ❌ **Don't run migrations without backups**
+
+## Support and Resources
+
+### Documentation
+
+- **Technical Guide**: [migrations/README.md](../../migrations/README.md)
+- **Database Architecture**: [docs/database/DATABASE_GUIDE.md](../database/DATABASE_GUIDE.md)
+- **Deployment Checklist**: [docs/deployment/PRE_DEPLOYMENT_CHECKLIST.md](./PRE_DEPLOYMENT_CHECKLIST.md)
+- **Migration Plans**: [migrations/*.md](../../migrations/)
+
+### Logging and Debugging
+
+```bash
+# Enable detailed PostgreSQL logging
+export PGOPTIONS="-c client_min_messages=DEBUG1"
+
+# Run migration with verbose output
+psql -h <host> -U postgres -d omninode_bridge -f migrations/005_create_node_registrations.sql -e
+
+# Check PostgreSQL logs
+docker logs postgres --tail 100
+# OR
+tail -f /var/log/postgresql/postgresql-*.log
+```
+
+### Contact
+
+For migration issues or questions:
+1. Check [Troubleshooting](#troubleshooting) section
+2. Review [migrations/README.md](../../migrations/README.md)
+3. Check PostgreSQL logs for detailed errors
+4. Consult database administrator or DevOps team
+
+## Version History
+
+- **v1.0.0** (2025-10-25): Initial deployment guide
+  - 11 migrations documented
+  - Production deployment procedures
+  - Comprehensive troubleshooting
+  - CI/CD integration examples

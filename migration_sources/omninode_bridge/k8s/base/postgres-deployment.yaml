@@ -1,0 +1,254 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: omninode-bridge-postgres
+  namespace: omninode-bridge
+  labels:
+    app.kubernetes.io/name: omninode-bridge
+    app.kubernetes.io/component: database
+    app.kubernetes.io/version: "15"
+spec:
+  serviceName: omninode-bridge-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omninode-bridge
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: omninode-bridge
+        app.kubernetes.io/component: database
+        app.kubernetes.io/version: "15"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: postgres
+          containerPort: 5432
+          protocol: TCP
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: database
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        startupProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 999
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: postgres-config
+          mountPath: /etc/postgresql
+          readOnly: true
+      volumes:
+      - name: postgres-config
+        configMap:
+          name: postgres-config
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+      labels:
+        app.kubernetes.io/name: omninode-bridge
+        app.kubernetes.io/component: database
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "fast-ssd"
+      resources:
+        requests:
+          storage: 50Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: omninode-bridge-postgres
+  namespace: omninode-bridge
+  labels:
+    app.kubernetes.io/name: omninode-bridge
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+  - port: 5432
+    targetPort: postgres
+    protocol: TCP
+    name: postgres
+  selector:
+    app.kubernetes.io/name: omninode-bridge
+    app.kubernetes.io/component: database
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: omninode-bridge
+  labels:
+    app.kubernetes.io/name: omninode-bridge
+    app.kubernetes.io/component: database
+data:
+  postgresql.conf: |
+    # PostgreSQL production configuration for OmniNode Bridge
+
+    # Connection settings
+    max_connections = 200
+    shared_preload_libraries = 'pg_stat_statements'
+
+    # Memory settings
+    shared_buffers = 512MB
+    effective_cache_size = 1536MB
+    work_mem = 16MB
+    maintenance_work_mem = 256MB
+
+    # WAL settings
+    wal_level = replica
+    max_wal_size = 2GB
+    min_wal_size = 80MB
+    checkpoint_completion_target = 0.9
+
+    # Query performance
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+
+    # Logging
+    log_destination = 'stderr'
+    log_statement = 'mod'
+    log_min_duration_statement = 1000
+    log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+
+    # Security
+    ssl = on
+    ssl_cert_file = '/etc/ssl/certs/server.crt'
+    ssl_key_file = '/etc/ssl/private/server.key'
+
+---
+# Backup CronJob for PostgreSQL
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: omninode-bridge
+  labels:
+    app.kubernetes.io/name: omninode-bridge
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: postgres-backup
+            image: postgres:15-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              pg_dump -h omninode-bridge-postgres -U $POSTGRES_USER -d $POSTGRES_DB \
+                --verbose --clean --if-exists --create \
+                --file=/backup/omninode_bridge_$(date +%Y%m%d_%H%M%S).sql
+            env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: postgres-backup-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backup-pvc
+  namespace: omninode-bridge
+  labels:
+    app.kubernetes.io/name: omninode-bridge
+    app.kubernetes.io/component: backup
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: "standard"
+  resources:
+    requests:
+      storage: 100Gi

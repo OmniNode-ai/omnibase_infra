@@ -1,0 +1,63 @@
+# Performance Thresholds Configuration for Two-Way Registration Tests
+#
+# This configuration file defines performance expectations for the two-way
+# registration pattern between bridge nodes and the registry service.
+#
+# Environment-Specific Overrides:
+# - Set environment variable TEST_PERFORMANCE_CONFIG to override this file path
+# - Individual thresholds can be overridden with env vars (see examples below)
+#
+# Usage Examples:
+#   # Override entire config file
+#   export TEST_PERFORMANCE_CONFIG=/path/to/custom/thresholds.yaml
+#
+#   # Override individual thresholds
+#   export TEST_INTROSPECTION_BROADCAST_LATENCY_MS=100
+#   export TEST_DUAL_REGISTRATION_TIME_MS=300
+
+# Introspection Broadcasting Performance
+introspection_broadcast_latency_ms: 50
+# Maximum acceptable latency for a node to broadcast its introspection event
+# to Kafka. This includes event construction and Kafka I/O overhead.
+#
+# Threshold: <50ms
+# Environment Override: TEST_INTROSPECTION_BROADCAST_LATENCY_MS
+
+# Registry Processing Performance
+registry_processing_latency_ms: 100
+# Maximum acceptable latency for the registry to process an incoming
+# introspection event and initiate dual registration workflow.
+#
+# Threshold: <100ms
+# Environment Override: TEST_REGISTRY_PROCESSING_LATENCY_MS
+
+# Dual Registration Performance
+dual_registration_time_ms: 300
+# Maximum acceptable time for completing dual registration in both
+# Consul (service discovery) and PostgreSQL (persistent registry).
+# This includes network I/O, database writes, and acknowledgment.
+#
+# Threshold: <300ms
+# Environment Override: TEST_DUAL_REGISTRATION_TIME_MS
+
+# Heartbeat Configuration
+heartbeat_interval_s: 30
+# Standard heartbeat interval in seconds. Nodes publish heartbeat events
+# at this frequency to indicate they are alive and operational.
+#
+# Default: 30 seconds
+# Environment Override: TEST_HEARTBEAT_INTERVAL_S
+
+heartbeat_overhead_ms: 50
+# Maximum acceptable overhead per heartbeat event. This includes:
+# - Event construction time
+# - Metadata collection (uptime, active operations)
+# - Kafka publishing I/O
+#
+# Threshold: <50ms
+# Environment Override: TEST_HEARTBEAT_OVERHEAD_MS
+
+# End-to-End Workflow Performance
+# The following derived metrics are calculated but not directly configurable:
+# - end_to_end_workflow_ms: introspection_broadcast_latency_ms + dual_registration_time_ms
+#   Expected: <250ms for full node registration workflow

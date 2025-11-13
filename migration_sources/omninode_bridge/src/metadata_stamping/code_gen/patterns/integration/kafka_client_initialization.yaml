@@ -1,0 +1,73 @@
+name: kafka_client_initialization
+description: "Kafka client initialization with fallback and health check mode support"
+category: integration
+applicable_to: [effect, orchestrator, reducer]
+priority: high
+code_template: |
+  # Get or create KafkaClient from container
+  self.kafka_client = container.get_service("kafka_client")
+
+  if self.kafka_client is None and not health_check_mode:
+      try:
+          from omninode_bridge.services.kafka_client import KafkaClient
+
+          self.kafka_client = KafkaClient(
+              bootstrap_servers=self.kafka_broker_url,
+              enable_dead_letter_queue=True,
+              max_retry_attempts=3,
+              timeout_seconds=30,
+          )
+          container.register_service("kafka_client", self.kafka_client)
+      except ImportError:
+          emit_log_event(
+              LogLevel.WARNING,
+              "KafkaClient not available - events will be logged only",
+              {"node_id": self.node_id},
+          )
+          self.kafka_client = None
+  elif health_check_mode:
+      emit_log_event(
+          LogLevel.DEBUG,
+          "Health check mode enabled - skipping Kafka initialization",
+          {"node_id": self.node_id},
+      )
+      self.kafka_client = None
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - codegen_metrics_reducer
+
+configuration:
+  kafka_config:
+    enable_dead_letter_queue: true
+    max_retry_attempts: 3
+    timeout_seconds: 30
+  fallback_mode: "log_only"
+
+prerequisites:
+  - KafkaClient available in omninode_bridge.services
+  - container.get_service() and register_service() methods
+  - health_check_mode detection
+  - kafka_broker_url configured
+
+metrics:
+  initialization_time_ms: 100
+  memory_bytes: 5242880  # 5MB
+
+best_practices:
+  - "Try to get KafkaClient from container first"
+  - "Create new client only if not available and not health_check_mode"
+  - "Register client with container for reuse"
+  - "Handle ImportError gracefully with fallback"
+  - "Log at WARNING when falling back to log-only mode"
+  - "Skip initialization in health_check_mode"
+  - "Set kafka_client to None on failure (not undefined)"
+  - "Enable DLQ for production resilience"
+
+validation_rules:
+  - "Must try container.get_service() first"
+  - "Must check health_check_mode before creating client"
+  - "Must handle ImportError without failing"
+  - "Must register created client with container"
+  - "Must set to None if unavailable or health check mode"

@@ -1,0 +1,340 @@
+# ONEX v2.0 Node Contract
+name: llm_effect
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: |
+  LLM Effect Node for multi-tier LLM generation.
+
+  Provides LLM inference capabilities with 3-tier model support:
+  - LOCAL: Ollama/vLLM (future-ready, not implemented in Phase 1)
+  - CLOUD_FAST: GLM-4.5 via Z.ai (PRIMARY for Phase 1, 128K context)
+  - CLOUD_PREMIUM: GLM-4.6 via Z.ai (future-ready, not implemented in Phase 1)
+
+  Features:
+  - Circuit breaker pattern for resilience
+  - Exponential backoff retry logic
+  - Token usage and cost tracking
+  - Streaming support (future)
+  - Comprehensive metrics collection
+
+  Operations:
+  - generate_text: Generate text using specified LLM tier
+  - Cost tracking: Sub-cent accuracy for budget management
+  - Token metrics: Input/output/total token counts
+
+node_type: effect
+base_class: NodeEffect
+
+# Input/Output Models
+input_model: ModelLLMRequest
+output_model: ModelLLMResponse
+
+# Tool Specification
+tool_specification:
+  tool_name: llm_generation
+  main_tool_class: omninode_bridge.nodes.llm_effect.v1_0_0.node.NodeLLMEffect
+  description: Multi-tier LLM generation operations
+  version: 1.0.0
+
+# Input State (required by ONEX v2.0)
+input_state:
+  type: object
+  description: "Input state for LLM generation operations"
+  properties:
+    tier:
+      type: string
+      enum: ["LOCAL", "CLOUD_FAST", "CLOUD_PREMIUM"]
+      description: "LLM tier to use for generation"
+      default: "CLOUD_FAST"
+    prompt:
+      type: string
+      description: "Input prompt for LLM generation"
+      minLength: 1
+    model:
+      type: string
+      description: "Specific model name (optional, uses tier default if not specified)"
+    max_tokens:
+      type: integer
+      minimum: 1
+      maximum: 128000
+      description: "Maximum tokens to generate"
+      default: 4096
+    temperature:
+      type: number
+      minimum: 0.0
+      maximum: 2.0
+      description: "Sampling temperature for generation"
+      default: 0.7
+    circuit_breaker_state:
+      type: object
+      description: "Circuit breaker state for API calls"
+      properties:
+        state:
+          type: string
+          enum: ["closed", "open", "half_open"]
+          description: "Current circuit breaker state"
+        failure_count:
+          type: integer
+          description: "Number of consecutive failures"
+
+# Output State (required by ONEX v2.0)
+output_state:
+  type: object
+  description: "Output state after LLM generation"
+  properties:
+    success:
+      type: boolean
+      description: "Whether generation completed successfully"
+    generated_text:
+      type: string
+      description: "Generated text output"
+    model_used:
+      type: string
+      description: "Model name that was used for generation"
+    tier_used:
+      type: string
+      enum: ["LOCAL", "CLOUD_FAST", "CLOUD_PREMIUM"]
+      description: "Tier that was used for generation"
+    token_usage:
+      type: object
+      description: "Token usage statistics"
+      properties:
+        input_tokens:
+          type: integer
+          minimum: 0
+        output_tokens:
+          type: integer
+          minimum: 0
+        total_tokens:
+          type: integer
+          minimum: 0
+    cost_tracking:
+      type: object
+      description: "Cost tracking information"
+      properties:
+        cost_usd:
+          type: number
+          minimum: 0.0
+          description: "Total cost in USD"
+        input_cost_usd:
+          type: number
+          minimum: 0.0
+        output_cost_usd:
+          type: number
+          minimum: 0.0
+    performance_metrics:
+      type: object
+      description: "Performance metrics"
+      properties:
+        execution_time_ms:
+          type: number
+          description: "Total execution time in milliseconds"
+        api_time_ms:
+          type: number
+          description: "Time spent in LLM API call"
+        retry_count:
+          type: integer
+          minimum: 0
+          description: "Number of retry attempts made"
+    circuit_breaker_state:
+      type: string
+      enum: ["closed", "open", "half_open"]
+      description: "Circuit breaker state after operation"
+    error_message:
+      type: string
+      description: "Error message if generation failed"
+
+# IO Operations
+io_operations:
+  - operation_type: http_api_call
+    description: LLM API calls to Z.ai (Anthropic-compatible endpoint)
+    atomic: false
+    timeout_seconds: 60
+    retryable: true
+
+  - operation_type: streaming_response
+    description: Streaming LLM responses (future)
+    atomic: false
+    timeout_seconds: 300
+    retryable: false
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 2000
+    max_ms: 10000
+    percentile: 95
+    description: P95 latency for CLOUD_FAST tier
+
+  throughput:
+    target_operations_per_second: 10
+    max_concurrent_operations: 20
+    description: Concurrent LLM generation requests
+
+  resource_limits:
+    max_memory_mb: 512
+    max_cpu_percent: 25
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    initial_delay_ms: 1000
+    retryable_status_codes: [429, 500, 502, 503, 504]
+
+  timeout_policy:
+    enabled: true
+    default_timeout_seconds: 60
+    per_tier_timeout:
+      LOCAL: 30
+      CLOUD_FAST: 60
+      CLOUD_PREMIUM: 120
+
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    timeout_seconds: 60
+    description: Circuit breaker opens after 5 consecutive failures
+
+# Subcontracts
+subcontracts:
+  - type: http_client
+    enabled: true
+    config:
+      timeout_seconds: 60
+      max_connections: 10
+      connection_pool_enabled: true
+
+  - type: metrics_collection
+    enabled: true
+    config:
+      collect_latency: true
+      collect_token_usage: true
+      collect_cost: true
+      collect_retry_count: true
+
+  - type: cost_tracking
+    enabled: true
+    config:
+      pricing_per_1m_input_tokens:
+        CLOUD_FAST: 0.20
+        CLOUD_PREMIUM: 0.30
+      pricing_per_1m_output_tokens:
+        CLOUD_FAST: 0.20
+        CLOUD_PREMIUM: 0.30
+
+# Configuration
+configuration:
+  zai_api_key:
+    type: string
+    required: true
+    description: Z.ai API key for GLM models (from environment)
+    source: environment
+    env_var: ZAI_API_KEY
+
+  zai_base_url:
+    type: string
+    default: "https://api.z.ai/api/anthropic"
+    description: Z.ai API base URL (Anthropic-compatible endpoint)
+    source: environment
+    env_var: ZAI_ENDPOINT
+
+  ollama_base_url:
+    type: string
+    required: false
+    description: Ollama API base URL for LOCAL tier (future)
+    source: environment
+    env_var: OLLAMA_BASE_URL
+
+  default_model_cloud_fast:
+    type: string
+    default: "glm-4.5"
+    description: Default model for CLOUD_FAST tier
+
+  default_model_cloud_premium:
+    type: string
+    default: "glm-4.6"
+    description: Default model for CLOUD_PREMIUM tier
+
+  context_window_cloud_fast:
+    type: integer
+    default: 128000
+    description: Context window for CLOUD_FAST tier (tokens)
+
+  circuit_breaker_threshold:
+    type: integer
+    default: 5
+    description: Number of consecutive failures before circuit breaker opens
+    validation:
+      min: 1
+      max: 20
+
+  max_retry_attempts:
+    type: integer
+    default: 3
+    description: Maximum retry attempts on API failures
+    validation:
+      min: 1
+      max: 5
+
+# Dependencies
+dependencies:
+  - name: httpx
+    version: ">=0.24.0"
+    required: true
+    description: HTTP client for API calls
+
+  - name: pydantic
+    version: ">=2.0.0"
+    required: true
+    description: Data validation and settings management
+
+  - name: omnibase_core
+    version: ">=0.1.0"
+    required: true
+    description: ONEX v2.0 core framework
+
+# Tier Configuration
+tier_configuration:
+  LOCAL:
+    status: future
+    description: Ollama/vLLM integration (not implemented in Phase 1)
+    models: []
+    context_window: 8192
+
+  CLOUD_FAST:
+    status: active
+    description: GLM-4.5 via Z.ai (PRIMARY for Phase 1)
+    models:
+      - glm-4.5
+    context_window: 128000
+    cost_per_1m_input: 0.20
+    cost_per_1m_output: 0.20
+
+  CLOUD_PREMIUM:
+    status: future
+    description: GLM-4.6 via Z.ai (not implemented in Phase 1)
+    models:
+      - glm-4.6
+    context_window: 128000
+    cost_per_1m_input: 0.30
+    cost_per_1m_output: 0.30
+
+# Metadata
+metadata:
+  author: OmniNode Team
+  created_at: "2025-10-31"
+  tags:
+    - llm
+    - generation
+    - ai
+    - z-ai
+    - glm-4.5
+  category: ai-services
+  maturity: alpha
+  phase: 1
+  primary_tier: CLOUD_FAST

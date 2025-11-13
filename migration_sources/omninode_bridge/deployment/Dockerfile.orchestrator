@@ -1,0 +1,126 @@
+# Multi-stage Dockerfile for NodeBridgeOrchestrator
+# ONEX-compliant bridge orchestrator for stamping workflow coordination
+ARG PYTHON_VERSION=3.12
+
+# ============================================================================
+# Base Stage - System dependencies and Poetry installation
+# ============================================================================
+FROM python:${PYTHON_VERSION}-slim as base
+
+# Install system dependencies
+# BuildKit cache mounts persist APT cache between builds for faster subsequent builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y \
+    # Build tools for Python packages
+    build-essential \
+    gcc \
+    g++ \
+    # PostgreSQL client library
+    libpq-dev \
+    # Kafka client dependencies
+    librdkafka-dev \
+    # Git for installing dependencies from Git repositories
+    git \
+    # Utilities
+    curl \
+    ca-certificates
+
+# Install Poetry for dependency management
+ENV POETRY_VERSION=1.7.1
+RUN pip install --no-cache-dir poetry==${POETRY_VERSION}
+
+# Configure Poetry
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VENV_IN_PROJECT=0 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
+WORKDIR /app
+
+# ============================================================================
+# Development Stage - Full development environment
+# ============================================================================
+FROM base as development
+
+# Copy Poetry configuration
+COPY pyproject.toml ./
+
+# Copy poetry.lock if it exists (using wildcard pattern to avoid error if missing)
+COPY poetry.loc[k] ./poetry.lock* ./
+
+# Generate poetry.lock if it doesn't exist, then install dependencies
+# BuildKit cache mount persists Poetry cache between builds (wheels, metadata) for faster installs
+RUN --mount=type=cache,target=/tmp/poetry_cache \
+    if [ ! -f poetry.lock ]; then \
+        echo "poetry.lock not found, generating from pyproject.toml..."; \
+        poetry lock --no-update; \
+    fi && \
+    poetry install --with dev
+
+# Copy source code
+COPY . .
+
+# Create non-root user for development
+RUN useradd --create-home --shell /bin/bash orchestrator && \
+    chown -R orchestrator:orchestrator /app
+USER orchestrator
+
+# Expose ports
+# 8060: Orchestrator API
+# 9091: Prometheus metrics
+EXPOSE 8060 9091
+
+# Development command with hot reload
+CMD ["poetry", "run", "uvicorn", \
+     "src.omninode_bridge.nodes.orchestrator.v1_0_0.main:app", \
+     "--host", "0.0.0.0", "--port", "8060", "--reload", \
+     "--log-level", "debug"]
+
+# ============================================================================
+# Production Stage - Optimized production image
+# ============================================================================
+FROM base as production
+
+# Copy Poetry configuration and README (required by pyproject.toml)
+COPY pyproject.toml README.md ./
+
+# Copy poetry.lock if it exists (using wildcard pattern to avoid error if missing)
+COPY poetry.loc[k] ./poetry.lock* ./
+
+# Generate poetry.lock if it doesn't exist, then install dependencies
+# BuildKit cache mount persists Poetry cache between builds (wheels, metadata) for faster installs
+RUN --mount=type=cache,target=/tmp/poetry_cache \
+    if [ ! -f poetry.lock ]; then \
+        echo "poetry.lock not found, generating from pyproject.toml..."; \
+        poetry lock --no-update; \
+    fi && \
+    poetry install --only=main
+
+# Copy source code (selective copy for smaller image)
+COPY src/ ./src/
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+
+# Create non-root user for production
+RUN useradd --create-home --shell /bin/bash orchestrator && \
+    chown -R orchestrator:orchestrator /app && \
+    # Create directories for logs and data
+    mkdir -p /app/logs /app/data && \
+    chown -R orchestrator:orchestrator /app/logs /app/data
+USER orchestrator
+
+# Expose ports
+EXPOSE 8060 9091
+
+# Health check using ONEX health check mixin
+# Verifies node is running and all critical components are healthy
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -m omninode_bridge.nodes.health_check_cli orchestrator
+
+# Production command with multiple workers
+CMD ["poetry", "run", "uvicorn", \
+     "src.omninode_bridge.nodes.orchestrator.v1_0_0.main:app", \
+     "--host", "0.0.0.0", "--port", "8060", \
+     "--workers", "4", "--log-level", "info", \
+     "--access-log", "--use-colors"]

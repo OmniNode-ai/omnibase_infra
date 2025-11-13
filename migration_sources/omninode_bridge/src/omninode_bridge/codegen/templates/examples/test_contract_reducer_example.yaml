@@ -1,0 +1,445 @@
+# Test Contract Example - Reducer Node (ONEX Standards Compliant)
+#
+# This example demonstrates comprehensive testing for a Reducer node
+# that performs streaming aggregation with state management.
+#
+# Reducer nodes handle streaming data aggregation, maintaining state
+# across events while ensuring proper isolation and persistence.
+#
+# VERSION: 1.0.0
+
+# === CORE TEST CONTRACT IDENTIFICATION ===
+
+name: metrics_aggregator_reducer_tests
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: |
+  Comprehensive test contract for Metrics Aggregator Reducer node.
+
+  Tests streaming aggregation with state management including:
+  - Event processing and aggregation logic
+  - State persistence and recovery
+  - Namespace-based isolation
+  - High-throughput event streaming (>500 events/sec)
+  - State checkpoint and restoration
+
+  Reducer nodes must ensure:
+  - Stateful aggregation with proper isolation
+  - Correct aggregation semantics (commutative, associative)
+  - State persistence for fault tolerance
+  - Efficient memory usage for large state
+  - Proper event ordering and handling
+
+# === TEST TARGET IDENTIFICATION ===
+
+target_node: NodeMetricsAggregatorReducer
+target_version: "1.0.0"
+target_node_type: reducer
+
+test_suite_name: test_node_metrics_aggregator_reducer
+test_file_path: tests/nodes/reducer/metrics_aggregator/
+
+# === COVERAGE REQUIREMENTS ===
+
+coverage_minimum: 90
+coverage_target: 95
+coverage_by_file: true
+coverage_by_function: true
+
+# === TEST TYPE SPECIFICATIONS ===
+
+test_types:
+  - unit
+  - integration
+  - contract
+  - performance
+  - stress
+
+# === TEST TARGETS AND SCENARIOS ===
+
+test_targets:
+  # Test main reduction logic
+  - target_name: execute_reduction
+    target_type: method
+    test_scenarios:
+      - "aggregate single event"
+      - "aggregate multiple events in sequence"
+      - "aggregate events with different namespaces"
+      - "aggregate high-volume event stream (1000+ events)"
+      - "aggregate events with out-of-order timestamps"
+      - "aggregate events with duplicate IDs"
+    expected_behaviors:
+      - "processes event and updates state"
+      - "maintains namespace isolation"
+      - "returns aggregated result"
+      - "persists state to storage"
+      - "publishes aggregation_completed event"
+    input_parameters:
+      contract:
+        type: ModelContractReducer
+        required: true
+        fields:
+          event_stream:
+            type: list
+            required: true
+          aggregation_type:
+            type: str
+            values: ["sum", "count", "average", "min", "max", "custom"]
+          namespace:
+            type: str
+            required: true
+    expected_outputs:
+      result:
+        type: ModelResult
+        success: true
+        data:
+          type: dict
+          fields:
+            - aggregated_value
+            - event_count
+            - last_updated
+    edge_cases:
+      - "empty event stream"
+      - "single event in stream"
+      - "events with null values"
+      - "events with missing fields"
+      - "extremely large aggregation values"
+      - "namespace with no prior state"
+    error_conditions:
+      - "invalid aggregation type"
+      - "state persistence failure"
+      - "state corruption detected"
+      - "event validation failure"
+    assertions:
+      - "assert result.success is True"
+      - "assert result.data['aggregated_value'] is not None"
+      - "assert state_persisted_to_storage()"
+      - "assert namespace_isolation_maintained()"
+    test_priority: 1
+
+  # Test state management
+  - target_name: _update_aggregation_state
+    target_type: method
+    test_scenarios:
+      - "initialize new state"
+      - "update existing state"
+      - "merge states from different sources"
+      - "handle state version conflicts"
+      - "detect and handle state corruption"
+    expected_behaviors:
+      - "updates state with new event data"
+      - "maintains state consistency"
+      - "handles concurrent updates"
+      - "validates state integrity"
+    edge_cases:
+      - "state initialization from empty"
+      - "state overflow (numeric limits)"
+      - "state with circular references"
+    error_conditions:
+      - "state validation failure"
+      - "concurrent modification conflict"
+      - "state corruption detected"
+    assertions:
+      - "assert state_is_valid(updated_state)"
+      - "assert state_version_incremented()"
+      - "assert no_data_loss(old_state, new_state)"
+    test_priority: 1
+
+  # Test state persistence
+  - target_name: _persist_state
+    target_type: method
+    test_scenarios:
+      - "persist state to storage"
+      - "restore state from storage"
+      - "handle storage failure gracefully"
+      - "checkpoint state periodically"
+      - "recover from incomplete checkpoint"
+    expected_behaviors:
+      - "writes state to persistent storage"
+      - "validates write success"
+      - "handles write failures with retry"
+      - "maintains state backup"
+    edge_cases:
+      - "storage full"
+      - "storage connection lost"
+      - "corrupted state data"
+    error_conditions:
+      - "write timeout"
+      - "storage unavailable"
+      - "serialization error"
+    assertions:
+      - "assert state_written_to_storage()"
+      - "assert state_recoverable_from_storage()"
+      - "assert checkpoint_successful()"
+    test_priority: 1
+
+  # Test namespace isolation
+  - target_name: _get_namespace_state
+    target_type: method
+    test_scenarios:
+      - "retrieve state for specific namespace"
+      - "isolate states across namespaces"
+      - "handle namespace creation"
+      - "handle namespace deletion"
+    expected_behaviors:
+      - "returns state for requested namespace only"
+      - "creates namespace if not exists"
+      - "maintains isolation boundaries"
+    edge_cases:
+      - "namespace not found"
+      - "namespace with special characters"
+      - "very long namespace names"
+    assertions:
+      - "assert namespace_state_isolated()"
+      - "assert no_cross_namespace_leakage()"
+    test_priority: 1
+
+  # Test event ordering
+  - target_name: _process_event_stream
+    target_type: method
+    test_scenarios:
+      - "process events in order"
+      - "handle out-of-order events"
+      - "detect and handle duplicate events"
+      - "handle event gaps in sequence"
+    expected_behaviors:
+      - "processes events in correct order"
+      - "buffers out-of-order events"
+      - "deduplicates events"
+      - "maintains event sequence numbers"
+    edge_cases:
+      - "events arrive significantly out of order"
+      - "large gaps in sequence numbers"
+      - "duplicate events with same ID"
+    assertions:
+      - "assert events_processed_in_order()"
+      - "assert no_duplicate_processing()"
+      - "assert sequence_continuity_maintained()"
+    test_priority: 2
+
+  # Test aggregation semantics
+  - target_name: _validate_aggregation_semantics
+    target_type: method
+    test_scenarios:
+      - "validate commutative property (a+b = b+a)"
+      - "validate associative property ((a+b)+c = a+(b+c))"
+      - "validate identity element exists"
+      - "validate aggregation correctness"
+    expected_behaviors:
+      - "aggregation is commutative"
+      - "aggregation is associative"
+      - "aggregation has identity element"
+    assertions:
+      - "assert aggregation_commutative(a, b)"
+      - "assert aggregation_associative(a, b, c)"
+      - "assert identity_element_exists()"
+    test_priority: 2
+
+  # Test high-throughput streaming
+  - target_name: execute_reduction
+    target_type: method
+    test_scenarios:
+      - "process 1000 events/second"
+      - "process 10000 events total"
+      - "process continuous event stream"
+      - "handle burst traffic"
+    expected_behaviors:
+      - "maintains throughput target"
+      - "processes events without loss"
+      - "manages memory efficiently"
+      - "checkpoints state periodically"
+    assertions:
+      - "assert throughput >= 500  # events/second"
+      - "assert all_events_processed()"
+      - "assert memory_usage_bounded()"
+    test_priority: 1
+
+# === MOCK REQUIREMENTS ===
+
+mock_requirements:
+  # Dependencies to mock
+  mock_dependencies:
+    - "omninode_bridge.infrastructure.database.PostgreSQLClient"
+    - "omninode_bridge.infrastructure.state.StateStore"
+    - "redis.asyncio.Redis"
+
+  mock_external_services:
+    - "PostgreSQL state store"
+    - "Redis cache"
+    - "Event stream source"
+
+  # Database mocking
+  mock_database: true
+  database_mock_config:
+    use_in_memory: true
+    preload_data: false
+
+  # Mock return values
+  mock_return_values:
+    StateStore.save:
+      success: true
+      duration_ms: 10
+    StateStore.load:
+      return_type: dict
+      delay_ms: 5
+
+  # Mock exceptions
+  mock_exceptions:
+    - "redis.exceptions.ConnectionError"
+    - "asyncpg.exceptions.PostgresConnectionError"
+    - "pickle.PickleError"
+
+  # Fixture configuration
+  use_fixtures: true
+  fixture_scope: function
+
+  # Event stream generators (configured via custom_mocks)
+  # Note: Event stream generators implemented as pytest fixtures
+  # Available generators: simple_event_stream, high_volume_stream, out_of_order_stream
+  custom_mocks:
+    - name: "simple_event_stream"
+      type: "generator"
+      config: "count=100, rate=10/sec"
+    - name: "high_volume_stream"
+      type: "generator"
+      config: "count=10000, rate=1000/sec"
+    - name: "out_of_order_stream"
+      type: "generator"
+      config: "count=1000, out_of_order=20%"
+
+# === ASSERTION REQUIREMENTS ===
+
+assertion_types:
+  - "equality"
+  - "type"
+  - "state_verification"
+  - "isolation"
+  - "performance"
+
+custom_assertions:
+  - "assert_state_persisted"
+  - "assert_namespace_isolated"
+  - "assert_aggregation_correct"
+  - "assert_no_event_loss"
+  - "assert_commutative_aggregation"
+  - "assert_associative_aggregation"
+
+# === TEST CONFIGURATION ===
+
+test_configuration:
+  # Pytest configuration
+  pytest_markers:
+    - "unit"
+    - "integration"
+    - "asyncio"
+    - "stress"
+
+  pytest_plugins:
+    - "pytest-asyncio"
+    - "pytest-mock"
+    - "pytest-cov"
+    - "pytest-benchmark"
+    - "pytest-timeout"
+
+  pytest_options:
+    verbose: true
+    capture: "no"
+
+  # Test execution settings
+  parallel_execution: true
+  parallel_workers: 4
+  timeout_seconds: 600  # Longer timeout for stress tests
+
+  # Coverage configuration
+  coverage_enabled: true
+  coverage_threshold: 90
+  coverage_fail_under: true
+
+  # Fixtures
+  required_fixtures:
+    - "mock_state_store"
+    - "mock_event_stream"
+    - "test_namespace"
+    - "state_validator"
+
+  # Test data
+  test_data_directory: "tests/data/metrics_aggregator"
+  use_test_database: true
+  test_database_config:
+    database: "test_omninode_bridge"
+    recreate: true
+
+  # Output configuration
+  verbose_output: true
+  generate_html_report: true
+  report_output_directory: "htmlcov"
+
+  # Retry configuration
+  retry_failed_tests: true
+  max_retries: 3
+
+  # Environment setup
+  setup_commands:
+    - "docker compose up -d postgres redis"
+  teardown_commands:
+    - "docker compose down"
+
+  environment_variables:
+    TESTING: "true"
+    LOG_LEVEL: "DEBUG"
+    POSTGRES_HOST: "localhost"
+    REDIS_HOST: "localhost"
+    STATE_CHECKPOINT_INTERVAL: "1000"  # Events between checkpoints
+
+  # Quality gates
+  enforce_type_checking: true
+  enforce_linting: true
+  allowed_warnings:
+    - "DeprecationWarning"
+
+  # Performance benchmarks (configured via pytest-benchmark)
+  # Target benchmarks documented in test docstrings:
+  #   - process_single_event: <5ms latency, >500 events/sec
+  #   - process_100_events: <100ms latency, >100 batches/sec
+  #   - process_1000_events: <500ms latency, >50 batches/sec
+  #   - state_checkpoint: <100ms latency
+  #   - state_restore: <50ms latency
+  #
+  # Stress test configuration (via pytest markers and fixtures):
+  #   - event_volumes: [1000, 10000, 100000]
+  #   - concurrent_namespaces: [1, 10, 100]
+  #   - event_rates: [100, 500, 1000] events/second
+  #   - duration_seconds: 60
+
+# === TEST GENERATION OPTIONS ===
+
+include_docstrings: true
+include_type_hints: true
+use_async_tests: true
+parametrize_tests: true
+
+# === QUALITY GATES ===
+
+enforce_test_naming: true
+enforce_test_isolation: true
+enforce_deterministic_tests: true
+
+# Additional quality gates for reducer nodes
+enforce_namespace_isolation: true
+enforce_state_persistence: true
+enforce_aggregation_semantics: true
+
+# === METADATA ===
+
+author: "OmniNode Bridge Team"
+documentation_url: "https://docs.omninode.dev/testing/reducer-nodes"
+tags:
+  - "reducer"
+  - "streaming"
+  - "aggregation"
+  - "state-management"
+  - "persistence"
+  - "namespace-isolation"

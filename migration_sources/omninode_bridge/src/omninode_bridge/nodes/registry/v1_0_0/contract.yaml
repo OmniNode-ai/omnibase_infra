@@ -1,0 +1,223 @@
+# NodeBridgeRegistry Contract - ONEX v2.0 Placeholder
+#
+# This is a placeholder contract for the Registry Node.
+# Full contract specification will be added when omnibase_core is available.
+
+name: "NodeBridgeRegistry"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+
+description: >
+  Registry node for node discovery and dual registration system.
+  Listens for NODE_INTROSPECTION events and performs dual registration
+  in both Consul (service discovery) and PostgreSQL (tool orchestration).
+
+capabilities:
+  - name: "node_discovery"
+    description: "Listen for node introspection events from Kafka"
+  - name: "dual_registration"
+    description: "Register nodes in Consul and PostgreSQL"
+  - name: "registry_request"
+    description: "Request nodes to broadcast introspection data"
+  - name: "health_monitoring"
+    description: "Monitor health of registration services"
+
+endpoints:
+  kafka_consumer:
+    topic: "node-introspection.v1"
+    consumer_group: "bridge-registry-group"
+    event_type: "NODE_INTROSPECTION"
+  kafka_producer:
+    topic: "registry-request-introspection.v1"
+    event_type: "REGISTRY_REQUEST_INTROSPECTION"
+
+dependencies:
+  services:
+    - name: "kafka_client"
+      required: true
+      description: "Kafka client for event streaming"
+    - name: "consul_client"
+      required: false
+      description: "Consul client for service discovery registration"
+    - name: "postgres_client"
+      required: false
+      description: "PostgreSQL client for database operations"
+    - name: "tool_repository"
+      required: false
+      description: "Tool registration repository for database persistence"
+
+# === INPUT STATE (required by ONEX v2.0) ===
+# Input state for node registration operations
+input_state:
+  type: object
+  description: "Input state for node registration and discovery"
+  properties:
+    operation_type:
+      type: string
+      enum: ["register_node", "discover_nodes", "request_introspection", "health_check"]
+      description: "Type of registry operation to perform"
+    node_introspection:
+      type: object
+      description: "Node introspection data from NODE_INTROSPECTION event"
+      properties:
+        node_id:
+          type: string
+          description: "Unique node identifier"
+        node_type:
+          type: string
+          enum: ["effect", "compute", "reducer", "orchestrator"]
+        node_version:
+          type: string
+          pattern: "^\\d+\\.\\d+\\.\\d+$"
+        capabilities:
+          type: array
+          items:
+            type: string
+        endpoints:
+          type: object
+          description: "Node API endpoints"
+        tool_specification:
+          type: object
+          description: "Tool registration details"
+    registration_targets:
+      type: object
+      description: "Registration target services"
+      properties:
+        consul_enabled:
+          type: boolean
+          default: true
+        postgresql_enabled:
+          type: boolean
+          default: true
+
+# === OUTPUT STATE (required by ONEX v2.0) ===
+# Output state after node registration operations
+output_state:
+  type: object
+  description: "Output state after node registration and discovery"
+  properties:
+    success:
+      type: boolean
+      description: "Whether registration operation completed successfully"
+    operation_type:
+      type: string
+      enum: ["register_node", "discover_nodes", "request_introspection", "health_check"]
+      description: "Type of operation that was performed"
+    registration_results:
+      type: object
+      description: "Dual registration results"
+      properties:
+        consul_registered:
+          type: boolean
+          description: "Whether node was registered in Consul"
+        consul_service_id:
+          type: string
+          description: "Consul service ID"
+        postgresql_registered:
+          type: boolean
+          description: "Whether node was registered in PostgreSQL"
+        postgresql_tool_id:
+          type: string
+          format: uuid
+          description: "PostgreSQL tool registration ID"
+    discovered_nodes:
+      type: array
+      items:
+        type: object
+        properties:
+          node_id:
+            type: string
+          node_type:
+            type: string
+          status:
+            type: string
+            enum: ["healthy", "unhealthy", "unknown"]
+      description: "List of discovered nodes (for discover_nodes operation)"
+    introspection_requests_sent:
+      type: integer
+      minimum: 0
+      description: "Number of introspection requests published"
+    performance_metrics:
+      type: object
+      description: "Performance metrics for the operation"
+      properties:
+        execution_time_ms:
+          type: number
+          description: "Total execution time in milliseconds"
+        consul_registration_time_ms:
+          type: number
+        postgresql_registration_time_ms:
+          type: number
+    error_message:
+      type: string
+      description: "Error message if operation failed"
+    error_details:
+      type: object
+      description: "Detailed error information"
+      properties:
+        consul_error:
+          type: string
+        postgresql_error:
+          type: string
+
+configuration:
+  kafka_broker_url:
+    default: "localhost:29092"
+    description: "Kafka broker URL for event streaming"
+  consul_host:
+    default: "localhost"
+    description: "Consul server hostname"
+  consul_port:
+    default: 8500
+    description: "Consul server port"
+  postgres_host:
+    default: "localhost"
+    description: "PostgreSQL server hostname"
+  postgres_port:
+    default: 5432
+    description: "PostgreSQL server port"
+  postgres_db:
+    default: "omninode_bridge"
+    description: "PostgreSQL database name"
+
+subcontracts:
+  # Effect subcontract for registration operations
+  effect:
+    operations:
+      - "register"
+      - "start"
+      - "stop"
+
+  # EventType subcontract for Kafka events
+  event_type:
+    consumed_events:
+      - "NODE_INTROSPECTION"
+    produced_events:
+      - "REGISTRY_REQUEST_INTROSPECTION"
+
+  # StateManagement subcontract for tracking registered nodes
+  state_management:
+    persistence: "memory"
+    tracked_state:
+      - "registered_nodes"
+      - "registration_metrics"
+
+performance_targets:
+  registration_latency_ms: 100
+  throughput_registrations_per_second: 50
+  max_concurrent_registrations: 20
+
+health_checks:
+  components:
+    - name: "kafka"
+      critical: true
+      timeout_seconds: 5.0
+    - name: "consul"
+      critical: false
+      timeout_seconds: 3.0
+    - name: "postgres"
+      critical: false
+      timeout_seconds: 5.0

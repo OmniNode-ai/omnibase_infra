@@ -1,0 +1,403 @@
+# Warning Alert Rules for OmniNode Bridge Production
+groups:
+  - name: performance_warning_alerts
+    interval: 60s
+    rules:
+      # ========================================
+      # Performance Warnings
+      # ========================================
+
+      - alert: HighResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "High response time on {{ $labels.job }}"
+          description: |
+            95th percentile response time is {{ $value | printf "%.2f" }}s for {{ $labels.job }}.
+            This may indicate performance degradation that could affect user experience.
+          runbook_url: "https://docs.omninode.ai/runbooks/performance-degradation"
+          dashboard_url: "https://grafana.omninode.ai/d/performance-metrics"
+
+      - alert: ModerateErrorRate
+        expr: |
+          (
+            rate(http_requests_total{status=~"5..", job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m]) /
+            rate(http_requests_total{job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m])
+          ) > 0.01
+        for: 3m
+        labels:
+          severity: warning
+          team: development
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "Moderate error rate {{ $value | humanizePercentage }} on {{ $labels.job }}"
+          description: |
+            Error rate has increased to {{ $value | humanizePercentage }} for {{ $labels.job }}.
+            This is above normal thresholds and should be investigated.
+          runbook_url: "https://docs.omninode.ai/runbooks/error-investigation"
+
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95,
+            rate(postgres_query_duration_seconds_bucket[5m])
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          team: infrastructure
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "Slow database queries detected"
+          description: |
+            95th percentile database query time is {{ $value | printf "%.2f" }}s.
+            This may indicate database performance issues or suboptimal queries.
+          runbook_url: "https://docs.omninode.ai/runbooks/database-performance"
+
+      - alert: HighCPUUsage
+        expr: |
+          (
+            100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+          ) > 80
+        for: 10m
+        labels:
+          severity: warning
+          team: infrastructure
+          escalation: standard
+          impact: low
+        annotations:
+          summary: 'High CPU usage {{ $value | printf "%.1f" }}% on {{ $labels.instance }}'
+          description: |
+            CPU usage has been above 80% for more than 10 minutes.
+            This may indicate resource constraints or inefficient processing.
+          runbook_url: "https://docs.omninode.ai/runbooks/resource-optimization"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) /
+            node_memory_MemTotal_bytes
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          team: infrastructure
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "High memory usage {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          description: |
+            Memory usage has been above 80% for more than 10 minutes.
+            System may experience performance degradation or instability.
+          runbook_url: "https://docs.omninode.ai/runbooks/memory-optimization"
+
+  - name: availability_warning_alerts
+    interval: 60s
+    rules:
+      # ========================================
+      # Availability Warnings
+      # ========================================
+
+      - alert: ServiceDegraded
+        expr: |
+          (
+            rate(http_requests_total{status=~"2..", job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m]) /
+            rate(http_requests_total{job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m])
+          ) < 0.95
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "Service {{ $labels.job }} is degraded"
+          description: |
+            Success rate for {{ $labels.job }} is {{ $value | humanizePercentage }}, below 95%.
+            Service may be experiencing issues that require investigation.
+          runbook_url: "https://docs.omninode.ai/runbooks/service-degradation"
+
+      - alert: HighDiskUsage
+        expr: |
+          (
+            (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_avail_bytes{fstype!="tmpfs"}) /
+            node_filesystem_size_bytes{fstype!="tmpfs"}
+          ) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "High disk usage {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          description: |
+            Disk usage is {{ $value | humanizePercentage }} on {{ $labels.instance }} {{ $labels.mountpoint }}.
+            Disk space should be monitored and cleaned up if necessary.
+          runbook_url: "https://docs.omninode.ai/runbooks/disk-cleanup"
+
+      - alert: ContainerRestarts
+        expr: |
+          rate(container_start_time_seconds[10m]) * 600 > 2
+        for: 0m
+        labels:
+          severity: warning
+          team: platform
+          escalation: standard
+          impact: low
+        annotations:
+          summary: "Container {{ $labels.name }} is restarting frequently"
+          description: |
+            Container {{ $labels.name }} has restarted more than 2 times in 10 minutes.
+            This may indicate instability or resource issues.
+          runbook_url: "https://docs.omninode.ai/runbooks/container-stability"
+
+  - name: business_logic_warning_alerts
+    interval: 60s
+    rules:
+      # ========================================
+      # Business Logic Warnings
+      # ========================================
+
+      - alert: HookProcessingSlowdown
+        expr: |
+          histogram_quantile(0.95,
+            rate(omninode_hook_processing_duration_seconds_bucket[5m])
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team: development
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "Hook processing is slower than normal"
+          description: |
+            95th percentile hook processing time is {{ $value | printf "%.2f" }}s.
+            This is above normal thresholds and may indicate processing issues.
+          runbook_url: "https://docs.omninode.ai/runbooks/hook-performance"
+
+      - alert: ModelExecutionFailureRate
+        expr: |
+          (
+            rate(omninode_model_executions_total{status="error"}[5m]) /
+            rate(omninode_model_executions_total[5m])
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: ai
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "AI model execution failure rate {{ $value | humanizePercentage }}"
+          description: |
+            Model execution failure rate is {{ $value | humanizePercentage }}.
+            This may indicate issues with AI service connectivity or model availability.
+          runbook_url: "https://docs.omninode.ai/runbooks/model-execution-issues"
+
+      - alert: LowIntelligencePatternDiscovery
+        expr: |
+          rate(omninode_intelligence_patterns_discovered_total[1h]) < 5
+        for: 30m
+        labels:
+          severity: warning
+          team: ai
+          escalation: standard
+          impact: low
+        annotations:
+          summary: "Low intelligence pattern discovery rate"
+          description: |
+            Only {{ $value }} intelligence patterns discovered per hour.
+            This may indicate reduced data quality or algorithm issues.
+          runbook_url: "https://docs.omninode.ai/runbooks/intelligence-analysis"
+
+      - alert: WorkflowCompletionRate
+        expr: |
+          (
+            rate(omninode_workflows_completed_total{status="success"}[10m]) /
+            rate(omninode_workflows_started_total[10m])
+          ) < 0.9
+        for: 15m
+        labels:
+          severity: warning
+          team: development
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "Workflow completion rate {{ $value | humanizePercentage }} is below normal"
+          description: |
+            Workflow success rate is {{ $value | humanizePercentage }}, below 90%.
+            This may indicate issues with workflow execution or dependencies.
+          runbook_url: "https://docs.omninode.ai/runbooks/workflow-issues"
+
+  - name: external_dependency_warning_alerts
+    interval: 120s
+    rules:
+      # ========================================
+      # External Dependencies
+      # ========================================
+
+      - alert: ExternalAPILatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(omninode_external_api_duration_seconds_bucket[5m])
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "High latency to external API {{ $labels.api_name }}"
+          description: |
+            95th percentile latency to {{ $labels.api_name }} is {{ $value | printf "%.2f" }}s.
+            This may impact overall system performance.
+          runbook_url: "https://docs.omninode.ai/runbooks/external-api-issues"
+
+      - alert: ExternalAPIErrorRate
+        expr: |
+          (
+            rate(omninode_external_api_requests_total{status=~"5.."}[5m]) /
+            rate(omninode_external_api_requests_total[5m])
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "High error rate {{ $value | humanizePercentage }} from external API {{ $labels.api_name }}"
+          description: |
+            Error rate from {{ $labels.api_name }} is {{ $value | humanizePercentage }}.
+            This may indicate issues with external service or network connectivity.
+          runbook_url: "https://docs.omninode.ai/runbooks/external-api-errors"
+
+  - name: security_warning_alerts
+    interval: 60s
+    rules:
+      # ========================================
+      # Security Warnings
+      # ========================================
+
+      - alert: UnusualTrafficPattern
+        expr: |
+          (
+            rate(http_requests_total[5m]) >
+            (avg_over_time(rate(http_requests_total[5m])[1d:5m]) * 2)
+          )
+        for: 10m
+        labels:
+          severity: warning
+          team: security
+          escalation: standard
+          impact: low
+        annotations:
+          summary: "Unusual traffic pattern detected on {{ $labels.job }}"
+          description: |
+            Request rate is {{ $value | printf "%.2f" }} requests/second, which is
+            significantly higher than normal patterns. This may indicate a DDoS
+            attack or unusual usage patterns.
+          runbook_url: "https://docs.omninode.ai/runbooks/traffic-analysis"
+
+      - alert: FailedAuthenticationAttempts
+        expr: |
+          rate(omninode_auth_failures_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+          escalation: standard
+          impact: low
+        annotations:
+          summary: "Increased authentication failures"
+          description: |
+            {{ $value | printf "%.2f" }} authentication failures per second.
+            This may indicate attempted unauthorized access.
+          runbook_url: "https://docs.omninode.ai/runbooks/auth-monitoring"
+
+      - alert: SuspiciousRequestPatterns
+        expr: |
+          rate(omninode_suspicious_requests_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          team: security
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "Suspicious request patterns detected"
+          description: |
+            {{ $value | printf "%.2f" }} suspicious requests per second detected.
+            This may indicate reconnaissance or attack attempts.
+          runbook_url: "https://docs.omninode.ai/runbooks/security-monitoring"
+
+  - name: capacity_warning_alerts
+    interval: 300s  # Check every 5 minutes
+    rules:
+      # ========================================
+      # Capacity Planning Warnings
+      # ========================================
+
+      - alert: HighRequestVolume
+        expr: |
+          rate(http_requests_total{job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m]) >
+          quantile_over_time(0.95, rate(http_requests_total{job=~"hook-receiver|model-metrics|workflow-coordinator"}[5m])[7d:5m])
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+          escalation: standard
+          impact: low
+        annotations:
+          summary: 'Request volume {{ $value | printf "%.2f" }}/sec above 95th percentile for {{ $labels.job }}'
+          description: |
+            Current request volume is in the top 5% of historical data.
+            This may indicate increased usage requiring capacity planning.
+          runbook_url: "https://docs.omninode.ai/runbooks/capacity-planning"
+
+      - alert: DatabaseConnectionPoolNearLimit
+        expr: |
+          (
+            postgres_active_connections /
+            postgres_max_connections
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          team: infrastructure
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "Database connection pool usage {{ $value | humanizePercentage }}"
+          description: |
+            Database connection pool is {{ $value | humanizePercentage }} full.
+            Consider optimizing connection usage or increasing pool size.
+          runbook_url: "https://docs.omninode.ai/runbooks/database-connections"
+
+      - alert: KafkaTopicLag
+        expr: |
+          kafka_consumer_lag_sum > 1000
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          escalation: standard
+          impact: medium
+        annotations:
+          summary: "High Kafka consumer lag {{ $value }} messages"
+          description: |
+            Kafka consumer lag is {{ $value }} messages for topic {{ $labels.topic }}.
+            This may indicate processing bottlenecks or consumer issues.
+          runbook_url: "https://docs.omninode.ai/runbooks/kafka-lag"

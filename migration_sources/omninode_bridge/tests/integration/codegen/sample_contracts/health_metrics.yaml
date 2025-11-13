@@ -1,0 +1,41 @@
+---
+# Two mixins test - MixinHealthCheck + MixinMetrics
+node_id: "health_metrics_effect"
+node_type: "effect"
+version: "v1_0_0"
+namespace: "omninode.services.test"
+
+metadata:
+  name: "Health + Metrics Effect Node"
+  description: "Effect node with health check and metrics collection"
+  author: "Test Generator"
+  tags: ["test", "health", "metrics", "monitoring"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinHealthCheck"
+      config:
+        health_check_interval_seconds: 30
+
+    - mixin_name: "MixinMetrics"
+      config:
+        metrics_enabled: true
+        prometheus_port: 9090
+        metric_labels:
+          service: "health_metrics_effect"
+          environment: "test"
+
+input_schema:
+  type: "object"
+  properties:
+    operation:
+      type: "string"
+      description: "Operation to perform"
+
+output_schema:
+  type: "object"
+  properties:
+    result:
+      type: "object"
+    metrics:
+      type: "object"

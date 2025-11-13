@@ -1,0 +1,60 @@
+# ONEX v2.0 Subcontract - FSM States
+# Finite State Machine state definitions and transitions
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Common FSM state definitions and transition rules for
+  workflow orchestration and node state management.
+
+common_states:
+  - state: "PENDING"
+    description: "Initial state, ready to start"
+    valid_transitions:
+      - "IN_PROGRESS"
+      - "CANCELLED"
+
+  - state: "IN_PROGRESS"
+    description: "Currently executing"
+    valid_transitions:
+      - "COMPLETED"
+      - "FAILED"
+      - "PAUSED"
+
+  - state: "COMPLETED"
+    description: "Successfully completed"
+    terminal: true
+
+  - state: "FAILED"
+    description: "Execution failed"
+    terminal: true
+    retry_allowed: true
+
+  - state: "PAUSED"
+    description: "Temporarily paused"
+    valid_transitions:
+      - "IN_PROGRESS"
+      - "CANCELLED"
+
+  - state: "CANCELLED"
+    description: "Cancelled by user or system"
+    terminal: true
+
+transition_rules:
+  - rule: "no_backward_transitions"
+    description: "Cannot transition to previous states"
+    exceptions:
+      - "PAUSED -> IN_PROGRESS"
+
+  - rule: "terminal_states_final"
+    description: "Terminal states cannot transition"
+    exceptions:
+      - "FAILED -> PENDING (retry)"
+
+state_metadata:
+  - "entry_timestamp"
+  - "exit_timestamp"
+  - "duration_seconds"
+  - "transition_reason"

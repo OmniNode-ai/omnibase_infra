@@ -1,0 +1,412 @@
+# ONEX v2.0 Contract - OnexTree Intelligence Effect
+# Effect node for intelligence gathering and pattern analysis
+
+schema_version: "2.0"
+contract_version: "1.1.0"
+last_updated: "2025-10-27"
+
+# Node Identity
+node_identity:
+  name: "onextree_intelligence"
+  display_name: "OnexTree Intelligence Effect"
+  node_type: "effect"
+  version: "1.0.0"
+  description: |
+    Effect node for OnexTree intelligence service integration.
+    Provides RAG-based intelligence gathering, pattern analysis, architectural compliance,
+    and code quality assessment using event-driven communication via Redpanda.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-24"
+  tags:
+    - "intelligence-gathering"
+    - "rag-research"
+    - "pattern-analysis"
+    - "quality-assessment"
+    - "event-driven"
+    - "redpanda"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/architecture/ARCHITECTURE.md"
+    type: "architecture"
+    description: "System architecture and intelligence integration"
+  - path: "docs/ROADMAP.md"
+    type: "planning"
+    description: "Intelligence service roadmap"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 150      # <150ms for standard intelligence queries
+    max_ms: 5000        # Max 5 seconds for complex research
+  memory_usage:
+    target_mb: 256
+    max_mb: 1024
+  throughput:
+    target_requests_per_second: 50
+    max_concurrent_requests: 20
+  cache_hit_rate:
+    target_percent: 60
+    min_percent: 40
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - operation_type
+    - query
+  properties:
+    operation_type:
+      type: "string"
+      enum:
+        - "rag_query"
+        - "pattern_analysis"
+        - "quality_assessment"
+        - "compliance_check"
+        - "code_search"
+        - "cross_project_research"
+      description: "Type of intelligence operation to perform"
+    query:
+      type: "string"
+      description: "Natural language query or content to analyze"
+      minLength: 1
+      maxLength: 10000
+    context:
+      type: "object"
+      description: "Optional context for intelligence gathering"
+      properties:
+        project_name:
+          type: "string"
+        file_path:
+          type: "string"
+        language:
+          type: "string"
+        domain:
+          type: "string"
+    options:
+      type: "object"
+      description: "Operation-specific options"
+      properties:
+        max_results:
+          type: "integer"
+          default: 10
+          minimum: 1
+          maximum: 100
+        include_metrics:
+          type: "boolean"
+          default: true
+        enable_orchestration:
+          type: "boolean"
+          default: true
+          description: "Use event-driven multi-service orchestration"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Optional correlation ID for tracking"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - success
+    - operation_type
+    - execution_time_ms
+  properties:
+    success:
+      type: "boolean"
+      description: "Operation success status"
+    operation_type:
+      type: "string"
+      description: "Type of operation performed"
+    results:
+      type: "array"
+      description: "Intelligence results"
+      items:
+        type: "object"
+        properties:
+          content:
+            type: "string"
+          source:
+            type: "string"
+          confidence:
+            type: "number"
+            minimum: 0.0
+            maximum: 1.0
+          metadata:
+            type: "object"
+    quality_score:
+      type: "number"
+      minimum: 0.0
+      maximum: 1.0
+      description: "Quality score (for assessment operations)"
+    compliance_status:
+      type: "string"
+      enum: ["compliant", "non_compliant", "partially_compliant"]
+      description: "Compliance status (for compliance checks)"
+    patterns_found:
+      type: "array"
+      description: "Patterns identified (for pattern analysis)"
+      items:
+        type: "object"
+    execution_time_ms:
+      type: "integer"
+      minimum: 0
+      description: "Total execution time in milliseconds"
+    cache_hit:
+      type: "boolean"
+      description: "Whether result was served from cache"
+    service_health:
+      type: "object"
+      description: "Intelligence service health status"
+      properties:
+        healthy:
+          type: "boolean"
+        response_time_ms:
+          type: "integer"
+    error_message:
+      type: "string"
+      description: "Error message if operation failed"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "../subcontracts/effect_operations.yaml"
+    - "../subcontracts/intelligence_operations.yaml"
+    - "../subcontracts/circuit_breaker.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "redpanda"
+      type: "event_bus"
+      required: true
+      endpoint: "${KAFKA_BOOTSTRAP_SERVERS}"
+      description: "Redpanda event bus for async communication"
+      topics:
+        request: "omninode.intelligence.request"
+        response: "omninode.intelligence.response"
+        events: "omninode.intelligence.events"
+    - name: "qdrant"
+      type: "vector_database"
+      required: false
+      endpoint: "${QDRANT_URL}"
+      description: "Vector database for semantic search"
+    - name: "memgraph"
+      type: "graph_database"
+      required: false
+      endpoint: "${MEMGRAPH_URL}"
+      description: "Graph database for relationship analysis"
+    - name: "postgresql"
+      type: "relational_database"
+      required: false
+      endpoint: "${POSTGRESQL_URL}"
+      description: "Relational database for structured data"
+  libraries:
+    - name: "aiokafka"
+      version: ">=0.8.0"
+      description: "Async Kafka client for event bus communication"
+    - name: "httpx"
+      version: ">=0.24.0"
+      description: "Async HTTP client"
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation"
+
+# IO Operations (Effect Node Specific)
+io_operations:
+  - name: "perform_rag_query"
+    description: "Execute RAG query across knowledge bases"
+    target_ms: 150
+    input_model: "ModelRAGQueryInput"
+    output_model: "ModelRAGQueryOutput"
+    side_effects:
+      - "event_publishing"
+      - "async_messaging"
+      - "cache_lookup"
+
+  - name: "analyze_patterns"
+    description: "Analyze code patterns and anti-patterns"
+    target_ms: 200
+    input_model: "ModelPatternAnalysisInput"
+    output_model: "ModelPatternAnalysisOutput"
+    side_effects:
+      - "event_publishing"
+      - "vector_search"
+      - "graph_traversal"
+
+  - name: "assess_quality"
+    description: "Assess code quality and ONEX compliance"
+    target_ms: 100
+    input_model: "ModelQualityAssessmentInput"
+    output_model: "ModelQualityAssessmentOutput"
+    side_effects:
+      - "event_publishing"
+      - "llm_inference"
+
+  - name: "check_compliance"
+    description: "Verify ONEX architectural compliance"
+    target_ms: 80
+    input_model: "ModelComplianceCheckInput"
+    output_model: "ModelComplianceCheckOutput"
+    side_effects:
+      - "event_publishing"
+      - "pattern_matching"
+
+# Event Bus Configuration
+event_bus:
+  topics:
+    # Intelligence Request/Response Topics
+    intelligence_request: "omninode.intelligence.request"
+    intelligence_response: "omninode.intelligence.response"
+    intelligence_events: "omninode.intelligence.events"
+
+    # Specific Operation Topics
+    rag_query: "omninode.intelligence.rag.query"
+    pattern_analysis: "omninode.intelligence.pattern.analysis"
+    quality_assessment: "omninode.intelligence.quality.assessment"
+    compliance_check: "omninode.intelligence.compliance.check"
+
+  consumer_config:
+    group_id: "onextree-intelligence-consumer"
+    auto_offset_reset: "latest"
+    enable_auto_commit: true
+    session_timeout_ms: 30000
+    max_poll_records: 100
+
+  producer_config:
+    acks: "all"
+    compression_type: "lz4"
+    max_in_flight_requests_per_connection: 5
+    retries: 3
+
+  orchestration:
+    async_execution: true
+    timeout_seconds: 30
+    graceful_degradation: true
+
+# Circuit Breaker Configuration
+circuit_breaker:
+  failure_threshold: 5
+  success_threshold: 2
+  timeout_seconds: 60
+  half_open_timeout_seconds: 30
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    timeout_ms: 30000  # 30 seconds
+  fallback_strategy: "graceful_degradation"
+  error_codes:
+    - code: "SERVICE_UNAVAILABLE"
+      description: "Intelligence service unavailable"
+      severity: "warning"
+      fallback: "use_cache"
+    - code: "QUERY_TIMEOUT"
+      description: "Query execution timeout"
+      severity: "warning"
+      fallback: "return_partial_results"
+    - code: "INVALID_QUERY"
+      description: "Query validation failed"
+      severity: "error"
+      fallback: "none"
+    - code: "CIRCUIT_OPEN"
+      description: "Circuit breaker open"
+      severity: "warning"
+      fallback: "use_cache"
+
+# Quality Gates
+quality_gates:
+  - name: "response_time"
+    description: "Verify response time within targets"
+    threshold: 0.90
+  - name: "cache_efficiency"
+    description: "Verify cache hit rate >40%"
+    threshold: 0.40
+  - name: "result_quality"
+    description: "Verify result confidence scores >0.7"
+    threshold: 0.80
+
+# Health Checks
+health_checks:
+  - name: "event_bus_connectivity"
+    type: "kafka"
+    endpoint: "${KAFKA_BOOTSTRAP_SERVERS}"
+    interval_seconds: 60
+    timeout_seconds: 5
+    critical: true
+    description: "Verify Redpanda event bus connectivity"
+  - name: "circuit_breaker_state"
+    type: "internal"
+    interval_seconds: 30
+    critical: true
+  - name: "cache_health"
+    type: "internal"
+    interval_seconds: 120
+    critical: false
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 85
+    required: true
+    critical_paths:
+      - "rag_query_execution"
+      - "pattern_analysis"
+      - "quality_assessment"
+      - "circuit_breaker_logic"
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "event_bus_integration"
+      - "async_message_handling"
+      - "service_orchestration"
+      - "circuit_breaker_behavior"
+      - "cache_functionality"
+      - "timeout_handling"
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "rag_query_time"
+        target: 150.0
+        unit: "milliseconds"
+      - metric: "cache_hit_rate"
+        target: 60.0
+        unit: "percent"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "intelligence_queries_total"
+      type: "counter"
+      description: "Total intelligence queries by operation type"
+      labels: ["operation_type"]
+    - name: "query_duration_seconds"
+      type: "histogram"
+      description: "Query execution duration"
+      buckets: [0.05, 0.1, 0.2, 0.5, 1.0, 5.0]
+    - name: "cache_hit_rate"
+      type: "gauge"
+      description: "Current cache hit rate"
+    - name: "circuit_breaker_state"
+      type: "gauge"
+      description: "Circuit breaker state (0=closed, 1=open, 2=half_open)"
+    - name: "service_availability"
+      type: "gauge"
+      description: "Intelligence service availability"
+      labels: ["service_name"]
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+  traces:
+    enabled: true
+    sampling_rate: 0.2
+    trace_external_calls: true

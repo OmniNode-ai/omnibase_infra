@@ -1,0 +1,282 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://omninode.dev/schemas/contract/mixins/v1.0.0",
+  "title": "Contract Mixins Schema",
+  "description": "JSON Schema for contract mixin declarations in ONEX v2.0",
+  "type": "array",
+  "items": {
+    "$ref": "#/definitions/MixinDeclaration"
+  },
+  "definitions": {
+    "MixinDeclaration": {
+      "type": "object",
+      "description": "Single mixin declaration with configuration",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Mixin class name (must exist in omnibase_core or be a valid import)",
+          "pattern": "^Mixin[A-Z][a-zA-Z0-9]*$",
+          "examples": [
+            "MixinHealthCheck",
+            "MixinMetrics",
+            "MixinEventDrivenNode",
+            "MixinServiceRegistry",
+            "MixinLogData"
+          ]
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this mixin is enabled (allows conditional inclusion)",
+          "default": true
+        },
+        "config": {
+          "type": "object",
+          "description": "Mixin-specific configuration (validated against mixin's schema)",
+          "additionalProperties": true
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "MixinHealthCheckConfig": {
+      "type": "object",
+      "description": "Configuration for MixinHealthCheck",
+      "properties": {
+        "check_interval_ms": {
+          "type": "integer",
+          "description": "Interval between health checks in milliseconds",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "description": "Health check timeout in seconds",
+          "minimum": 1.0,
+          "maximum": 60.0,
+          "default": 5.0
+        },
+        "components": {
+          "type": "array",
+          "description": "List of components to monitor",
+          "items": {
+            "$ref": "#/definitions/HealthCheckComponent"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "HealthCheckComponent": {
+      "type": "object",
+      "description": "Single component health check configuration",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Component name (database, kafka_consumer, etc.)",
+          "minLength": 1
+        },
+        "critical": {
+          "type": "boolean",
+          "description": "Whether this component is critical (failure fails overall health)",
+          "default": true
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "description": "Component-specific timeout in seconds",
+          "minimum": 0.5,
+          "maximum": 30.0,
+          "default": 5.0
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "MixinMetricsConfig": {
+      "type": "object",
+      "description": "Configuration for MixinMetrics",
+      "properties": {
+        "collect_latency": {
+          "type": "boolean",
+          "description": "Collect latency metrics",
+          "default": true
+        },
+        "collect_throughput": {
+          "type": "boolean",
+          "description": "Collect throughput metrics",
+          "default": true
+        },
+        "collect_error_rates": {
+          "type": "boolean",
+          "description": "Collect error rate metrics",
+          "default": true
+        },
+        "percentiles": {
+          "type": "array",
+          "description": "Percentiles to calculate (e.g., 50, 95, 99)",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "default": [50, 95, 99]
+        },
+        "histogram_buckets": {
+          "type": "array",
+          "description": "Histogram bucket boundaries in milliseconds",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "default": [10, 50, 100, 500, 1000]
+        }
+      },
+      "additionalProperties": false
+    },
+    "MixinEventDrivenNodeConfig": {
+      "type": "object",
+      "description": "Configuration for MixinEventDrivenNode",
+      "properties": {
+        "kafka_bootstrap_servers": {
+          "type": "string",
+          "description": "Kafka bootstrap servers (supports environment variables)",
+          "minLength": 1
+        },
+        "consumer_group": {
+          "type": "string",
+          "description": "Kafka consumer group ID (supports environment variables)",
+          "minLength": 1
+        },
+        "topics": {
+          "type": "array",
+          "description": "List of Kafka topics to consume",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "auto_offset_reset": {
+          "type": "string",
+          "description": "Auto offset reset policy",
+          "enum": ["earliest", "latest", "none"],
+          "default": "latest"
+        },
+        "enable_auto_commit": {
+          "type": "boolean",
+          "description": "Enable automatic offset commits",
+          "default": true
+        }
+      },
+      "required": ["kafka_bootstrap_servers", "consumer_group", "topics"],
+      "additionalProperties": false
+    },
+    "MixinServiceRegistryConfig": {
+      "type": "object",
+      "description": "Configuration for MixinServiceRegistry (Consul integration)",
+      "properties": {
+        "consul_host": {
+          "type": "string",
+          "description": "Consul server hostname (supports environment variables)",
+          "minLength": 1
+        },
+        "consul_port": {
+          "type": "integer",
+          "description": "Consul server port",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 8500
+        },
+        "service_name": {
+          "type": "string",
+          "description": "Service name for registration (supports environment variables)",
+          "minLength": 1
+        },
+        "health_check_interval_seconds": {
+          "type": "integer",
+          "description": "Interval between Consul health checks in seconds",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 10
+        },
+        "deregister_critical_service_after": {
+          "type": "string",
+          "description": "Time after which critical service is deregistered (e.g., '30m')",
+          "pattern": "^[0-9]+[smh]$",
+          "default": "30m"
+        }
+      },
+      "required": ["consul_host", "service_name"],
+      "additionalProperties": false
+    },
+    "MixinLogDataConfig": {
+      "type": "object",
+      "description": "Configuration for MixinLogData (structured logging)",
+      "properties": {
+        "log_level": {
+          "type": "string",
+          "description": "Logging level",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+          "default": "INFO"
+        },
+        "structured": {
+          "type": "boolean",
+          "description": "Enable structured logging (JSON format)",
+          "default": true
+        },
+        "include_correlation_id": {
+          "type": "boolean",
+          "description": "Include correlation IDs in log entries",
+          "default": true
+        },
+        "redact_sensitive_fields": {
+          "type": "boolean",
+          "description": "Automatically redact sensitive fields (passwords, tokens, etc.)",
+          "default": true
+        },
+        "sensitive_field_patterns": {
+          "type": "array",
+          "description": "Regex patterns for sensitive fields to redact",
+          "items": {
+            "type": "string"
+          },
+          "default": ["password", "token", "api_key", "secret", "credential"]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    [
+      {
+        "name": "MixinHealthCheck",
+        "enabled": true,
+        "config": {
+          "check_interval_ms": 30000,
+          "timeout_seconds": 5.0,
+          "components": [
+            {
+              "name": "database",
+              "critical": true,
+              "timeout_seconds": 5.0
+            },
+            {
+              "name": "kafka_consumer",
+              "critical": false,
+              "timeout_seconds": 3.0
+            }
+          ]
+        }
+      },
+      {
+        "name": "MixinMetrics",
+        "enabled": true,
+        "config": {
+          "collect_latency": true,
+          "collect_throughput": true,
+          "percentiles": [50, 95, 99]
+        }
+      }
+    ]
+  ]
+}

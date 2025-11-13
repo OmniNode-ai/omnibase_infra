@@ -1,0 +1,89 @@
+# Aggregation Subcontract - Data Aggregation Strategies for NodeBridgeReducer
+
+subcontract_type: "aggregation"
+version: "1.0.0"
+description: "Defines aggregation strategies, functions, and windowing for stamp metadata"
+
+# === AGGREGATION TYPE CONFIGURATION ===
+aggregation_type: "multi_dimensional"  # count, sum, avg, distinct_count
+supported_types:
+  - "count"
+  - "sum"
+  - "avg"
+  - "distinct_count"
+  - "min"
+  - "max"
+
+# === AGGREGATION FUNCTIONS ===
+aggregation_functions:
+  count_stamps:
+    function_type: "count"
+    input_field: "stamp_id"
+    output_field: "total_stamps"
+    group_by: ["namespace"]
+    description: "Count total stamps per namespace"
+
+  sum_file_sizes:
+    function_type: "sum"
+    input_field: "file_size_bytes"
+    output_field: "total_size_bytes"
+    group_by: ["namespace"]
+    description: "Sum total file size per namespace"
+
+  count_file_types:
+    function_type: "distinct_count"
+    input_field: "content_type"
+    output_field: "unique_file_types"
+    group_by: ["namespace"]
+    description: "Count unique file types per namespace"
+
+  avg_file_size:
+    function_type: "avg"
+    input_field: "file_size_bytes"
+    output_field: "avg_file_size_bytes"
+    group_by: ["namespace"]
+    description: "Average file size per namespace"
+
+  workflow_status_distribution:
+    function_type: "count"
+    input_field: "workflow_state"
+    output_field: "workflow_status_counts"
+    group_by: ["namespace", "workflow_state"]
+    description: "Distribution of workflow states by namespace"
+
+# === BATCH PROCESSING ===
+batch_configuration:
+  batch_size: 100  # Items per batch
+  max_batch_size: 1000  # Maximum items per batch
+  batch_timeout_ms: 5000  # Timeout for batch collection
+  enable_auto_flush: true  # Flush incomplete batches on timeout
+
+# === WINDOWING STRATEGY ===
+windowing:
+  mode: "tumbling"  # tumbling, sliding, session
+  window_size_ms: 5000  # 5-second windows
+  window_overlap_ms: 0  # No overlap for tumbling windows
+  late_arrival_tolerance_ms: 1000  # Accept late data within 1 second
+
+# === GROUPING CONFIGURATION ===
+grouping:
+  primary_group_key: "namespace"
+  secondary_group_keys:
+    - "content_type"
+    - "workflow_state"
+  enable_nested_grouping: true
+
+# === PERFORMANCE TUNING ===
+performance:
+  enable_parallel_aggregation: true
+  max_parallel_workers: 4
+  enable_incremental_aggregation: true
+  cache_intermediate_results: true
+  cache_ttl_seconds: 300
+
+# === OUTPUT CONFIGURATION ===
+output:
+  format: "structured"  # structured, flat, hierarchical
+  include_metadata: true
+  include_timestamps: true
+  include_group_statistics: true

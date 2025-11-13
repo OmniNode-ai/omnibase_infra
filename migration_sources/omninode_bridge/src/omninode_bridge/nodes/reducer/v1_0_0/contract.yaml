@@ -1,0 +1,233 @@
+# NodeBridgeReducer Contract - Stamping Metadata Aggregation
+# ONEX v2.0 Compliant Contract with Subcontract Composition
+
+# Required fields for ModelContractReducer
+name: "bridge_reducer"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "Aggregates stamping metadata across workflows with FSM state management and PostgreSQL persistence"
+node_type: "REDUCER"
+
+# Input/Output Models (required by omnibase_core) - must be strings (model class names)
+input_model: "ModelStampMetadata"
+output_model: "ModelAggregationResult"
+
+# Legacy fields for compatibility (using main version field)
+# contract_version removed - using main version field above
+# Note: This contract uses inline definitions instead of $ref to subcontracts
+# for better self-contained contracts and easier reading
+
+node_name: bridge_reducer
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+contract_name: bridge_reducer_contract
+author: omninode_bridge team
+created_at: "2025-10-10"
+
+# === INPUT STATE (required by ONEX v2.0) ===
+# Input state for stamping metadata aggregation
+input_state:
+  type: object
+  description: "Input state for stamping metadata aggregation"
+  properties:
+    file_hash:
+      type: string
+      pattern: "^[a-f0-9]{64}$"
+      description: "BLAKE3 hash of stamped file"
+    namespace:
+      type: string
+      description: "Multi-tenant namespace"
+    stamp_metadata:
+      type: object
+      description: "Stamp metadata to aggregate"
+      properties:
+        protocol_version:
+          type: string
+        file_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    aggregation_window:
+      type: object
+      description: "Aggregation time window"
+      properties:
+        window_start:
+          type: string
+          format: date-time
+        window_end:
+          type: string
+          format: date-time
+        window_size_ms:
+          type: integer
+          minimum: 0
+
+# === OUTPUT STATE (required by ONEX v2.0) ===
+# Output state after stamping metadata aggregation
+output_state:
+  type: object
+  description: "Output state after stamping metadata aggregation"
+  properties:
+    success:
+      type: boolean
+      description: "Whether aggregation completed successfully"
+    aggregation_type:
+      type: string
+      enum: ["namespace_grouping", "time_window", "file_type_grouping", "size_buckets"]
+      description: "Type of aggregation performed"
+    total_stamps:
+      type: integer
+      minimum: 0
+      description: "Total stamps aggregated"
+    namespace_breakdown:
+      type: object
+      description: "Stamps per namespace"
+      additionalProperties:
+        type: integer
+    file_type_breakdown:
+      type: object
+      description: "Stamps per file type"
+      additionalProperties:
+        type: integer
+    time_window_stats:
+      type: object
+      description: "Aggregation time window statistics"
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        stamps_per_second:
+          type: number
+          minimum: 0.0
+    aggregation_duration_ms:
+      type: number
+      minimum: 0.0
+      description: "Time taken to perform aggregation"
+    items_per_second:
+      type: number
+      minimum: 0.0
+      description: "Aggregation throughput (items/second)"
+    fsm_state:
+      type: string
+      enum: ["pending", "processing", "completed", "failed"]
+      description: "Final FSM state after aggregation"
+    error_message:
+      type: string
+      description: "Error message if aggregation failed"
+
+# === ONEX 2.0 COMPOSITION ===
+# Subcontracts define reducer capabilities through composition
+
+aggregation:
+  aggregation_functions:
+    - "sum"
+    - "count"
+    - "unique_count"
+  aggregation_type: "namespace_grouping"
+  supported_types:
+    - namespace_grouping
+    - time_window
+    - file_type_grouping
+
+state_management:
+  enable_state_tracking: true
+  persistence_backend: "postgresql"
+
+fsm:
+  initial_state: "pending"
+  states:
+    - name: "pending"
+      transitions: ["processing"]
+    - name: "processing"
+      transitions: ["completed", "failed"]
+    - name: "completed"
+      transitions: []
+    - name: "failed"
+      transitions: []
+
+# === STREAMING CONFIGURATION ===
+# Windowed aggregation for efficient processing
+streaming:
+  mode: "windowed"
+  window_size_ms: 5000  # 5-second tumbling windows
+  batch_size: 100  # Items per batch
+  enable_late_arrival: true
+  late_arrival_tolerance_ms: 1000
+
+# === AGGREGATION STRATEGY ===
+# Primary aggregation approach
+aggregation_strategy:
+  primary_key: "namespace"  # Group by namespace for multi-tenant isolation
+  aggregation_type: "namespace_grouping"
+  supported_types:
+    - namespace_grouping
+    - time_window
+    - file_type_grouping
+    - size_buckets
+    - workflow_grouping
+    - custom
+
+# === PERFORMANCE REQUIREMENTS ===
+# Resource limits and performance targets
+execution_capabilities:
+  aggregation_throughput_items_per_second: 1000
+  max_aggregation_latency_ms: 100
+  max_concurrent_aggregations: 10
+  memory_limit_mb: 512
+  cpu_limit_cores: 2
+
+# === STATE PERSISTENCE ===
+# PostgreSQL persistence configuration
+persistence:
+  backend: "postgresql"
+  enable_transactions: true
+  enable_batching: true
+  batch_size: 50
+  batch_flush_interval_ms: 1000
+
+# === FSM STATE TRACKING ===
+# Workflow state management
+fsm_tracking:
+  enable_state_tracking: true
+  track_transitions: true
+  persist_history: true
+  enable_state_recovery: true
+  recovery_on_startup: true
+
+# === INPUT/OUTPUT VALIDATION ===
+validation:
+  input:
+    required_fields:
+      - namespace
+      - file_hash
+      - file_size
+      - content_type
+      - workflow_id
+      - workflow_state
+    optional_fields:
+      - metadata
+      - intelligence_data
+
+  output:
+    required_fields:
+      - aggregation_type
+      - total_items
+      - total_size_bytes
+      - namespaces
+      - aggregations
+      - fsm_states
+
+# === MONITORING & METRICS ===
+metrics:
+  enable_performance_metrics: true
+  enable_aggregation_metrics: true
+  enable_fsm_metrics: true
+  metrics_export_interval_ms: 10000

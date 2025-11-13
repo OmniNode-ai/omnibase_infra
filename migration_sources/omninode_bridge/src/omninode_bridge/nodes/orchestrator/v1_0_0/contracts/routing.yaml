@@ -1,0 +1,201 @@
+---
+# Routing Subcontract
+# Service discovery and routing configuration for orchestrator
+# References: NodeBridgeOrchestrator._route_to_metadata_stamping(),
+#             _route_to_onextree()
+
+type: "service_routing"
+routing_name: "orchestrator_service_routing"
+description: >-
+  Routes workflow steps to appropriate backend services
+  (MetadataStamping, OnexTree)
+
+# Service registry
+services:
+  - service_name: "metadata_stamping"
+    description: >-
+      MetadataStampingService for BLAKE3 hash generation
+      and stamping
+    service_type: "http_service"
+    # Can be upgraded to "consul" for dynamic discovery
+    discovery_method: "static"
+    endpoints:
+      primary: "http://metadata-stamping:8053"
+      fallback: "http://localhost:8053"
+    health_check:
+      enabled: true
+      endpoint: "/health"
+      interval_seconds: 30
+      timeout_seconds: 5
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 5
+      success_threshold: 2
+      timeout_seconds: 60
+      half_open_max_calls: 3
+    routing_config:
+      timeout_ms: 5000
+      max_retries: 3
+      retry_backoff_ms: 100
+      load_balancing: "round_robin"
+
+  - service_name: "onextree"
+    description: >-
+      OnexTree intelligence service for AI analysis
+    service_type: "http_service"
+    discovery_method: "static"
+    endpoints:
+      primary: "http://onextree:8058"
+      fallback: "http://localhost:8058"
+    health_check:
+      enabled: true
+      endpoint: "/health"
+      interval_seconds: 60
+      timeout_seconds: 3
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 3
+      success_threshold: 1
+      timeout_seconds: 30
+      half_open_max_calls: 2
+    routing_config:
+      # Fast timeout for intelligence service
+      timeout_ms: 500
+      # Single retry for fast failure
+      max_retries: 1
+      retry_backoff_ms: 0
+      load_balancing: "round_robin"
+      # Continue workflow if OnexTree fails
+      graceful_degradation: true
+
+  - service_name: "event_bus"
+    description: >-
+      EventBus service for event-driven coordination
+    service_type: "internal_service"
+    discovery_method: "container"
+    endpoints:
+      primary: "internal://event_bus"
+    health_check:
+      enabled: true
+      check_method: "is_initialized"
+      interval_seconds: 30
+    circuit_breaker:
+      # No circuit breaker for internal services
+      enabled: false
+    routing_config:
+      # 30s timeout for event-driven workflows
+      timeout_ms: 30000
+      event_driven: true
+
+# Routing rules
+routing_rules:
+  - rule_name: "hash_generation_routing"
+    description: >-
+      Route hash generation requests to
+      MetadataStampingService
+    trigger: "step_type == 'hash_generation'"
+    target_service: "metadata_stamping"
+    endpoint_path: "/hash"
+    http_method: "POST"
+    required_fields:
+      - "content"
+      - "namespace"
+    optional_fields:
+      - "correlation_id"
+    response_mapping:
+      file_hash: "hash"
+      hash_generation_time_ms: "execution_time_ms"
+
+  - rule_name: "intelligence_routing"
+    description: >-
+      Route intelligence requests to OnexTree
+    trigger: "step_type == 'onextree_intelligence'"
+    target_service: "onextree"
+    endpoint_path: "/intelligence"
+    http_method: "GET"
+    required_fields:
+      - "context"
+    optional_fields:
+      - "include_patterns"
+      - "include_relationships"
+      - "correlation_id"
+      - "use_cache"
+    response_mapping:
+      intelligence_data: "intelligence"
+      intelligence_time_ms: "execution_time_ms"
+    error_handling:
+      graceful_degradation: true
+      fallback_response:
+        analysis_type: "fallback"
+        confidence_score: "0.0"
+        recommendations: >-
+          OnexTree unavailable - using fallback intelligence
+
+  - rule_name: "event_driven_coordination"
+    description: >-
+      Route workflow to EventBus for event-driven execution
+    trigger: "execution_mode == 'event_driven'"
+    target_service: "event_bus"
+    action: "publish_action_event"
+    required_fields:
+      - "correlation_id"
+      - "action_type"
+      - "payload"
+    wait_for_completion: true
+    completion_timeout_seconds: 30
+    completion_events:
+      - "STATE_COMMITTED"
+      - "REDUCER_GAVE_UP"
+
+# Load balancing configuration
+load_balancing:
+  strategy: "round_robin"
+  health_check_based: true
+  prefer_local_endpoints: false
+  sticky_sessions: false
+
+# Service discovery configuration
+service_discovery:
+  method: "static"  # Options: static, consul, kubernetes
+  refresh_interval_seconds: 300
+  cache_endpoints: true
+  cache_ttl_seconds: 60
+
+# Timeout configuration
+timeouts:
+  default_timeout_ms: 5000
+  connection_timeout_ms: 3000
+  read_timeout_ms: 5000
+  write_timeout_ms: 3000
+
+# Retry configuration
+retries:
+  default_max_retries: 3
+  default_backoff_ms: 100
+  backoff_multiplier: 2
+  max_backoff_ms: 5000
+  retry_on_http_codes:
+    - 408  # Request Timeout
+    - 429  # Too Many Requests
+    - 500  # Internal Server Error
+    - 502  # Bad Gateway
+    - 503  # Service Unavailable
+    - 504  # Gateway Timeout
+
+# Circuit breaker configuration
+circuit_breaker:
+  global_enabled: true
+  failure_threshold: 5
+  success_threshold: 2
+  timeout_seconds: 60
+  half_open_max_calls: 3
+  track_per_service: true
+
+# Monitoring and metrics
+monitoring:
+  track_routing_latency: true
+  track_service_health: true
+  track_circuit_breaker_state: true
+  track_retry_attempts: true
+  alert_on_service_down: true
+  alert_threshold_failures: 5

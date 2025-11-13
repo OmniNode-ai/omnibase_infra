@@ -1,0 +1,53 @@
+---
+# Reducer node with persistence and metrics
+node_id: "reducer_persistent"
+node_type: "reducer"
+version: "v1_0_0"
+namespace: "omninode.services.aggregation"
+
+metadata:
+  name: "Persistent Reducer Node"
+  description: "Reducer with state persistence, metrics, and event publishing"
+  author: "Test Generator"
+  tags: ["reducer", "persistence", "aggregation", "state"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinMetrics"
+      config:
+        metrics_enabled: true
+        track_aggregation_count: true
+
+    - mixin_name: "MixinEventBus"
+      config:
+        event_bus_enabled: true
+
+    - mixin_name: "MixinHealthCheck"
+      config:
+        health_check_interval_seconds: 30
+
+    - mixin_name: "MixinCanonicalYAMLSerializer"
+      config:
+        yaml_output: true
+
+event_patterns:
+  subscribes:
+    - topic: "test.data.stream.item"
+      event_type: "StreamItemEvent"
+  publishes:
+    - topic: "test.data.aggregated"
+      event_type: "AggregatedResultEvent"
+
+input_schema:
+  type: "object"
+  properties:
+    stream_items:
+      type: "array"
+
+output_schema:
+  type: "object"
+  properties:
+    aggregated_result:
+      type: "object"
+    item_count:
+      type: "integer"

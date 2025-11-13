@@ -1,0 +1,564 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://omninode.dev/schemas/contract/v2.0.0",
+  "title": "ONEX v2.0 Contract Schema",
+  "description": "Complete JSON Schema for ONEX v2.0 node contracts with mixin and advanced features support",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version for contract validation",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "default": "v2.0.0"
+    },
+    "name": {
+      "type": "string",
+      "description": "Node class name (must follow NodeXxxYyy pattern)",
+      "pattern": "^Node[A-Z][a-zA-Z0-9]+(Effect|Compute|Reducer|Orchestrator)$",
+      "minLength": 1
+    },
+    "version": {
+      "$ref": "#/definitions/VersionInfo",
+      "description": "Node version (semantic versioning)"
+    },
+    "node_type": {
+      "type": "string",
+      "description": "Node type classification",
+      "enum": ["effect", "compute", "reducer", "orchestrator"]
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable node description",
+      "minLength": 10
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "List of node capabilities",
+      "items": {
+        "$ref": "#/definitions/Capability"
+      }
+    },
+    "endpoints": {
+      "type": "object",
+      "description": "Service endpoints (HTTP, gRPC, Kafka, etc.)",
+      "additionalProperties": true
+    },
+    "dependencies": {
+      "$ref": "#/definitions/Dependencies",
+      "description": "Service dependencies for dependency injection"
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Configuration parameters with defaults",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "default": {
+            "description": "Default value"
+          },
+          "description": {
+            "type": "string",
+            "description": "Configuration parameter description"
+          }
+        }
+      }
+    },
+    "mixins": {
+      "$ref": "mixins_schema.json",
+      "description": "Mixin declarations for enhanced functionality (NEW in v2.0)"
+    },
+    "advanced_features": {
+      "$ref": "advanced_features_schema.json",
+      "description": "Advanced features configuration (NEW in v2.0)"
+    },
+    "subcontracts": {
+      "type": "object",
+      "description": "Subcontract references (FSM, EventType, Aggregation, etc.)",
+      "properties": {
+        "effect": {
+          "$ref": "#/definitions/EffectSubcontract"
+        },
+        "event_type": {
+          "$ref": "#/definitions/EventTypeSubcontract"
+        },
+        "fsm": {
+          "$ref": "#/definitions/FSMSubcontract"
+        },
+        "aggregation": {
+          "$ref": "#/definitions/AggregationSubcontract"
+        },
+        "state_management": {
+          "$ref": "#/definitions/StateManagementSubcontract"
+        },
+        "routing": {
+          "$ref": "#/definitions/RoutingSubcontract"
+        }
+      },
+      "additionalProperties": false
+    },
+    "performance_targets": {
+      "type": "object",
+      "description": "Performance targets and SLAs",
+      "additionalProperties": {
+        "type": ["number", "integer", "string"]
+      }
+    },
+    "health_checks": {
+      "$ref": "#/definitions/HealthChecks",
+      "description": "Health check configuration"
+    },
+    "input_state": {
+      "type": "object",
+      "description": "Input state schema (ONEX v2.0 requirement)",
+      "additionalProperties": true
+    },
+    "output_state": {
+      "type": "object",
+      "description": "Output state schema (ONEX v2.0 requirement)",
+      "additionalProperties": true
+    },
+    "io_operations": {
+      "type": "array",
+      "description": "I/O operations for EFFECT nodes",
+      "items": {
+        "$ref": "#/definitions/IOOperation"
+      }
+    },
+    "definitions": {
+      "type": "object",
+      "description": "Model definitions (Pydantic models)",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "error_handling": {
+      "type": "object",
+      "description": "DEPRECATED: Use advanced_features instead. Kept for backward compatibility",
+      "deprecated": true,
+      "properties": {
+        "retry_policy": {
+          "type": "object",
+          "description": "DEPRECATED: Use advanced_features.retry_policy"
+        },
+        "circuit_breaker": {
+          "type": "object",
+          "description": "DEPRECATED: Use advanced_features.circuit_breaker"
+        }
+      }
+    },
+    "template": {
+      "$ref": "#/definitions/TemplateConfiguration",
+      "description": "Template configuration for code generation (Phase 3)"
+    },
+    "generation": {
+      "$ref": "#/definitions/GenerationDirectives",
+      "description": "LLM-powered generation directives (Phase 3)"
+    },
+    "quality_gates": {
+      "$ref": "#/definitions/QualityGatesConfiguration",
+      "description": "Quality gate checkpoints for validation (Phase 3)"
+    }
+  },
+  "required": ["name", "version", "node_type", "description"],
+  "additionalProperties": false,
+  "definitions": {
+    "VersionInfo": {
+      "type": "object",
+      "description": "Semantic version information",
+      "properties": {
+        "major": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "patch": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["major", "minor", "patch"],
+      "additionalProperties": false
+    },
+    "Capability": {
+      "type": "object",
+      "description": "Single node capability",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["name", "description"],
+      "additionalProperties": false
+    },
+    "Dependencies": {
+      "type": "object",
+      "description": "Service dependencies",
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ServiceDependency"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ServiceDependency": {
+      "type": "object",
+      "description": "Single service dependency",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "EffectSubcontract": {
+      "type": "object",
+      "description": "Effect subcontract for I/O operations",
+      "properties": {
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "required": ["operations"],
+      "additionalProperties": false
+    },
+    "EventTypeSubcontract": {
+      "type": "object",
+      "description": "EventType subcontract for event-driven nodes",
+      "properties": {
+        "consumed_events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "produced_events": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FSMSubcontract": {
+      "type": "object",
+      "description": "FSM subcontract for state machines",
+      "properties": {
+        "states": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "AggregationSubcontract": {
+      "type": "object",
+      "description": "Aggregation subcontract for reducers",
+      "properties": {
+        "aggregation_type": {
+          "type": "string"
+        },
+        "window_size_ms": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "StateManagementSubcontract": {
+      "type": "object",
+      "description": "StateManagement subcontract",
+      "properties": {
+        "persistence": {
+          "type": "string",
+          "enum": ["memory", "redis", "postgres"]
+        },
+        "tracked_state": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RoutingSubcontract": {
+      "type": "object",
+      "description": "Routing subcontract for orchestrators",
+      "properties": {
+        "routing_strategy": {
+          "type": "string"
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "HealthChecks": {
+      "type": "object",
+      "description": "Health check configuration",
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HealthCheckComponent"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "HealthCheckComponent": {
+      "type": "object",
+      "description": "Single health check component",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "critical": {
+          "type": "boolean",
+          "default": true
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 60.0
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "IOOperation": {
+      "type": "object",
+      "description": "I/O operation definition for EFFECT nodes",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "input_model": {
+          "type": "string",
+          "description": "Reference to input model in definitions"
+        },
+        "output_model": {
+          "type": "string",
+          "description": "Reference to output model in definitions"
+        }
+      },
+      "required": ["name", "description", "input_model", "output_model"],
+      "additionalProperties": false
+    },
+    "TemplateConfiguration": {
+      "type": "object",
+      "description": "Template configuration for code generation (Phase 3)",
+      "properties": {
+        "variant": {
+          "type": "string",
+          "enum": ["minimal", "standard", "production", "custom"],
+          "description": "Template variant to use"
+        },
+        "custom_template": {
+          "type": "string",
+          "description": "Path to custom template (required if variant is 'custom')"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Design patterns to include"
+        },
+        "pattern_configuration": {
+          "type": "object",
+          "description": "Configuration for specific patterns",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "GenerationDirectives": {
+      "type": "object",
+      "description": "LLM-powered generation directives (Phase 3)",
+      "properties": {
+        "enable_llm": {
+          "type": "boolean",
+          "description": "Enable LLM-assisted code generation"
+        },
+        "llm_tier": {
+          "type": "string",
+          "enum": ["CLOUD_FAST", "CLOUD_DEEP", "LOCAL_FAST", "LOCAL_DEEP"],
+          "description": "LLM tier for generation"
+        },
+        "quality_level": {
+          "type": "string",
+          "enum": ["minimal", "standard", "production"],
+          "description": "Quality level for generated code"
+        },
+        "fallback_strategy": {
+          "type": "string",
+          "enum": ["graceful", "template_only", "fail"],
+          "description": "Fallback strategy when LLM fails"
+        },
+        "include_patterns": {
+          "type": "boolean",
+          "description": "Include design patterns in LLM context"
+        },
+        "include_references": {
+          "type": "boolean",
+          "description": "Include reference implementations in context"
+        },
+        "max_context_size": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Maximum context size for LLM"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout for LLM operations"
+        },
+        "retry_attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of retry attempts for LLM"
+        }
+      },
+      "additionalProperties": false
+    },
+    "QualityGatesConfiguration": {
+      "type": "object",
+      "description": "Quality gate checkpoints for validation (Phase 3)",
+      "properties": {
+        "gates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/QualityGate"
+          },
+          "description": "List of quality gate checkpoints"
+        },
+        "fail_on_first_error": {
+          "type": "boolean",
+          "description": "Stop on first gate failure"
+        },
+        "collect_warnings": {
+          "type": "boolean",
+          "description": "Collect warnings from gates"
+        }
+      },
+      "additionalProperties": false
+    },
+    "QualityGate": {
+      "type": "object",
+      "description": "Single quality gate checkpoint",
+      "properties": {
+        "gate": {
+          "type": "string",
+          "description": "Gate name (e.g., 'syntax_validation', 'onex_compliance')"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether this gate is required"
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "minimum": 0.1,
+          "description": "Timeout for gate execution"
+        },
+        "config": {
+          "type": "object",
+          "description": "Gate-specific configuration",
+          "additionalProperties": true
+        }
+      },
+      "required": ["gate"],
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "v2.0.0",
+      "name": "NodeDatabaseAdapterEffect",
+      "version": {
+        "major": 1,
+        "minor": 0,
+        "patch": 0
+      },
+      "node_type": "effect",
+      "description": "Database adapter for PostgreSQL persistence",
+      "mixins": [
+        {
+          "name": "MixinHealthCheck",
+          "enabled": true,
+          "config": {
+            "check_interval_ms": 30000,
+            "components": [
+              {
+                "name": "database",
+                "critical": true,
+                "timeout_seconds": 5.0
+              }
+            ]
+          }
+        },
+        {
+          "name": "MixinMetrics",
+          "enabled": true
+        }
+      ],
+      "advanced_features": {
+        "circuit_breaker": {
+          "enabled": true,
+          "failure_threshold": 5
+        },
+        "retry_policy": {
+          "enabled": true,
+          "max_attempts": 3
+        }
+      },
+      "subcontracts": {
+        "effect": {
+          "operations": ["initialize", "shutdown", "process"]
+        }
+      }
+    }
+  ]
+}

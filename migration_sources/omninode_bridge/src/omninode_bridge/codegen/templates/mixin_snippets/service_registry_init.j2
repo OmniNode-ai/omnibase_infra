@@ -1,0 +1,6 @@
+{# Service Registry Mixin Initialization Snippet #}
+{# Usage: Include in initialize() method when MixinServiceRegistry is enabled #}
+{% if 'MixinServiceRegistry' in enabled_mixins %}
+        # Register with service registry
+        await self.register_service()
+{% endif %}

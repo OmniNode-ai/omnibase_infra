@@ -1,0 +1,8 @@
+{
+  "cursor.ai.openaiBaseUrl": "http://192.168.86.201:8001/v1",
+  "cursor.ai.openaiApiKey": "dummy-key",  // pragma: allowlist secret
+  "cursor.ai.openaiModel": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+  "cursor.ai.enabled": true,
+  "cursor.ai.maxTokens": 4000,
+  "cursor.ai.contextLength": 6000
+}

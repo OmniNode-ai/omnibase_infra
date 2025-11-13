@@ -1,0 +1,50 @@
+# ONEX v2.0 Subcontract - Registry Operations
+# Service discovery and node registration operations
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Registry operations for service discovery, node registration,
+  and health monitoring in the omninode ecosystem.
+
+operations:
+  - operation: "register_node"
+    description: "Register a new node with the registry"
+    required_fields:
+      - node_name
+      - node_type
+      - endpoint_url
+      - version
+    optional_fields:
+      - metadata
+      - health_check_endpoint
+
+  - operation: "discover_nodes"
+    description: "Discover nodes by type or capability"
+    required_fields:
+      - query_type
+    optional_fields:
+      - node_type
+      - capabilities
+      - status_filter
+
+  - operation: "heartbeat"
+    description: "Node heartbeat for health monitoring"
+    required_fields:
+      - node_id
+      - status
+    optional_fields:
+      - metrics
+
+registration_requirements:
+  - "unique_node_name"
+  - "valid_endpoint"
+  - "version_specified"
+  - "health_check_available"
+
+health_monitoring:
+  heartbeat_interval_seconds: 30
+  timeout_seconds: 90
+  retry_attempts: 3

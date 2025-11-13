@@ -1,0 +1,93 @@
+# Standard Effect Node Contract with Subcontracts
+node_id: standard_effect_node
+node_type: effect
+version: v1_0_0
+
+metadata:
+  service_name: standard_service
+  domain: test
+  description: Standard effect node with subcontracts
+  author: test_suite
+  tags:
+    - testing
+    - standard
+
+# FSM Subcontract
+subcontracts:
+  fsm:
+    states:
+      - idle
+      - processing
+      - completed
+      - failed
+    initial_state: idle
+    transitions:
+      - from: idle
+        to: processing
+        trigger: start
+        guard: null
+      - from: processing
+        to: completed
+        trigger: finish_success
+        guard: null
+      - from: processing
+        to: failed
+        trigger: finish_failure
+        guard: null
+      - from: failed
+        to: idle
+        trigger: retry
+        guard: retry_count < max_retries
+
+  # Event Type Subcontract
+  event_type:
+    events:
+      - name: processing_started
+        schema:
+          type: object
+          properties:
+            correlation_id:
+              type: string
+            started_at:
+              type: string
+              format: date-time
+      - name: processing_completed
+        schema:
+          type: object
+          properties:
+            correlation_id:
+              type: string
+            completed_at:
+              type: string
+              format: date-time
+            result:
+              type: object
+      - name: processing_failed
+        schema:
+          type: object
+          properties:
+            correlation_id:
+              type: string
+            failed_at:
+              type: string
+              format: date-time
+            error:
+              type: string
+
+input_schema:
+  type: object
+  properties:
+    operation:
+      type: string
+    data:
+      type: object
+
+output_schema:
+  type: object
+  properties:
+    success:
+      type: boolean
+    result:
+      type: object
+    metadata:
+      type: object

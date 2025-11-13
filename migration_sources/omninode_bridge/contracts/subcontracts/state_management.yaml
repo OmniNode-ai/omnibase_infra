@@ -1,0 +1,76 @@
+# ONEX v2.0 Subcontract - State Management
+# State persistence and consistency patterns
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  State management patterns for distributed systems.
+  Defines persistence strategies, consistency models, and recovery patterns.
+
+persistence_strategies:
+  - strategy: "memory"
+    description: "In-memory state (fastest, non-durable)"
+    use_cases:
+      - "temporary_buffers"
+      - "cache_data"
+    durability: false
+
+  - strategy: "local_disk"
+    description: "Local disk persistence"
+    use_cases:
+      - "checkpoints"
+      - "local_state"
+    durability: true
+    replication: false
+
+  - strategy: "database"
+    description: "Database-backed state"
+    use_cases:
+      - "long_term_storage"
+      - "shared_state"
+    durability: true
+    replication: true
+
+consistency_models:
+  - model: "eventual_consistency"
+    description: "State eventually becomes consistent"
+    latency: "low"
+    use_cases:
+      - "metrics_aggregation"
+      - "cache_updates"
+
+  - model: "strong_consistency"
+    description: "Immediate consistency across replicas"
+    latency: "higher"
+    use_cases:
+      - "financial_transactions"
+      - "critical_state"
+
+recovery_patterns:
+  - pattern: "checkpoint_recovery"
+    description: "Recover from latest checkpoint"
+    rto_seconds: 60
+
+  - pattern: "event_replay"
+    description: "Rebuild state from event log"
+    rto_seconds: 300
+
+  - pattern: "snapshot_recovery"
+    description: "Recover from state snapshot"
+    rto_seconds: 30
+
+state_types:
+  - type: "transient"
+    ttl_seconds: 3600
+    persistence: "memory"
+
+  - type: "persistent"
+    ttl_seconds: null
+    persistence: "database"
+
+  - type: "cached"
+    ttl_seconds: 1800
+    persistence: "memory"
+    eviction_policy: "lru"

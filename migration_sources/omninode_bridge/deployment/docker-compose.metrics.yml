@@ -1,0 +1,172 @@
+# Docker Compose configuration for Metrics Workflow
+# Deploys: codegen_orchestrator + codegen_metrics_reducer + store_effect
+# Purpose: ONEX-compliant metrics collection, aggregation, and storage
+# Usage: docker-compose -f deployment/docker-compose.metrics.yml --env-file .env.codegen up -d
+# Prerequisites: Base infrastructure (postgres, redpanda) must be running via docker-compose.yml
+
+name: omninode_bridge
+
+networks:
+  omninode-bridge-network:
+    external: true
+
+volumes:
+  metrics_contracts:
+    driver: local
+
+services:
+  # Codegen Orchestrator - Workflow coordination for code generation metrics
+  codegen-orchestrator:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.generic-orchestrator
+      target: ${BUILD_TARGET:-production}
+    container_name: omninode-bridge-codegen-orchestrator
+    networks:
+      - omninode-bridge-network
+    environment:
+      # Node configuration
+      NODE_TYPE: codegen_orchestrator
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-1.0.0}
+
+      # PostgreSQL configuration
+      POSTGRES_HOST: ${POSTGRES_HOST:-omninode-bridge-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.codegen}
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
+
+      # Contract path
+      CONTRACT_PATH: /contracts/codegen_orchestrator.yaml
+
+      # Service URLs for workflow coordination
+      REDUCER_URL: http://codegen-metrics-reducer:8063
+      STORE_URL: http://store-effect:8071
+
+      # Orchestrator performance tuning
+      ORCHESTRATOR_CONCURRENCY: ${ORCHESTRATOR_CONCURRENCY:-10}
+      MAX_WORKFLOW_QUEUE_SIZE: ${MAX_WORKFLOW_QUEUE_SIZE:-1000}
+      WORKFLOW_TIMEOUT_MS: ${WORKFLOW_TIMEOUT_MS:-300000}
+
+    volumes:
+      - metrics_contracts:/contracts:ro
+      - ../src:/app/src${MOUNT_MODE:-:ro}
+      - ../logs:/app/logs
+    ports:
+      - "${CODEGEN_ORCHESTRATOR_PORT:-8062}:8062"
+      - "9094:9094"  # Metrics
+    healthcheck:
+      test: ["CMD", "python", "-m", "omninode_bridge.nodes.health_check_cli", "codegen_orchestrator"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Codegen Metrics Reducer - Aggregation of code generation metrics
+  codegen-metrics-reducer:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.generic-reducer
+      target: ${BUILD_TARGET:-production}
+    container_name: omninode-bridge-codegen-metrics-reducer
+    networks:
+      - omninode-bridge-network
+    environment:
+      # Node configuration
+      NODE_TYPE: codegen_metrics_reducer
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-1.0.0}
+
+      # PostgreSQL configuration
+      POSTGRES_HOST: ${POSTGRES_HOST:-omninode-bridge-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.codegen}
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
+
+      # Contract path
+      CONTRACT_PATH: /contracts/codegen_metrics_reducer.yaml
+
+      # Service URLs
+      STORE_URL: http://store-effect:8071
+
+      # Reducer performance tuning
+      REDUCER_CONCURRENCY: ${REDUCER_CONCURRENCY:-10}
+      MAX_AGGREGATION_QUEUE_SIZE: ${MAX_AGGREGATION_QUEUE_SIZE:-5000}
+      AGGREGATION_WINDOW_SIZE_MS: ${AGGREGATION_WINDOW_SIZE_MS:-5000}
+      AGGREGATION_BATCH_SIZE: ${AGGREGATION_BATCH_SIZE:-100}
+
+    volumes:
+      - metrics_contracts:/contracts:ro
+      - ../src:/app/src${MOUNT_MODE:-:ro}
+      - ../logs:/app/logs
+    ports:
+      - "${CODEGEN_REDUCER_PORT:-8063}:8063"
+      - "9095:9095"  # Metrics
+    healthcheck:
+      test: ["CMD", "python", "-m", "omninode_bridge.nodes.health_check_cli", "codegen_metrics_reducer"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Store Effect - Persistent storage for aggregated metrics
+  store-effect:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.generic-effect
+      target: ${BUILD_TARGET:-production}
+    container_name: omninode-bridge-store-effect
+    networks:
+      - omninode-bridge-network
+    environment:
+      # Node configuration
+      NODE_TYPE: store_effect
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-1.0.0}
+
+      # PostgreSQL configuration
+      POSTGRES_HOST: ${POSTGRES_HOST:-omninode-bridge-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.codegen}
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
+
+      # Contract path
+      CONTRACT_PATH: /contracts/store_effect.yaml
+
+      # Store effect configuration
+      STORAGE_BACKEND: postgresql
+      ENABLE_COMPRESSION: ${ENABLE_COMPRESSION:-true}
+      ENABLE_DEDUPLICATION: ${ENABLE_DEDUPLICATION:-true}
+
+    volumes:
+      - metrics_contracts:/contracts:ro
+      - ../src:/app/src${MOUNT_MODE:-:ro}
+      - ../logs:/app/logs
+      - ../data:/app/data  # Optional file-based storage
+    ports:
+      - "${STORE_EFFECT_PORT:-8071}:8071"
+      - "9096:9096"  # Metrics
+    healthcheck:
+      test: ["CMD", "python", "-m", "omninode_bridge.nodes.health_check_cli", "store_effect"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped

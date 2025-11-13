@@ -1,0 +1,453 @@
+# CI/CD Pipeline for Bridge Nodes Testing
+# Comprehensive test suite for Orchestrator and Reducer nodes
+
+name: Bridge Nodes Tests
+
+on:
+  push:
+    branches: [ main, develop, 'feature/node-implementation', 'feature/*', 'fix/*' ]
+    paths:
+      - 'src/omninode_bridge/nodes/**'
+      - 'tests/unit/nodes/**'
+      - 'tests/integration/test_orchestrator_reducer_flow.py'
+      - '.github/workflows/test-bridge-nodes.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/omninode_bridge/nodes/**'
+      - 'tests/unit/nodes/**'
+      - 'tests/integration/test_orchestrator_reducer_flow.py'
+  workflow_dispatch:
+
+env:
+  # Environment configuration
+  ENVIRONMENT: test
+  LOG_LEVEL: info
+  SERVICE_VERSION: ${{ github.sha }}
+
+  # Security configuration (test values)
+  SECURITY_MODE: permissive
+  API_KEY: test-api-key-for-ci  # pragma: allowlist secret
+  JWT_SECRET: test-jwt-secret-minimum-32-characters-long-for-ci-testing  # pragma: allowlist secret
+
+  # Test database configuration
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_DATABASE: bridge_test
+  POSTGRES_USER: test
+  POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+
+  # Test Kafka configuration
+  KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+  KAFKA_WORKFLOW_TOPIC: test.omninode_bridge.onex.workflows.v1
+  KAFKA_TASK_EVENTS_TOPIC: test.omninode_bridge.onex.task-events.v1
+
+  # Performance thresholds
+  MAX_HASH_GENERATION_MS: 2
+  MAX_API_RESPONSE_MS: 10
+  MIN_SUCCESS_RATE: 0.95
+
+jobs:
+  # Unit Tests - Fast, isolated tests for orchestrator and reducer nodes
+  unit-tests:
+    name: Unit Tests (Bridge Nodes)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.12']
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: |
+          poetry install --with dev
+          poetry run pip list
+
+      - name: Create test directories
+        run: |
+          mkdir -p test-results
+          mkdir -p htmlcov-orchestrator
+          mkdir -p htmlcov-reducer
+          echo "✅ Created test directories for unit tests"
+
+      - name: Run orchestrator unit tests
+        env:
+          COVERAGE_FILE: .coverage.orchestrator
+        run: |
+          poetry run pytest tests/unit/nodes/orchestrator/ \
+            --cov=src/omninode_bridge/nodes/orchestrator \
+            --cov-report=xml:coverage-orchestrator.xml \
+            --cov-report=term-missing \
+            --cov-report=html:htmlcov-orchestrator \
+            --junit-xml=pytest-orchestrator.xml \
+            --timeout=30 \
+            --tb=short \
+            -v
+
+      - name: Run reducer unit tests
+        env:
+          COVERAGE_FILE: .coverage.reducer
+        run: |
+          poetry run pytest tests/unit/nodes/reducer/ \
+            --cov=src/omninode_bridge/nodes/reducer \
+            --cov-report=xml:coverage-reducer.xml \
+            --cov-report=term-missing \
+            --cov-report=html:htmlcov-reducer \
+            --junit-xml=pytest-reducer.xml \
+            --timeout=30 \
+            --tb=short \
+            -v
+
+      - name: Check coverage thresholds
+        run: |
+          echo "Checking orchestrator coverage..."
+          # Check only orchestrator module coverage (excluding imported modules from other nodes)
+          poetry run coverage report --data-file=.coverage.orchestrator --include="src/omninode_bridge/nodes/orchestrator/*" --fail-under=38
+          echo ""
+          echo "Checking reducer coverage..."
+          # Check only reducer module coverage (excluding imported modules from other nodes)
+          poetry run coverage report --data-file=.coverage.reducer --include="src/omninode_bridge/nodes/reducer/*" --fail-under=30
+
+      - name: Combine coverage data
+        run: |
+          poetry run coverage combine .coverage.orchestrator .coverage.reducer
+          echo "📊 Combined coverage report:"
+          poetry run coverage report --show-missing
+
+      - name: Upload unit test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results-${{ matrix.python-version }}
+          path: |
+            coverage-orchestrator.xml
+            coverage-reducer.xml
+            htmlcov-orchestrator/
+            htmlcov-reducer/
+            pytest-orchestrator.xml
+            pytest-reducer.xml
+          retention-days: 30
+
+  # Integration Tests - End-to-end workflow tests with test containers
+  integration-tests:
+    name: Integration Tests (Bridge Nodes)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: bridge_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redpanda:
+        image: redpandadata/redpanda:v24.2.7
+        options: >-
+          --health-cmd "rpk cluster info"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 5
+        ports:
+          - 9092:9092
+        env:
+          REDPANDA_AUTO_CREATE_TOPICS_ENABLED: "true"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for PostgreSQL..."
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U test; then
+              echo "✅ PostgreSQL is ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 2
+          done
+
+          echo "Waiting for Kafka..."
+          for i in {1..30}; do
+            if timeout 5 bash -c 'cat < /dev/null > /dev/tcp/localhost/9092' 2>/dev/null; then
+              echo "✅ Kafka is ready"
+              break
+            fi
+            echo "Waiting for Kafka... ($i/30)"
+            sleep 2
+          done
+
+      - name: Create directories for integration tests
+        run: |
+          mkdir -p test-results
+          mkdir -p htmlcov-integration
+          echo "✅ Created directories for integration tests"
+
+      - name: Run orchestrator-reducer integration tests
+        run: |
+          poetry run pytest tests/integration/test_orchestrator_reducer_flow.py \
+            --cov=src/omninode_bridge/nodes \
+            --cov-report=xml:coverage-integration.xml \
+            --cov-report=term-missing \
+            --junit-xml=pytest-integration.xml \
+            --timeout=60 \
+            -v \
+            --tb=short
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DATABASE: bridge_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test-password  # pragma: allowlist secret
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+
+      - name: Upload integration test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: |
+            coverage-integration.xml
+            pytest-integration.xml
+          retention-days: 30
+
+  # Performance Benchmarks - Validate performance requirements
+  performance-tests:
+    name: Performance Benchmarks (Bridge Nodes)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Create directories for performance tests
+        run: |
+          mkdir -p test-results
+          mkdir -p .benchmarks
+          echo "✅ Created directories for performance tests"
+
+      - name: Run performance benchmarks
+        run: |
+          # Run performance tests from correct directory
+          poetry run pytest tests/performance/ \
+            -m performance \
+            --benchmark-only \
+            --benchmark-json=benchmark-results.json \
+            --benchmark-autosave \
+            --benchmark-warmup=off \
+            --timeout=120 \
+            -v || exit_code=$?
+
+          # Ensure valid JSON output exists (pytest-benchmark may create empty file)
+          if [ ! -f benchmark-results.json ] || [ ! -s benchmark-results.json ]; then
+            echo '{"benchmarks": [], "datetime": "'$(date -u +%Y-%m-%dT%H:%M:%S.000000Z)'", "version": "1.0.0", "machine_info": {}, "commit_info": {}}' > benchmark-results.json
+            echo "⚠️ No performance tests executed - created empty benchmark results"
+          else
+            # Validate JSON is well-formed
+            if ! python -m json.tool benchmark-results.json > /dev/null 2>&1; then
+              echo "⚠️ Invalid JSON detected - creating valid empty benchmark results"
+              echo '{"benchmarks": [], "datetime": "'$(date -u +%Y-%m-%dT%H:%M:%S.000000Z)'", "version": "1.0.0", "machine_info": {}, "commit_info": {}}' > benchmark-results.json
+            fi
+          fi
+        continue-on-error: true
+
+      - name: Validate performance thresholds
+        if: always()
+        run: |
+          if [ -f benchmark-results.json ] && [ -s benchmark-results.json ]; then
+            echo "📊 Performance Benchmark Results:"
+            python -m json.tool benchmark-results.json || echo "⚠️ Invalid JSON format"
+
+            # Check if any benchmarks exist
+            benchmark_count=$(python -c "import json; data=json.load(open('benchmark-results.json')); print(len(data.get('benchmarks', [])))" 2>/dev/null || echo "0")
+
+            if [ "$benchmark_count" -eq "0" ]; then
+              echo "⚠️ No performance benchmarks executed"
+              echo "💡 Add @pytest.mark.performance to tests for benchmarking"
+            else
+              echo "✅ Found $benchmark_count benchmark(s)"
+              # Add custom threshold validation logic here
+            fi
+          else
+            echo "⚠️ Benchmark results file is missing or empty"
+          fi
+
+      - name: Upload performance artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-results
+          path: |
+            benchmark-results.json
+            .benchmarks/
+          retention-days: 30
+
+  # Coverage Report - Aggregate coverage across all test suites
+  coverage-report:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create directories for coverage report
+        run: |
+          mkdir -p test-results
+          mkdir -p htmlcov-combined
+          echo "✅ Created directories for coverage report"
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-test-results*'
+          merge-multiple: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install coverage tools
+        run: pip install coverage coverage-badge
+
+      - name: Generate combined coverage report
+        run: |
+          echo "📊 Coverage Summary:"
+          if [ -f coverage-orchestrator.xml ]; then
+            echo "Orchestrator Coverage:"
+            python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage-orchestrator.xml'); root = tree.getroot(); total = int(root.get('lines-valid', 0)); covered = int(root.get('lines-covered', 0)); print(f'  Lines: {covered}/{total} ({(covered/total)*100:.1f}%)' if total > 0 else '  No data')"
+          fi
+
+          if [ -f coverage-reducer.xml ]; then
+            echo "Reducer Coverage:"
+            python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage-reducer.xml'); root = tree.getroot(); total = int(root.get('lines-valid', 0)); covered = int(root.get('lines-covered', 0)); print(f'  Lines: {covered}/{total} ({(covered/total)*100:.1f}%)' if total > 0 else '  No data')"
+          fi
+
+          if [ -f coverage-integration.xml ]; then
+            echo "Integration Coverage:"
+            python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage-integration.xml'); root = tree.getroot(); total = int(root.get('lines-valid', 0)); covered = int(root.get('lines-covered', 0)); print(f'  Lines: {covered}/{total} ({(covered/total)*100:.1f}%)' if total > 0 else '  No data')"
+          fi
+
+      - name: Comment coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let comment = '## 📊 Bridge Nodes Coverage Report\n\n';
+
+            // Add coverage details for each component
+            if (fs.existsSync('coverage-orchestrator.xml')) {
+              comment += '### Orchestrator Node\n';
+              comment += '- Coverage data available in artifacts\n\n';
+            }
+
+            if (fs.existsSync('coverage-reducer.xml')) {
+              comment += '### Reducer Node\n';
+              comment += '- Coverage data available in artifacts\n\n';
+            }
+
+            comment += '\n📁 Full coverage reports available in workflow artifacts';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  # Test Summary - Overall test results summary
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, performance-tests, coverage-report]
+    if: always()
+
+    steps:
+      - name: Generate test summary
+        run: |
+          echo "# Bridge Nodes Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Unit Tests: ${{ needs.unit-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Integration Tests: ${{ needs.integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Performance Tests: ${{ needs.performance-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Coverage Report: ${{ needs.coverage-report.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Review test artifacts for detailed results" >> $GITHUB_STEP_SUMMARY
+          echo "- Check coverage reports for areas needing improvement" >> $GITHUB_STEP_SUMMARY
+          echo "- Validate performance benchmarks meet requirements" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check overall status
+        run: |
+          if [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.integration-tests.result }}" != "success" ]; then
+            echo "❌ Some tests failed. Please review the results."
+            exit 1
+          else
+            echo "✅ All tests passed!"
+          fi

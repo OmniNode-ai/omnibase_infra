@@ -1,0 +1,441 @@
+{
+  "dashboard": {
+    "title": "Code Generation Metrics & Registry",
+    "tags": ["omninode", "codegen", "metrics", "registry"],
+    "timezone": "UTC",
+    "schemaVersion": 30,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Generation Success Rate",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(codegen_generations_successful_total[5m])) / sum(rate(codegen_generations_total[5m]))",
+            "legendFormat": "Success Rate",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 0.8, "color": "yellow"},
+                {"value": 0.95, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Generations Per Hour",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(codegen_generations_total[1h])) * 3600",
+            "legendFormat": "Total",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(codegen_generations_successful_total[1h])) * 3600",
+            "legendFormat": "Successful",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(codegen_generations_failed_total[1h])) * 3600",
+            "legendFormat": "Failed",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Average Generation Duration",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "avg(codegen_generation_duration_seconds)",
+            "legendFormat": "Average",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(codegen_generation_duration_seconds_bucket[5m]))",
+            "legendFormat": "p50",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(codegen_generation_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95",
+            "refId": "C"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(codegen_generation_duration_seconds_bucket[5m]))",
+            "legendFormat": "p99",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Average Quality Score",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "avg(codegen_quality_score)",
+            "legendFormat": "Quality Score",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 0.6, "color": "yellow"},
+                {"value": 0.8, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Generations by Node Type",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "sum by (node_type) (codegen_generations_total)",
+            "legendFormat": "{{node_type}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Quality Bucket Distribution",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 8},
+        "targets": [
+          {
+            "expr": "sum by (quality_bucket) (codegen_quality_bucket_count)",
+            "legendFormat": "{{quality_bucket}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Domain Distribution",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "sum by (domain) (codegen_generations_by_domain_total)",
+            "legendFormat": "{{domain}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Cost Tracking",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 8},
+        "targets": [
+          {
+            "expr": "sum(codegen_total_cost_usd)",
+            "legendFormat": "Total Cost (USD)",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(codegen_total_tokens)",
+            "legendFormat": "Total Tokens",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD"
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Workflow State Distribution",
+        "type": "bargauge",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "sum by (state) (workflow_state_count)",
+            "legendFormat": "{{state}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "State Transition Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "rate(workflow_state_transitions_total[5m])",
+            "legendFormat": "Transitions/sec",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Registered Nodes by Type",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "sum by (node_type) (registered_nodes_total)",
+            "legendFormat": "{{node_type}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Registry Health Status",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 24},
+        "targets": [
+          {
+            "expr": "sum by (health_status) (registered_nodes_health_status)",
+            "legendFormat": "{{health_status}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "title": "Registration Success Rate",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 24},
+        "targets": [
+          {
+            "expr": "sum(rate(registrations_successful_total[5m])) / sum(rate(registrations_total[5m]))",
+            "legendFormat": "Success Rate",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 0.9, "color": "yellow"},
+                {"value": 0.99, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 14,
+        "title": "Dual Registration Consistency",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 24},
+        "targets": [
+          {
+            "expr": "consul_postgres_consistency",
+            "legendFormat": "Consistency",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 0.95, "color": "yellow"},
+                {"value": 0.99, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 15,
+        "title": "Aggregation Throughput",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+        "targets": [
+          {
+            "expr": "rate(aggregation_events_processed_total[1m])",
+            "legendFormat": "Events/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "aggregation_items_per_second",
+            "legendFormat": "Items/sec",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops"
+          }
+        }
+      },
+      {
+        "id": 16,
+        "title": "Aggregation Latency",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(aggregation_duration_seconds_bucket[5m]))",
+            "legendFormat": "p50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(aggregation_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(aggregation_duration_seconds_bucket[5m]))",
+            "legendFormat": "p99",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": {
+              "thresholds": [
+                {"value": 0.050, "color": "green"},
+                {"value": 0.100, "color": "yellow"},
+                {"value": 0.500, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 17,
+        "title": "Stage Failure Distribution",
+        "type": "bargauge",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+        "targets": [
+          {
+            "expr": "sum by (stage_name) (stage_failure_count)",
+            "legendFormat": "{{stage_name}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 18,
+        "title": "Active Workflows",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 40},
+        "targets": [
+          {
+            "expr": "sum(active_workflows_count)",
+            "legendFormat": "Active",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 19,
+        "title": "Buffer Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 40},
+        "targets": [
+          {
+            "expr": "aggregation_buffer_size",
+            "legendFormat": "Buffer Size",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "thresholds": [
+                {"value": 0, "color": "green"},
+                {"value": 5000, "color": "yellow"},
+                {"value": 10000, "color": "red"}
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "node_type",
+          "type": "query",
+          "query": "label_values(codegen_generations_total, node_type)",
+          "refresh": 1,
+          "multi": true,
+          "includeAll": true
+        },
+        {
+          "name": "domain",
+          "type": "query",
+          "query": "label_values(codegen_generations_by_domain_total, domain)",
+          "refresh": 1,
+          "multi": true,
+          "includeAll": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "Prometheus",
+          "expr": "changes(deployment_timestamp[5m]) > 0",
+          "tagKeys": "version",
+          "textFormat": "Deployment: {{version}}",
+          "iconColor": "blue"
+        }
+      ]
+    }
+  }
+}

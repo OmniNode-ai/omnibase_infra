@@ -1,0 +1,34 @@
+---
+# Error case: Invalid mixin name
+node_id: "invalid_mixin_test"
+node_type: "effect"
+version: "v1_0_0"
+namespace: "omninode.services.test"
+
+metadata:
+  name: "Invalid Mixin Test"
+  description: "Test contract with invalid mixin name for error handling validation"
+  author: "Test Generator"
+  tags: ["test", "error", "invalid"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinDoesNotExist"  # Invalid - should cause validation error
+      config:
+        some_config: "value"
+
+    - mixin_name: "MixinHealthCheck"  # Valid mixin after invalid one
+      config:
+        health_check_interval_seconds: 30
+
+input_schema:
+  type: "object"
+  properties:
+    data:
+      type: "string"
+
+output_schema:
+  type: "object"
+  properties:
+    result:
+      type: "string"

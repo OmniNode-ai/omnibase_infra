@@ -1,0 +1,571 @@
+# Linting and Type Checking for Bridge Nodes
+# Code quality validation for orchestrator and reducer nodes
+
+name: Code Quality (Lint & Type Check)
+
+on:
+  push:
+    branches: [ main, develop, 'feature/node-implementation', 'feature/*', 'fix/*' ]
+    paths:
+      - 'src/omninode_bridge/nodes/**'
+      - 'tests/unit/nodes/**'
+      - 'tests/integration/test_orchestrator_reducer_flow.py'
+      - '.github/workflows/lint-and-type-check.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/omninode_bridge/nodes/**'
+      - 'tests/unit/nodes/**'
+      - 'tests/integration/test_orchestrator_reducer_flow.py'
+  workflow_dispatch:
+
+jobs:
+  # Black - Code formatting check
+  black-formatting:
+    name: Black Formatting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Check Black formatting (Bridge Nodes)
+        run: |
+          echo "Checking orchestrator node formatting..."
+          poetry run black --check src/omninode_bridge/nodes/orchestrator/
+
+          echo "Checking reducer node formatting..."
+          poetry run black --check src/omninode_bridge/nodes/reducer/
+
+          echo "Checking bridge node tests..."
+          poetry run black --check tests/unit/nodes/
+          poetry run black --check tests/integration/test_orchestrator_reducer_flow.py
+
+      - name: Generate formatting report
+        if: failure()
+        run: |
+          echo "# ⚠️ Black Formatting Issues" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Issue:** Some files do not meet Black formatting standards." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Fix:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'poetry run black src/omninode_bridge/nodes/ tests/unit/nodes/ tests/integration/test_orchestrator_reducer_flow.py' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Verify:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'poetry run black --check src/omninode_bridge/nodes/ tests/' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "::error::Black formatting check failed. Run 'poetry run black src/omninode_bridge/nodes/ tests/' to fix."
+
+  # isort - Import sorting check
+  isort-check:
+    name: isort Import Sorting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Check import sorting (Bridge Nodes)
+        run: |
+          echo "Checking orchestrator node imports..."
+          poetry run isort --check-only src/omninode_bridge/nodes/orchestrator/
+
+          echo "Checking reducer node imports..."
+          poetry run isort --check-only src/omninode_bridge/nodes/reducer/
+
+          echo "Checking bridge node tests..."
+          poetry run isort --check-only tests/unit/nodes/
+          poetry run isort --check-only tests/integration/test_orchestrator_reducer_flow.py
+
+      - name: Generate import sorting report
+        if: failure()
+        run: |
+          echo "# ⚠️ Import Sorting Issues" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Issue:** Imports are not sorted according to isort configuration." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Fix:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'poetry run isort src/omninode_bridge/nodes/ tests/unit/nodes/ tests/integration/test_orchestrator_reducer_flow.py' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Verify:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'poetry run isort --check-only src/omninode_bridge/nodes/ tests/' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "::error::Import sorting check failed. Run 'poetry run isort src/omninode_bridge/nodes/ tests/' to fix."
+
+  # Ruff - Fast Python linter
+  ruff-linting:
+    name: Ruff Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run Ruff linting (Bridge Nodes)
+        run: |
+          echo "Linting orchestrator node..."
+          poetry run ruff check src/omninode_bridge/nodes/orchestrator/ --output-format=github
+
+          echo "Linting reducer node..."
+          poetry run ruff check src/omninode_bridge/nodes/reducer/ --output-format=github
+
+          echo "Linting bridge node tests..."
+          poetry run ruff check tests/unit/nodes/ --output-format=github
+          poetry run ruff check tests/integration/test_orchestrator_reducer_flow.py --output-format=github
+
+      - name: Generate linting report
+        if: failure()
+        run: |
+          echo "# ⚠️ Ruff Linting Issues" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Issue:** Code quality or style violations detected." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Fix (Auto):**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo '# Auto-fix safe issues' >> $GITHUB_STEP_SUMMARY
+          echo 'poetry run ruff check src/omninode_bridge/nodes/ tests/unit/nodes/ tests/integration/test_orchestrator_reducer_flow.py --fix' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo "**Fix (Manual):**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo '# Review remaining issues that require manual fixes' >> $GITHUB_STEP_SUMMARY
+          echo 'poetry run ruff check src/omninode_bridge/nodes/ tests/unit/nodes/ tests/integration/test_orchestrator_reducer_flow.py' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Common Issues:**" >> $GITHUB_STEP_SUMMARY
+          echo "- RUF012: Mutable class attributes should use \`typing.ClassVar\`" >> $GITHUB_STEP_SUMMARY
+          echo "- F401: Imported but unused" >> $GITHUB_STEP_SUMMARY
+          echo "- E501: Line too long" >> $GITHUB_STEP_SUMMARY
+          echo "::error::Ruff linting failed. Run 'poetry run ruff check src/omninode_bridge/nodes/ tests/ --fix' to auto-fix issues."
+
+  # mypy - Type checking
+  mypy-type-check:
+    name: mypy Type Checking
+    runs-on: ubuntu-latest
+    outputs:
+      exit_code: ${{ steps.run_check.outputs.exit_code }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run mypy type checking (Bridge Nodes)
+        id: run_check
+        run: |
+          EXIT_CODE=0
+
+          echo "Type checking orchestrator node..."
+          poetry run mypy src/omninode_bridge/nodes/orchestrator/ --show-error-codes --pretty || EXIT_CODE=$?
+
+          echo "Type checking reducer node..."
+          poetry run mypy src/omninode_bridge/nodes/reducer/ --show-error-codes --pretty || EXIT_CODE=$?
+
+          # Set output for summary job
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          # Always exit 0 to prevent job failure (non-blocking check)
+          exit 0
+
+      - name: Generate type checking report
+        if: always()
+        run: |
+          EXIT_CODE="${{ steps.run_check.outputs.exit_code }}"
+
+          echo "# 🔍 Type Checking Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$EXIT_CODE" == "0" ]; then
+            echo "✅ Type checking passed for all bridge nodes" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Type checking found issues (exit code: $EXIT_CODE)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ Note: Type checking is informational only and does not block the build" >> $GITHUB_STEP_SUMMARY
+
+  # Bandit - Security linting
+  bandit-security:
+    name: Bandit Security Scan
+    runs-on: ubuntu-latest
+    outputs:
+      exit_code: ${{ steps.run_check.outputs.exit_code }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run Bandit security scan (Bridge Nodes)
+        id: run_check
+        run: |
+          EXIT_CODE=0
+
+          echo "Security scanning orchestrator node..."
+          poetry run bandit -r src/omninode_bridge/nodes/orchestrator/ -f json -o bandit-orchestrator.json || EXIT_CODE=$?
+
+          echo "Security scanning reducer node..."
+          poetry run bandit -r src/omninode_bridge/nodes/reducer/ -f json -o bandit-reducer.json || EXIT_CODE=$?
+
+          # Set output for summary job
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          # Generate summary
+          echo "# 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$EXIT_CODE" == "0" ]; then
+            echo "✅ No security issues found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Security scan found issues (exit code: $EXIT_CODE)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Review the uploaded scan results for details." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Security scanning completed for bridge nodes" >> $GITHUB_STEP_SUMMARY
+
+          # Always exit 0 to prevent job failure (non-blocking check)
+          exit 0
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-results
+          path: |
+            bandit-orchestrator.json
+            bandit-reducer.json
+          retention-days: 30
+
+  # ONEX Pattern Validation - Custom validation for ONEX architecture patterns
+  onex-pattern-validation:
+    name: ONEX Pattern Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.1.3'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Validate ONEX naming conventions
+        run: |
+          echo "Validating ONEX naming conventions for bridge nodes..."
+
+          # Check orchestrator node naming
+          echo "Checking orchestrator node..."
+          if grep -r "class.*Orchestrator" src/omninode_bridge/nodes/orchestrator/v1_0_0/node.py; then
+            echo "✅ Orchestrator node naming convention validated"
+          else
+            echo "⚠️ Orchestrator node naming may not follow ONEX conventions"
+          fi
+
+          # Check reducer node naming
+          echo "Checking reducer node..."
+          if grep -r "class.*Reducer" src/omninode_bridge/nodes/reducer/v1_0_0/node.py; then
+            echo "✅ Reducer node naming convention validated"
+          else
+            echo "⚠️ Reducer node naming may not follow ONEX conventions"
+          fi
+
+      - name: Validate contract patterns
+        run: |
+          echo "Validating contract patterns..."
+
+          # Check for proper model imports
+          echo "Checking model imports..."
+          if grep -r "from.*models.*import.*Model" src/omninode_bridge/nodes/*/v1_0_0/models/*.py; then
+            echo "✅ Model import patterns validated"
+          fi
+
+          # Check for enum patterns
+          echo "Checking enum patterns..."
+          if grep -r "class Enum.*Enum" src/omninode_bridge/nodes/*/v1_0_0/models/enum_*.py; then
+            echo "✅ Enum naming patterns validated"
+          fi
+
+      - name: Generate ONEX validation report
+        if: always()
+        run: |
+          echo "# 🏗️ ONEX Pattern Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ONEX architecture pattern validation completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Validated Patterns:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Node naming conventions" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Model import patterns" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Enum naming conventions" >> $GITHUB_STEP_SUMMARY
+
+  # Summary - Aggregate all checks
+  quality-summary:
+    name: Quality Check Summary
+    runs-on: ubuntu-latest
+    needs: [black-formatting, isort-check, ruff-linting, mypy-type-check, bandit-security, onex-pattern-validation]
+    if: always()
+
+    steps:
+      - name: Generate quality summary
+        id: summary
+        run: |
+          echo "# 📊 Code Quality Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Track failures for exit code
+          FAILED_CHECKS=0
+
+          # Required checks (blocking)
+          echo "## Required Checks (Blocking):" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Black formatting
+          BLACK_STATUS="${{ needs.black-formatting.result }}"
+          if [ "$BLACK_STATUS" == "success" ]; then
+            echo "- ✅ **Black Formatting** - Passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "$BLACK_STATUS" == "failure" ]; then
+            echo "- ❌ **Black Formatting** - Failed" >> $GITHUB_STEP_SUMMARY
+            echo "  - **Fix:** \`poetry run black src/omninode_bridge/nodes/ tests/unit/nodes/ tests/integration/\`" >> $GITHUB_STEP_SUMMARY
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+          else
+            echo "- ⚠️ **Black Formatting** - $BLACK_STATUS" >> $GITHUB_STEP_SUMMARY
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+          fi
+
+          # isort
+          ISORT_STATUS="${{ needs.isort-check.result }}"
+          if [ "$ISORT_STATUS" == "success" ]; then
+            echo "- ✅ **isort Import Sorting** - Passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "$ISORT_STATUS" == "failure" ]; then
+            echo "- ❌ **isort Import Sorting** - Failed" >> $GITHUB_STEP_SUMMARY
+            echo "  - **Fix:** \`poetry run isort src/omninode_bridge/nodes/ tests/unit/nodes/ tests/integration/\`" >> $GITHUB_STEP_SUMMARY
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+          else
+            echo "- ⚠️ **isort Import Sorting** - $ISORT_STATUS" >> $GITHUB_STEP_SUMMARY
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+          fi
+
+          # Ruff
+          RUFF_STATUS="${{ needs.ruff-linting.result }}"
+          if [ "$RUFF_STATUS" == "success" ]; then
+            echo "- ✅ **Ruff Linting** - Passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "$RUFF_STATUS" == "failure" ]; then
+            echo "- ❌ **Ruff Linting** - Failed" >> $GITHUB_STEP_SUMMARY
+            echo "  - **Fix (auto):** \`poetry run ruff check src/omninode_bridge/nodes/ tests/ --fix\`" >> $GITHUB_STEP_SUMMARY
+            echo "  - **Check:** \`poetry run ruff check src/omninode_bridge/nodes/ tests/\`" >> $GITHUB_STEP_SUMMARY
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+          else
+            echo "- ⚠️ **Ruff Linting** - $RUFF_STATUS" >> $GITHUB_STEP_SUMMARY
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Optional checks (informational)
+          echo "## Optional Checks (Informational):" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # mypy
+          MYPY_STATUS="${{ needs.mypy-type-check.result }}"
+          if [ "$MYPY_STATUS" == "success" ]; then
+            echo "- ✅ **mypy Type Checking** - Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ℹ️ **mypy Type Checking** - Issues found (non-blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "  - **Check:** \`poetry run mypy src/omninode_bridge/nodes/ --show-error-codes --pretty\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Bandit
+          BANDIT_STATUS="${{ needs.bandit-security.result }}"
+          if [ "$BANDIT_STATUS" == "success" ]; then
+            echo "- ✅ **Bandit Security** - Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ℹ️ **Bandit Security** - Issues found (non-blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "  - **Check:** \`poetry run bandit -r src/omninode_bridge/nodes/ -f screen\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ONEX patterns
+          ONEX_STATUS="${{ needs.onex-pattern-validation.result }}"
+          if [ "$ONEX_STATUS" == "success" ]; then
+            echo "- ✅ **ONEX Pattern Validation** - Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ℹ️ **ONEX Pattern Validation** - Issues found (non-blocking)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Overall status
+          if [ $FAILED_CHECKS -eq 0 ]; then
+            echo "## ✅ Overall Status: PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All required code quality checks passed! The code meets the quality standards." >> $GITHUB_STEP_SUMMARY
+            echo "::notice::All code quality checks passed successfully"
+            echo "failed_checks=0" >> $GITHUB_OUTPUT
+          else
+            echo "## ❌ Overall Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**$FAILED_CHECKS required check(s) failed.** Please fix the issues below:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # List failed checks with specific details
+            if [ "$BLACK_STATUS" != "success" ]; then
+              echo "### Black Formatting Issues" >> $GITHUB_STEP_SUMMARY
+              echo "Code formatting does not meet Black standards." >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+              echo "poetry run black src/omninode_bridge/nodes/ tests/unit/nodes/ tests/integration/" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            if [ "$ISORT_STATUS" != "success" ]; then
+              echo "### Import Sorting Issues" >> $GITHUB_STEP_SUMMARY
+              echo "Imports are not properly sorted according to isort configuration." >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+              echo "poetry run isort src/omninode_bridge/nodes/ tests/unit/nodes/ tests/integration/" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            if [ "$RUFF_STATUS" != "success" ]; then
+              echo "### Ruff Linting Issues" >> $GITHUB_STEP_SUMMARY
+              echo "Code quality or style violations detected." >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+              echo "# Auto-fix safe issues" >> $GITHUB_STEP_SUMMARY
+              echo "poetry run ruff check src/omninode_bridge/nodes/ tests/ --fix" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "# View remaining issues" >> $GITHUB_STEP_SUMMARY
+              echo "poetry run ruff check src/omninode_bridge/nodes/ tests/" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "### Quick Fix (All Issues)" >> $GITHUB_STEP_SUMMARY
+            echo "Run all formatters and linters together:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "# Format and fix all issues" >> $GITHUB_STEP_SUMMARY
+            echo "poetry run black src/omninode_bridge/nodes/ tests/" >> $GITHUB_STEP_SUMMARY
+            echo "poetry run isort src/omninode_bridge/nodes/ tests/" >> $GITHUB_STEP_SUMMARY
+            echo "poetry run ruff check src/omninode_bridge/nodes/ tests/ --fix" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "# Verify fixes" >> $GITHUB_STEP_SUMMARY
+            echo "poetry run black --check src/omninode_bridge/nodes/ tests/" >> $GITHUB_STEP_SUMMARY
+            echo "poetry run isort --check-only src/omninode_bridge/nodes/ tests/" >> $GITHUB_STEP_SUMMARY
+            echo "poetry run ruff check src/omninode_bridge/nodes/ tests/" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+            echo "::error::$FAILED_CHECKS required code quality check(s) failed. See job summary for details."
+            echo "failed_checks=$FAILED_CHECKS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check overall status
+        if: always()
+        run: |
+          FAILED_CHECKS="${{ steps.summary.outputs.failed_checks }}"
+
+          if [ "$FAILED_CHECKS" == "0" ]; then
+            echo "✅ All code quality checks passed!"
+            exit 0
+          else
+            echo "❌ $FAILED_CHECKS required code quality check(s) failed"
+            echo "📋 See the job summary for detailed fix instructions"
+            echo "🔧 Quick fix: Run black, isort, and ruff with --fix flag"
+            exit 1
+          fi

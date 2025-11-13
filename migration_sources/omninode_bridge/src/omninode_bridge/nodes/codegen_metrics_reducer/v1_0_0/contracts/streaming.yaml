@@ -1,0 +1,7 @@
+# Streaming Subcontract
+# Event streaming configuration for real-time metrics aggregation
+
+enabled: true
+batch_size: 100
+window_size_ms: 5000
+backpressure_strategy: "drop_oldest"

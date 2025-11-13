@@ -1,0 +1,544 @@
+# ONEX v2.0 Contract - Code Generation Metrics Reducer
+# Reducer node for streaming aggregation of code generation metrics
+
+schema_version: "2.0"
+contract_version: "1.0.0"
+last_updated: "2025-10-24"
+
+# Node Identity
+node_identity:
+  name: "codegen_metrics"
+  display_name: "Code Generation Metrics Reducer"
+  node_type: "reducer"
+  version: "1.0.0"
+  description: |
+    Reducer node for streaming aggregation of code generation metrics.
+    Consumes generation events from Kafka, performs real-time aggregation,
+    and maintains time-windowed metrics for performance analysis and cost tracking.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-24"
+  tags:
+    - "metrics-aggregation"
+    - "streaming-reducer"
+    - "performance-analysis"
+    - "cost-tracking"
+    - "kafka-consumer"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/architecture/ARCHITECTURE.md"
+    type: "architecture"
+    description: "System architecture and reducer patterns"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 50       # <50ms per aggregation operation
+    max_ms: 100         # Max aggregation latency
+  throughput:
+    target_events_per_second: 1000
+    max_buffer_size: 10000
+  memory_usage:
+    target_mb: 256
+    max_mb: 512
+  aggregation_latency:
+    target_ms: 100      # <100ms for 1000 items
+    max_ms: 500
+
+# Aggregation Strategy
+aggregation_strategy:
+  type: "streaming"
+  window_types:
+    - name: "hourly"
+      duration_seconds: 3600
+      description: "Hourly aggregation window"
+
+    - name: "daily"
+      duration_seconds: 86400
+      description: "Daily aggregation window"
+
+    - name: "weekly"
+      duration_seconds: 604800
+      description: "Weekly aggregation window"
+
+    - name: "monthly"
+      duration_seconds: 2592000
+      description: "Monthly aggregation window"
+
+  aggregation_functions:
+    - name: "total_generations"
+      function: "count"
+      description: "Total number of generation workflows"
+
+    - name: "successful_generations"
+      function: "count_where"
+      condition: "success == true"
+      description: "Total successful generations"
+
+    - name: "failed_generations"
+      function: "count_where"
+      condition: "success == false"
+      description: "Total failed generations"
+
+    - name: "avg_duration_seconds"
+      function: "avg"
+      field: "total_duration_seconds"
+      description: "Average workflow duration"
+
+    - name: "p50_duration_seconds"
+      function: "percentile"
+      field: "total_duration_seconds"
+      percentile: 0.50
+      description: "Median workflow duration"
+
+    - name: "p95_duration_seconds"
+      function: "percentile"
+      field: "total_duration_seconds"
+      percentile: 0.95
+      description: "95th percentile workflow duration"
+
+    - name: "p99_duration_seconds"
+      function: "percentile"
+      field: "total_duration_seconds"
+      percentile: 0.99
+      description: "99th percentile workflow duration"
+
+    - name: "avg_quality_score"
+      function: "avg"
+      field: "quality_score"
+      description: "Average quality score"
+
+    - name: "total_tokens"
+      function: "sum"
+      field: "total_tokens"
+      description: "Total LLM tokens consumed"
+
+    - name: "total_cost_usd"
+      function: "sum"
+      field: "total_cost_usd"
+      description: "Total generation cost in USD"
+
+    - name: "stage_failure_counts"
+      function: "count_by_group"
+      group_by: "failed_stage"
+      description: "Failures grouped by stage"
+
+  grouping:
+    - field: "node_type"
+      description: "Group by node type (effect, orchestrator, reducer, compute)"
+
+    - field: "window_type"
+      description: "Group by time window"
+
+# Input State (Stream)
+input_state:
+  type: "stream"
+  event_types:
+    - event_type: "NODE_GENERATION_STARTED"
+      schema:
+        type: "object"
+        required:
+          - event_type
+          - workflow_id
+          - timestamp
+        properties:
+          event_type:
+            type: "string"
+            const: "NODE_GENERATION_STARTED"
+          workflow_id:
+            type: "string"
+            format: "uuid"
+          node_type:
+            type: "string"
+            enum: ["effect", "orchestrator", "reducer", "compute"]
+          timestamp:
+            type: "string"
+            format: "date-time"
+
+    - event_type: "NODE_GENERATION_STAGE_COMPLETED"
+      schema:
+        type: "object"
+        required:
+          - event_type
+          - workflow_id
+          - stage_name
+          - stage_number
+          - duration_ms
+          - success
+        properties:
+          event_type:
+            type: "string"
+            const: "NODE_GENERATION_STAGE_COMPLETED"
+          workflow_id:
+            type: "string"
+            format: "uuid"
+          stage_name:
+            type: "string"
+          stage_number:
+            type: "integer"
+            minimum: 1
+            maximum: 8
+          duration_ms:
+            type: "integer"
+            minimum: 0
+          success:
+            type: "boolean"
+          tokens_consumed:
+            type: "integer"
+          cost_usd:
+            type: "number"
+          timestamp:
+            type: "string"
+            format: "date-time"
+
+    - event_type: "NODE_GENERATION_COMPLETED"
+      schema:
+        type: "object"
+        required:
+          - event_type
+          - workflow_id
+          - total_duration_seconds
+          - quality_score
+        properties:
+          event_type:
+            type: "string"
+            const: "NODE_GENERATION_COMPLETED"
+          workflow_id:
+            type: "string"
+            format: "uuid"
+          node_type:
+            type: "string"
+          total_duration_seconds:
+            type: "number"
+            minimum: 0
+          quality_score:
+            type: "number"
+            minimum: 0.0
+            maximum: 1.0
+          total_tokens:
+            type: "integer"
+            minimum: 0
+          total_cost_usd:
+            type: "number"
+            minimum: 0.0
+          timestamp:
+            type: "string"
+            format: "date-time"
+
+    - event_type: "NODE_GENERATION_FAILED"
+      schema:
+        type: "object"
+        required:
+          - event_type
+          - workflow_id
+          - failed_stage
+        properties:
+          event_type:
+            type: "string"
+            const: "NODE_GENERATION_FAILED"
+          workflow_id:
+            type: "string"
+            format: "uuid"
+          node_type:
+            type: "string"
+          failed_stage:
+            type: "string"
+          error_message:
+            type: "string"
+          timestamp:
+            type: "string"
+            format: "date-time"
+
+# Output State (Aggregated Metrics)
+output_state:
+  type: "object"
+  required:
+    - aggregation_id
+    - window_type
+    - window_start
+    - window_end
+  properties:
+    aggregation_id:
+      type: "string"
+      format: "uuid"
+      description: "Unique aggregation identifier"
+    window_type:
+      type: "string"
+      enum: ["hourly", "daily", "weekly", "monthly"]
+      description: "Aggregation time window"
+    window_start:
+      type: "string"
+      format: "date-time"
+      description: "Window start timestamp"
+    window_end:
+      type: "string"
+      format: "date-time"
+      description: "Window end timestamp"
+    total_generations:
+      type: "integer"
+      minimum: 0
+      description: "Total generation workflows in window"
+    successful_generations:
+      type: "integer"
+      minimum: 0
+      description: "Successful generations"
+    failed_generations:
+      type: "integer"
+      minimum: 0
+      description: "Failed generations"
+    success_rate:
+      type: "number"
+      minimum: 0.0
+      maximum: 1.0
+      description: "Success rate (successful / total)"
+    duration_statistics:
+      type: "object"
+      properties:
+        avg_seconds:
+          type: "number"
+        p50_seconds:
+          type: "number"
+        p95_seconds:
+          type: "number"
+        p99_seconds:
+          type: "number"
+        min_seconds:
+          type: "number"
+        max_seconds:
+          type: "number"
+    quality_statistics:
+      type: "object"
+      properties:
+        avg_score:
+          type: "number"
+        min_score:
+          type: "number"
+        max_score:
+          type: "number"
+    cost_statistics:
+      type: "object"
+      properties:
+        total_tokens:
+          type: "integer"
+        total_cost_usd:
+          type: "number"
+        avg_tokens_per_generation:
+          type: "number"
+        avg_cost_per_generation:
+          type: "number"
+    stage_statistics:
+      type: "object"
+      description: "Per-stage breakdown"
+      additionalProperties:
+        type: "object"
+        properties:
+          total_executions:
+            type: "integer"
+          avg_duration_ms:
+            type: "number"
+          failure_count:
+            type: "integer"
+    node_type_breakdown:
+      type: "object"
+      description: "Breakdown by node type"
+      additionalProperties:
+        type: "integer"
+    aggregation_metadata:
+      type: "object"
+      properties:
+        aggregation_duration_ms:
+          type: "integer"
+        events_processed:
+          type: "integer"
+        items_per_second:
+          type: "number"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "contracts/subcontracts/aggregation_strategy.yaml"
+    - "contracts/subcontracts/streaming_processing.yaml"
+    - "contracts/subcontracts/state_management.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+    - name: "postgresql"
+      type: "database"
+      required: false
+      description: "Optional persistence for aggregated metrics"
+  libraries:
+    - name: "aiokafka"
+      version: ">=0.11.0"
+      description: "Async Kafka consumer"
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation"
+    - name: "numpy"
+      version: ">=1.24.0"
+      description: "Statistical computations"
+
+# Kafka Integration
+kafka:
+  consumer_topics:
+    - "dev.omninode-bridge.codegen.generation-started.v1"
+    - "dev.omninode-bridge.codegen.stage-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-failed.v1"
+  producer_topics:
+    - "dev.omninode-bridge.codegen.metrics-recorded.v1"
+  consumer_group: "codegen-metrics-reducer"
+  event_envelope: "OnexEnvelopeV1"
+  batch_size: 100
+  auto_commit: false
+  max_poll_records: 1000
+
+# State Management
+state_management:
+  persistence: "memory"
+  state_types:
+    - name: "active_workflows"
+      description: "In-flight workflow tracking"
+      ttl_seconds: 86400  # 24 hours - supports multi-day code generation workflows
+
+    - name: "window_aggregations"
+      description: "Time-windowed aggregations"
+      ttl_seconds: 2592000  # 30 days
+
+    - name: "stage_metrics"
+      description: "Per-stage performance metrics"
+      ttl_seconds: 604800   # 7 days
+
+  checkpoint_interval_seconds: 60
+  snapshot_interval_seconds: 300
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    timeout_ms: 10000
+  fallback_strategy: "skip_event"
+  error_codes:
+    - code: "DESERIALIZATION_ERROR"
+      description: "Failed to deserialize event"
+      severity: "warning"
+      action: "skip_event"
+    - code: "AGGREGATION_ERROR"
+      description: "Aggregation computation failed"
+      severity: "error"
+      action: "retry"
+    - code: "STATE_CORRUPTION"
+      description: "Aggregation state corrupted"
+      severity: "critical"
+      action: "reset_state"
+
+# Quality Gates
+quality_gates:
+  - name: "aggregation_accuracy"
+    description: "Verify aggregation calculations accurate"
+    threshold: 0.99
+
+  - name: "throughput_target"
+    description: "Verify >1000 events/second"
+    threshold: 1000
+
+  - name: "latency_target"
+    description: "Verify <100ms aggregation latency"
+    threshold: 100
+
+# Health Checks
+health_checks:
+  - name: "kafka_consumer"
+    type: "network"
+    interval_seconds: 60
+    timeout_seconds: 5
+    critical: true
+
+  - name: "aggregation_buffer"
+    type: "internal"
+    interval_seconds: 30
+    critical: false
+
+  - name: "state_consistency"
+    type: "internal"
+    interval_seconds: 120
+    critical: true
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 90
+    required: true
+    critical_paths:
+      - "event_processing"
+      - "aggregation_logic"
+      - "statistical_calculations"
+      - "state_management"
+
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "end_to_end_aggregation"
+      - "time_window_rollover"
+      - "high_throughput_stress"
+      - "event_ordering"
+
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "throughput"
+        target: 1000
+        unit: "events_per_second"
+      - metric: "aggregation_latency"
+        target: 100
+        unit: "milliseconds"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "events_processed_total"
+      type: "counter"
+      description: "Total events processed by type"
+      labels: ["event_type"]
+
+    - name: "aggregation_duration_seconds"
+      type: "histogram"
+      description: "Aggregation computation duration"
+      buckets: [0.01, 0.05, 0.1, 0.5, 1.0]
+
+    - name: "aggregation_buffer_size"
+      type: "gauge"
+      description: "Current aggregation buffer size"
+
+    - name: "items_per_second"
+      type: "gauge"
+      description: "Current aggregation throughput"
+
+    - name: "window_aggregations_active"
+      type: "gauge"
+      description: "Number of active time windows"
+
+    - name: "aggregation_errors_total"
+      type: "counter"
+      description: "Total aggregation errors by type"
+      labels: ["error_type"]
+
+  logs:
+    level: "INFO"
+    structured: true
+    log_aggregation_results: true
+
+  traces:
+    enabled: true
+    sampling_rate: 0.1
+    trace_aggregation_operations: true

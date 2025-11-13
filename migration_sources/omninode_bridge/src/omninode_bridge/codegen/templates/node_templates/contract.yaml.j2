@@ -1,0 +1,116 @@
+# {{ class_name }} Contract - ONEX v2.0 Compliant
+# Generated: {{ generation_timestamp }}
+
+# Required fields for ModelContract{{ node_type | capitalize }}
+name: "{{ service_name }}"
+version:
+  major: {{ version_dict.major }}
+  minor: {{ version_dict.minor }}
+  patch: {{ version_dict.patch }}
+description: "{{ description }}"
+node_type: "{{ node_type | upper }}"
+
+# Input/Output Models (required by omnibase_core) - must be strings (model class names)
+input_model: "{{ input_model }}"
+output_model: "{{ output_model }}"
+
+# State schemas (required by ONEX v2.0)
+input_state:
+  $ref: "contracts/{{ service_name }}-input-state.yaml"
+output_state:
+  $ref: "contracts/{{ service_name }}-output-state.yaml"
+
+# Tool specification (required by omnibase_core)
+tool_specification:
+  tool_name: "{{ service_name }}"
+  main_tool_class: "{{ package_path }}.{{ class_name }}"
+
+{% if node_type == 'effect' %}
+# IO operations for EFFECT node (required)
+# Each operation follows ModelIOOperationConfig schema
+io_operations:
+{% for operation in io_operations %}
+  - operation_type: "{{ operation.operation_type | default('database_query') }}"
+    atomic: {{ operation.atomic | default(true) }}
+    timeout_seconds: {{ operation.timeout_seconds | default(30) }}
+    validation_enabled: {{ operation.validation_enabled | default(true) }}
+{% endfor %}
+{% endif %}
+
+{% if mixins %}
+# Mixin declarations
+mixins:
+{% for mixin in mixins %}
+  - name: "{{ mixin.name }}"
+    enabled: {{ mixin.enabled }}
+    config:
+{% for key, value in mixin.config.items() %}
+      {{ key }}: {{ value | tojson }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+
+{% if advanced_features %}
+# Advanced features (NodeEffect built-ins)
+advanced_features:
+{% if advanced_features.circuit_breaker %}
+  circuit_breaker:
+    services:
+{% for service_name, cb_config in advanced_features.circuit_breaker.services.items() %}
+      {{ service_name }}:
+        failure_threshold: {{ cb_config.failure_threshold }}
+        recovery_timeout_ms: {{ cb_config.recovery_timeout_ms }}
+{% endfor %}
+{% endif %}
+{% if advanced_features.retry_policy %}
+  retry_policy:
+    max_attempts: {{ advanced_features.retry_policy.max_attempts }}
+    initial_delay_ms: {{ advanced_features.retry_policy.initial_delay_ms }}
+    max_delay_ms: {{ advanced_features.retry_policy.max_delay_ms }}
+    exponential_base: {{ advanced_features.retry_policy.exponential_base }}
+{% endif %}
+{% endif %}
+
+# Legacy fields for compatibility
+node_name: {{ service_name }}
+node_version:
+  major: {{ version_dict.major }}
+  minor: {{ version_dict.minor }}
+  patch: {{ version_dict.patch }}
+
+contract_name: {{ service_name }}_contract
+author: OmniNode Code Generation
+created_at: "{{ generation_timestamp }}"
+
+# Core Metadata
+metadata:
+  domain: "{{ domain }}"
+  generated: true
+  generated_at: "{{ generation_timestamp }}"
+  tags:
+{% for feature in features %}
+    - "{{ feature }}"
+{% endfor %}
+
+# Operations supported by this node
+operations:
+{% for operation in operations %}
+  - "{{ operation }}"
+{% endfor %}
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: {{ performance_requirements.target_execution_time_ms | default(100) }}
+    max_ms: {{ performance_requirements.max_execution_time_ms | default(1000) }}
+  memory_usage:
+    target_mb: {{ performance_requirements.target_memory_mb | default(128) }}
+    max_mb: {{ performance_requirements.max_memory_mb | default(512) }}
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: {{ testing.unit_test_coverage | default(85) }}
+    required: true
+  integration_tests:
+    required: {{ testing.integration_tests_required | default(true) }}

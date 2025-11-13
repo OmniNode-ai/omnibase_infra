@@ -1,0 +1,93 @@
+# Multi-stage optimized Dockerfile for OmniNode Bridge Model Metrics Service
+# Stage 1: Builder stage for dependencies and compilation
+FROM python:3.12-slim as builder
+
+# Install build dependencies in builder stage
+# BuildKit cache mounts persist APT cache between builds for faster subsequent builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libsnappy-dev \
+    git \
+    curl
+
+# Install Poetry in builder stage
+RUN pip install --no-cache-dir poetry==2.1.3
+
+# Set up Poetry configuration
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VENV_IN_PROJECT=1 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache \
+    POETRY_VENV_PATH=/app/.venv
+
+WORKDIR /app
+
+# Copy Poetry configuration files
+COPY pyproject.toml poetry.lock* ./
+
+# Install dependencies in virtual environment
+# BuildKit cache mount persists Poetry cache between builds (wheels, metadata) for faster installs
+RUN --mount=type=cache,target=/tmp/poetry_cache \
+    poetry install --without dev --no-root
+
+# Copy source code and install application
+COPY src/ ./src/
+RUN poetry install --without dev
+
+# Stage 2: Runtime stage with minimal dependencies
+FROM python:3.12-slim as runtime
+
+# Install only runtime dependencies
+# BuildKit cache mounts persist APT cache between builds for faster subsequent builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libsnappy1v5 \
+    curl \
+    ca-certificates \
+    && apt-get autoremove -y \
+    && apt-get clean
+
+# Create non-root user for security
+RUN groupadd --gid 1002 modelmetrics && \
+    useradd --uid 1002 --gid modelmetrics --shell /bin/bash --create-home modelmetrics
+
+# Set working directory
+WORKDIR /app
+
+# Copy virtual environment from builder stage
+COPY --from=builder --chown=modelmetrics:modelmetrics /app/.venv /app/.venv
+
+# Copy source code from builder stage
+COPY --from=builder --chown=modelmetrics:modelmetrics /app/src /app/src
+
+# Create logs directory with proper permissions
+RUN mkdir -p /app/logs && chown -R modelmetrics:modelmetrics /app/logs
+
+# Set up environment
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH=/app/src \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Switch to non-root user
+USER modelmetrics
+
+# Expose the service port
+EXPOSE 8005
+
+# Health check with proper user context
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+    CMD curl -f http://localhost:8005/ || exit 1
+
+# Run the Model Metrics service
+CMD ["python", "-m", "omninode_bridge.model_metrics_main"]
+
+# Add metadata labels for security scanning and documentation
+LABEL org.opencontainers.image.title="OmniNode Bridge Model Metrics" \
+      org.opencontainers.image.description="AI Lab integration and model performance tracking for OmniNode Bridge" \
+      org.opencontainers.image.vendor="OmniNode AI" \
+      org.opencontainers.image.version="0.2.0" \
+      org.opencontainers.image.source="https://github.com/OmniNode-ai/omninode_bridge" \
+      org.opencontainers.image.licenses="MIT"

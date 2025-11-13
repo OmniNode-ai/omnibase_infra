@@ -1,0 +1,143 @@
+# Multi-stage Dockerfile for Generic Effect Nodes
+# ONEX-compliant generic effect nodes (database_adapter_effect, store_effect, etc.)
+# Supports dynamic contract loading via volume mounts
+ARG PYTHON_VERSION=3.12
+
+# ============================================================================
+# Base Stage - System dependencies and Poetry installation
+# ============================================================================
+FROM python:${PYTHON_VERSION}-slim as base
+
+# Install system dependencies
+# BuildKit cache mounts persist APT cache between builds for faster subsequent builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y \
+    # Build tools for Python packages
+    build-essential \
+    gcc \
+    g++ \
+    # PostgreSQL client library
+    libpq-dev \
+    # Kafka client dependencies
+    librdkafka-dev \
+    # Git for installing dependencies from Git repositories
+    git \
+    # Utilities
+    curl \
+    ca-certificates
+
+# Install Poetry for dependency management
+ENV POETRY_VERSION=1.7.1
+RUN pip install --no-cache-dir poetry==${POETRY_VERSION}
+
+# Configure Poetry
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VENV_IN_PROJECT=0 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
+WORKDIR /app
+
+# ============================================================================
+# Development Stage - Full development environment
+# ============================================================================
+FROM base as development
+
+# Copy Poetry configuration
+COPY pyproject.toml ./
+
+# Copy poetry.lock if it exists (using wildcard pattern to avoid error if missing)
+COPY poetry.loc[k] ./poetry.lock* ./
+
+# Generate poetry.lock if it doesn't exist, then install dependencies
+# BuildKit cache mount persists Poetry cache between builds (wheels, metadata) for faster installs
+RUN --mount=type=cache,target=/tmp/poetry_cache \
+    if [ ! -f poetry.lock ]; then \
+        echo "poetry.lock not found, generating from pyproject.toml..."; \
+        poetry lock --no-update; \
+    fi && \
+    poetry install --with dev
+
+# Copy source code
+COPY . .
+
+# Copy validation script
+COPY deployment/scripts/validate-node-type.sh /usr/local/bin/validate-node-type.sh
+
+# Create non-root user for development
+RUN useradd --create-home --shell /bin/bash effectnode && \
+    chown -R effectnode:effectnode /app && \
+    # Create directories for contracts, logs, and data
+    mkdir -p /contracts /app/logs /app/data && \
+    chown -R effectnode:effectnode /contracts /app/logs /app/data && \
+    # Make validation script executable
+    chmod +x /usr/local/bin/validate-node-type.sh
+
+USER effectnode
+
+# Create contract mount point
+VOLUME ["/contracts"]
+
+# Expose port for metrics (configurable via environment)
+EXPOSE 9093
+
+# Development command with hot reload
+# NODE_TYPE environment variable specifies which effect node to run
+# Valid values: database_adapter_effect, store_effect
+ENV PYTHONPATH=/app/src
+CMD ["sh", "-c", "/usr/local/bin/validate-node-type.sh && poetry run python -m omninode_bridge.nodes.${NODE_TYPE}.v1_0_0.node --reload --log-level debug"]
+
+# ============================================================================
+# Production Stage - Optimized production image
+# ============================================================================
+FROM base as production
+
+# Copy Poetry configuration and README (required by pyproject.toml)
+COPY pyproject.toml README.md ./
+
+# Copy poetry.lock if it exists (using wildcard pattern to avoid error if missing)
+COPY poetry.loc[k] ./poetry.lock* ./
+
+# Copy source code BEFORE poetry install (required for local package installation)
+COPY src/ ./src/
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+
+# Copy validation script
+COPY deployment/scripts/validate-node-type.sh /usr/local/bin/validate-node-type.sh
+
+# Generate poetry.lock if it doesn't exist, then install dependencies
+# BuildKit cache mount persists Poetry cache between builds (wheels, metadata) for faster installs
+RUN --mount=type=cache,target=/tmp/poetry_cache \
+    if [ ! -f poetry.lock ]; then \
+        echo "poetry.lock not found, generating from pyproject.toml..."; \
+        poetry lock --no-update; \
+    fi && \
+    poetry install --only=main
+
+# Create non-root user for production
+RUN useradd --create-home --shell /bin/bash effectnode && \
+    chown -R effectnode:effectnode /app && \
+    # Create directories for contracts, logs, and data
+    mkdir -p /contracts /app/logs /app/data && \
+    chown -R effectnode:effectnode /contracts /app/logs /app/data && \
+    # Make validation script executable
+    chmod +x /usr/local/bin/validate-node-type.sh
+
+USER effectnode
+
+# Create contract mount point
+VOLUME ["/contracts"]
+
+# Expose port for metrics
+EXPOSE 9093
+
+# Health check using ONEX health check mixin
+# Verifies node is running and all critical components are healthy
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD /usr/local/bin/validate-node-type.sh && python -m omninode_bridge.nodes.health_check_cli ${NODE_TYPE}
+
+# Production command
+# NODE_TYPE environment variable specifies which effect node to run
+CMD ["sh", "-c", "/usr/local/bin/validate-node-type.sh && poetry run python -m omninode_bridge.nodes.${NODE_TYPE}.v1_0_0.node --log-level info"]

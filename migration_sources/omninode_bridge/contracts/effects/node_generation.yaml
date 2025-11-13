@@ -1,0 +1,427 @@
+# ONEX v2.0 Contract - Node Generation Effect
+# Effect node for ONEX node code generation operations
+
+schema_version: "2.0"
+contract_version: "1.0.0"
+last_updated: "2025-10-24"
+
+# Node Identity
+node_identity:
+  name: "node_generation"
+  display_name: "Node Generation Effect"
+  node_type: "effect"
+  version: "1.0.0"
+  description: |
+    Effect node for ONEX node code generation with AI assistance.
+    Generates complete ONEX-compliant nodes (Effect, Compute, Reducer, Orchestrator)
+    with contract-first architecture, Pydantic models, and comprehensive testing.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-24"
+  tags:
+    - "code-generation"
+    - "onex-nodes"
+    - "ai-assisted"
+    - "contract-first"
+    - "effect-node"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/ONEX_ARCHITECTURE_PATTERNS_COMPLETE.md"
+    type: "reference"
+    description: "Complete ONEX architecture patterns"
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation guide"
+  - path: "docs/LLAMAINDEX_WORKFLOWS_GUIDE.md"
+    type: "guide"
+    description: "LlamaIndex workflow patterns"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 10000    # 10 seconds per generation stage
+    max_ms: 30000       # 30 seconds max per stage
+  memory_usage:
+    target_mb: 512
+    max_mb: 2048
+  throughput:
+    target_generations_per_minute: 6
+    max_concurrent_generations: 5
+  quality_score:
+    target_minimum: 0.80
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - generation_stage
+    - prompt
+    - node_type
+  properties:
+    generation_stage:
+      type: "string"
+      enum:
+        - "contract_generation"
+        - "model_generation"
+        - "node_implementation"
+        - "test_generation"
+        - "integration_generation"
+        - "documentation_generation"
+      description: "Current generation stage"
+    prompt:
+      type: "string"
+      description: "Natural language description or context"
+      minLength: 10
+      maxLength: 10000
+    node_type:
+      type: "string"
+      enum: ["effect", "compute", "reducer", "orchestrator"]
+      description: "Type of ONEX node to generate"
+    node_name:
+      type: "string"
+      pattern: "^[a-z][a-z0-9_]*$"
+      description: "Node name in snake_case"
+    output_directory:
+      type: "string"
+      description: "Target directory for generated files"
+      default: "./generated_nodes"
+    previous_stage_output:
+      type: "object"
+      description: "Output from previous generation stage"
+    intelligence_context:
+      type: "object"
+      description: "Intelligence gathered from RAG queries"
+    enable_quorum:
+      type: "boolean"
+      default: false
+      description: "Enable AI quorum validation"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Workflow correlation ID"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - success
+    - generation_stage
+    - files_generated
+    - execution_time_ms
+  properties:
+    success:
+      type: "boolean"
+      description: "Generation success status"
+    generation_stage:
+      type: "string"
+      description: "Stage that was completed"
+    files_generated:
+      type: "array"
+      description: "List of generated file paths"
+      items:
+        type: "object"
+        properties:
+          path:
+            type: "string"
+          content_preview:
+            type: "string"
+          file_type:
+            type: "string"
+          size_bytes:
+            type: "integer"
+    stage_output:
+      type: "object"
+      description: "Stage-specific output data"
+      properties:
+        contract_spec:
+          type: "object"
+        model_definitions:
+          type: "array"
+        implementation_code:
+          type: "string"
+        test_code:
+          type: "string"
+    quality_metrics:
+      type: "object"
+      description: "Quality assessment metrics"
+      properties:
+        quality_score:
+          type: "number"
+          minimum: 0.0
+          maximum: 1.0
+        onex_compliance:
+          type: "boolean"
+        type_safety_score:
+          type: "number"
+        test_coverage:
+          type: "number"
+    execution_time_ms:
+      type: "integer"
+      minimum: 0
+      description: "Stage execution time in milliseconds"
+    tokens_consumed:
+      type: "integer"
+      minimum: 0
+      description: "Total LLM tokens consumed"
+    estimated_cost_usd:
+      type: "number"
+      minimum: 0.0
+      description: "Estimated generation cost in USD"
+    kafka_event_published:
+      type: "boolean"
+      description: "Whether stage completion event was published"
+    error_message:
+      type: "string"
+      description: "Error message if generation failed"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/effect_operations.yaml"
+    - "./contracts/generation_stages.yaml"
+    - "./contracts/kafka_events.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "llm_provider"
+      type: "ai_service"
+      required: true
+      description: "LLM provider (OpenAI, Anthropic, local)"
+    - name: "onextree_intelligence"
+      type: "intelligence_service"
+      required: false
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+  libraries:
+    - name: "openai"
+      version: ">=1.0.0"
+      description: "OpenAI Python client"
+    - name: "anthropic"
+      version: ">=0.25.0"
+      description: "Anthropic Python client"
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation"
+    - name: "jinja2"
+      version: ">=3.1.0"
+      description: "Template engine for code generation"
+
+# IO Operations (Effect Node Specific)
+io_operations:
+  - name: "generate_contract"
+    description: "Generate ONEX v2.0 contract YAML"
+    target_ms: 8000
+    input_model: "ModelContractGenerationInput"
+    output_model: "ModelGenerationOutput"
+    side_effects:
+      - "llm_api_call"
+      - "file_write"
+      - "kafka_publish"
+
+  - name: "generate_models"
+    description: "Generate Pydantic v2 data models"
+    target_ms: 6000
+    input_model: "ModelGenerationInput"
+    output_model: "ModelGenerationOutput"
+    side_effects:
+      - "llm_api_call"
+      - "file_write"
+      - "kafka_publish"
+
+  - name: "generate_node_implementation"
+    description: "Generate node implementation code"
+    target_ms: 12000
+    input_model: "ModelImplementationGenerationInput"
+    output_model: "ModelGenerationOutput"
+    side_effects:
+      - "llm_api_call"
+      - "file_write"
+      - "kafka_publish"
+
+  - name: "generate_tests"
+    description: "Generate unit and integration tests"
+    target_ms: 8000
+    input_model: "ModelTestGenerationInput"
+    output_model: "ModelGenerationOutput"
+    side_effects:
+      - "llm_api_call"
+      - "file_write"
+      - "kafka_publish"
+
+  - name: "generate_integration"
+    description: "Generate integration scaffolding"
+    target_ms: 5000
+    input_model: "ModelIntegrationGenerationInput"
+    output_model: "ModelGenerationOutput"
+    side_effects:
+      - "llm_api_call"
+      - "file_write"
+      - "kafka_publish"
+
+  - name: "generate_documentation"
+    description: "Generate node documentation"
+    target_ms: 4000
+    input_model: "ModelDocumentationGenerationInput"
+    output_model: "ModelGenerationOutput"
+    side_effects:
+      - "llm_api_call"
+      - "file_write"
+      - "kafka_publish"
+
+# AI Model Configuration
+ai_models:
+  primary:
+    provider: "anthropic"
+    model: "claude-sonnet-4"
+    temperature: 0.2
+    max_tokens: 8000
+  fallback:
+    provider: "openai"
+    model: "gpt-4-turbo"
+    temperature: 0.2
+    max_tokens: 8000
+  quorum:
+    enabled: false
+    models:
+      - provider: "anthropic"
+        model: "claude-sonnet-4"
+        weight: 2.0
+      - provider: "openai"
+        model: "gpt-4-turbo"
+        weight: 1.5
+      - provider: "ollama"
+        model: "codestral"
+        weight: 1.5
+    consensus_threshold: 0.80
+
+# Kafka Integration
+kafka:
+  producer_topics:
+    - "dev.omninode-bridge.codegen.stage-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-failed.v1"
+  event_envelope: "OnexEnvelopeV1"
+  event_types:
+    - "NODE_GENERATION_STAGE_COMPLETED"
+    - "NODE_GENERATION_COMPLETED"
+    - "NODE_GENERATION_FAILED"
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    timeout_ms: 60000  # 1 minute
+  fallback_strategy: "switch_model_provider"
+  error_codes:
+    - code: "LLM_API_ERROR"
+      description: "LLM API call failed"
+      severity: "error"
+      fallback: "use_fallback_model"
+    - code: "GENERATION_TIMEOUT"
+      description: "Generation timeout exceeded"
+      severity: "error"
+      fallback: "retry_with_reduced_scope"
+    - code: "VALIDATION_FAILED"
+      description: "Generated code validation failed"
+      severity: "error"
+      fallback: "regenerate_with_feedback"
+    - code: "FILE_WRITE_ERROR"
+      description: "Failed to write generated files"
+      severity: "error"
+      fallback: "retry_write"
+
+# Quality Gates
+quality_gates:
+  - name: "onex_compliance"
+    description: "Verify ONEX v2.0 compliance"
+    threshold: 1.0
+  - name: "type_safety"
+    description: "Verify Pydantic v2 type safety"
+    threshold: 1.0
+  - name: "code_quality"
+    description: "Verify minimum quality score >0.80"
+    threshold: 0.80
+  - name: "generation_time"
+    description: "Verify generation time within targets"
+    threshold: 0.85
+
+# Health Checks
+health_checks:
+  - name: "llm_provider_connectivity"
+    type: "http"
+    interval_seconds: 60
+    timeout_seconds: 10
+    critical: true
+  - name: "file_system_access"
+    type: "internal"
+    interval_seconds: 120
+    critical: true
+  - name: "kafka_connectivity"
+    type: "network"
+    interval_seconds: 60
+    timeout_seconds: 5
+    critical: false
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 85
+    required: true
+    critical_paths:
+      - "contract_generation"
+      - "model_generation"
+      - "validation_logic"
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "end_to_end_generation"
+      - "multi_stage_workflow"
+      - "error_recovery"
+      - "quorum_validation"
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "stage_duration"
+        target: 10.0
+        unit: "seconds"
+      - metric: "quality_score"
+        target: 0.85
+        unit: "score"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "generations_total"
+      type: "counter"
+      description: "Total generations by stage and node type"
+      labels: ["stage", "node_type"]
+    - name: "generation_duration_seconds"
+      type: "histogram"
+      description: "Generation stage duration"
+      buckets: [5.0, 10.0, 15.0, 30.0, 60.0]
+    - name: "generation_quality_score"
+      type: "histogram"
+      description: "Quality scores of generated code"
+      buckets: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    - name: "llm_tokens_consumed_total"
+      type: "counter"
+      description: "Total LLM tokens consumed"
+      labels: ["provider", "model"]
+    - name: "generation_cost_usd_total"
+      type: "counter"
+      description: "Total generation cost in USD"
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+    log_generated_code_samples: false
+  traces:
+    enabled: true
+    sampling_rate: 0.3
+    trace_llm_calls: true

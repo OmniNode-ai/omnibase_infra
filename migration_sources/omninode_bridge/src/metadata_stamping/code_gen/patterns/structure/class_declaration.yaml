@@ -1,0 +1,79 @@
+name: class_declaration
+description: "Node class declaration with comprehensive docstring and ONEX compliance"
+category: structure
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: critical
+code_template: |
+  class Node{Name}{Type}(Node{Type}):
+      """
+      {Name} {Type} for {purpose}.
+
+      {1-2 sentence overview of what this node does}
+
+      Responsibilities:
+      - {Responsibility 1}
+      - {Responsibility 2}
+      - {Responsibility 3}
+
+      ONEX v2.0 Compliance:
+      - Suffix-based naming: Node{Name}{Type}
+      - Extends Node{Type} from omnibase_core
+      - Uses ModelOnexError for error handling
+      - Event-driven architecture with Kafka
+      - Structured logging with correlation tracking
+
+      Performance Targets:
+      - {Metric 1}: {Value}
+      - {Metric 2}: {Value}
+      - {Metric 3}: {Value}
+
+      Example Usage:
+          ```python
+          # Initialize node
+          container = ModelContainer(...)
+          node = Node{Name}{Type}(container)
+
+          # Execute
+          result = await node.execute_{type}(contract)
+          ```
+      """
+
+example_nodes:
+  - codegen_orchestrator (NodeCodegenOrchestrator)
+  - llm_effect (NodeLLMEffect)
+  - codegen_metrics_reducer (NodeCodegenMetricsReducer)
+
+configuration:
+  naming_convention: "Node{Name}{Type}"
+  base_class: "Node{Type}"
+  docstring_sections:
+    - overview
+    - responsibilities
+    - onex_compliance
+    - performance_targets
+    - example_usage
+
+prerequisites:
+  - Node{Type} base class imported
+  - Clear understanding of node purpose
+
+metrics:
+  memory_overhead_bytes: 1024
+
+best_practices:
+  - "Use suffix-based naming (Node{Name}{Type})"
+  - "Extend appropriate Node{Type} base class"
+  - "Include comprehensive docstring with all sections"
+  - "Document 3-5 key responsibilities"
+  - "Specify ONEX v2.0 compliance features"
+  - "Include realistic performance targets"
+  - "Provide runnable example in docstring"
+  - "Document event types published (if applicable)"
+  - "Include circuit breaker info (if applicable)"
+
+validation_rules:
+  - "Class name must follow Node{Name}{Type} pattern"
+  - "Must extend correct Node{Type} base class"
+  - "Docstring must include all required sections"
+  - "Must document ONEX v2.0 compliance"
+  - "Must include example usage"

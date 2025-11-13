@@ -1,0 +1,627 @@
+# ONEX v2.0 Contract - Deployment Receiver Effect
+# Effect node for receiving and deploying Docker containers on remote systems
+
+schema_version: "2.0"
+contract_version: "1.0.0"
+last_updated: "2025-10-25"
+
+# Node Identity
+node_identity:
+  name: "deployment_receiver_effect"
+  display_name: "Deployment Receiver Effect"
+  node_type: "effect"
+  version: "1.0.0"
+  description: |
+    Effect node for receiving Docker image packages and deploying containers on remote systems.
+    Handles secure image transfer, Docker daemon integration, container deployment with configuration,
+    health verification, and Kafka event publishing. Designed for automated deployment pipelines
+    with security validation and sandbox execution.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-25"
+  tags:
+    - "docker-deployment"
+    - "container-orchestration"
+    - "effect-node"
+    - "remote-deployment"
+    - "kafka-events"
+    - "security-validated"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/deployment/REMOTE_MIGRATION_GUIDE.md"
+    type: "guide"
+    description: "Remote deployment and migration guide"
+  - path: "docs/deployment/SECURE_DEPLOYMENT_GUIDE.md"
+    type: "guide"
+    description: "Security best practices for production"
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/architecture/ARCHITECTURE.md"
+    type: "architecture"
+    description: "System architecture and ONEX v2.0 compliance"
+
+# Performance Requirements
+performance_requirements:
+  image_load_time:
+    target_seconds: 3       # <3s Docker image load
+    max_seconds: 5          # Max acceptable load time
+  container_start_time:
+    target_seconds: 2       # <2s container start
+    max_seconds: 3          # Max acceptable start time
+  health_check_time:
+    target_seconds: 1       # <1s health check
+    max_seconds: 2          # Max acceptable health check time
+  total_deployment_time:
+    target_seconds: 8       # <8s end-to-end deployment
+    max_seconds: 15         # Max acceptable total time
+  throughput:
+    target_deployments_per_minute: 10
+    max_concurrent_deployments: 5
+  memory_usage:
+    target_mb: 256
+    max_mb: 1024
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - operation_type
+    - deployment_config
+  properties:
+    operation_type:
+      type: "string"
+      description: "Type of deployment operation"
+      enum:
+        - "receive_package"
+        - "load_image"
+        - "deploy_container"
+        - "health_check"
+        - "publish_deployment_event"
+        - "full_deployment"  # All steps in sequence
+    deployment_config:
+      type: "object"
+      description: "Container deployment configuration"
+      required:
+        - image_name
+        - container_name
+      properties:
+        image_name:
+          type: "string"
+          description: "Docker image name with tag"
+          pattern: "^[a-z0-9_-]+/[a-z0-9_-]+:[a-z0-9._-]+$"
+          example: "omninode/orchestrator:v1.0.0"
+        container_name:
+          type: "string"
+          description: "Container name for deployment"
+          pattern: "^[a-z0-9_-]+$"
+        ports:
+          type: "object"
+          description: "Port mappings (container:host)"
+          additionalProperties:
+            type: "integer"
+          example:
+            "8060": 8060
+            "8061": 8061
+        environment_vars:
+          type: "object"
+          description: "Environment variables"
+          additionalProperties:
+            type: "string"
+        volumes:
+          type: "array"
+          description: "Volume mount specifications"
+          items:
+            type: "object"
+            properties:
+              host_path:
+                type: "string"
+              container_path:
+                type: "string"
+              mode:
+                type: "string"
+                enum: ["ro", "rw"]
+        networks:
+          type: "array"
+          description: "Docker networks to attach"
+          items:
+            type: "string"
+        restart_policy:
+          type: "string"
+          enum: ["no", "always", "on-failure", "unless-stopped"]
+          default: "unless-stopped"
+        resource_limits:
+          type: "object"
+          properties:
+            cpu_limit:
+              type: "string"
+              description: "CPU limit (e.g., '1.5', '2.0')"
+            memory_limit:
+              type: "string"
+              description: "Memory limit (e.g., '512m', '1g')"
+    package_data:
+      type: "object"
+      description: "Docker image package data"
+      properties:
+        image_tar_path:
+          type: "string"
+          description: "Path to Docker image tar file"
+        checksum:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+          description: "BLAKE3 checksum for validation"
+        size_bytes:
+          type: "integer"
+          minimum: 0
+    sender_auth:
+      type: "object"
+      description: "Sender authentication credentials"
+      required:
+        - sender_id
+        - auth_token
+      properties:
+        sender_id:
+          type: "string"
+          format: "uuid"
+        auth_token:
+          type: "string"
+          minLength: 32
+        signature:
+          type: "string"
+          description: "HMAC signature for package validation"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Correlation ID for tracking"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - success
+    - execution_time_ms
+  properties:
+    success:
+      type: "boolean"
+      description: "Operation success status"
+    container_id:
+      type: "string"
+      pattern: "^[a-f0-9]{64}$"
+      description: "Docker container ID (full SHA256)"
+    container_short_id:
+      type: "string"
+      pattern: "^[a-f0-9]{12}$"
+      description: "Docker container ID (short form)"
+    container_url:
+      type: "string"
+      format: "uri"
+      description: "Container service URL"
+      example: "http://192.168.86.200:8060"
+    deployment_success:
+      type: "boolean"
+      description: "Overall deployment success"
+    health_status:
+      type: "object"
+      description: "Container health check results"
+      properties:
+        is_healthy:
+          type: "boolean"
+        status:
+          type: "string"
+          enum: ["healthy", "unhealthy", "starting", "not_started"]
+        checks_passed:
+          type: "integer"
+          minimum: 0
+        last_check_time:
+          type: "string"
+          format: "date-time"
+    image_loaded:
+      type: "boolean"
+      description: "Whether image was successfully loaded"
+    image_id:
+      type: "string"
+      description: "Docker image ID"
+    kafka_events_published:
+      type: "array"
+      description: "List of Kafka events published"
+      items:
+        type: "string"
+        enum:
+          - "DEPLOYMENT_STARTED"
+          - "IMAGE_LOADED"
+          - "CONTAINER_STARTED"
+          - "HEALTH_CHECK_PASSED"
+          - "DEPLOYMENT_COMPLETED"
+          - "DEPLOYMENT_FAILED"
+    execution_time_ms:
+      type: "integer"
+      minimum: 0
+      description: "Total execution time in milliseconds"
+    error_message:
+      type: "string"
+      description: "Error message if operation failed"
+    error_details:
+      type: "object"
+      description: "Detailed error information"
+      properties:
+        error_code:
+          type: "string"
+        stack_trace:
+          type: "string"
+        docker_error:
+          type: "string"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/effect_operations.yaml"
+    - "./contracts/kafka_events.yaml"
+    - "./contracts/state_management.yaml"
+    - "./contracts/security_validation.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "docker_daemon"
+      type: "container_runtime"
+      required: true
+      socket: "/var/run/docker.sock"
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+    - name: "consul"
+      type: "service_discovery"
+      required: false
+      description: "For service registration"
+  libraries:
+    - name: "docker"
+      version: ">=7.0.0"
+      description: "Docker SDK for Python"
+    - name: "fastapi"
+      version: ">=0.104.0"
+      description: "FastAPI for receiver endpoint"
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation and settings management"
+    - name: "aiokafka"
+      version: ">=0.11.0"
+      description: "Async Kafka client"
+    - name: "blake3"
+      version: ">=0.4.0"
+      description: "BLAKE3 hash verification"
+
+# IO Operations (Effect Node Specific)
+io_operations:
+  - name: "receive_package"
+    description: "Receive Docker image package from sender"
+    target_ms: 1000        # Network transfer time varies
+    input_model: "ModelPackageReceiveInput"
+    output_model: "ModelPackageReceiveOutput"
+    side_effects:
+      - "network_io"
+      - "file_system_write"
+      - "authentication_check"
+      - "checksum_validation"
+
+  - name: "load_image"
+    description: "Load Docker image into local Docker daemon"
+    target_ms: 3000        # <3s image load
+    input_model: "ModelImageLoadInput"
+    output_model: "ModelImageLoadOutput"
+    side_effects:
+      - "docker_api_call"
+      - "image_extraction"
+      - "storage_allocation"
+
+  - name: "deploy_container"
+    description: "Start container with provided configuration"
+    target_ms: 2000        # <2s container start
+    input_model: "ModelContainerDeployInput"
+    output_model: "ModelContainerDeployOutput"
+    side_effects:
+      - "docker_api_call"
+      - "container_creation"
+      - "network_configuration"
+      - "volume_mounting"
+
+  - name: "health_check"
+    description: "Verify container is running and healthy"
+    target_ms: 1000        # <1s health check
+    input_model: "ModelHealthCheckInput"
+    output_model: "ModelHealthCheckOutput"
+    side_effects:
+      - "http_request"
+      - "docker_inspect"
+
+  - name: "publish_deployment_event"
+    description: "Publish deployment event to Kafka"
+    target_ms: 100         # <100ms event publish
+    input_model: "ModelDeploymentEventInput"
+    output_model: "ModelDeploymentEventOutput"
+    side_effects:
+      - "kafka_producer_call"
+      - "network_io"
+
+# Kafka Integration
+kafka:
+  producer_topics:
+    - "dev.omninode-bridge.deployment.deployment-started.v1"
+    - "dev.omninode-bridge.deployment.image-loaded.v1"
+    - "dev.omninode-bridge.deployment.container-started.v1"
+    - "dev.omninode-bridge.deployment.health-check-passed.v1"
+    - "dev.omninode-bridge.deployment.deployment-completed.v1"
+    - "dev.omninode-bridge.deployment.deployment-failed.v1"
+  event_envelope: "OnexEnvelopeV1"
+  event_types:
+    - "DEPLOYMENT_STARTED"
+    - "IMAGE_LOADED"
+    - "CONTAINER_STARTED"
+    - "HEALTH_CHECK_PASSED"
+    - "DEPLOYMENT_COMPLETED"
+    - "DEPLOYMENT_FAILED"
+  batch_size: 1
+  acks: "all"
+  compression: "snappy"
+
+# Security Configuration
+security:
+  authentication:
+    required: true
+    method: "hmac_signature"
+    token_expiry_seconds: 300
+  authorization:
+    validate_sender_id: true
+    allowed_sender_ips:
+      - "192.168.86.0/24"  # Local network
+      - "10.0.0.0/8"       # Private network
+  sandbox:
+    enabled: true
+    network_isolation: true
+    resource_limits: true
+    filesystem_isolation: true
+  checksum_validation:
+    algorithm: "blake3"
+    required: true
+  image_validation:
+    verify_signature: false  # Optional: GPG signature verification
+    scan_vulnerabilities: false  # Optional: Trivy/Clair integration
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    timeout_ms: 30000  # 30 seconds per operation
+  fallback_strategy: "graceful_degradation"
+  error_codes:
+    - code: "RECEIVE_FAILED"
+      description: "Package receive failed"
+      severity: "error"
+      retry: true
+    - code: "AUTHENTICATION_FAILED"
+      description: "Sender authentication failed"
+      severity: "critical"
+      retry: false
+    - code: "CHECKSUM_MISMATCH"
+      description: "Package checksum validation failed"
+      severity: "critical"
+      retry: false
+    - code: "LOAD_FAILED"
+      description: "Docker image load failed"
+      severity: "error"
+      retry: true
+    - code: "DEPLOY_FAILED"
+      description: "Container deployment failed"
+      severity: "error"
+      retry: true
+    - code: "HEALTH_CHECK_FAILED"
+      description: "Container health check failed"
+      severity: "warning"
+      retry: true
+    - code: "KAFKA_PUBLISH_FAILED"
+      description: "Kafka event publish failed"
+      severity: "warning"
+      retry: true
+    - code: "DOCKER_DAEMON_UNAVAILABLE"
+      description: "Docker daemon is not accessible"
+      severity: "critical"
+      retry: true
+    - code: "RESOURCE_LIMIT_EXCEEDED"
+      description: "Container resource limits exceeded"
+      severity: "error"
+      retry: false
+    - code: "NETWORK_CONFIGURATION_FAILED"
+      description: "Docker network configuration failed"
+      severity: "error"
+      retry: true
+
+# Quality Gates
+quality_gates:
+  - name: "image_load_performance"
+    description: "Verify image load <3s"
+    threshold: 0.95
+  - name: "container_start_performance"
+    description: "Verify container start <2s"
+    threshold: 0.95
+  - name: "health_check_success"
+    description: "Verify health check success >95%"
+    threshold: 0.95
+  - name: "deployment_success_rate"
+    description: "Verify deployment success >99%"
+    threshold: 0.99
+  - name: "security_validation"
+    description: "Verify authentication and checksum validation 100%"
+    threshold: 1.0
+  - name: "kafka_event_reliability"
+    description: "Verify Kafka event publishing >99%"
+    threshold: 0.99
+
+# Health Checks
+health_checks:
+  - name: "docker_daemon"
+    type: "docker"
+    interval_seconds: 30
+    timeout_seconds: 5
+    critical: true
+    check_command: "docker info"
+  - name: "kafka_connectivity"
+    type: "network"
+    interval_seconds: 60
+    timeout_seconds: 3
+    critical: false
+  - name: "receiver_endpoint"
+    type: "http"
+    endpoint: "/health"
+    interval_seconds: 30
+    timeout_seconds: 5
+    critical: true
+  - name: "disk_space"
+    type: "internal"
+    interval_seconds: 120
+    critical: true
+    threshold_gb: 10  # Minimum 10GB free space
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 90
+    required: true
+    critical_paths:
+      - "package_receive"
+      - "image_load"
+      - "container_deploy"
+      - "health_check"
+      - "authentication"
+      - "checksum_validation"
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "end_to_end_deployment"
+      - "authentication_failure"
+      - "checksum_validation_failure"
+      - "docker_daemon_unavailable"
+      - "health_check_failure"
+      - "kafka_event_flow"
+      - "rollback_on_failure"
+      - "concurrent_deployments"
+  security_tests:
+    required: true
+    test_scenarios:
+      - "unauthorized_sender"
+      - "invalid_checksum"
+      - "malicious_image"
+      - "resource_exhaustion"
+      - "network_isolation"
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "image_load_time"
+        target: 3.0
+        unit: "seconds"
+      - metric: "container_start_time"
+        target: 2.0
+        unit: "seconds"
+      - metric: "health_check_time"
+        target: 1.0
+        unit: "seconds"
+      - metric: "total_deployment_time"
+        target: 8.0
+        unit: "seconds"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "deployments_total"
+      type: "counter"
+      description: "Total deployments attempted"
+      labels: ["status", "image_name"]
+    - name: "image_load_duration_seconds"
+      type: "histogram"
+      description: "Docker image load duration"
+      buckets: [1.0, 2.0, 3.0, 5.0, 10.0]
+    - name: "container_start_duration_seconds"
+      type: "histogram"
+      description: "Container start duration"
+      buckets: [0.5, 1.0, 2.0, 3.0, 5.0]
+    - name: "health_check_duration_seconds"
+      type: "histogram"
+      description: "Health check duration"
+      buckets: [0.1, 0.5, 1.0, 2.0, 5.0]
+    - name: "deployment_duration_seconds"
+      type: "histogram"
+      description: "Total deployment duration"
+      buckets: [5.0, 8.0, 10.0, 15.0, 30.0]
+    - name: "kafka_events_published_total"
+      type: "counter"
+      description: "Total Kafka deployment events published"
+      labels: ["event_type"]
+    - name: "operation_errors_total"
+      type: "counter"
+      description: "Total operation errors by type"
+      labels: ["error_code"]
+    - name: "active_containers_gauge"
+      type: "gauge"
+      description: "Number of active deployed containers"
+    - name: "authentication_failures_total"
+      type: "counter"
+      description: "Total authentication failures"
+    - name: "checksum_validation_failures_total"
+      type: "counter"
+      description: "Total checksum validation failures"
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+    security_audit: true
+  traces:
+    enabled: true
+    sampling_rate: 0.1
+    trace_docker_operations: true
+    trace_kafka_events: true
+  alerts:
+    - name: "deployment_failure_rate"
+      condition: "deployments_failed > 5% in 5m"
+      severity: "warning"
+    - name: "docker_daemon_down"
+      condition: "docker_daemon_health == 0"
+      severity: "critical"
+    - name: "authentication_failures"
+      condition: "authentication_failures > 10 in 1m"
+      severity: "critical"
+    - name: "disk_space_low"
+      condition: "disk_space_available_gb < 10"
+      severity: "warning"
+
+# Deployment Configuration
+deployment:
+  recommended_resources:
+    cpu: "1.0"
+    memory: "512Mi"
+    disk: "20Gi"
+  environment_variables:
+    - name: "DOCKER_HOST"
+      value: "unix:///var/run/docker.sock"
+      required: true
+    - name: "RECEIVER_PORT"
+      value: "8070"
+      required: true
+    - name: "KAFKA_BOOTSTRAP_SERVERS"
+      value: "localhost:29092"
+      required: true
+    - name: "AUTH_SECRET_KEY"
+      value: "${AUTH_SECRET_KEY}"
+      required: true
+      sensitive: true
+    - name: "LOG_LEVEL"
+      value: "INFO"
+      required: false
+  volume_mounts:
+    - host_path: "/var/run/docker.sock"
+      container_path: "/var/run/docker.sock"
+      mode: "rw"
+      description: "Docker daemon socket"
+  network_mode: "bridge"
+  restart_policy: "unless-stopped"

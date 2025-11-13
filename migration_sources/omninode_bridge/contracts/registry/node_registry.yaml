@@ -1,0 +1,515 @@
+# ONEX v2.0 Contract - Node Registry
+# Effect node for node discovery and dual registration system
+
+schema_version: "2.0"
+contract_version: "1.0.0"
+last_updated: "2025-10-24"
+
+# Node Identity
+node_identity:
+  name: "node_registry"
+  display_name: "Node Registry"
+  node_type: "effect"
+  version: "1.0.0"
+  description: |
+    Effect node for node discovery and dual registration system.
+    Listens for NODE_INTROSPECTION events from Kafka and performs dual registration
+    in both Consul (service discovery) and PostgreSQL (tool orchestration).
+    Provides unified node catalog with health monitoring and capability tracking.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-24"
+  tags:
+    - "node-discovery"
+    - "service-registry"
+    - "dual-registration"
+    - "consul-integration"
+    - "kafka-consumer"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/architecture/ARCHITECTURE.md"
+    type: "architecture"
+    description: "System architecture and registry patterns"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 100      # <100ms for registration operations
+    max_ms: 500         # Max acceptable registration time
+  throughput:
+    target_registrations_per_second: 50
+    max_concurrent_registrations: 20
+  memory_usage:
+    target_mb: 128
+    max_mb: 256
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - operation_type
+  properties:
+    operation_type:
+      type: "string"
+      enum:
+        - "register_node"
+        - "deregister_node"
+        - "update_node_health"
+        - "query_nodes"
+        - "request_introspection"
+      description: "Type of registry operation"
+
+    # For register_node
+    node_introspection:
+      type: "object"
+      description: "Node introspection data (for registration)"
+      properties:
+        node_id:
+          type: "string"
+          description: "Unique node identifier"
+        node_name:
+          type: "string"
+          description: "Node name"
+        node_type:
+          type: "string"
+          enum: ["effect", "compute", "reducer", "orchestrator"]
+        version:
+          type: "string"
+          pattern: "^\\d+\\.\\d+\\.\\d+$"
+        capabilities:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              name:
+                type: "string"
+              description:
+                type: "string"
+        endpoints:
+          type: "object"
+          description: "Node endpoints (HTTP, gRPC, etc.)"
+        health_check:
+          type: "object"
+          properties:
+            endpoint:
+              type: "string"
+            interval_seconds:
+              type: "integer"
+        metadata:
+          type: "object"
+          description: "Additional node metadata"
+
+    # For deregister_node / update_node_health
+    node_id:
+      type: "string"
+      description: "Node identifier (for deregister/update)"
+
+    health_status:
+      type: "string"
+      enum: ["healthy", "degraded", "unhealthy"]
+      description: "Health status (for update_node_health)"
+
+    # For query_nodes
+    query_filters:
+      type: "object"
+      description: "Query filters (for query_nodes)"
+      properties:
+        node_type:
+          type: "string"
+        capability:
+          type: "string"
+        health_status:
+          type: "string"
+
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Optional correlation ID"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - success
+    - operation_type
+    - execution_time_ms
+  properties:
+    success:
+      type: "boolean"
+      description: "Operation success status"
+
+    operation_type:
+      type: "string"
+      description: "Type of operation performed"
+
+    # For register_node
+    registration_result:
+      type: "object"
+      description: "Registration result"
+      properties:
+        node_id:
+          type: "string"
+        consul_registered:
+          type: "boolean"
+        postgres_registered:
+          type: "boolean"
+        registration_timestamp:
+          type: "string"
+          format: "date-time"
+
+    # For query_nodes
+    nodes:
+      type: "array"
+      description: "Query results (for query_nodes)"
+      items:
+        type: "object"
+        properties:
+          node_id:
+            type: "string"
+          node_name:
+            type: "string"
+          node_type:
+            type: "string"
+          version:
+            type: "string"
+          health_status:
+            type: "string"
+          capabilities:
+            type: "array"
+          last_heartbeat:
+            type: "string"
+            format: "date-time"
+
+    execution_time_ms:
+      type: "integer"
+      minimum: 0
+      description: "Operation execution time"
+
+    kafka_event_published:
+      type: "boolean"
+      description: "Whether event was published to Kafka"
+
+    error_message:
+      type: "string"
+      description: "Error message if operation failed"
+
+    error_details:
+      type: "object"
+      description: "Detailed error information"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/effect_operations.yaml"
+    - "./contracts/registry_operations.yaml"
+    - "./contracts/dual_registration.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "consul"
+      type: "service_discovery"
+      required: false
+      endpoint: "http://localhost:8500"
+      description: "Consul for service discovery registration"
+
+    - name: "postgresql"
+      type: "database"
+      required: false
+      description: "PostgreSQL for tool orchestration registry"
+
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+      description: "Kafka for node introspection events"
+
+  libraries:
+    - name: "python-consul"
+      version: ">=1.1.0"
+      description: "Python Consul client"
+
+    - name: "asyncpg"
+      version: ">=0.29.0"
+      description: "Async PostgreSQL client"
+
+    - name: "aiokafka"
+      version: ">=0.11.0"
+      description: "Async Kafka client"
+
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation"
+
+# IO Operations (Effect Node Specific)
+io_operations:
+  - name: "register_node_consul"
+    description: "Register node in Consul service discovery"
+    target_ms: 50
+    input_model: "ModelConsulRegistrationInput"
+    output_model: "ModelRegistrationOutput"
+    side_effects:
+      - "network_io"
+      - "consul_api_call"
+
+  - name: "register_node_postgres"
+    description: "Register node in PostgreSQL tool registry"
+    target_ms: 30
+    input_model: "ModelPostgresRegistrationInput"
+    output_model: "ModelRegistrationOutput"
+    side_effects:
+      - "network_io"
+      - "database_write"
+
+  - name: "deregister_node"
+    description: "Remove node from both registries"
+    target_ms: 50
+    input_model: "ModelDeregistrationInput"
+    output_model: "ModelOperationOutput"
+    side_effects:
+      - "network_io"
+      - "database_delete"
+      - "consul_api_call"
+
+  - name: "update_node_health"
+    description: "Update node health status in both registries"
+    target_ms: 30
+    input_model: "ModelHealthUpdateInput"
+    output_model: "ModelOperationOutput"
+    side_effects:
+      - "network_io"
+      - "database_update"
+      - "consul_api_call"
+
+  - name: "query_nodes"
+    description: "Query registered nodes with filters"
+    target_ms: 50
+    input_model: "ModelNodeQueryInput"
+    output_model: "ModelQueryOutput"
+    side_effects:
+      - "network_io"
+      - "database_query"
+
+  - name: "publish_introspection_request"
+    description: "Publish introspection request to Kafka"
+    target_ms: 10
+    input_model: "ModelIntrospectionRequestInput"
+    output_model: "ModelPublishOutput"
+    side_effects:
+      - "network_io"
+      - "kafka_publish"
+
+# Dual Registration Strategy
+dual_registration:
+  mode: "eventual_consistency"
+  priority: "consul_first"
+
+  consul_registration:
+    service_prefix: "onex-node"
+    tags:
+      - "onex"
+      - "node"
+    health_check:
+      interval: "30s"
+      timeout: "5s"
+      deregister_critical_service_after: "5m"
+
+  postgres_registration:
+    schema: "public"
+    table: "registered_nodes"
+    indexes:
+      - "node_id"
+      - "node_type"
+      - "health_status"
+
+  consistency_strategy:
+    reconciliation_interval_seconds: 300
+    conflict_resolution: "consul_wins"
+
+# Kafka Integration
+kafka:
+  consumer_topics:
+    - "dev.omninode-bridge.registry.node-introspection.v1"
+  producer_topics:
+    - "dev.omninode-bridge.registry.node-registered.v1"
+    - "dev.omninode-bridge.registry.node-deregistered.v1"
+    - "dev.omninode-bridge.registry.request-introspection.v1"
+  consumer_group: "bridge-registry-group"
+  event_envelope: "OnexEnvelopeV1"
+  event_types:
+    consumed:
+      - "NODE_INTROSPECTION"
+    produced:
+      - "NODE_REGISTERED"
+      - "NODE_DEREGISTERED"
+      - "REGISTRY_REQUEST_INTROSPECTION"
+
+# State Management
+state_management:
+  persistence: "memory"
+  state_types:
+    - name: "registered_nodes_cache"
+      description: "In-memory cache of registered nodes"
+      ttl_seconds: 300
+
+    - name: "registration_metrics"
+      description: "Registration operation metrics"
+      ttl_seconds: 3600
+
+    - name: "health_checks_state"
+      description: "Health check results"
+      ttl_seconds: 600
+
+  sync_interval_seconds: 60
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 1.5
+    timeout_ms: 30000
+  fallback_strategy: "partial_registration"
+  error_codes:
+    - code: "CONSUL_UNAVAILABLE"
+      description: "Consul service unavailable"
+      severity: "warning"
+      fallback: "postgres_only"
+
+    - code: "POSTGRES_UNAVAILABLE"
+      description: "PostgreSQL unavailable"
+      severity: "warning"
+      fallback: "consul_only"
+
+    - code: "REGISTRATION_CONFLICT"
+      description: "Node already registered"
+      severity: "error"
+      action: "update_existing"
+
+    - code: "VALIDATION_ERROR"
+      description: "Node introspection validation failed"
+      severity: "error"
+      action: "reject"
+
+    - code: "KAFKA_PUBLISH_FAILED"
+      description: "Failed to publish event to Kafka"
+      severity: "warning"
+      action: "retry"
+
+# Quality Gates
+quality_gates:
+  - name: "registration_latency"
+    description: "Verify registration <100ms"
+    threshold: 0.95
+
+  - name: "dual_registration_consistency"
+    description: "Verify both registries synchronized"
+    threshold: 0.99
+
+  - name: "health_check_accuracy"
+    description: "Verify health checks accurate"
+    threshold: 0.95
+
+# Health Checks
+health_checks:
+  - name: "consul_connectivity"
+    type: "http"
+    endpoint: "http://localhost:8500/v1/status/leader"
+    interval_seconds: 60
+    timeout_seconds: 5
+    critical: false
+
+  - name: "postgres_connectivity"
+    type: "database"
+    interval_seconds: 60
+    timeout_seconds: 5
+    critical: false
+
+  - name: "kafka_consumer"
+    type: "internal"
+    interval_seconds: 30
+    critical: true
+
+  - name: "registry_consistency"
+    type: "internal"
+    interval_seconds: 300
+    critical: false
+    description: "Verify Consul and PostgreSQL in sync"
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 85
+    required: true
+    critical_paths:
+      - "consul_registration"
+      - "postgres_registration"
+      - "dual_registration_logic"
+      - "query_operations"
+
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "end_to_end_registration"
+      - "consul_failure_fallback"
+      - "postgres_failure_fallback"
+      - "consistency_reconciliation"
+      - "introspection_event_handling"
+
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "registration_time"
+        target: 100
+        unit: "milliseconds"
+      - metric: "throughput"
+        target: 50
+        unit: "registrations_per_second"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "registrations_total"
+      type: "counter"
+      description: "Total registrations by operation type"
+      labels: ["operation_type", "node_type"]
+
+    - name: "registration_duration_seconds"
+      type: "histogram"
+      description: "Registration operation duration"
+      buckets: [0.05, 0.1, 0.2, 0.5, 1.0]
+
+    - name: "registered_nodes_total"
+      type: "gauge"
+      description: "Current number of registered nodes"
+      labels: ["node_type", "health_status"]
+
+    - name: "registration_errors_total"
+      type: "counter"
+      description: "Total registration errors by type"
+      labels: ["error_type", "registry"]
+
+    - name: "consul_postgres_consistency"
+      type: "gauge"
+      description: "Registry consistency metric (0-1)"
+
+    - name: "health_checks_failed_total"
+      type: "counter"
+      description: "Total failed health checks"
+      labels: ["node_id"]
+
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+    log_node_details: true
+
+  traces:
+    enabled: true
+    sampling_rate: 0.2
+    trace_dual_registration: true
+    trace_kafka_events: true

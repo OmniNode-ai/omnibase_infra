@@ -1,0 +1,22 @@
+# Minimal Effect Node Contract
+node_id: minimal_effect_node
+node_type: effect
+version: v1_0_0
+
+metadata:
+  service_name: minimal_service
+  domain: test
+  description: Minimal effect node for testing
+
+# No subcontracts - basic contract only
+input_schema:
+  type: object
+  properties:
+    data:
+      type: string
+
+output_schema:
+  type: object
+  properties:
+    result:
+      type: string

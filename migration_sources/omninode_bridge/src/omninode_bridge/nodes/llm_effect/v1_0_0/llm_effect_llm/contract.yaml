@@ -1,0 +1,93 @@
+# NodeLlmEffectEffect Contract - ONEX v2.0 Compliant
+# Generated: 2025-11-05
+
+# Required fields for ModelContractEffect
+name: "llm_effect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "LLM Effect Node for multi-tier LLM generation with Z.ai integration. Supports CLOUD_FAST (GLM-4.5) tier with 128K context window. Includes circuit breaker, retry logic, token tracking, and cost management."
+node_type: "EFFECT"
+
+# Input/Output Models (required by omnibase_core) - must be strings (model class names)
+input_model: "ModelLlmEffectRequest"
+output_model: "ModelLlmEffectResponse"
+
+# State schemas (required by ONEX v2.0)
+input_state:
+  $ref: "contracts/llm_effect-input-state.yaml"
+output_state:
+  $ref: "contracts/llm_effect-output-state.yaml"
+
+# Tool specification (required by omnibase_core)
+tool_specification:
+  tool_name: "llm_effect"
+  main_tool_class: "omninode_bridge.nodes.llm_effect.v1_0_0.node.NodeLlmEffectEffect"
+
+# IO operations for EFFECT node (required)
+# Each operation follows ModelIOOperationConfig schema
+io_operations:
+  - operation_type: "database_query"
+    atomic: true
+    timeout_seconds: 30
+    validation_enabled: true
+
+
+# Legacy fields for compatibility
+node_name: llm_effect
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+contract_name: llm_effect_contract
+author: OmniNode Code Generation
+created_at: "2025-11-05"
+
+# Core Metadata
+metadata:
+  domain: "ai_services"
+  generated: true
+  generated_at: "2025-11-05T13:31:05.422648+00:00"
+  tags:
+    - "Multi-tier LLM support (LOCAL, CLOUD_FAST, CLOUD_PREMIUM)"
+    - "Z.ai API integration (Anthropic-compatible endpoint)"
+    - "GLM-4.5 model support (PRIMARY tier)"
+    - "Circuit breaker pattern for fault tolerance"
+    - "Retry logic with exponential backoff"
+    - "HTTP client with connection pooling"
+    - "Token usage tracking (input/output/total)"
+    - "Cost tracking with sub-cent accuracy"
+    - "Comprehensive metrics collection via MixinMetrics"
+    - "Performance monitoring (latency, throughput)"
+    - "Health checks via MixinHealthCheck"
+    - "Z.ai API health monitoring"
+    - "Structured logging with correlation tracking"
+    - "OpenTelemetry tracing support"
+    - "Environment-based credentials (ZAI_API_KEY)"
+    - "Configurable timeouts and thresholds"
+    - "Per-tier pricing configuration"
+
+# Operations supported by this node
+operations:
+  - "generate_text"
+  - "calculate_cost"
+  - "track_usage"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 100
+    max_ms: 1000
+  memory_usage:
+    target_mb: 128
+    max_mb: 512
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 85
+    required: true
+  integration_tests:
+    required: true

@@ -1,0 +1,134 @@
+# Mixin Conflict Rules - Phase 3 Intelligent Selection
+# Version: 1.0
+# Created: 2025-11-06
+# Purpose: Define mixin conflicts, prerequisites, and redundancies
+
+version: "1.0"
+updated_at: "2025-11-06"
+
+# Mutual exclusions - mixins that cannot be used together
+conflicts:
+  - type: mutual_exclusion
+    mixin_a: MixinMetrics
+    mixin_b: MixinCustomMetrics
+    reason: "Both provide metrics collection with different implementations"
+    resolution: prefer_higher_score
+
+  - type: mutual_exclusion
+    mixin_a: MixinEventDrivenNode
+    mixin_b: MixinSimpleNode
+    reason: "Different node paradigms (event-driven vs simple)"
+    resolution: prefer_event_driven
+
+  - type: mutual_exclusion
+    mixin_a: MixinCaching
+    mixin_b: MixinNoCaching
+    reason: "Conflicting caching strategies"
+    resolution: prefer_higher_score
+
+  - type: mutual_exclusion
+    mixin_a: ModelServiceEffect
+    mixin_b: NodeEffect
+    reason: "Service wrapper already includes base class"
+    resolution: prefer_wrapper
+
+  - type: mutual_exclusion
+    mixin_a: ModelServiceCompute
+    mixin_b: NodeCompute
+    reason: "Service wrapper already includes base class"
+    resolution: prefer_wrapper
+
+  - type: mutual_exclusion
+    mixin_a: ModelServiceReducer
+    mixin_b: NodeReducer
+    reason: "Service wrapper already includes base class"
+    resolution: prefer_wrapper
+
+  - type: mutual_exclusion
+    mixin_a: ModelServiceOrchestrator
+    mixin_b: NodeOrchestrator
+    reason: "Service wrapper already includes base class"
+    resolution: prefer_wrapper
+
+# Prerequisites - mixin A requires mixin B to be present
+prerequisites:
+  - mixin: MixinTransactionManagement
+    requires: [MixinConnectionPooling]
+    reason: "Transaction management requires connection pooling to be enabled"
+    auto_add: true
+
+  - mixin: MixinCacheInvalidation
+    requires: [MixinCaching]
+    reason: "Cache invalidation requires caching to be enabled"
+    auto_add: true
+
+  - mixin: MixinEventPublisher
+    requires: [MixinEventBus]
+    reason: "Event publishing requires event bus"
+    auto_add: true
+
+  - mixin: MixinEventConsumer
+    requires: [MixinEventBus]
+    reason: "Event consuming requires event bus"
+    auto_add: true
+
+  - mixin: MixinCircuitBreaker
+    requires: [MixinRetry]
+    reason: "Circuit breaker should be used with retry logic for best results"
+    auto_add: false  # Optional but recommended
+
+# Redundancies - mixin A already includes mixin B
+redundancies:
+  - mixin: ModelServiceEffect
+    includes: [MixinNodeService, MixinHealthCheck, MixinEventBus, MixinMetrics]
+    reason: "Service wrapper already includes these mixins"
+    action: remove_redundant
+
+  - mixin: ModelServiceCompute
+    includes: [MixinNodeService, MixinHealthCheck, MixinCaching, MixinMetrics]
+    reason: "Service wrapper already includes these mixins"
+    action: remove_redundant
+
+  - mixin: ModelServiceReducer
+    includes: [MixinNodeService, MixinHealthCheck, MixinCaching, MixinMetrics]
+    reason: "Service wrapper already includes these mixins"
+    action: remove_redundant
+
+  - mixin: ModelServiceOrchestrator
+    includes: [MixinNodeService, MixinHealthCheck, MixinEventBus, MixinMetrics]
+    reason: "Service wrapper already includes these mixins"
+    action: remove_redundant
+
+# Priority rules - which mixin to prefer in conflicts
+priorities:
+  - category: observability
+    priority: 1  # Always include
+    rationale: "Observability is critical for production"
+
+  - category: security
+    priority: 2  # High priority
+    rationale: "Security cannot be compromised"
+
+  - category: resilience
+    priority: 3  # Important for reliability
+    rationale: "Resilience improves system reliability"
+
+  - category: database
+    priority: 4  # Domain-specific
+    rationale: "Database operations are domain-specific"
+
+  - category: api
+    priority: 4  # Domain-specific
+    rationale: "API operations are domain-specific"
+
+  - category: kafka
+    priority: 4  # Domain-specific
+    rationale: "Kafka operations are domain-specific"
+
+  - category: performance
+    priority: 5  # Optimization
+    rationale: "Performance optimizations are important but not critical"
+
+  - category: caching
+    priority: 6  # Optional optimization
+    rationale: "Caching is an optional optimization"

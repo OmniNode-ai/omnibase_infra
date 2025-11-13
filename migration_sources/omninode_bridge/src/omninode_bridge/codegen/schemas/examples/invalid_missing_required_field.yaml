@@ -1,0 +1,28 @@
+# Example: Invalid Contract - Missing Required Mixin Field
+#
+# VALIDATION ERROR: Missing required 'name' field in mixin
+# Required: name
+# Actual: only 'enabled' provided
+
+schema_version: "v2.0.0"
+name: "NodeMissingFieldEffect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+description: "Example contract with missing required field"
+
+mixins:
+  - enabled: true  # ERROR: Missing required 'name' field
+    config:
+      check_interval_ms: 30000
+
+subcontracts:
+  effect:
+    operations:
+      - "initialize"
+      - "shutdown"
+
+# Expected validation error:
+# ValidationError: mixins[0]: 'name' is a required property

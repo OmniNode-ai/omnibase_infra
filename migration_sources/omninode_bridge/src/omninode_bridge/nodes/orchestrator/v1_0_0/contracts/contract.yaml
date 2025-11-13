@@ -1,0 +1,224 @@
+---
+# NodeBridgeOrchestrator Contract
+# ONEX v2.0 compliant contract with subcontract composition
+# Node Type: Orchestrator
+# Purpose: Workflow coordination for metadata stamping with OnexTree
+#          intelligence
+
+# Contract metadata
+name: "NodeBridgeOrchestrator"
+version: "1.0.0"
+node_type: "orchestrator"
+description: >-
+  Bridge Orchestrator for stamping workflow coordination with FSM
+  state management, service routing, and Kafka event publishing
+
+# Node identity and capabilities
+node_identity:
+  node_class: "NodeBridgeOrchestrator"
+  node_file: "node.py"
+  namespace: "omninode.bridge.orchestrator"
+  category: "workflow_coordination"
+
+# Execution signature
+execute_method: "execute_orchestration"
+contract_type: "ModelContractOrchestrator"
+
+# Subcontract composition (ONEX v2.0 pattern)
+subcontracts:
+  workflow_coordination:
+    $ref: "./workflow.yaml"
+    description: >-
+      Multi-step workflow execution with performance targets
+    required: true
+
+  routing:
+    $ref: "./routing.yaml"
+    description: >-
+      Service routing to MetadataStamping, OnexTree, and EventBus
+    required: true
+
+  state_transitions:
+    $ref: "./fsm.yaml"
+    description: >-
+      FSM state management for workflow lifecycle
+    required: true
+
+  event_types:
+    $ref: "./events.yaml"
+    description: >-
+      Kafka event publishing for workflow observability
+    required: true
+
+# Input/Output contracts
+input_contract:
+  type: "ModelContractOrchestrator"
+  required_fields:
+    - name: "input_data"
+      type: "dict | ModelStampRequest"
+      description: >-
+        Workflow input data with content to stamp
+      validation:
+        - "must contain 'content' field for hash generation"
+    - name: "correlation_id"
+      type: "UUID"
+      description: >-
+        Workflow correlation ID for tracking
+  optional_fields:
+    - name: "namespace"
+      type: "string"
+      description: >-
+        Namespace for multi-tenant isolation
+      default: "omninode.bridge"
+    - name: "execution_mode"
+      type: "string"
+      description: >-
+        Workflow execution mode
+      enum: ["event_driven", "legacy"]
+      default: "event_driven"
+    - name: "enable_intelligence"
+      type: "boolean"
+      description: >-
+        Enable OnexTree intelligence analysis
+      default: false
+
+output_contract:
+  type: "ModelStampResponseOutput"
+  fields:
+    - name: "stamp_id"
+      type: "string (UUID)"
+      description: >-
+        Unique identifier for metadata stamp
+    - name: "file_hash"
+      type: "string"
+      description: >-
+        BLAKE3 hash of stamped content
+    - name: "stamped_content"
+      type: "string"
+      description: >-
+        Content with embedded metadata stamp
+    - name: "stamp_metadata"
+      type: "dict[str, str]"
+      description: >-
+        Stamp metadata (O.N.E. v0.1 compliant)
+    - name: "namespace"
+      type: "string"
+      description: >-
+        Namespace for multi-tenant isolation
+    - name: "workflow_state"
+      type: "EnumWorkflowState"
+      description: >-
+        Final FSM workflow state
+    - name: "workflow_id"
+      type: "UUID"
+      description: >-
+        Workflow correlation ID
+    - name: "processing_time_ms"
+      type: "float"
+      description: >-
+        Total workflow processing time
+    - name: "hash_generation_time_ms"
+      type: "float"
+      description: >-
+        BLAKE3 hash generation time
+    - name: "workflow_steps_executed"
+      type: "integer"
+      description: >-
+        Number of workflow steps executed
+    - name: "intelligence_data"
+      type: "dict[str, str] | None"
+      description: >-
+        OnexTree intelligence analysis data (optional)
+
+# Dependencies and service requirements
+dependencies:
+  services:
+    - name: "metadata_stamping_client"
+      type: "AsyncMetadataStampingClient"
+      required: true
+      description: >-
+        HTTP client for MetadataStampingService
+    - name: "kafka_client"
+      type: "KafkaClient"
+      required: false
+      description: >-
+        Kafka client for event publishing
+        (degraded mode if unavailable)
+    - name: "event_bus"
+      type: "EventBusService"
+      required: false
+      description: >-
+        EventBus for event-driven coordination
+        (falls back to legacy mode)
+    - name: "database_adapter_node"
+      type: "NodeDatabaseAdapterEffect"
+      required: false
+      description: >-
+        Database adapter for workflow execution persistence
+
+  external_services:
+    - name: "MetadataStampingService"
+      endpoint: "http://metadata-stamping:8053"
+      health_check: "/health"
+      critical: true
+    - name: "OnexTree"
+      endpoint: "http://onextree:8058"
+      health_check: "/health"
+      critical: false
+    - name: "Kafka/Redpanda"
+      endpoint: "localhost:29092"
+      critical: false
+
+# Performance requirements
+performance:
+  target_latency_p99_ms: 50  # Without OnexTree intelligence
+  target_latency_p99_with_intelligence_ms: 150  # With OnexTree
+  target_throughput_per_second: 100
+  max_concurrent_workflows: 100
+  resource_limits:
+    max_memory_mb: 512
+    max_cpu_percent: 50
+
+# Operational configuration
+operational:
+  lifecycle_hooks:
+    - "startup"
+    - "shutdown"
+  health_checks:
+    enabled: true
+    components:
+      - "node_runtime"
+      - "metadata_stamping"
+      - "onextree"
+      - "kafka"
+      - "event_bus"
+  introspection:
+    enabled: true
+    broadcast_on_startup: true
+    heartbeat_interval_seconds: 30
+
+# Error handling
+error_handling:
+  retry_policy: "exponential_backoff"
+  max_retries: 3
+  circuit_breaker_enabled: true
+  graceful_degradation:
+    - service: "onextree"
+      fallback: >-
+        continue_with_fallback_intelligence
+    - service: "kafka"
+      fallback: "log_events_only"
+    - service: "event_bus"
+      fallback: >-
+        use_legacy_synchronous_mode
+
+# Compliance and standards
+compliance:
+  onex_version: "2.0"
+  one_protocol_version: "0.1"
+  standards:
+    - "ONEX v2.0 suffix-based naming"
+    - "Subcontract composition architecture"
+    - "ModelContainer dependency injection"
+    - "OnexEnvelopeV1 event format"
+    - "FSM-driven state management"

@@ -1,0 +1,32 @@
+---
+# Minimal Effect node contract (no mixins) - Backward compatibility test
+node_id: "minimal_effect"
+node_type: "effect"
+version: "v1_0_0"
+namespace: "omninode.services.test"
+
+metadata:
+  name: "Minimal Effect Node"
+  description: "Minimal Effect node without any mixins for backward compatibility testing"
+  author: "Test Generator"
+  tags: ["test", "minimal", "backward-compat"]
+
+# No mixin_configuration section - should work with v1.0 contracts
+input_schema:
+  type: "object"
+  properties:
+    data:
+      type: "string"
+      description: "Input data to process"
+
+output_schema:
+  type: "object"
+  properties:
+    result:
+      type: "string"
+      description: "Processing result"
+    status:
+      type: "string"
+      description: "Processing status"
+
+# No event_patterns - minimal configuration

@@ -1,0 +1,29 @@
+# Workflow Coordination Subcontract
+# Multi-step workflow for code generation orchestration
+
+type: "multi_step_workflow"
+stages:
+  - name: "prompt_parsing"
+    description: "Parse natural language prompt"
+    target_duration_ms: 5000
+  - name: "intelligence_gathering"
+    description: "Query RAG for patterns"
+    target_duration_ms: 3000
+  - name: "contract_building"
+    description: "Generate ONEX contract"
+    target_duration_ms: 2000
+  - name: "code_generation"
+    description: "Generate node implementation"
+    target_duration_ms: 12500
+  - name: "event_bus_integration"
+    description: "Wire up Kafka events"
+    target_duration_ms: 2000
+  - name: "validation"
+    description: "Run linting and tests"
+    target_duration_ms: 5000
+  - name: "refinement"
+    description: "Apply quality improvements"
+    target_duration_ms: 3000
+  - name: "file_writing"
+    description: "Write files to disk"
+    target_duration_ms: 3000

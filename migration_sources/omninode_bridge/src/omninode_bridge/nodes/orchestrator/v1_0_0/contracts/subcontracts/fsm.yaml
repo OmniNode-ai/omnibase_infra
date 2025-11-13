@@ -1,0 +1,261 @@
+# FSM (Finite State Machine) Subcontract
+# Defines state machine patterns for workflow state management in NodeBridgeOrchestrator
+
+subcontract_type: fsm
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: "FSM-based workflow state management with transition validation and persistence"
+
+# === STATE MACHINE DEFINITION ===
+state_machine:
+  # Machine name
+  name: "stamp_workflow_fsm"
+
+  # Initial state
+  initial_state: "pending"
+
+  # State definitions
+  states:
+    pending:
+      description: "Workflow created, awaiting processing"
+      type: "initial"
+      allowed_transitions:
+        - target: "processing"
+          event: "start_processing"
+          guards:
+            - "input_validated"
+      actions:
+        on_enter:
+          - action: "log_workflow_created"
+            params:
+              level: "INFO"
+          - action: "emit_metric"
+            params:
+              metric_name: "workflow_created"
+        on_exit:
+          - action: "update_started_timestamp"
+
+    processing:
+      description: "Workflow steps executing"
+      type: "active"
+      allowed_transitions:
+        - target: "completed"
+          event: "workflow_success"
+          guards:
+            - "all_steps_completed"
+        - target: "failed"
+          event: "workflow_failure"
+          guards:
+            - "critical_step_failed"
+      actions:
+        on_enter:
+          - action: "increment_processing_count"
+          - action: "start_timer"
+            params:
+              timer_name: "processing_duration"
+        on_exit:
+          - action: "stop_timer"
+            params:
+              timer_name: "processing_duration"
+          - action: "log_transition"
+            params:
+              level: "INFO"
+
+    completed:
+      description: "Workflow successfully completed"
+      type: "terminal"
+      allowed_transitions: []  # No transitions from terminal state
+      actions:
+        on_enter:
+          - action: "log_workflow_completed"
+            params:
+              level: "INFO"
+          - action: "publish_completion_event"
+            params:
+              event_type: "stamp_workflow_completed"
+          - action: "emit_metric"
+            params:
+              metric_name: "workflow_success"
+          - action: "persist_final_state"
+          - action: "cleanup_resources"
+
+    failed:
+      description: "Workflow execution failed"
+      type: "terminal"
+      allowed_transitions: []  # No transitions from terminal state
+      actions:
+        on_enter:
+          - action: "log_workflow_failed"
+            params:
+              level: "ERROR"
+          - action: "publish_failure_event"
+            params:
+              event_type: "stamp_workflow_failed"
+          - action: "emit_metric"
+            params:
+              metric_name: "workflow_failure"
+          - action: "persist_final_state"
+          - action: "execute_compensation"
+          - action: "cleanup_resources"
+
+# === TRANSITION EVENTS ===
+events:
+  - event_name: "start_processing"
+    description: "Begin workflow processing"
+    payload_schema:
+      correlation_id: "UUID"
+      timestamp: "datetime"
+
+  - event_name: "workflow_success"
+    description: "Workflow completed successfully"
+    payload_schema:
+      correlation_id: "UUID"
+      result: "object"
+      timestamp: "datetime"
+
+  - event_name: "workflow_failure"
+    description: "Workflow failed"
+    payload_schema:
+      correlation_id: "UUID"
+      error: "string"
+      timestamp: "datetime"
+
+# === GUARD CONDITIONS ===
+guards:
+  input_validated:
+    description: "Input data passes validation"
+    expression: "input_valid == true"
+
+  all_steps_completed:
+    description: "All workflow steps completed successfully"
+    expression: "completed_steps == total_steps"
+
+  critical_step_failed:
+    description: "A critical step has failed"
+    expression: "failed_step.required == true"
+
+# === STATE PERSISTENCE ===
+persistence:
+  # Enable state persistence
+  enabled: true
+
+  # Persistence backend
+  backend: "postgresql"  # Options: postgresql, redis, dynamodb
+
+  # Persistence configuration
+  configuration:
+    table: "workflow_fsm_states"
+    schema: "public"
+    connection_pool_size: 20
+
+  # What to persist
+  persist:
+    - "current_state"
+    - "previous_state"
+    - "transition_history"
+    - "state_data"
+    - "retry_count"
+    - "timestamps"
+
+  # Persistence strategy
+  strategy: "on_transition"  # Options: on_transition, periodic, on_change
+
+# === RETRY POLICY ===
+retry_policy:
+  # Maximum retry attempts
+  max_retries: 3
+
+  # Backoff strategy
+  backoff_strategy: "exponential"  # Options: exponential, linear, fixed
+
+  # Backoff configuration
+  backoff:
+    initial_ms: 1000
+    multiplier: 2.0
+    max_ms: 10000
+
+  # Retry on specific errors
+  retry_on_errors:
+    - "NetworkError"
+    - "TimeoutError"
+    - "ServiceUnavailable"
+    - "TemporaryFailure"
+
+# === TIMEOUT CONFIGURATION ===
+timeouts:
+  # State-specific timeouts
+  state_timeouts:
+    pending: 60000      # 1 minute
+    processing: 30000   # 30 seconds
+
+  # Transition timeout
+  transition_timeout_ms: 5000
+
+# === MONITORING & METRICS ===
+monitoring:
+  # Emit FSM metrics
+  emit_metrics: true
+
+  # Metrics to track
+  metrics:
+    - "state_transition_count"
+    - "state_duration_ms"
+    - "retry_count"
+    - "transition_failures"
+    - "terminal_state_distribution"
+
+  # Logging configuration
+  logging:
+    log_transitions: true
+    log_actions: true
+    log_guards: true
+    log_level: "INFO"
+
+# === TRANSITION HISTORY ===
+history:
+  # Track transition history
+  enabled: true
+
+  # Maximum history entries per workflow
+  max_entries: 100
+
+  # Include in history
+  include:
+    - "timestamp"
+    - "from_state"
+    - "to_state"
+    - "event"
+    - "guards_evaluated"
+    - "actions_executed"
+
+# === VALIDATION RULES ===
+validation:
+  # Validate state before transition
+  pre_transition_checks:
+    - check: "validate_current_state"
+      required: true
+    - check: "validate_event"
+      required: true
+    - check: "evaluate_guards"
+      required: true
+
+  # Validate state after transition
+  post_transition_checks:
+    - check: "validate_new_state"
+      required: true
+    - check: "persist_state_successful"
+      required: true
+
+# === ERROR HANDLING ===
+error_handling:
+  # On transition error
+  on_transition_error: "rollback"  # Options: rollback, ignore, retry
+
+  # On persistence error
+  on_persistence_error: "log_and_continue"  # Options: log_and_continue, fail, retry
+
+  # On action execution error
+  on_action_error: "log_and_continue"  # Options: log_and_continue, fail, skip_action

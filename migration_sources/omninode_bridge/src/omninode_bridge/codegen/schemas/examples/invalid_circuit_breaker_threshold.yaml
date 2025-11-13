@@ -1,0 +1,29 @@
+# Example: Invalid Contract - Circuit Breaker Threshold Too High
+#
+# VALIDATION ERROR: failure_threshold exceeds maximum
+# Expected: maximum 100
+# Actual: 150
+
+schema_version: "v2.0.0"
+name: "NodeInvalidCircuitBreakerEffect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+description: "Example contract with invalid circuit breaker configuration"
+
+advanced_features:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 150  # ERROR: Above maximum 100
+    recovery_timeout_ms: 60000
+
+subcontracts:
+  effect:
+    operations:
+      - "initialize"
+      - "shutdown"
+
+# Expected validation error:
+# ValidationError: advanced_features.circuit_breaker.failure_threshold: 150 is greater than maximum 100

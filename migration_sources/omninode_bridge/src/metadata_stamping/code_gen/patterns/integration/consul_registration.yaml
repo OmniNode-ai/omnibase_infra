@@ -1,0 +1,139 @@
+name: consul_registration
+description: "Consul service discovery registration with health checks and metadata"
+category: integration
+applicable_to: [effect, orchestrator, reducer]
+priority: high
+code_template: |
+  def _register_with_consul_sync(self) -> None:
+      """
+      Register {node} with Consul for service discovery (synchronous).
+
+      Registers the {node} as a service with health checks pointing to
+      the health endpoint. Includes metadata about node capabilities.
+
+      Note:
+          This is a non-blocking registration. Failures are logged but don't
+          fail node startup. Service will continue without Consul if registration fails.
+      """
+      try:
+          import consul
+
+          # Initialize Consul client
+          consul_client = consul.Consul(host=self.consul_host, port=self.consul_port)
+
+          # Generate unique service ID
+          service_id = f"omninode-bridge-{node-name}-{self.node_id}"
+
+          # Get service port from config (default to {port} for {node})
+          service_port = int(self.container.config.get("service_port", {port}))
+
+          # Get service host from config (default to localhost)
+          service_host = self.container.config.get("service_host", "localhost")
+
+          # Prepare service tags
+          service_tags = [
+              "onex",
+              "bridge",
+              "{node-type}",
+              f"version:{getattr(self, 'version', '0.1.0')}",
+              "omninode_bridge",
+          ]
+
+          # Prepare service metadata (encoded in tags for MVP compatibility)
+          service_tags.extend(
+              [
+                  "node_type:{node-type}",
+                  f"kafka_enabled:{self.kafka_client is not None}",
+              ]
+          )
+
+          # Health check URL (assumes health endpoint is available)
+          health_check_url = f"http://{service_host}:{service_port}/health"
+
+          # Register service with Consul
+          consul_client.agent.service.register(
+              name="omninode-bridge-{node-name}",
+              service_id=service_id,
+              address=service_host,
+              port=service_port,
+              tags=service_tags,
+              http=health_check_url,
+              interval="30s",
+              timeout="5s",
+          )
+
+          emit_log_event(
+              LogLevel.INFO,
+              "Registered with Consul successfully",
+              {
+                  "node_id": self.node_id,
+                  "service_id": service_id,
+                  "consul_host": self.consul_host,
+                  "consul_port": self.consul_port,
+                  "service_host": service_host,
+                  "service_port": service_port,
+              },
+          )
+
+          # Store service_id for deregistration
+          self._consul_service_id = service_id
+
+      except ImportError:
+          emit_log_event(
+              LogLevel.WARNING,
+              "python-consul not installed - Consul registration skipped",
+              {"node_id": self.node_id},
+          )
+      except Exception as e:
+          emit_log_event(
+              LogLevel.ERROR,
+              "Failed to register with Consul",
+              {
+                  "node_id": self.node_id,
+                  "error": str(e),
+                  "error_type": type(e).__name__,
+              },
+          )
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - store_effect
+
+configuration:
+  health_check:
+    interval: "30s"
+    timeout: "5s"
+    endpoint: "/health"
+  default_port: 8053
+  default_host: "localhost"
+  service_tags:
+    - "onex"
+    - "bridge"
+    - "omninode_bridge"
+
+prerequisites:
+  - python-consul library
+  - Health endpoint implemented
+  - consul_host and consul_port configured
+
+metrics:
+  registration_time_ms: 50
+  memory_bytes: 2048
+
+best_practices:
+  - "Always non-blocking - failures don't stop node startup"
+  - "Use service tags for metadata (not meta parameter)"
+  - "Generate unique service_id with node_id"
+  - "Point health check to /health endpoint"
+  - "Store service_id for deregistration"
+  - "Handle ImportError gracefully"
+  - "Log registration success and failures"
+  - "Use WARNING level for missing library"
+  - "Use ERROR level for registration failures"
+
+validation_rules:
+  - "Must wrap in try/except to prevent startup failure"
+  - "Must store service_id for later deregistration"
+  - "Must include health check configuration"
+  - "Must use unique service_id with node_id"

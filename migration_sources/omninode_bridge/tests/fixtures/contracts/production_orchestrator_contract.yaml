@@ -1,0 +1,200 @@
+# Production-Grade Orchestrator Contract
+node_id: production_orchestrator_node
+node_type: orchestrator
+version: v1_0_0
+
+metadata:
+  service_name: payment_orchestrator
+  domain: financial
+  description: Production-grade payment orchestration with all subcontracts
+  author: test_suite
+  tags:
+    - production
+    - financial
+    - orchestrator
+  sla:
+    max_latency_ms: 2000
+    min_throughput_rps: 50
+    availability: 99.9
+
+# All 6 Subcontract Types
+subcontracts:
+  # 1. FSM Subcontract
+  fsm:
+    states:
+      - pending
+      - validating
+      - risk_assessing
+      - routing
+      - processing
+      - completed
+      - failed
+      - cancelled
+    initial_state: pending
+    transitions:
+      - from: pending
+        to: validating
+        trigger: start_validation
+      - from: validating
+        to: risk_assessing
+        trigger: validation_success
+      - from: validating
+        to: failed
+        trigger: validation_failure
+      - from: risk_assessing
+        to: routing
+        trigger: risk_accepted
+      - from: risk_assessing
+        to: failed
+        trigger: risk_rejected
+      - from: routing
+        to: processing
+        trigger: route_determined
+      - from: processing
+        to: completed
+        trigger: payment_success
+      - from: processing
+        to: failed
+        trigger: payment_failure
+      - from: "*"
+        to: cancelled
+        trigger: cancel_payment
+
+  # 2. Event Type Subcontract
+  event_type:
+    events:
+      - name: orchestration_started
+        schema:
+          type: object
+          properties:
+            correlation_id: { type: string }
+            started_at: { type: string, format: date-time }
+            payment_data: { type: object }
+      - name: validation_completed
+        schema:
+          type: object
+          properties:
+            correlation_id: { type: string }
+            validation_result: { type: object }
+      - name: risk_assessment_completed
+        schema:
+          type: object
+          properties:
+            correlation_id: { type: string }
+            risk_score: { type: number }
+            risk_factors: { type: array }
+      - name: payment_routed
+        schema:
+          type: object
+          properties:
+            correlation_id: { type: string }
+            routing_decision: { type: object }
+      - name: orchestration_completed
+        schema:
+          type: object
+          properties:
+            correlation_id: { type: string }
+            transaction_id: { type: string }
+            status: { type: string }
+
+  # 3. Aggregation Subcontract
+  aggregation:
+    type: workflow_results
+    window_type: session
+    aggregation_keys:
+      - correlation_id
+    metrics:
+      - name: total_steps
+        type: count
+      - name: total_duration_ms
+        type: sum
+        field: step_duration_ms
+      - name: avg_step_duration_ms
+        type: average
+        field: step_duration_ms
+
+  # 4. State Management Subcontract
+  state_management:
+    persistence: database
+    storage_backend: postgresql
+    state_schema:
+      type: object
+      properties:
+        correlation_id: { type: string }
+        current_step: { type: string }
+        payment_data: { type: object }
+        validation_result: { type: object }
+        risk_score: { type: number }
+        routing_decision: { type: object }
+        intermediate_results: { type: object }
+    ttl_seconds: 86400  # 24 hours
+
+  # 5. Routing Subcontract
+  routing:
+    routing_rules:
+      - condition: risk_score < 0.3
+        destination: low_risk_processor
+        priority: 1
+      - condition: risk_score >= 0.3 and risk_score < 0.7
+        destination: standard_processor
+        priority: 2
+      - condition: risk_score >= 0.7
+        destination: high_risk_processor
+        priority: 3
+    fallback_destination: fallback_processor
+
+  # 6. Caching Subcontract
+  caching:
+    cache_backend: redis
+    cache_strategy: write_through
+    ttl_seconds: 3600
+    cached_operations:
+      - operation: get_customer_profile
+        cache_key_template: "customer:{customer_id}"
+        ttl_seconds: 7200
+      - operation: get_merchant_config
+        cache_key_template: "merchant:{merchant_id}"
+        ttl_seconds: 3600
+
+input_schema:
+  type: object
+  required:
+    - payment_data
+    - customer_profile
+    - merchant_config
+  properties:
+    payment_data:
+      type: object
+      required: [transaction_id, amount, currency]
+      properties:
+        transaction_id: { type: string }
+        amount: { type: number }
+        currency: { type: string }
+        payment_method: { type: string }
+    customer_profile:
+      type: object
+      properties:
+        customer_id: { type: string }
+        risk_profile: { type: object }
+    merchant_config:
+      type: object
+      properties:
+        merchant_id: { type: string }
+        routing_preferences: { type: object }
+
+output_schema:
+  type: object
+  required:
+    - transaction_id
+    - status
+  properties:
+    transaction_id: { type: string }
+    status: { type: string }
+    routing_decisions: { type: array }
+    risk_score: { type: number }
+    processing_time_ms: { type: number }
+    metadata:
+      type: object
+      properties:
+        steps_executed: { type: array }
+        total_duration_ms: { type: number }

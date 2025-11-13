@@ -1,0 +1,60 @@
+name: defensive_config
+description: "Defensive configuration loading with container.config edge case handling"
+category: configuration
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: high
+code_template: |
+  # Configuration - defensive pattern for dependency_injector
+  try:
+      if hasattr(container.config, "get") and callable(container.config.get):
+          self.config_value = container.config.get(
+              "config_key",
+              os.getenv("ENV_VAR", "default_value")
+          )
+      else:
+          # Fallback to defaults
+          self.config_value = os.getenv("ENV_VAR", "default_value")
+  except Exception:
+      # Fallback to defaults if any error
+      self.config_value = os.getenv("ENV_VAR", "default_value")
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - store_effect
+
+configuration:
+  fallback_order:
+    1: "container.config.get(key, default)"
+    2: "os.getenv(ENV_VAR, default)"
+    3: "hardcoded default"
+  defensive_checks:
+    - hasattr(container.config, "get")
+    - callable(container.config.get)
+    - try/except wrapper
+
+prerequisites:
+  - os module imported
+  - container.config available
+  - Environment variables defined
+
+metrics:
+  overhead_ms: 0.1
+  memory_bytes: 128
+
+best_practices:
+  - "Always use defensive try/except around config.get()"
+  - "Check hasattr() and callable() before calling config.get()"
+  - "Provide multiple fallback levels"
+  - "Use os.getenv() as second-level fallback"
+  - "Provide hardcoded defaults as final fallback"
+  - "Never fail initialization due to config errors"
+  - "Log warnings for missing config (optional)"
+  - "Document expected config keys"
+
+validation_rules:
+  - "Must use hasattr() check before accessing config.get"
+  - "Must use callable() check before calling config.get"
+  - "Must have try/except wrapper"
+  - "Must have at least 2 fallback levels"
+  - "Must never raise exceptions for missing config"

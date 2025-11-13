@@ -1,0 +1,167 @@
+# Advanced Orchestrator with Metrics - ONEX v2.0 Example
+# Demonstrates: Production-grade orchestrator with comprehensive observability
+
+# Required fields for ModelContractOrchestrator
+name: "workflow_orchestrator"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "Production-grade workflow orchestrator with comprehensive observability. Demonstrates advanced mixin integration with health monitoring, performance metrics, and structured logging for production deployments."
+node_type: "ORCHESTRATOR"
+
+# Input/Output Models (required by omnibase_core)
+input_model: "ModelWorkflowOrchestratorInput"
+output_model: "ModelWorkflowOrchestratorOutput"
+
+# State schemas (ONEX v2.0 requirement)
+input_state:
+  type: "object"
+  properties:
+    workflow_id:
+      type: "string"
+      format: "uuid"
+      description: "Unique workflow identifier"
+    steps:
+      type: "array"
+      items:
+        type: "object"
+        properties:
+          step_id:
+            type: "string"
+          operation:
+            type: "string"
+          parameters:
+            type: "object"
+      description: "Workflow steps to execute"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Request correlation ID"
+  required:
+    - workflow_id
+    - steps
+
+output_state:
+  type: "object"
+  properties:
+    workflow_id:
+      type: "string"
+      format: "uuid"
+    status:
+      type: "string"
+      enum: ["completed", "partial", "failed"]
+    completed_steps:
+      type: "integer"
+      description: "Number of successfully completed steps"
+    failed_steps:
+      type: "integer"
+      description: "Number of failed steps"
+    total_duration_ms:
+      type: "number"
+      description: "Total workflow duration in milliseconds"
+    step_results:
+      type: "array"
+      items:
+        type: "object"
+  required:
+    - workflow_id
+    - status
+
+# Tool specification (required by omnibase_core)
+tool_specification:
+  tool_name: "workflow_orchestrator"
+  main_tool_class: "examples.mixin_enhanced_nodes.advanced_orchestrator_with_metrics.node.NodeWorkflowOrchestrator"
+
+# Orchestration configuration
+orchestration:
+  max_parallel_steps: 5
+  step_timeout_seconds: 300
+  failure_handling: "continue_on_error"
+  retry_failed_steps: true
+
+# Mixin Configuration (Multiple mixins for full observability)
+mixins:
+  - name: "MixinHealthCheck"
+    enabled: true
+    config:
+      cache_ttl_seconds: 10.0
+      critical_components:
+        - database
+        - kafka
+        - external_service
+
+  - name: "MixinMetrics"
+    enabled: true
+    config:
+      collect_histograms: true
+      histogram_buckets: [0.001, 0.01, 0.1, 1.0, 10.0]
+      track_request_duration: true
+      track_error_rates: true
+
+  - name: "MixinLogData"
+    enabled: true
+    config:
+      log_level: "INFO"
+      include_timestamps: true
+      include_correlation_ids: true
+      structured_format: true
+
+# Metadata
+metadata:
+  domain: "workflow_orchestration"
+  generated: true
+  generated_at: "2025-11-05T00:00:00Z"
+  tags:
+    - "example"
+    - "advanced"
+    - "orchestrator"
+    - "observability"
+    - "metrics"
+    - "production_ready"
+
+# Operations supported
+operations:
+  - "execute_workflow"
+  - "execute_step"
+  - "retry_failed_step"
+  - "health_check"
+  - "get_metrics"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 100
+    max_ms: 1000
+  memory_usage:
+    target_mb: 256
+    max_mb: 1024
+  throughput:
+    target_rps: 100
+    max_concurrent: 50
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 95
+    required: true
+  integration_tests:
+    required: true
+  load_tests:
+    required: true
+    target_rps: 100
+
+# Circuit Breaker Configuration
+advanced_features:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 10
+    recovery_timeout_seconds: 120
+    half_open_max_calls: 5
+
+# Retry Policy
+retry_policy:
+  max_attempts: 5
+  backoff_multiplier: 2.0
+  max_backoff_seconds: 60
+  retry_on_timeouts: true

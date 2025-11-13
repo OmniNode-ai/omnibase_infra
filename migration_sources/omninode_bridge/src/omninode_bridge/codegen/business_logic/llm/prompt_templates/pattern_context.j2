@@ -1,0 +1,25 @@
+{#
+Pattern Context Template
+
+Includes production patterns with code examples and usage guidelines.
+
+Template Variables:
+- formatted_patterns: str - Pre-formatted markdown from PatternFormatter
+- pattern_count: int - Number of patterns included
+- total_patterns_available: int - Total patterns available in library
+#}
+{{ formatted_patterns }}
+
+**Pattern Usage Notes:**
+- These patterns are extracted from production ONEX nodes
+- All code examples are battle-tested in real deployments
+- Adapt patterns to fit your specific requirements
+- Combine multiple patterns when appropriate
+- Always include error handling and logging
+
+**Pattern Coverage:**
+- Patterns included: {{ pattern_count }}
+{% if total_patterns_available > pattern_count %}
+- Additional patterns available: {{ total_patterns_available - pattern_count }}
+{% endif %}
+- All patterns scored >0.3 relevance for your requirements

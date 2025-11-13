@@ -1,0 +1,144 @@
+name: event_publishing
+description: "Kafka event publishing with OnexEnvelopeV1 wrapping and metadata enrichment"
+category: observability
+applicable_to: [effect, orchestrator, reducer]
+priority: high
+code_template: |
+  async def _publish_event(
+      self, event_type: {EventEnum}, data: dict[str, Any]
+  ) -> None:
+      """
+      Publish event to Kafka using OnexEnvelopeV1 wrapping.
+
+      Args:
+          event_type: Event type identifier
+          data: Event payload data
+      """
+      try:
+          # Get Kafka topic name
+          topic_name = event_type.get_topic_name(namespace=self.default_namespace)
+
+          # Publish to Kafka if client is available
+          if self.kafka_client and self.kafka_client.is_connected:
+              # Extract correlation ID from data
+              correlation_id = data.get("correlation_id") or data.get("workflow_id")
+
+              # Add node metadata to payload
+              payload = {
+                  **data,
+                  "node_id": self.node_id,
+                  "published_at": datetime.now(UTC).isoformat(),
+              }
+
+              # Publish with OnexEnvelopeV1 wrapping for standardized event format
+              # Include Consul service_id for cross-service event correlation
+              event_metadata = {
+                  "event_category": "{category}",
+                  "node_type": "{type}",
+                  "namespace": self.default_namespace,
+              }
+
+              # Add consul_service_id if available (enables cross-service correlation)
+              if hasattr(self, "_consul_service_id"):
+                  event_metadata["consul_service_id"] = self._consul_service_id
+
+              success = await self.kafka_client.publish_with_envelope(
+                  event_type=event_type.value,
+                  source_node_id=str(self.node_id),
+                  payload=payload,
+                  topic=topic_name,
+                  correlation_id=correlation_id,
+                  metadata=event_metadata,
+              )
+
+              if success:
+                  emit_log_event(
+                      LogLevel.DEBUG,
+                      f"Published Kafka event (OnexEnvelopeV1): {event_type.value}",
+                      {
+                          "node_id": self.node_id,
+                          "event_type": event_type.value,
+                          "topic_name": topic_name,
+                          "correlation_id": correlation_id,
+                          "envelope_wrapped": True,
+                      },
+                  )
+              else:
+                  emit_log_event(
+                      LogLevel.WARNING,
+                      f"Failed to publish Kafka event: {event_type.value}",
+                      {
+                          "node_id": self.node_id,
+                          "event_type": event_type.value,
+                          "topic_name": topic_name,
+                      },
+                  )
+          else:
+              # Kafka not available - log event only
+              emit_log_event(
+                  LogLevel.DEBUG,
+                  f"Kafka unavailable, logging event: {event_type.value}",
+                  {
+                      "node_id": self.node_id,
+                      "event_type": event_type.value,
+                      "topic_name": topic_name,
+                      "data": data,
+                  },
+              )
+
+      except Exception as e:
+          # Log error but don't fail workflow
+          emit_log_event(
+              LogLevel.WARNING,
+              f"Failed to publish Kafka event: {event_type.value}",
+              {
+                  "node_id": self.node_id,
+                  "event_type": event_type.value,
+                  "error": str(e),
+              },
+          )
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - codegen_metrics_reducer
+
+configuration:
+  envelope_format: "OnexEnvelopeV1"
+  default_namespace: "omninode.bridge"
+  log_level_success: DEBUG
+  log_level_failure: WARNING
+
+prerequisites:
+  - KafkaClient with publish_with_envelope() method
+  - Event enum with get_topic_name() method
+  - datetime and UTC imports
+  - emit_log_event for logging
+
+metadata_fields:
+  required:
+    - event_category
+    - node_type
+    - namespace
+  optional:
+    - consul_service_id
+
+metrics:
+  overhead_ms: 5.0
+  memory_bytes: 1024
+
+best_practices:
+  - "Always wrap with OnexEnvelopeV1 via publish_with_envelope()"
+  - "Include metadata with event_category, node_type, namespace"
+  - "Add consul_service_id if available for cross-service correlation"
+  - "Never fail workflow if event publishing fails (try/except)"
+  - "Log event locally if Kafka unavailable"
+  - "Use DEBUG level for successful publishes (reduce noise)"
+  - "Extract correlation_id from data (workflow_id as fallback)"
+  - "Add published_at timestamp to payload"
+
+validation_rules:
+  - "Must check kafka_client.is_connected before publishing"
+  - "Must wrap all publishing in try/except"
+  - "Must log on both success and failure"
+  - "Must not raise exceptions that fail the workflow"

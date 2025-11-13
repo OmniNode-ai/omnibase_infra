@@ -1,0 +1,224 @@
+# ONEX v2.0 Contract for NodeCodegenMetricsReducer
+# Contract-first architecture for code generation metrics aggregation
+
+# Required top-level fields per omnibase_core requirements
+node_name: "node_codegen_metrics_reducer"
+node_type: "REDUCER"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+# Node identity section
+node_identity:
+  description: "Code generation metrics aggregator with streaming aggregation and time-windowed analysis"
+  service_name: "omninode_bridge_codegen_metrics"
+  namespace: "omninode.bridge.codegen"
+
+# Tool specification
+tool_specification:
+  main_tool_class: "NodeCodegenMetricsReducer"
+
+# Definitions section
+definitions: {}
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/intent_publisher.yaml"
+    - "./contracts/aggregation.yaml"
+    - "./contracts/streaming.yaml"
+
+# Mixins
+mixins:
+  - "MixinIntentPublisher"
+
+# Contract specification
+contract:
+  # Input: Stream of code generation events
+  input_state:
+    type: stream
+    schema:
+      oneOf:
+          - type: object  # NODE_GENERATION_STARTED
+            properties:
+              event_type:
+                type: string
+                enum: ["NODE_GENERATION_STARTED"]
+              workflow_id:
+                type: string
+                format: uuid
+              timestamp:
+                type: string
+                format: date-time
+          - type: object  # NODE_GENERATION_STAGE_COMPLETED
+            properties:
+              event_type:
+                type: string
+                enum: ["NODE_GENERATION_STAGE_COMPLETED"]
+              workflow_id:
+                type: string
+                format: uuid
+              stage_name:
+                type: string
+              stage_number:
+                type: integer
+                minimum: 1
+                maximum: 8
+              duration_seconds:
+                type: number
+              success:
+                type: boolean
+              metrics:
+                type: object
+                description: "Optional stage-specific metrics"
+              timestamp:
+                type: string
+                format: date-time
+          - type: object  # NODE_GENERATION_COMPLETED
+            properties:
+              event_type:
+                type: string
+                enum: ["NODE_GENERATION_COMPLETED"]
+              workflow_id:
+                type: string
+                format: uuid
+              total_duration_seconds:
+                type: number
+              quality_score:
+                type: number
+                minimum: 0
+                maximum: 1
+              total_tokens:
+                type: integer
+                description: "Total tokens consumed"
+              total_cost_usd:
+                type: number
+                description: "Total cost in USD"
+              timestamp:
+                type: string
+                format: date-time
+          - type: object  # NODE_GENERATION_FAILED
+            properties:
+              event_type:
+                type: string
+                enum: ["NODE_GENERATION_FAILED"]
+              workflow_id:
+                type: string
+                format: uuid
+              failed_stage:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+
+  # Output: Aggregated metrics state
+  output_state:
+    type: object
+    schema:
+      type: object
+      properties:
+        aggregation_id:
+          type: string
+          format: uuid
+        window_type:
+          type: string
+          enum: ["hourly", "daily", "weekly", "monthly"]
+        total_generations:
+          type: integer
+        successful_generations:
+          type: integer
+        failed_generations:
+          type: integer
+        avg_duration_seconds:
+          type: number
+        p95_duration_seconds:
+          type: number
+        avg_quality_score:
+          type: number
+        total_cost_usd:
+          type: number
+        aggregation_duration_ms:
+          type: number
+        items_per_second:
+          type: number
+
+# Performance requirements
+performance:
+  throughput_target:
+    events_per_second: 1000
+    description: "Target: >1000 events/second aggregation"
+  latency_target:
+    p95_ms: 100
+    description: "Target: <100ms aggregation latency for 1000 items"
+  resource_limits:
+    max_memory_mb: 256
+    max_cpu_percent: 50
+
+# Dependencies
+dependencies:
+  required_services:
+    - name: "kafka"
+      type: "event_bus"
+      version: ">=2.8.0"
+      description: "Kafka for event streaming"
+  optional_services:
+    - name: "postgresql"
+      type: "database"
+      version: ">=13.0"
+      description: "PostgreSQL for state persistence"
+
+# Kafka integration
+kafka:
+  consumer_topics:
+    - "dev.omninode-bridge.codegen.generation-started.v1"
+    - "dev.omninode-bridge.codegen.stage-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-completed.v1"
+    - "dev.omninode-bridge.codegen.generation-failed.v1"
+  producer_topics:
+    - "dev.omninode-bridge.codegen.metrics-recorded.v1"
+  consumer_group: "codegen-metrics-reducer"
+  batch_size: 100
+
+# Quality gates
+quality_gates:
+  - name: "aggregation_accuracy"
+    description: "Verify aggregation calculations are accurate"
+    threshold: 0.99
+  - name: "performance_compliance"
+    description: "Verify performance targets met"
+    threshold: 0.95
+  - name: "type_safety"
+    description: "Verify strong typing throughout"
+    threshold: 1.0
+
+# Health checks
+health_checks:
+  - name: "aggregation_buffer"
+    type: "memory"
+    interval_seconds: 30
+    critical: false
+  - name: "kafka_connectivity"
+    type: "network"
+    interval_seconds: 60
+    critical: false
+
+# Monitoring and observability
+monitoring:
+  metrics:
+    - name: "events_processed_total"
+      type: "counter"
+      description: "Total events processed"
+    - name: "aggregation_duration_seconds"
+      type: "histogram"
+      description: "Aggregation duration"
+      buckets: [0.01, 0.05, 0.1, 0.5, 1.0]
+    - name: "items_per_second"
+      type: "gauge"
+      description: "Current aggregation throughput"
+  logs:
+    level: "INFO"
+    structured: true
+  traces:
+    enabled: true
+    sampling_rate: 0.1

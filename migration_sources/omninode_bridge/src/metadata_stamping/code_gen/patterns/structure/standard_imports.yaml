@@ -1,0 +1,104 @@
+name: standard_imports
+description: "Standard Python and ONEX imports required for all nodes"
+category: structure
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: critical
+code_template: |
+  #!/usr/bin/env python3
+  """
+  Node{Name}{Type} - Description.
+
+  ONEX v2.0 Compliance:
+  - Suffix-based naming: Node{Name}{Type}
+  - Extends Node{Type} from omnibase_core
+  - Uses ModelOnexError for error handling
+  - Event-driven architecture with Kafka
+  """
+
+  import os
+  import time
+  from datetime import UTC, datetime
+  from pathlib import Path
+  from typing import Any, Optional
+  from uuid import UUID, uuid4
+
+  # ONEX Core Imports (ALWAYS required)
+  from omnibase_core import EnumCoreErrorCode, ModelOnexError
+  from omnibase_core.enums.enum_log_level import EnumLogLevel as LogLevel
+  from omnibase_core.logging.structured import emit_log_event_sync as emit_log_event
+  from omnibase_core.models.core import ModelContainer
+  from omnibase_core.models.contracts.model_contract_{type} import ModelContract{Type}
+  from omnibase_core.nodes.node_{type} import Node{Type}
+
+  # Node-specific imports (models, protocols, services)
+  from .models import ...  # Local models
+  from omninode_bridge.protocols import ...  # Protocols
+  from omninode_bridge.services import ...  # Services
+
+  # Aliases for compatibility
+  OnexError = ModelOnexError
+  CoreErrorCode = EnumCoreErrorCode
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - codegen_metrics_reducer
+
+configuration:
+  python_version: "3.11+"
+  encoding: "utf-8"
+  import_style: "absolute"
+
+import_groups:
+  standard_library:
+    - os
+    - time
+    - datetime (UTC, datetime)
+    - pathlib (Path)
+    - typing (Any, Optional)
+    - uuid (UUID, uuid4)
+    - asyncio (for async nodes)
+
+  omnibase_core_required:
+    - EnumCoreErrorCode
+    - ModelOnexError
+    - EnumLogLevel as LogLevel
+    - emit_log_event_sync as emit_log_event
+    - ModelContainer
+    - ModelContract{Type}
+    - Node{Type}
+
+  node_specific:
+    - Local models from .models
+    - Protocols from omninode_bridge.protocols
+    - Services from omninode_bridge.services
+
+  aliases:
+    - OnexError = ModelOnexError
+    - CoreErrorCode = EnumCoreErrorCode
+
+prerequisites:
+  - omnibase_core installed
+  - Python 3.11+
+
+metrics:
+  import_time_ms: 50
+  memory_bytes: 10485760  # 10MB
+
+best_practices:
+  - "Start with shebang line (#!/usr/bin/env python3)"
+  - "Include comprehensive module docstring"
+  - "Document ONEX v2.0 compliance in docstring"
+  - "Group imports: stdlib, omnibase_core, node-specific"
+  - "Use absolute imports (not relative for omnibase_core)"
+  - "Create aliases for commonly used types"
+  - "Import datetime.UTC for timezone-aware timestamps"
+  - "Import time.perf_counter for high-precision timing"
+  - "Import uuid4 for correlation IDs"
+
+validation_rules:
+  - "Must include shebang line"
+  - "Must have module docstring with ONEX compliance"
+  - "Must import all omnibase_core required modules"
+  - "Must create OnexError and CoreErrorCode aliases"
+  - "Must use Node{Type} specific imports"

@@ -1,0 +1,36 @@
+---
+# Error case: Mixin with missing dependencies
+node_id: "missing_dependency_test"
+node_type: "effect"
+version: "v1_0_0"
+namespace: "omninode.services.test"
+
+metadata:
+  name: "Missing Dependency Test"
+  description: "Test contract missing required mixin dependencies"
+  author: "Test Generator"
+  tags: ["test", "error", "dependency"]
+
+mixin_configuration:
+  mixins:
+    # MixinEventDrivenNode requires:
+    # - MixinEventHandler
+    # - MixinNodeLifecycle
+    # - MixinIntrospectionPublisher
+    # But we're only declaring the main mixin without dependencies
+    - mixin_name: "MixinEventDrivenNode"
+      config:
+        event_bus_enabled: true
+        # Missing required dependencies should trigger validation error
+
+input_schema:
+  type: "object"
+  properties:
+    data:
+      type: "string"
+
+output_schema:
+  type: "object"
+  properties:
+    result:
+      type: "string"

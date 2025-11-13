@@ -1,0 +1,66 @@
+# Health Check Pattern
+name: health_checks
+category: monitoring
+description: Health check endpoints for service monitoring
+
+# Applicability
+node_types:
+  - effect
+  - compute
+  - orchestrator
+  - reducer
+
+complexity: 2
+recommended_for:
+  - production_services
+  - kubernetes_deployments
+  - service_mesh
+
+# Pattern Definition
+code_template: |
+  async def health_check(self) -> dict[str, Any]:
+      """Perform health check.
+
+      Returns:
+          Health status dictionary
+      """
+      health_status = {
+          "status": "healthy",
+          "timestamp": datetime.now(UTC).isoformat(),
+          "checks": {}
+      }
+
+      # Check database connection
+      if hasattr(self, "_connection_pool"):
+          try:
+              async with self._connection_pool.acquire() as conn:
+                  await conn.execute("SELECT 1")
+              health_status["checks"]["database"] = "healthy"
+          except Exception as e:
+              health_status["checks"]["database"] = f"unhealthy: {e}"
+              health_status["status"] = "degraded"
+
+      # Check external dependencies
+      if hasattr(self, "_external_services"):
+          for service_name, service_client in self._external_services.items():
+              try:
+                  await service_client.ping()
+                  health_status["checks"][service_name] = "healthy"
+              except Exception as e:
+                  health_status["checks"][service_name] = f"unhealthy: {e}"
+                  health_status["status"] = "degraded"
+
+      return health_status
+
+dependencies: []
+
+imports:
+  - from datetime import UTC, datetime
+  - from typing import Any
+
+# Usage Example
+example: |
+  # Call health check endpoint
+  health_status = await node.health_check()
+  if health_status["status"] != "healthy":
+      logger.warning(f"Service degraded: {health_status}")

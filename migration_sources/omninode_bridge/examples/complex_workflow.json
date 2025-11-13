@@ -1,0 +1,108 @@
+{
+  "workflow_id": "complex_analysis_workflow",
+  "name": "Complex Project Analysis Workflow",
+  "description": "Comprehensive multi-step project analysis with validation contracts and model fallback",
+  "tasks": [
+    {
+      "task_id": "security_audit",
+      "task_type": "ai_task",
+      "prompt": "Perform a comprehensive security audit of the project. Analyze dependencies, code patterns, and configuration for security vulnerabilities. Provide specific recommendations for remediation.",
+      "config": {
+        "complexity": "complex",
+        "ai_task_type": "security_analysis",
+        "timeout": 300,
+        "retry_limit": 3,
+        "preferred_model": "codestral:22b-v0.1-q4_K_M"
+      },
+      "validation_contract": {
+        "type": "required_fields",
+        "fields": ["vulnerabilities_found", "risk_assessment", "remediation_steps"],
+        "min_content_length": 200
+      },
+      "definition_of_done": {
+        "min_content_length": 300,
+        "required_keywords": ["security", "vulnerability", "risk", "recommendation"],
+        "forbidden_keywords": ["placeholder", "TODO", "example"],
+        "quality_threshold": 0.8
+      },
+      "model_fallback_config": {
+        "strategy": "next_tier",
+        "fallback_models": ["llama3.1:8b-instruct-q6_k", "mixtral:8x7b-instruct-v0.1-q4_K_M"],
+        "max_attempts": 3
+      }
+    },
+    {
+      "task_id": "performance_analysis",
+      "task_type": "ai_task",
+      "prompt": "Analyze the codebase for performance bottlenecks, resource usage patterns, and optimization opportunities. Focus on database queries, API endpoints, and async operations.",
+      "config": {
+        "complexity": "moderate",
+        "ai_task_type": "performance_analysis",
+        "timeout": 240,
+        "retry_limit": 2
+      },
+      "validation_contract": {
+        "type": "content_length",
+        "min_length": 150,
+        "max_length": 5000
+      },
+      "definition_of_done": {
+        "min_content_length": 200,
+        "required_keywords": ["performance", "optimization", "bottleneck"],
+        "quality_threshold": 0.7
+      }
+    },
+    {
+      "task_id": "code_quality_review",
+      "task_type": "ai_task",
+      "prompt": "Review code quality focusing on maintainability, readability, and adherence to Python best practices. Identify technical debt and suggest refactoring opportunities.",
+      "config": {
+        "complexity": "moderate",
+        "ai_task_type": "code_review",
+        "timeout": 180,
+        "retry_limit": 2
+      },
+      "validation_contract": {
+        "type": "required_fields",
+        "fields": ["quality_score", "issues_identified", "improvement_suggestions"]
+      },
+      "definition_of_done": {
+        "min_content_length": 250,
+        "required_keywords": ["quality", "maintainability", "best practices"],
+        "quality_threshold": 0.75
+      }
+    },
+    {
+      "task_id": "integration_recommendations",
+      "task_type": "ai_task",
+      "prompt": "Based on the security audit, performance analysis, and code quality review, provide integrated recommendations for overall project improvement. Prioritize recommendations by impact and effort required.",
+      "config": {
+        "complexity": "complex",
+        "ai_task_type": "synthesis",
+        "timeout": 200,
+        "retry_limit": 2,
+        "context_size": 8192
+      },
+      "validation_contract": {
+        "type": "required_fields",
+        "fields": ["prioritized_recommendations", "implementation_roadmap", "risk_mitigation"],
+        "min_content_length": 300
+      },
+      "definition_of_done": {
+        "min_content_length": 400,
+        "required_keywords": ["recommendation", "priority", "implementation", "roadmap"],
+        "quality_threshold": 0.85
+      },
+      "model_fallback_config": {
+        "strategy": "escalate_complexity",
+        "fallback_models": ["mixtral:8x7b-instruct-v0.1-q4_K_M"],
+        "max_attempts": 2
+      }
+    }
+  ],
+  "dependencies": {
+    "performance_analysis": ["security_audit"],
+    "code_quality_review": ["security_audit"],
+    "integration_recommendations": ["security_audit", "performance_analysis", "code_quality_review"]
+  }
+}

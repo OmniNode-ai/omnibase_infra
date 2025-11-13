@@ -1,0 +1,51 @@
+# ONEX v2.0 Subcontract - Kafka Events
+# Kafka event publishing and consumption patterns
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Standard Kafka event patterns for the omninode ecosystem.
+  Defines event envelope format, topic naming, and publishing requirements.
+
+event_envelope:
+  format: "OnexEnvelopeV1"
+  required_fields:
+    - event_id
+    - event_type
+    - correlation_id
+    - timestamp
+    - payload
+  optional_fields:
+    - metadata
+    - source_node
+    - destination_node
+
+topic_naming:
+  pattern: "{environment}.{namespace}.{domain}.{event_name}.{version}"
+  example: "dev.omninode-bridge.codegen.generation-started.v1"
+
+publishing_requirements:
+  - "correlation_id_propagation"
+  - "timestamp_utc"
+  - "schema_version"
+  - "event_ordering"
+
+consumer_patterns:
+  - pattern: "at_least_once"
+    description: "Events processed at least once"
+    requirements:
+      - "idempotent_processing"
+      - "offset_management"
+
+  - pattern: "exactly_once"
+    description: "Events processed exactly once"
+    requirements:
+      - "transactional_processing"
+      - "deduplication"
+
+retry_policy:
+  max_retries: 3
+  backoff_multiplier: 2.0
+  dead_letter_queue: true

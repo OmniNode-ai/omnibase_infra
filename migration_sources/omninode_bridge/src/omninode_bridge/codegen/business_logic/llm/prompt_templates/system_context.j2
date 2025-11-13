@@ -1,0 +1,84 @@
+{#
+System Context Template
+
+Provides foundational ONEX v2.0 and node type context for LLM generation.
+
+Template Variables:
+- node_type: str - Node type (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR)
+- node_type_description: str - Description of node type characteristics
+- variant: str - Selected template variant name
+- variant_confidence: float - Variant selection confidence score
+- variant_rationale: str - Why this variant was selected
+- variant_features: list[str] - Features provided by variant
+- onex_version: str - ONEX version (default: "2.0")
+#}
+# System Context
+
+## ONEX {{ onex_version }} Requirements
+You are generating code for an ONEX {{ onex_version }} compliant node.
+
+**Core Requirements:**
+- Async/await throughout all methods
+- ModelOnexError for all error handling
+- emit_log_event for structured logging (no print() or logger.info())
+- Type hints on all functions and variables
+- Comprehensive error handling with try/except blocks
+- Correlation ID tracking in all operations
+- Performance metrics collection and reporting
+
+## Node Type: {{ node_type }}
+{{ node_type_description }}
+
+**Node Type Characteristics:**
+{% if node_type == "EFFECT" %}
+- External system interaction (database, API, file system, etc.)
+- Network/disk I/O operations
+- Idempotent operations preferred
+- Timeout handling REQUIRED
+- Connection pooling and resource management
+- Circuit breaker patterns for resilience
+{% elif node_type == "COMPUTE" %}
+- Pure computation with no side effects
+- Deterministic transformations
+- No external I/O (except logging)
+- Fast execution (<10ms typical)
+- Heavy CPU usage acceptable
+- Memory efficiency important
+{% elif node_type == "REDUCER" %}
+- Streaming data aggregation
+- State management and persistence
+- Window-based aggregation patterns
+- High throughput (>1000 items/sec)
+- Memory-efficient accumulation
+- Partial result emission
+{% elif node_type == "ORCHESTRATOR" %}
+- Workflow coordination and routing
+- Multi-step execution management
+- FSM (Finite State Machine) patterns
+- Sub-node invocation and result aggregation
+- Rollback and compensation logic
+- Complex error handling and retry
+{% endif %}
+
+## Template Variant: {{ variant }}
+Selected variant: **{{ variant }}** (confidence: {{ "%.2f"|format(variant_confidence) }})
+
+**Selection Rationale:**
+{{ variant_rationale }}
+
+**Variant Features:**
+{% for feature in variant_features[:8] %}
+- {{ feature }}
+{% endfor %}
+{% if variant_features|length > 8 %}
+- ... and {{ variant_features|length - 8 }} more features
+{% endif %}
+
+**Architecture Principles:**
+1. Fail fast with clear error messages
+2. Log at INFO level for success, ERROR for failures
+3. Include correlation_id in all log events
+4. Track latency and include in response metadata
+5. Use type hints everywhere (already imported: Any, Dict, List, Optional)
+6. Handle edge cases explicitly (null inputs, empty collections, etc.)
+7. No hardcoded values - use configuration or environment variables

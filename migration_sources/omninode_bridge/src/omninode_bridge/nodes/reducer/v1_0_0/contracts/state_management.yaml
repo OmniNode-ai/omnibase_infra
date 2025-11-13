@@ -1,0 +1,184 @@
+# State Management Subcontract
+# PostgreSQL persistence and state recovery configuration
+# References: NodeBridgeReducer persistence hooks, ModelStateManagementSubcontract
+
+type: "state_persistence"
+state_management_name: "reducer_state_persistence"
+description: "Intent-based state persistence to PostgreSQL via EFFECT node with transaction support"
+
+# Persistence mode (ONEX v2.0 Pure Function Pattern)
+persistence_mode: "intent_based"
+description_mode: "Reducer generates intents for EFFECT node execution (no direct I/O)"
+
+# Database configuration (for EFFECT node consumption)
+database:
+  type: "postgresql"
+  connection_pool:
+    min_connections: 10
+    max_connections: 50
+    acquire_timeout_seconds: 30
+    idle_timeout_seconds: 600
+  schema: "public"
+  tables:
+    aggregated_state:
+      table_name: "aggregated_reducer_state"
+      primary_key: "aggregation_id"
+      indexes:
+        - columns: ["namespace"]
+          unique: false
+        - columns: ["aggregation_type"]
+          unique: false
+        - columns: ["created_at"]
+          unique: false
+      partitioning:
+        enabled: true
+        strategy: "range"
+        partition_key: "created_at"
+        partition_interval: "1 month"
+    fsm_workflow_states:
+      table_name: "fsm_workflow_states"
+      primary_key: "workflow_id"
+      indexes:
+        - columns: ["current_state"]
+          unique: false
+        - columns: ["updated_at"]
+          unique: false
+        - columns: ["namespace"]
+          unique: false
+      cleanup:
+        enabled: true
+        cleanup_interval_hours: 24
+        cleanup_terminal_states_after_hours: 72
+
+# Intent types for EFFECT node execution
+intent_types:
+  - intent_type: "PERSIST_AGGREGATED_STATE"
+    target_node: "store_effect"
+    priority: 0  # Normal priority
+    description: "Persist aggregated state to aggregated_reducer_state table"
+    payload_schema:
+      aggregation_id: "UUID (string)"
+      aggregation_type: "EnumAggregationType (string)"
+      namespace: "string"
+      aggregated_data: "JSONB object"
+      metadata: "JSONB object"
+      timestamp: "ISO8601 timestamp"
+    persistence_strategy:
+      operation: "upsert"
+      conflict_resolution: "on_conflict_update"
+      conflict_columns: ["namespace", "aggregation_type"]
+
+  - intent_type: "PERSIST_FSM_TRANSITION"
+    target_node: "store_effect"
+    priority: 1  # High priority
+    description: "Persist FSM state transition to fsm_workflow_states table"
+    payload_schema:
+      workflow_id: "UUID (string)"
+      current_state: "string"
+      previous_state: "string | null"
+      transition_count: "integer"
+      transition_record: "JSONB object"
+      transition_history: "JSONB array"
+      metadata: "JSONB object"
+      timestamp: "ISO8601 timestamp"
+    persistence_strategy:
+      operation: "upsert"
+      conflict_resolution: "on_conflict_update"
+      conflict_columns: ["workflow_id"]
+
+  - intent_type: "RECOVER_FSM_STATES"
+    target_node: "store_effect"
+    priority: 2  # Highest priority (startup recovery)
+    description: "Recover FSM states from fsm_workflow_states table on startup"
+    payload_schema:
+      recovery_id: "UUID (string)"
+      timestamp: "ISO8601 timestamp"
+      request_all_workflows: "boolean"
+      filter_by_state: "string | null"
+    persistence_strategy:
+      operation: "select"
+      result_handling: "restore_to_state_cache"
+
+# State persistence configuration
+persistence:
+  persist_interval_seconds: 60
+  batch_persistence: true
+  batch_size: 100
+  checkpoint_enabled: true
+  checkpoint_interval_seconds: 300  # 5 minutes
+  checkpoint_retention_count: 10
+
+# Transaction management
+transactions:
+  enabled: true
+  isolation_level: "READ_COMMITTED"
+  retry_on_conflict: true
+  max_retries: 3
+  retry_backoff_ms: 100
+  atomic_batch_commits: true
+
+# State recovery configuration
+recovery:
+  enabled: true
+  recovery_on_startup: true
+  recovery_source: "postgresql"
+  recovery_strategy: "intent_based"
+  recovery_timeout_seconds: 30
+  recovery_batch_size: 1000
+  parallel_recovery: false
+
+# Cleanup and maintenance
+maintenance:
+  vacuum_enabled: true
+  vacuum_interval_hours: 24
+  analyze_enabled: true
+  analyze_interval_hours: 6
+  cleanup_old_states: true
+  cleanup_interval_hours: 24
+  state_retention_days: 90
+  terminal_state_retention_days: 7
+
+# Performance optimization
+performance:
+  use_prepared_statements: true
+  connection_pooling: true
+  statement_timeout_seconds: 30
+  batch_insert_optimization: true
+  compression_enabled: false
+  async_persistence: true
+
+# Error handling
+error_handling:
+  retry_on_transient_errors: true
+  max_retries: 3
+  retry_backoff_strategy: "exponential"
+  retry_backoff_base_ms: 100
+  circuit_breaker_enabled: true
+  circuit_breaker_failure_threshold: 5
+  circuit_breaker_timeout_seconds: 60
+  dead_letter_queue_enabled: true
+
+# Monitoring and metrics
+monitoring:
+  track_persistence_latency: true
+  track_persistence_success_rate: true
+  track_intent_queue_depth: true
+  track_database_connection_pool_usage: true
+  track_checkpoint_frequency: true
+  alert_on_persistence_failures: true
+  alert_threshold_failures: 10
+  alert_on_pool_exhaustion: true
+  pool_exhaustion_threshold_percent: 90
+
+# Deferred to EFFECT Node
+effect_node_configuration:
+  target_node: "NodeBridgeStoreEffect"
+  expected_location: "src/omninode_bridge/nodes/store_effect/v1_0_0/node.py"
+  responsibilities:
+    - "Execute PostgreSQL connections and queries"
+    - "Consume intents from reducer"
+    - "Perform atomic upsert operations"
+    - "Handle transaction management"
+    - "Publish persistence events to Kafka"
+    - "Return recovery results to reducer"
+  implementation_status: "TODO"

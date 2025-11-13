@@ -1,0 +1,343 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "omninode_bridge"
+version = "0.1.0"
+description = "OmniNode Bridge - Intelligent service lifecycle management and adaptive event processing"
+authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Distributed Computing",
+]
+keywords = ["omninode", "microservices", "bridge", "metadata", "stamping"]
+dynamic = ["dependencies"]
+
+[project.scripts]
+omni-bridge = "omninode_bridge.cli.commands:cli"
+omninode-workflow = "omninode_bridge.ci.cli.main:cli"
+omninode-generate = "omninode_bridge.cli.codegen.main:main"
+
+[tool.poetry]
+name = "omninode_bridge"
+version = "0.1.0"
+description = "OmniNode Bridge - Intelligent service lifecycle management and adaptive event processing"
+authors = ["OmniNode Team <team@omninode.ai>"]
+readme = "README.md"
+packages = [
+    {include = "omninode_bridge", from = "src"},
+    {include = "metadata_stamping", from = "src"},
+    {include = "onextree_service", from = "src"}
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+# Core dependencies
+pydantic = "^2.11.7"
+fastapi = "^0.115.0"
+uvicorn = "^0.32.0"
+pyyaml = "^6.0.2"
+aiohttp = "^3.12.14"
+# Database dependencies
+asyncpg = "^0.29.0"
+psycopg2-binary = "^2.9.10"
+alembic = "^1.13.3"
+# Service integration dependencies
+python-consul = "^1.1.0"
+redis = "^6.0.0"  # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
+aiokafka = "^0.11.0"
+hvac = "^2.1.0"
+# CLI Dependencies
+click = "^8.1.0"
+rich = "^13.7.0"
+# System utilities
+cryptography = "^44.0.1"
+jinja2 = "^3.1.6"
+aiofiles = "^23.2.1"
+pyjwt = "^2.8.0"
+# Tracing and observability dependencies
+sqlparse = "^0.4.4"
+opentelemetry-api = "^1.27.0"  # Pinned for kafka-instrumentation compatibility
+opentelemetry-sdk = "^1.27.0"  # Pinned for kafka-instrumentation compatibility
+opentelemetry-exporter-otlp = "^1.27.0"
+opentelemetry-instrumentation = "^0.48b0"  # Pinned to 0.48b0 for kafka compatibility
+opentelemetry-instrumentation-fastapi = "^0.48b0"  # Pinned to 0.48b0 for kafka compatibility
+opentelemetry-instrumentation-asyncpg = "^0.48b0"  # Downgraded from 0.49b0 for kafka compatibility
+opentelemetry-instrumentation-aiohttp-client = "^0.48b0"  # Pinned to 0.48b0 for kafka compatibility
+opentelemetry-instrumentation-kafka-python = "^0.48b0"  # Kafka tracing
+opentelemetry-instrumentation-redis = "^0.48b0"  # Downgraded from 0.49b0 for kafka compatibility
+# Additional dependencies
+structlog = "^23.2.0"
+prometheus-client = "^0.19.0"
+httpx = "^0.25.2"
+# Security and resilience dependencies
+slowapi = "^0.1.9"
+circuitbreaker = "^2.0.0"
+pydantic-settings = "^2.2.1"
+tenacity = "^9.0.0"
+jsonschema = "^4.20.0"
+# Metadata Stamping Service dependencies
+blake3 = "^0.4.1"
+python-multipart = "^0.0.6"
+orjson = "^3.9.10"
+psutil = "^6.1.0"
+# Docker client for deployment receiver
+docker = "^7.0.0"
+langextract = "^1.0.7"
+# OnexTree Agent Intelligence dependencies
+watchdog = "^3.0.0"
+mcp = "^0.9.0"
+# LlamaIndex Workflows dependencies
+llama-index-core = "^0.12.0"
+# ONEX dependencies - Using remote repositories with pinned versions
+omnibase-spi = {git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.1.0"}
+omnibase_core = {git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "v0.1.0"}
+confluent-kafka = "^2.12.0"
+dependency-injector = "^4.48.1"
+python-snappy = "^0.7.3"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.0"
+pytest-asyncio = "^0.25.0"
+pytest-mock = "^3.11.0"
+pytest-cov = "^6.0.0"
+mypy = "^1.13.0"
+black = "^24.10.0"
+isort = "^5.13.0"
+ruff = "^0.8.0"
+types-pyyaml = "^6.0.12.20250822"
+pre-commit = "^3.6.0"
+locust = "^2.31.8"
+testcontainers = "^4.9.0"
+kafka-python = "^2.0.2"
+coverage-badge = "^1.1.0"
+pytest-timeout = "^2.2.0"
+pytest-xdist = "^3.5.0"
+pytest-html = "^4.1.1"
+pytest-json-report = "^1.5.0"
+pytest-order = "^1.2.0"
+pytest-benchmark = "^4.0.0"
+bandit = "^1.7.5"
+pip-audit = "*"
+detect-secrets = "^1.5.0"
+types-aiofiles = "^23.2.0.20240403"
+types-requests = "^2.32.0.20250914"
+opentelemetry-propagator-b3 = "^1.37.0"
+pytest-dotenv = "^0.5.2"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+# Essential rules for code quality and correctness
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "W",     # pycodestyle warnings
+    # "I",     # isort - DISABLED: let standalone isort tool handle import sorting
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "RUF",   # Ruff-specific rules
+]
+# Common ignores for practical development
+ignore = [
+    "S101",   # Allow assert statements in tests
+    "E501",   # Allow line length violations (handled by Black)
+    "B904",   # Allow raise without from in exception handlers
+    "N812",   # Allow lowercase imported as non-lowercase
+    "N806",   # Allow non-lowercase variable in function
+    "N805",   # Allow cls as first argument (for validators/classmethods)
+    "UP007",  # Allow Union syntax (not requiring | syntax)
+    "UP041",  # Allow asyncio.TimeoutError (explicit is clearer than built-in alias)
+    "SIM117", # Allow nested with statements for clarity
+    "SIM105", # Allow try-except-pass (sometimes clearer than contextlib.suppress)
+    "SIM102", # Allow nested if statements for clarity
+    "B017",   # Allow pytest.raises(Exception) in tests
+    "B008",   # Allow FastAPI Depends/HTTPBearer in defaults (framework pattern)
+    "B023",   # Allow function uses loop variable (common in tests)
+    "B007",   # Allow unused loop control variable
+    "F841",   # Allow unused variables (common in tests/fixtures)
+    "F821",   # Allow undefined names (test fixture issues)
+    "F811",   # Allow redefined functions (test duplication)
+    "E402",   # Allow module import not at top (for conditional imports)
+    "RUF003", # Allow ambiguous unicode characters in comments
+    "RUF005", # Allow list concatenation instead of unpacking
+    "RUF006", # Allow asyncio.create_task without storing reference
+    "RUF013", # Allow implicit Optional (PEP 484 style)
+    "RUF015", # Allow list slice over next(iter()) for clarity
+    "RUF022", # Allow unsorted __all__ (manual organization preferred)
+    "N802",   # Allow uppercase factory-like function names for circuit breakers
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Fix namespace collision for test files with same names
+consider_namespace_packages = true
+
+# Asyncio configuration for reliable async test execution
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+# Enhanced timeout configuration for reliable test execution
+timeout = 300
+timeout_method = "thread"
+
+# Filter warnings from external libraries we can't control
+filterwarnings = [
+    # Suppress testcontainers deprecation warnings
+    "ignore::DeprecationWarning:testcontainers.*",
+    "ignore::PendingDeprecationWarning:testcontainers.*",
+    # Suppress asyncio warnings for better test output
+    "ignore::DeprecationWarning:asyncio.*",
+    "ignore::RuntimeWarning:asyncio.*",
+    # Suppress coverage warnings for cleaner output
+    "ignore::coverage.exceptions.CoverageWarning",
+    # Suppress pytest-asyncio warnings
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+# Centralized test artifacts output directory
+junit_family = "xunit2"
+junit_suite_name = "omninode_bridge"
+
+junit_logging = "system-out"
+
+# Optimized test collection and execution
+minversion = "8.0"
+required_plugins = ["pytest-asyncio", "pytest-mock", "pytest-cov", "pytest-timeout", "pytest-order", "pytest-html", "pytest-json-report", "pytest-benchmark"]
+
+# Test results and reports go to test-artifacts directory
+addopts = [
+    "--tb=short",
+    "--strict-markers",
+    "--strict-config",
+    "--disable-warnings",  # Suppress warnings for cleaner output
+    "--cov=src/omninode_bridge/nodes/orchestrator",
+    "--cov=src/omninode_bridge/nodes/reducer",
+    "--cov-report=html:test-artifacts/coverage-html",
+    "--cov-report=xml:test-artifacts/coverage.xml",
+    "--cov-report=term-missing",
+    # Coverage threshold removed from global config - applied selectively in CI
+    # Unit tests: --cov-fail-under=30
+    # Performance tests: no threshold (excluded from coverage requirements)
+    "--junit-xml=test-artifacts/junit.xml",
+    "--html=test-artifacts/report.html",
+    "--self-contained-html",
+    "--json-report",
+    "--json-report-file=test-artifacts/report.json",
+    # Performance optimizations
+    "--maxfail=5",  # Stop after 5 failures
+    "--durations=10",  # Show slowest 10 tests
+    # Test execution order optimization
+    "--order-scope=class",  # Group tests by class for better fixture reuse
+    "--order-dependencies",  # Respect test dependencies
+]
+
+# Test markers for organization
+markers = [
+    "integration: mark test as integration test requiring containers",
+    "e2e: mark test as end-to-end integration test validating complete event flows",
+    "performance: mark test as performance test",
+    "security: mark test as security test",
+    "load: mark test as load test",
+    "stress: mark test as stress test for concurrency and race conditions",
+    "memory: mark test as memory leak detection test",
+    "slow: mark test as slow running",
+    "unit: mark test as unit test",
+    "functional: mark test as functional test",
+    "isolation: mark test as isolation test with container isolation",
+    "advanced_isolation: mark test as advanced isolation test with cross-service mocking",
+    "compatibility: mark test as backward compatibility test",
+    "resilience: mark test as resilience test for circuit breakers and error handling",
+    "requires_infrastructure: mark test as requiring external infrastructure (Kafka, PostgreSQL, etc.)",
+    "compliance: mark test as protocol compliance test",
+    "phase2: mark test as Phase 2 Advanced Features test",
+    "phase3: mark test as Phase 3 Code Generation test (variants, patterns, mixins, LLM, contracts)",
+    "batch: mark test as batch processing test",
+    # Test ordering markers for execution optimization
+    "order_0: run first - fastest unit tests (~100ms)",
+    "order_1: run early - initialization tests (~110ms)",
+    "order_2: run middle - standard unit tests (~120ms)",
+    "order_3: run late - async/integration tests (~140ms)",
+    "order_4: run last - slowest/integration tests (>150ms)",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
+exclude = [
+    "tests/",
+    "scripts/",
+    "examples/",
+    "build/",
+    "dist/",
+    ".*_implementation\\.py$",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+
+[tool.coverage.run]
+data_file = "coverage-data/.coverage"
+source = ["src/omninode_bridge/nodes/orchestrator", "src/omninode_bridge/nodes/reducer"]
+omit = [
+    "*/tests/*",
+    "*/_stubs.py",  # Exclude stub implementations from coverage
+    "*/test_*.py",
+    "*/__pycache__/*",
+    # Exclude unused model files not imported in current implementation
+    "*/model_aggregate_state_output.py",
+    "*/model_stamp_metadata_input.py",
+    # Exclude performance tests from coverage calculations
+    "tests/performance/*",
+    "tests/performance/**/*",  # Also exclude all subdirectories
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+    "class .*\\bProtocol\\):",
+    "pass",
+]

@@ -1,0 +1,13 @@
+{# Health Check Mixin Initialization Snippet #}
+{# Usage: Include in initialize() method when MixinHealthCheck is enabled #}
+{% if 'MixinHealthCheck' in enabled_mixins %}
+        # Setup health checks
+{% for component in health_check_components %}
+        self.register_health_check(
+            "{{ component.name }}",
+            self._check_{{ component.name }}_health,
+            critical={{ component.critical }},
+            timeout_seconds={{ component.timeout_seconds }},
+        )
+{% endfor %}
+{% endif %}

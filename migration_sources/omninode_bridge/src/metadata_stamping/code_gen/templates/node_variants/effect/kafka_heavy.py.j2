@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""
+{{ node_name }} - ONEX v2.0 Effect node with Kafka-heavy optimizations.
+
+{{ description }}
+
+Features:
+- Kafka producer with batching ({{ batch_size }} messages)
+- Consumer groups with offset management
+- DLQ (Dead Letter Queue) handling
+- Exactly-once semantics (idempotency)
+- Compression ({{ compression_type }})
+- Metrics collection per topic
+
+Performance Targets:
+- Message latency: < 10ms (P95)
+- Throughput: 10000+ messages/sec
+- Batch efficiency: > 90%
+- Consumer lag: < 1000 messages
+
+Contract: {{ contract_name }}
+Node Type: EFFECT (Kafka Operations)
+"""
+
+import asyncio
+import logging
+import time
+from datetime import UTC, datetime
+from typing import Any, Optional
+from uuid import uuid4
+
+from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
+from aiokafka.errors import KafkaError
+from omnibase_core import EnumCoreErrorCode, ModelOnexError
+from omnibase_core.enums.enum_log_level import EnumLogLevel as LogLevel
+from omnibase_core.logging.structured import emit_log_event_sync as emit_log_event
+from omnibase_core.models.contracts.model_contract_effect import ModelContractEffect
+from omnibase_core.models.core import ModelContainer
+from omnibase_core.nodes.node_effect import NodeEffect
+
+from .models import {{ input_model }}, {{ output_model }}, {{ config_model }}
+
+OnexError = ModelOnexError
+CoreErrorCode = EnumCoreErrorCode
+logger = logging.getLogger(__name__)
+
+
+class {{ node_class_name }}(NodeEffect):
+    """{{ node_description }}
+
+    Kafka Configuration:
+    - Bootstrap servers: {{ bootstrap_servers }}
+    - Batch size: {{ batch_size }} messages
+    - Compression: {{ compression_type }}
+    - Acks: {{ acks_config }}
+
+    Producer Settings:
+    - Idempotent: {{ enable_idempotence }}
+    - Max in-flight: {{ max_in_flight_requests }}
+    - Linger: {{ linger_ms }}ms
+
+    Consumer Settings:
+    - Group ID: {{ consumer_group_id }}
+    - Auto-offset reset: {{ auto_offset_reset }}
+    - Max poll records: {{ max_poll_records }}
+    """
+
+    def __init__(self, container: ModelContainer) -> None:
+        """Initialize Kafka effect node."""
+        super().__init__(container)
+        self._health_check_mode = self._detect_health_check_mode()
+
+        config_data = container.value if isinstance(container.value, dict) else {}
+        self.config = {{ config_model }}.from_container(config_data)
+
+        self._producer: Optional[AIOKafkaProducer] = None
+        self._consumer: Optional[AIOKafkaConsumer] = None
+        self._producer_lock = asyncio.Lock()
+        self._consumer_lock = asyncio.Lock()
+
+        self._metrics = {
+            "messages_produced": 0,
+            "messages_consumed": 0,
+            "batches_sent": 0,
+            "dlq_messages": 0,
+            "producer_errors": 0,
+            "consumer_errors": 0,
+            "total_produce_time_ms": 0.0,
+        }
+
+        emit_log_event(
+            level=LogLevel.INFO,
+            message="{{ node_name }} initialized",
+            node_id="{{ node_name }}",
+            health_check_mode=self._health_check_mode,
+        )
+
+    def _detect_health_check_mode(self) -> bool:
+        """Detect if node is running in health check mode."""
+        try:
+            import os
+            return os.getenv("HEALTH_CHECK_MODE", "false").lower() == "true"
+        except Exception:
+            return False
+
+    async def _ensure_producer(self) -> AIOKafkaProducer:
+        """Ensure Kafka producer is initialized."""
+        if self._producer is not None:
+            return self._producer
+
+        async with self._producer_lock:
+            if self._producer is not None:
+                return self._producer
+
+            try:
+                self._producer = AIOKafkaProducer(
+                    bootstrap_servers={{ bootstrap_servers }},
+                    compression_type="{{ compression_type }}",
+                    acks="{{ acks_config }}",
+                    enable_idempotence={{ enable_idempotence }},
+                    max_in_flight_requests_per_connection={{ max_in_flight_requests }},
+                    linger_ms={{ linger_ms }},
+                    batch_size={{ batch_size }},
+                )
+                await self._producer.start()
+
+                emit_log_event(
+                    level=LogLevel.INFO,
+                    message="Kafka producer initialized",
+                    node_id="{{ node_name }}",
+                )
+                return self._producer
+
+            except Exception as e:
+                self._metrics["producer_errors"] += 1
+                raise OnexError(
+                    error_code=CoreErrorCode.UNAVAILABLE,
+                    message=f"Failed to initialize Kafka producer: {str(e)}",
+                ) from e
+
+    async def execute_effect(self, contract: ModelContractEffect) -> {{ output_model }}:
+        """Execute Kafka effect operation."""
+        start_time = time.perf_counter()
+        correlation_id = str(uuid4())
+
+        try:
+            input_data = {{ input_model }}(**contract.input_data)
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="Executing {{ operation_type }} Kafka operation",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                topic=input_data.topic,
+            )
+
+            producer = await self._ensure_producer()
+
+            # Produce message with idempotency key
+            await producer.send_and_wait(
+                topic=input_data.topic,
+                value=input_data.message_value,
+                key=input_data.message_key,
+                headers=[
+                    ("correlation_id", correlation_id.encode()),
+                    ("timestamp", str(datetime.now(UTC)).encode()),
+                ],
+            )
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            self._metrics["messages_produced"] += 1
+            self._metrics["total_produce_time_ms"] += elapsed_ms
+
+            emit_log_event(
+                level=LogLevel.INFO,
+                message="{{ operation_type }} Kafka operation completed",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                elapsed_ms=elapsed_ms,
+            )
+
+            return {{ output_model }}(
+                status="success",
+                correlation_id=correlation_id,
+                message="Message produced successfully",
+            )
+
+        except KafkaError as e:
+            # Send to DLQ
+            self._metrics["dlq_messages"] += 1
+            await self._send_to_dlq(input_data, correlation_id, str(e))
+
+            raise OnexError(
+                error_code=CoreErrorCode.UNAVAILABLE,
+                message=f"Kafka operation failed: {str(e)}",
+                details={"correlation_id": correlation_id},
+            ) from e
+
+        except Exception as e:
+            self._metrics["producer_errors"] += 1
+            raise OnexError(
+                error_code=CoreErrorCode.INTERNAL_ERROR,
+                message=f"Kafka operation failed: {str(e)}",
+                details={"correlation_id": correlation_id},
+            ) from e
+
+    async def _send_to_dlq(
+        self,
+        input_data: {{ input_model }},
+        correlation_id: str,
+        error: str,
+    ) -> None:
+        """Send failed message to Dead Letter Queue."""
+        try:
+            dlq_topic = f"{input_data.topic}.dlq"
+            producer = await self._ensure_producer()
+
+            await producer.send_and_wait(
+                topic=dlq_topic,
+                value=input_data.message_value,
+                key=input_data.message_key,
+                headers=[
+                    ("correlation_id", correlation_id.encode()),
+                    ("original_topic", input_data.topic.encode()),
+                    ("error", error.encode()),
+                    ("timestamp", str(datetime.now(UTC)).encode()),
+                ],
+            )
+
+            emit_log_event(
+                level=LogLevel.WARNING,
+                message="Message sent to DLQ",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                dlq_topic=dlq_topic,
+            )
+
+        except Exception as dlq_error:
+            emit_log_event(
+                level=LogLevel.ERROR,
+                message="Failed to send message to DLQ",
+                node_id="{{ node_name }}",
+                correlation_id=correlation_id,
+                error=str(dlq_error),
+            )
+
+    async def cleanup(self) -> None:
+        """Cleanup Kafka resources."""
+        if self._producer is not None:
+            try:
+                await self._producer.stop()
+                emit_log_event(
+                    level=LogLevel.INFO,
+                    message="Kafka producer stopped",
+                    node_id="{{ node_name }}",
+                )
+            except Exception as e:
+                emit_log_event(
+                    level=LogLevel.WARNING,
+                    message="Error stopping Kafka producer",
+                    node_id="{{ node_name }}",
+                    error=str(e),
+                )
+
+    def get_metrics(self) -> dict[str, Any]:
+        """Get current metrics."""
+        avg_produce_time = (
+            self._metrics["total_produce_time_ms"] / self._metrics["messages_produced"]
+            if self._metrics["messages_produced"] > 0
+            else 0.0
+        )
+
+        return {
+            **self._metrics,
+            "avg_produce_time_ms": avg_produce_time,
+        }

@@ -1,0 +1,202 @@
+# Workflow Coordination Subcontract
+# Defines multi-step workflow orchestration patterns for NodeBridgeOrchestrator
+
+subcontract_type: workflow_coordination
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: "Multi-step workflow orchestration with dependency management and concurrency control"
+
+# === WORKFLOW DEFINITION ===
+workflow_definition:
+  # Workflow execution mode
+  execution_mode: "sequential"  # Options: sequential, parallel, dag
+
+  # Workflow graph nodes (steps)
+  nodes:
+    - node_id: "validate_input"
+      node_type: "validation"
+      description: "Validate stamp request input"
+      timeout_ms: 1000
+      required: true
+      dependencies: []
+
+    - node_id: "onextree_intelligence"
+      node_type: "service_call"
+      description: "AI intelligence analysis"
+      timeout_ms: 5000
+      required: false
+      dependencies:
+        - "validate_input"
+      conditional: "intelligence_enabled == true"
+
+    - node_id: "hash_generation"
+      node_type: "service_call"
+      description: "BLAKE3 hash generation"
+      timeout_ms: 2000
+      required: true
+      dependencies:
+        - "validate_input"
+
+    - node_id: "stamp_creation"
+      node_type: "business_logic"
+      description: "Create O.N.E. v0.1 stamp"
+      timeout_ms: 3000
+      required: true
+      dependencies:
+        - "hash_generation"
+
+    - node_id: "event_publishing"
+      node_type: "event_emission"
+      description: "Publish Kafka events"
+      timeout_ms: 2000
+      required: true
+      dependencies:
+        - "stamp_creation"
+
+  # Workflow edges (step dependencies)
+  edges:
+    - from: "validate_input"
+      to: "onextree_intelligence"
+      condition: "intelligence_enabled"
+
+    - from: "validate_input"
+      to: "hash_generation"
+
+    - from: "hash_generation"
+      to: "stamp_creation"
+
+    - from: "stamp_creation"
+      to: "event_publishing"
+
+# === CONCURRENCY CONTROL ===
+concurrency:
+  # Maximum concurrent workflow executions
+  max_concurrent_workflows: 100
+
+  # Maximum concurrent steps within a workflow
+  max_concurrent_steps: 5
+
+  # Semaphore limits per step type
+  semaphore_limits:
+    validation: 200
+    service_call: 50
+    business_logic: 100
+    event_emission: 150
+
+# === STEP EXECUTION POLICIES ===
+step_policies:
+  # Default retry policy for all steps
+  default_retry:
+    max_retries: 3
+    backoff_strategy: "exponential"
+    initial_backoff_ms: 100
+    max_backoff_ms: 5000
+    retry_on_errors:
+      - "NetworkError"
+      - "TimeoutError"
+      - "ServiceUnavailable"
+
+  # Step-specific retry overrides
+  step_overrides:
+    onextree_intelligence:
+      max_retries: 1  # AI calls are expensive
+      backoff_strategy: "fixed"
+      initial_backoff_ms: 500
+
+    hash_generation:
+      max_retries: 3
+      backoff_strategy: "exponential"
+      initial_backoff_ms: 200
+
+# === COMPENSATION LOGIC ===
+# Rollback/compensation for failed workflows
+compensation:
+  enabled: true
+
+  # Compensation actions by step
+  compensation_actions:
+    stamp_creation:
+      action: "delete_stamp"
+      timeout_ms: 2000
+
+    event_publishing:
+      action: "publish_rollback_event"
+      timeout_ms: 1000
+
+# === WORKFLOW TIMEOUTS ===
+timeouts:
+  # Overall workflow timeout
+  workflow_timeout_ms: 30000
+
+  # Step-specific timeouts
+  step_timeouts:
+    validate_input: 1000
+    onextree_intelligence: 5000
+    hash_generation: 2000
+    stamp_creation: 3000
+    event_publishing: 2000
+
+# === MONITORING & METRICS ===
+monitoring:
+  # Emit metrics for workflow execution
+  emit_metrics: true
+
+  # Metrics to track
+  metrics:
+    - "workflow_duration_ms"
+    - "step_duration_ms"
+    - "workflow_success_rate"
+    - "step_failure_rate"
+    - "concurrent_workflows"
+
+  # Logging configuration
+  logging:
+    log_level: "INFO"
+    log_steps: true
+    log_transitions: true
+    log_errors: true
+
+# === WORKFLOW STATE PERSISTENCE ===
+state_persistence:
+  enabled: true
+
+  # Persistence strategy
+  strategy: "checkpoint"  # Options: checkpoint, continuous, none
+
+  # Checkpoint configuration
+  checkpoint:
+    frequency: "after_each_step"
+    storage: "postgresql"
+    table: "workflow_checkpoints"
+
+# === FAILURE HANDLING ===
+failure_handling:
+  # On step failure
+  on_step_failure: "abort_workflow"  # Options: abort_workflow, continue, skip
+
+  # On workflow timeout
+  on_timeout: "abort_and_compensate"
+
+  # Maximum step failures before aborting
+  max_step_failures: 3
+
+# === VALIDATION RULES ===
+validation:
+  # Validate workflow before execution
+  pre_execution_checks:
+    - check: "validate_step_dependencies"
+      required: true
+    - check: "validate_step_configuration"
+      required: true
+    - check: "validate_resource_availability"
+      required: false
+
+  # Validate workflow after execution
+  post_execution_checks:
+    - check: "validate_output_schema"
+      required: true
+    - check: "validate_state_consistency"
+      required: true

@@ -1,0 +1,50 @@
+---
+# Compute node with caching and metrics
+node_id: "compute_cached"
+node_type: "compute"
+version: "v1_0_0"
+namespace: "omninode.services.compute"
+
+metadata:
+  name: "Cached Compute Node"
+  description: "Compute node with result caching and performance metrics"
+  author: "Test Generator"
+  tags: ["compute", "caching", "metrics", "performance"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinCaching"
+      config:
+        cache_enabled: true
+        cache_ttl_seconds: 600
+        max_cache_size: 5000
+        cache_key_prefix: "compute_"
+
+    - mixin_name: "MixinMetrics"
+      config:
+        metrics_enabled: true
+        track_cache_hit_rate: true
+
+    - mixin_name: "MixinHashComputation"
+      config:
+        hash_algorithm: "blake3"
+
+input_schema:
+  type: "object"
+  properties:
+    data:
+      type: "array"
+      description: "Data to process"
+    operation:
+      type: "string"
+      enum: ["sum", "average", "transform"]
+
+output_schema:
+  type: "object"
+  properties:
+    result:
+      type: "number"
+    cached:
+      type: "boolean"
+    computation_time_ms:
+      type: "number"

@@ -1,0 +1,166 @@
+# Kafka-Heavy Effect Node Contract
+# Tests kafka_heavy template variant with event consumption, processing, and publishing
+
+node_id: kafka_consumer_effect_node
+node_type: effect
+version: v1_0_0
+
+metadata:
+  service_name: order_event_processor
+  domain: event_streaming
+  description: Kafka-heavy effect with consumption, transformation, and publishing
+  author: test_suite
+  tags:
+    - kafka
+    - event_streaming
+    - consumer
+    - producer
+    - real_time
+  sla:
+    max_latency_ms: 100
+    min_throughput_rps: 1000
+    availability: 99.99
+
+# Kafka-heavy subcontracts
+subcontracts:
+  # Event type definitions
+  event_type:
+    events:
+      - name: order_created
+        schema:
+          type: object
+          properties:
+            order_id: { type: string }
+            customer_id: { type: string }
+            items: { type: array }
+            total_amount: { type: number }
+      - name: order_processed
+        schema:
+          type: object
+          properties:
+            order_id: { type: string }
+            processing_status: { type: string }
+            processed_at: { type: string, format: date-time }
+      - name: processing_failed
+        schema:
+          type: object
+          properties:
+            order_id: { type: string }
+            error_message: { type: string }
+            retry_count: { type: integer }
+
+  # Aggregation for metrics
+  aggregation:
+    type: event_count
+    window_type: tumbling
+    window_duration_seconds: 60
+    aggregation_keys:
+      - event_type
+      - processing_status
+    metrics:
+      - name: total_events
+        type: count
+      - name: avg_processing_time_ms
+        type: average
+        field: processing_time_ms
+      - name: error_rate
+        type: ratio
+        numerator_field: error_count
+        denominator_field: total_count
+
+  # State management for offset tracking
+  state_management:
+    persistence: memory
+    state_schema:
+      type: object
+      properties:
+        last_committed_offset: { type: integer }
+        processing_stats: { type: object }
+        failed_events: { type: array }
+    ttl_seconds: 3600
+
+# Kafka operations
+operations:
+  - name: consume_events
+    description: Consume events from Kafka topic
+    type: kafka_consume
+  - name: process_event
+    description: Process consumed event
+    type: transform
+  - name: publish_result
+    description: Publish processed result to output topic
+    type: kafka_produce
+  - name: handle_failure
+    description: Handle processing failures with DLQ
+    type: error_handling
+
+dependencies:
+  aiokafka: "^0.10.0"
+  confluent-kafka: "^2.3.0"
+  avro: "^1.11.0"  # For schema registry
+  prometheus-client: "^0.19.0"  # Metrics
+
+features:
+  - Consumer group management
+  - Automatic offset management
+  - Batch processing
+  - Dead letter queue (DLQ) support
+  - Schema registry integration
+  - Exactly-once semantics
+  - Backpressure handling
+  - Consumer lag monitoring
+
+kafka_config:
+  consumer:
+    group_id: order_processor_group
+    topics:
+      - order_events
+      - payment_events
+    auto_offset_reset: earliest
+    max_poll_records: 500
+    session_timeout_ms: 30000
+  producer:
+    topics:
+      - processed_orders
+      - failed_orders
+    compression_type: lz4
+    acks: all
+    retries: 3
+
+input_schema:
+  type: object
+  required:
+    - event_data
+    - event_metadata
+  properties:
+    event_data:
+      type: object
+      properties:
+        key: { type: string }
+        value: { type: object }
+        headers: { type: object }
+    event_metadata:
+      type: object
+      properties:
+        topic: { type: string }
+        partition: { type: integer }
+        offset: { type: integer }
+        timestamp: { type: integer }
+
+output_schema:
+  type: object
+  required:
+    - processed
+    - output_topic
+  properties:
+    processed: { type: boolean }
+    output_topic: { type: string }
+    output_key: { type: string }
+    output_value: { type: object }
+    processing_time_ms: { type: number }
+    metadata:
+      type: object
+      properties:
+        consumer_lag: { type: integer }
+        partition_assigned: { type: array }
+        events_processed_count: { type: integer }

@@ -1,0 +1,527 @@
+# Bridge Database Adapter Effect Node Contract
+# Handles PostgreSQL persistence for bridge nodes (Orchestrator, Reducer, Registry)
+# ONEX v2.0 event-driven architecture
+
+name: "NodeBridgeDatabaseAdapterEffect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+
+description: >
+  Database adapter node for PostgreSQL persistence of bridge node events.
+  Consumes Kafka events from Orchestrator, Reducer, and Registry nodes
+  and persists workflow execution, state transitions, and metadata to PostgreSQL.
+
+capabilities:
+  - name: "workflow_persistence"
+    description: "Persist workflow execution records (INSERT/UPDATE)"
+  - name: "state_persistence"
+    description: "Persist FSM state transitions and bridge state (UPSERT)"
+  - name: "metadata_persistence"
+    description: "Persist metadata stamps and node heartbeats"
+  - name: "event_consumption"
+    description: "Consume and process Kafka events from bridge nodes"
+  - name: "health_monitoring"
+    description: "Monitor database health and connection pool status"
+
+endpoints:
+  kafka_consumer:
+    topics:
+      - "workflow-started"
+      - "workflow-completed"
+      - "workflow-failed"
+      - "step-completed"
+      - "stamp-created"
+      - "state-transition"
+      - "state-aggregation-completed"
+      - "node-heartbeat"
+    consumer_group: "database_adapter_consumers"
+    topic_class: "evt"
+
+# Dependencies for dependency injection
+dependencies:
+  services:
+    - name: "postgres_connection_manager"
+      required: true
+      description: "PostgreSQL connection pool manager"
+    - name: "postgres_query_executor"
+      required: true
+      description: "SQL query executor with prepared statements"
+    - name: "postgres_transaction_manager"
+      required: true
+      description: "Transaction management for atomic operations"
+    - name: "kafka_consumer"
+      required: false
+      description: "Kafka consumer for event streaming"
+
+configuration:
+  postgres_host:
+    default: "localhost"
+    description: "PostgreSQL server hostname"
+  postgres_port:
+    default: 5432
+    description: "PostgreSQL server port"
+  postgres_db:
+    default: "omninode_bridge"
+    description: "PostgreSQL database name"
+  postgres_user:
+    default: "postgres"
+    description: "PostgreSQL username"
+  kafka_environment:
+    default: "dev"
+    description: "Kafka topic environment prefix"
+
+subcontracts:
+  # Effect subcontract for database operations
+  effect:
+    operations:
+      - "initialize"
+      - "shutdown"
+      - "health_check"
+      - "metrics"
+      - "process"
+
+  # EventType subcontract for Kafka events
+  event_type:
+    consumed_events:
+      - "WORKFLOW_STARTED"
+      - "WORKFLOW_COMPLETED"
+      - "WORKFLOW_FAILED"
+      - "STEP_COMPLETED"
+      - "STAMP_CREATED"
+      - "STATE_TRANSITION"
+      - "STATE_AGGREGATION_COMPLETED"
+      - "NODE_HEARTBEAT"
+
+  # StateManagement subcontract for tracking metrics
+  state_management:
+    persistence: "memory"
+    tracked_state:
+      - "operation_counts"
+      - "performance_metrics"
+      - "circuit_breaker_state"
+
+performance_targets:
+  database_operation_latency_p95_ms: 10
+  event_processing_latency_p95_ms: 50
+  throughput_events_per_second: 1000
+  connection_pool_efficiency_percent: 90
+
+health_checks:
+  components:
+    - name: "database"
+      critical: true
+      timeout_seconds: 5.0
+    - name: "kafka_consumer"
+      critical: false
+      timeout_seconds: 3.0
+    - name: "circuit_breaker"
+      critical: true
+      timeout_seconds: 1.0
+
+# Input State (required by ONEX v2.0)
+input_state:
+  type: object
+  description: "Input state for database adapter operations"
+  properties:
+    connection_pool:
+      type: object
+      description: "PostgreSQL connection pool state"
+      properties:
+        min_connections:
+          type: integer
+          description: "Minimum number of connections"
+          default: 10
+        max_connections:
+          type: integer
+          description: "Maximum number of connections"
+          default: 50
+        active_connections:
+          type: integer
+          description: "Currently active connections"
+        idle_connections:
+          type: integer
+          description: "Currently idle connections"
+    circuit_breaker:
+      type: object
+      description: "Circuit breaker state"
+      properties:
+        state:
+          type: string
+          enum: ["closed", "open", "half_open"]
+          description: "Current circuit breaker state"
+        failure_count:
+          type: integer
+          description: "Number of consecutive failures"
+        last_failure_time:
+          type: string
+          format: date-time
+          description: "Timestamp of last failure"
+    kafka_offset:
+      type: object
+      description: "Kafka consumer offset state"
+      properties:
+        last_committed_offset:
+          type: integer
+          description: "Last committed offset for event processing"
+        pending_events:
+          type: integer
+          description: "Number of pending events in queue"
+
+# Output State (required by ONEX v2.0)
+output_state:
+  type: object
+  description: "Output state after database adapter operations"
+  properties:
+    last_operation_time:
+      type: string
+      format: date-time
+      description: "Timestamp of last database operation"
+    operation_metadata:
+      type: object
+      description: "Metadata about the operation performed"
+      properties:
+        operation_type:
+          type: string
+          description: "Type of database operation performed"
+        rows_affected:
+          type: integer
+          description: "Number of rows affected"
+          minimum: 0
+        success:
+          type: boolean
+          description: "Whether operation succeeded"
+    performance_metrics:
+      type: object
+      description: "Performance metrics for the operation"
+      properties:
+        execution_time_ms:
+          type: number
+          description: "Total execution time in milliseconds"
+        query_time_ms:
+          type: number
+          description: "Time spent in database query execution"
+        connection_wait_time_ms:
+          type: number
+          description: "Time spent waiting for connection from pool"
+    events_processed:
+      type: integer
+      description: "Total number of Kafka events processed"
+      minimum: 0
+    circuit_breaker_state:
+      type: string
+      enum: ["closed", "open", "half_open"]
+      description: "Current circuit breaker state after operation"
+
+# IO operations for EFFECT node
+io_operations:
+  - name: "persist_workflow_execution"
+    description: "Insert/update workflow execution record from orchestrator events"
+    input_model: "ModelWorkflowExecutionInput"
+    output_model: "ModelDatabaseOperationOutput"
+  - name: "persist_workflow_step"
+    description: "Insert workflow step history from orchestrator step completion events"
+    input_model: "ModelWorkflowStepInput"
+    output_model: "ModelDatabaseOperationOutput"
+  - name: "persist_bridge_state"
+    description: "Upsert bridge aggregation state from reducer events"
+    input_model: "ModelBridgeStateInput"
+    output_model: "ModelDatabaseOperationOutput"
+  - name: "persist_fsm_transition"
+    description: "Insert FSM state transition record from state change events"
+    input_model: "ModelFSMTransitionInput"
+    output_model: "ModelDatabaseOperationOutput"
+  - name: "persist_metadata_stamp"
+    description: "Insert metadata stamp audit record from stamp creation events"
+    input_model: "ModelMetadataStampInput"
+    output_model: "ModelDatabaseOperationOutput"
+  - name: "update_node_heartbeat"
+    description: "Update node heartbeat timestamp from node health events"
+    input_model: "ModelNodeHeartbeatInput"
+    output_model: "ModelDatabaseOperationOutput"
+
+# Model definitions - all models defined here
+definitions:
+  # Input/Output Models
+  ModelDatabaseOperationInput:
+    type: "object"
+    properties:
+      operation_type:
+        type: "string"
+        enum:
+          - "persist_workflow_execution"
+          - "persist_workflow_step"
+          - "persist_bridge_state"
+          - "persist_fsm_transition"
+          - "persist_metadata_stamp"
+          - "update_node_heartbeat"
+        description: "Type of database operation to perform"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Request correlation identifier as UUID"
+      workflow_execution_data:
+        type: "object"
+        description: "Workflow execution data (optional)"
+      workflow_step_data:
+        type: "object"
+        description: "Workflow step data (optional)"
+      bridge_state_data:
+        type: "object"
+        description: "Bridge state data (optional)"
+      fsm_transition_data:
+        type: "object"
+        description: "FSM transition data (optional)"
+      metadata_stamp_data:
+        type: "object"
+        description: "Metadata stamp data (optional)"
+      node_heartbeat_data:
+        type: "object"
+        description: "Node heartbeat data (optional)"
+      timeout_seconds:
+        type: "integer"
+        minimum: 1
+        maximum: 300
+        default: 60
+        description: "Operation timeout in seconds"
+    required: ["operation_type", "correlation_id"]
+
+  ModelDatabaseOperationOutput:
+    type: "object"
+    properties:
+      success:
+        type: "boolean"
+        description: "Whether operation completed successfully"
+      operation_type:
+        type: "string"
+        description: "Type of operation that was performed"
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Request correlation identifier as UUID"
+      execution_time_ms:
+        type: "integer"
+        minimum: 0
+        description: "Execution time in milliseconds"
+      rows_affected:
+        type: "integer"
+        minimum: 0
+        default: 0
+        description: "Number of rows affected by operation"
+      error_message:
+        type: "string"
+        description: "Error message if operation failed"
+      error_details:
+        type: "object"
+        description: "Detailed error information if operation failed"
+    required: ["success", "operation_type", "correlation_id", "execution_time_ms"]
+
+  # Operation-specific Input Models
+  ModelWorkflowExecutionInput:
+    type: "object"
+    properties:
+      correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Workflow correlation ID"
+      workflow_type:
+        type: "string"
+        description: "Type of workflow (e.g., metadata_stamping)"
+      current_state:
+        type: "string"
+        description: "Current FSM state (PENDING, PROCESSING, COMPLETED, FAILED)"
+      namespace:
+        type: "string"
+        description: "Multi-tenant namespace"
+      started_at:
+        type: "string"
+        format: "date-time"
+        description: "Workflow start timestamp (optional for updates)"
+      completed_at:
+        type: "string"
+        format: "date-time"
+        description: "Workflow completion timestamp (optional)"
+      execution_time_ms:
+        type: "integer"
+        minimum: 0
+        description: "Total execution time in milliseconds (optional)"
+      error_message:
+        type: "string"
+        description: "Error message if workflow failed (optional)"
+      metadata:
+        type: "object"
+        description: "Additional workflow metadata (optional)"
+    required: ["correlation_id"]
+
+  ModelWorkflowStepInput:
+    type: "object"
+    properties:
+      workflow_correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Parent workflow correlation ID"
+      step_name:
+        type: "string"
+        description: "Name of the workflow step"
+      step_order:
+        type: "integer"
+        minimum: 0
+        description: "Sequential order of step in workflow"
+      status:
+        type: "string"
+        description: "Step status (success, failed, skipped)"
+      execution_time_ms:
+        type: "integer"
+        minimum: 0
+        description: "Step execution time in milliseconds"
+      step_data:
+        type: "object"
+        description: "Step-specific data and results (JSONB)"
+      error_message:
+        type: "string"
+        description: "Error message if step failed (optional)"
+    required: ["workflow_correlation_id", "step_name", "step_order", "status"]
+
+  ModelBridgeStateInput:
+    type: "object"
+    properties:
+      bridge_id:
+        type: "string"
+        format: "uuid"
+        description: "Bridge instance identifier"
+      namespace:
+        type: "string"
+        description: "Multi-tenant namespace"
+      total_workflows_processed:
+        type: "integer"
+        minimum: 0
+        description: "Total workflows processed by this bridge instance"
+      total_items_aggregated:
+        type: "integer"
+        minimum: 0
+        description: "Total items aggregated"
+      aggregation_metadata:
+        type: "object"
+        description: "Aggregation-specific metadata (JSONB)"
+      current_fsm_state:
+        type: "string"
+        description: "Current FSM state of the bridge"
+      last_aggregation_timestamp:
+        type: "string"
+        format: "date-time"
+        description: "Timestamp of last aggregation operation"
+    required: ["bridge_id", "namespace", "total_workflows_processed", "total_items_aggregated", "current_fsm_state"]
+
+  ModelFSMTransitionInput:
+    type: "object"
+    properties:
+      entity_id:
+        type: "string"
+        format: "uuid"
+        description: "Entity undergoing state transition (workflow_id, bridge_id, etc.)"
+      entity_type:
+        type: "string"
+        description: "Type of entity (workflow, bridge, node)"
+      from_state:
+        type: "string"
+        description: "Previous state (optional for initial transition)"
+      to_state:
+        type: "string"
+        description: "New state after transition"
+      transition_event:
+        type: "string"
+        description: "Event that triggered the transition"
+      transition_data:
+        type: "object"
+        description: "Additional transition metadata (JSONB)"
+    required: ["entity_id", "entity_type", "to_state", "transition_event"]
+
+  ModelMetadataStampInput:
+    type: "object"
+    properties:
+      workflow_correlation_id:
+        type: "string"
+        format: "uuid"
+        description: "Parent workflow correlation ID (optional)"
+      file_hash:
+        type: "string"
+        maxLength: 128
+        description: "BLAKE3 hash of the file"
+      stamp_data:
+        type: "object"
+        description: "Complete stamp metadata (JSONB)"
+      namespace:
+        type: "string"
+        description: "Multi-tenant namespace"
+    required: ["file_hash", "stamp_data", "namespace"]
+
+  ModelNodeHeartbeatInput:
+    type: "object"
+    properties:
+      node_id:
+        type: "string"
+        description: "Unique node identifier"
+      health_status:
+        type: "string"
+        description: "Current health status (HEALTHY, DEGRADED, UNHEALTHY)"
+      heartbeat_timestamp:
+        type: "string"
+        format: "date-time"
+        description: "Timestamp of heartbeat"
+      metadata:
+        type: "object"
+        description: "Additional node metadata (optional)"
+    required: ["node_id", "health_status", "heartbeat_timestamp"]
+
+  # Health Check Models
+  ModelHealthCheckResponse:
+    type: "object"
+    properties:
+      healthy:
+        type: "boolean"
+        description: "Whether database connection is healthy"
+      database_version:
+        type: "string"
+        description: "PostgreSQL version string"
+      connection_stats:
+        $ref: "#/definitions/ModelConnectionStats"
+        description: "Connection pool statistics"
+      response_time_ms:
+        type: "integer"
+        minimum: 0
+        description: "Health check response time"
+      error_details:
+        type: "string"
+        description: "Error details if unhealthy"
+    required: ["healthy", "response_time_ms"]
+
+  ModelConnectionStats:
+    type: "object"
+    properties:
+      pool_size:
+        type: "integer"
+        minimum: 0
+        description: "Current pool size"
+      active_connections:
+        type: "integer"
+        minimum: 0
+        description: "Active connections count"
+      idle_connections:
+        type: "integer"
+        minimum: 0
+        description: "Idle connections count"
+      total_queries:
+        type: "integer"
+        minimum: 0
+        description: "Total queries executed"
+      failed_connections:
+        type: "integer"
+        minimum: 0
+        description: "Failed connection attempts"
+      average_response_time_ms:
+        type: "number"
+        minimum: 0.0
+        description: "Average response time in milliseconds"
+    required: ["pool_size", "active_connections", "idle_connections", "total_queries"]

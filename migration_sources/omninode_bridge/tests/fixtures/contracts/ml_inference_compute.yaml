@@ -1,0 +1,163 @@
+# ML Inference Compute Node Contract
+# Tests ml_inference template variant with model loading, inference, and caching
+
+node_id: ml_inference_compute_node
+node_type: compute
+version: v1_0_0
+
+metadata:
+  service_name: fraud_detection_inference
+  domain: machine_learning
+  description: ML inference compute node with model management and batching
+  author: test_suite
+  tags:
+    - ml
+    - inference
+    - fraud_detection
+    - batching
+    - gpu
+  sla:
+    max_latency_ms: 200
+    min_throughput_rps: 500
+    availability: 99.9
+
+# ML-specific subcontracts
+subcontracts:
+  # Caching for inference results
+  caching:
+    cache_backend: redis
+    cache_strategy: write_through
+    ttl_seconds: 300
+    cached_operations:
+      - operation: predict_fraud_score
+        cache_key_template: "fraud_score:{transaction_hash}"
+        ttl_seconds: 600
+      - operation: get_feature_vector
+        cache_key_template: "features:{entity_id}"
+        ttl_seconds: 1800
+
+  # State management for model versions
+  state_management:
+    persistence: memory
+    state_schema:
+      type: object
+      properties:
+        loaded_model_version: { type: string }
+        model_metadata: { type: object }
+        inference_stats: { type: object }
+        warmup_completed: { type: boolean }
+    ttl_seconds: null  # No expiry
+
+  # Event publishing for inference metrics
+  event_type:
+    events:
+      - name: inference_started
+        schema:
+          type: object
+          properties:
+            request_id: { type: string }
+            model_version: { type: string }
+            batch_size: { type: integer }
+      - name: inference_completed
+        schema:
+          type: object
+          properties:
+            request_id: { type: string }
+            predictions: { type: array }
+            inference_time_ms: { type: number }
+      - name: model_loaded
+        schema:
+          type: object
+          properties:
+            model_version: { type: string }
+            load_time_ms: { type: number }
+
+# Compute operations
+operations:
+  - name: load_model
+    description: Load ML model from artifact store
+    type: model_loading
+  - name: preprocess_features
+    description: Preprocess input features for inference
+    type: preprocessing
+  - name: run_inference
+    description: Execute model inference
+    type: inference
+  - name: postprocess_results
+    description: Postprocess inference results
+    type: postprocessing
+
+dependencies:
+  torch: "^2.1.0"
+  numpy: "^1.24.0"
+  onnxruntime: "^1.16.0"  # For ONNX models
+  scikit-learn: "^1.3.0"  # For preprocessing
+  redis: "^5.0.0"  # Result caching
+
+features:
+  - Model version management
+  - Batch inference support
+  - GPU acceleration (optional)
+  - Dynamic batching
+  - Feature preprocessing pipeline
+  - Result post-processing
+  - Inference caching
+  - Performance monitoring
+  - Model warmup on startup
+
+ml_config:
+  model:
+    type: pytorch
+    path: models/fraud_detection_v2.pt
+    input_shape: [batch_size, 128]
+    output_shape: [batch_size, 1]
+  inference:
+    batch_size: 32
+    max_batch_delay_ms: 50
+    use_gpu: false
+    num_threads: 4
+  preprocessing:
+    normalize: true
+    missing_value_strategy: mean_imputation
+    categorical_encoding: one_hot
+
+input_schema:
+  type: object
+  required:
+    - features
+  properties:
+    features:
+      type: object
+      properties:
+        transaction_amount: { type: number }
+        merchant_category: { type: string }
+        customer_age: { type: integer }
+        device_fingerprint: { type: string }
+        historical_features: { type: array }
+    options:
+      type: object
+      properties:
+        use_cache: { type: boolean, default: true }
+        batch_inference: { type: boolean, default: true }
+        explain_prediction: { type: boolean, default: false }
+
+output_schema:
+  type: object
+  required:
+    - prediction
+    - confidence
+  properties:
+    prediction:
+      type: object
+      properties:
+        fraud_score: { type: number, minimum: 0.0, maximum: 1.0 }
+        risk_category: { type: string, enum: [low, medium, high, critical] }
+    confidence: { type: number }
+    inference_time_ms: { type: number }
+    model_version: { type: string }
+    metadata:
+      type: object
+      properties:
+        cache_hit: { type: boolean }
+        batch_size_used: { type: integer }
+        feature_importance: { type: object }

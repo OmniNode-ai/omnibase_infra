@@ -1,0 +1,91 @@
+{#
+Workflow Coordination Subcontract Template
+
+Generates workflow orchestration methods.
+
+Context variables:
+- steps: List of workflow steps
+- use_llama_index: Boolean for LlamaIndex Workflow integration
+- parallel_steps: List of steps that can run in parallel
+- sequential_steps: List of steps that must run sequentially
+#}
+
+async def _coordinate_workflow(
+    self,
+    context: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Coordinate workflow execution.
+
+    Generated from workflow subcontract.
+    {% if steps %}Steps: {{ steps | join(', ') }}{% endif %}
+    """
+    results = {}
+
+    {% if use_llama_index %}
+    # LlamaIndex Workflow integration
+    workflow_results = await self._run_llama_index_workflow(context)
+    results.update(workflow_results)
+    {% else %}
+    # Standard workflow orchestration
+    {% if steps %}
+    workflow_status = {}
+
+    {% if parallel_steps %}
+    # Execute parallel steps
+    parallel_tasks = []
+    {% for step in parallel_steps %}
+    parallel_tasks.append(self._execute_step_{{ step }}(context))
+    {% endfor %}
+
+    parallel_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
+
+    for step_name, result in zip({{ parallel_steps }}, parallel_results):
+        if isinstance(result, Exception):
+            workflow_status[step_name] = {'status': 'failed', 'error': str(result)}
+        else:
+            workflow_status[step_name] = {'status': 'success', 'result': result}
+    {% endif %}
+
+    {% if sequential_steps %}
+    # Execute sequential steps
+    {% for step in sequential_steps %}
+    try:
+        step_result = await self._execute_step_{{ step }}(context)
+        workflow_status['{{ step }}'] = {'status': 'success', 'result': step_result}
+    except Exception as e:
+        logger.error(f"Step {{ step }} failed: {e}")
+        workflow_status['{{ step }}'] = {'status': 'failed', 'error': str(e)}
+        # Stop on first failure in sequential steps
+        break
+    {% endfor %}
+    {% endif %}
+
+    results['workflow_status'] = workflow_status
+    results['completed_steps'] = len([s for s in workflow_status.values() if s['status'] == 'success'])
+    results['failed_steps'] = len([s for s in workflow_status.values() if s['status'] == 'failed'])
+    {% else %}
+    # No steps configured
+    results['status'] = 'no_steps_configured'
+    {% endif %}
+    {% endif %}
+
+    return results
+
+{% if use_llama_index %}
+async def _run_llama_index_workflow(self, context: dict[str, Any]) -> dict[str, Any]:
+    """Execute LlamaIndex workflow."""
+    # TODO: Implement LlamaIndex workflow logic
+    return {'status': 'llama_index_workflow_placeholder'}
+{% endif %}
+
+{% if steps %}
+# Step execution methods
+{% for step in steps %}
+async def _execute_step_{{ step }}(self, context: dict[str, Any]) -> Any:
+    """Execute workflow step: {{ step }}."""
+    # TODO: Implement step {{ step }} logic
+    return {'step': '{{ step }}', 'status': 'completed'}
+
+{% endfor %}
+{% endif %}

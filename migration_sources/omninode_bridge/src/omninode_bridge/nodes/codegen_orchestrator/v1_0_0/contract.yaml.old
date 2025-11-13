@@ -1,0 +1,190 @@
+# ONEX v2.0 Contract - NodeCodegenOrchestrator
+# Code generation orchestrator for ONEX nodes
+
+schema_version: "2.0"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+last_updated: "2025-10-22"
+
+# Top-level required fields for omnibase_core
+node_name: codegen_orchestrator
+node_type: ORCHESTRATOR
+
+# Node Identity
+node_identity:
+  name: "codegen_orchestrator"
+  display_name: "Code Generation Orchestrator"
+  node_type: "orchestrator"
+  version: "1.0.0"
+  description: |
+    Orchestrates ONEX node code generation using 8-stage pipeline with LlamaIndex Workflows.
+    Provides event-driven coordination, RAG intelligence integration, and real-time progress tracking.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-22"
+  tags:
+    - "code-generation"
+    - "orchestration"
+    - "llama-index"
+    - "event-driven"
+    - "rag-intelligence"
+
+# Tool Specification
+tool_specification:
+  main_tool_class: "NodeCodegenOrchestrator"
+
+# Definitions
+definitions: {}
+
+# Associated Documents
+associated_documents:
+  - path: "docs/LLAMAINDEX_WORKFLOWS_GUIDE.md"
+    type: "guide"
+    description: "LlamaIndex Workflows integration patterns"
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/api/API_REFERENCE.md"
+    type: "reference"
+    description: "Complete API documentation"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 53000  # 53 seconds total pipeline
+    max_ms: 90000     # 90 seconds max
+  memory_usage:
+    target_mb: 512
+    max_mb: 1024
+  throughput:
+    target_requests_per_second: 2
+    max_concurrent_workflows: 10
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - prompt
+  properties:
+    prompt:
+      type: "string"
+      description: "Natural language description of node to generate"
+      example: "Create PostgreSQL CRUD Effect node"
+    output_directory:
+      type: "string"
+      description: "Target directory for generated files"
+      default: "./generated_nodes"
+    node_type_hint:
+      type: "string"
+      enum: ["effect", "orchestrator", "reducer", "compute"]
+      description: "Optional node type hint"
+    interactive_mode:
+      type: "boolean"
+      default: false
+      description: "Enable interactive checkpoints"
+    enable_intelligence:
+      type: "boolean"
+      default: true
+      description: "Use RAG intelligence gathering"
+    enable_quorum:
+      type: "boolean"
+      default: false
+      description: "Use AI quorum validation"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - workflow_id
+    - success
+    - generated_files
+  properties:
+    workflow_id:
+      type: "string"
+      format: "uuid"
+      description: "Unique workflow identifier"
+    success:
+      type: "boolean"
+      description: "Generation success status"
+    total_duration_seconds:
+      type: "number"
+      description: "Total pipeline duration"
+    generated_files:
+      type: "array"
+      items:
+        type: "string"
+      description: "List of generated file paths"
+    node_type:
+      type: "string"
+      description: "Inferred or specified node type"
+    quality_score:
+      type: "number"
+      minimum: 0.0
+      maximum: 1.0
+      description: "Overall quality score"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/workflow.yaml"
+    - "./contracts/events.yaml"
+    - "./contracts/routing.yaml"
+    - "./contracts/fsm.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+    - name: "omniarchon"
+      type: "intelligence_service"
+      required: false
+  libraries:
+    - name: "llama-index-core"
+      version: ">=0.10.0"
+    - name: "pydantic"
+      version: ">=2.0.0"
+    - name: "aiokafka"
+      version: ">=0.11.0"
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    timeout_ms: 300000  # 5 minutes
+  fallback_strategy: "graceful_degradation"
+  error_codes:
+    - code: "VALIDATION_ERROR"
+      description: "Input validation failed"
+      severity: "error"
+    - code: "GENERATION_FAILED"
+      description: "Code generation failed"
+      severity: "error"
+    - code: "TIMEOUT"
+      description: "Generation timeout exceeded"
+      severity: "error"
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 80
+    required: true
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "full_pipeline_execution"
+      - "intelligence_integration"
+      - "event_publishing"
+      - "timeout_handling"
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "total_duration"
+        target: 53.0
+        unit: "seconds"

@@ -1,0 +1,248 @@
+# Pre-commit Integration Example for Backwards Compatibility Validator
+#
+# This file shows how to add the backwards compatibility validator to your
+# .pre-commit-config.yaml file
+#
+# Usage:
+#   1. Copy the relevant section to your .pre-commit-config.yaml
+#   2. Adjust paths and settings as needed
+#   3. Run: pre-commit install
+#   4. Test: pre-commit run backwards-compatibility --all-files
+
+# ============================================================================
+# OPTION 1: Basic Integration (Recommended)
+# ============================================================================
+# Add this section to your .pre-commit-config.yaml
+
+repos-option-1:
+  - repo: local
+    hooks:
+      # Backwards Compatibility Validation
+      - id: backwards-compatibility
+        name: Backwards compatibility validation
+        entry: poetry run python scripts/validate_backwards_compatibility.py --staged
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+        description: "Validate backwards compatibility of public APIs"
+
+# ============================================================================
+# OPTION 2: With Custom Baseline
+# ============================================================================
+# Use specific baseline version
+
+repos-option-2:
+  - repo: local
+    hooks:
+      - id: backwards-compatibility
+        name: Backwards compatibility validation
+        entry: poetry run python scripts/validate_backwards_compatibility.py --staged --baseline main
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+# ============================================================================
+# OPTION 3: Strict Mode
+# ============================================================================
+# Fail even on exempted issues
+
+repos-option-3:
+  - repo: local
+    hooks:
+      - id: backwards-compatibility
+        name: Backwards compatibility validation (strict)
+        entry: poetry run python scripts/validate_backwards_compatibility.py --staged --strict
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+# ============================================================================
+# OPTION 4: Full Integration with Other Hooks
+# ============================================================================
+# Complete example with formatting, linting, and compatibility checks
+
+repos-option-4:
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-toml
+
+  # Local hooks for Python project
+  - repo: local
+    hooks:
+      # Code formatting (auto-fix)
+      - id: black-format
+        name: black (auto-format)
+        entry: poetry run black
+        language: system
+        types: [python]
+        stages: [commit]
+
+      - id: isort-format
+        name: isort (auto-sort imports)
+        entry: poetry run isort
+        language: system
+        types: [python]
+        stages: [commit]
+
+      # Linting (auto-fix)
+      - id: ruff-fix
+        name: ruff (auto-fix linting issues)
+        entry: poetry run ruff check --fix
+        language: system
+        types: [python]
+        stages: [commit]
+
+      # Type checking
+      - id: mypy
+        name: mypy (type checking)
+        entry: poetry run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+      # Backwards compatibility validation
+      - id: backwards-compatibility
+        name: Backwards compatibility validation
+        entry: poetry run python scripts/validate_backwards_compatibility.py --staged
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+        description: "Validate backwards compatibility of public APIs"
+
+      # Security scanning
+      - id: bandit
+        name: bandit (security scan)
+        entry: poetry run bandit -r src/
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+  # Secrets detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: "tests/|examples/"
+        stages: [commit]
+
+# ============================================================================
+# OPTION 5: Pre-push Hook (More Comprehensive)
+# ============================================================================
+# Run comprehensive checks before push instead of commit
+
+repos-option-5:
+  - repo: local
+    hooks:
+      # Quick commit checks
+      - id: backwards-compatibility-quick
+        name: Backwards compatibility (quick check)
+        entry: poetry run python scripts/validate_backwards_compatibility.py --staged
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+      # Comprehensive pre-push checks
+      - id: backwards-compatibility-full
+        name: Backwards compatibility (full validation)
+        entry: poetry run python scripts/validate_backwards_compatibility.py src/
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [push]
+
+# ============================================================================
+# CONFIGURATION NOTES
+# ============================================================================
+#
+# Key Parameters:
+#
+# entry:
+#   - Command to run the validator
+#   - Use --staged for commit hooks (only staged files)
+#   - Use file paths for push hooks (all files)
+#   - Add --baseline <ref> to specify baseline version
+#   - Add --strict for strict mode
+#   - Add --config <path> for custom config file
+#
+# language: system
+#   - Uses system Python (via poetry run)
+#   - Ensures consistent environment
+#
+# types: [python]
+#   - Only runs on Python files
+#   - Improves performance
+#
+# pass_filenames: false
+#   - Validator handles file discovery
+#   - Required for --staged mode
+#
+# stages: [commit] or [push]
+#   - commit: Run on git commit
+#   - push: Run on git push
+#   - Can specify both: [commit, push]
+#
+# ============================================================================
+# TESTING YOUR CONFIGURATION
+# ============================================================================
+#
+# 1. Install hooks:
+#    pre-commit install
+#
+# 2. Test on all files:
+#    pre-commit run backwards-compatibility --all-files
+#
+# 3. Test on staged files:
+#    git add <file>
+#    pre-commit run backwards-compatibility
+#
+# 4. Test full workflow:
+#    git add <file>
+#    git commit -m "test"
+#
+# 5. Skip hooks if needed:
+#    git commit --no-verify -m "skip hooks"
+#
+# ============================================================================
+# CUSTOMIZATION
+# ============================================================================
+#
+# Adjust these settings in config/backwards_compatibility_config.yaml:
+#
+# - baseline_version: Git ref for baseline (main, v1.0.0, etc.)
+# - strict_mode: Fail on exempted issues
+# - ignore_patterns: Files/directories to skip
+# - exemptions: Allowed breaking changes
+# - severity_overrides: Custom severity levels
+#
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+#
+# Problem: Hook not running
+# Solution: Run `pre-commit install` and verify with `pre-commit run --all-files`
+#
+# Problem: Too slow
+# Solution: Use --staged for commits, full validation for push only
+#
+# Problem: False positives
+# Solution: Add to ignore_patterns or exemptions in config
+#
+# Problem: Missing dependencies
+# Solution: Run `poetry install` to ensure all dependencies are available
+#
+# ============================================================================

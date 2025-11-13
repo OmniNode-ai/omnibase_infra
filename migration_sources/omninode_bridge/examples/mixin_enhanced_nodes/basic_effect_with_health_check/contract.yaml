@@ -1,0 +1,114 @@
+# Basic Effect with Health Check - ONEX v2.0 Example
+# Demonstrates: Simple EFFECT node with MixinHealthCheck integration
+
+# Required fields for ModelContractEffect
+name: "data_processing_effect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "Data processing effect node with health monitoring. Demonstrates basic mixin integration with MixinHealthCheck for component health tracking and Docker HEALTHCHECK compatibility."
+node_type: "EFFECT"
+
+# Input/Output Models (required by omnibase_core)
+input_model: "ModelDataProcessingInput"
+output_model: "ModelDataProcessingOutput"
+
+# State schemas (ONEX v2.0 requirement)
+input_state:
+  type: "object"
+  properties:
+    data:
+      type: "string"
+      description: "Input data to process"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Request correlation ID"
+  required:
+    - data
+
+output_state:
+  type: "object"
+  properties:
+    processed_data:
+      type: "string"
+      description: "Processed output data"
+    processing_time_ms:
+      type: "number"
+      description: "Processing duration in milliseconds"
+    status:
+      type: "string"
+      enum: ["success", "partial", "failed"]
+  required:
+    - processed_data
+    - status
+
+# Tool specification (required by omnibase_core)
+tool_specification:
+  tool_name: "data_processing_effect"
+  main_tool_class: "examples.mixin_enhanced_nodes.basic_effect_with_health_check.node.NodeDataProcessingEffect"
+
+# IO operations for EFFECT node
+io_operations:
+  - operation_type: "database_query"
+    atomic: true
+    timeout_seconds: 30
+    validation_enabled: true
+
+# Mixin Configuration
+mixins:
+  - name: "MixinHealthCheck"
+    enabled: true
+    config:
+      cache_ttl_seconds: 5.0
+      # Health check will monitor database connection
+      critical_components:
+        - database
+
+# Metadata
+metadata:
+  domain: "data_processing"
+  generated: true
+  generated_at: "2025-11-05T00:00:00Z"
+  tags:
+    - "example"
+    - "basic"
+    - "health_check"
+    - "mixin_integration"
+
+# Operations supported
+operations:
+  - "process_data"
+  - "health_check"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 50
+    max_ms: 500
+  memory_usage:
+    target_mb: 64
+    max_mb: 256
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 90
+    required: true
+  integration_tests:
+    required: true
+
+# Circuit Breaker Configuration (optional)
+advanced_features:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout_seconds: 60
+    half_open_max_calls: 3
+
+# Retry Policy (optional)
+retry_policy:
+  max_attempts: 3
+  backoff_multiplier: 2.0
+  max_backoff_seconds: 30

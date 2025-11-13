@@ -1,0 +1,220 @@
+# Mixin Scoring Configuration - Phase 3 Intelligent Selection
+# Version: 1.0
+# Created: 2025-11-06
+# Purpose: Define mixin scoring rules, requirements, and conflict resolution
+
+version: "1.0"
+updated_at: "2025-11-06"
+
+# Global settings
+global:
+  min_recommendation_score: 0.5  # Minimum score to recommend (0-1)
+  default_top_k: 5              # Default number of recommendations
+  confidence_threshold: 0.6      # Minimum confidence for auto-selection
+
+# Category weights (applied to base scores)
+category_weights:
+  database: 1.0
+  api: 1.0
+  kafka: 1.0
+  security: 0.95
+  observability: 1.0
+  resilience: 0.9
+  caching: 0.85
+  performance: 0.9
+
+# Mixin configurations with requirement mappings
+mixins:
+  # Database Mixins
+  MixinConnectionPooling:
+    primary_category: database
+    required_scores:
+      database: 5.0
+    boost_factors:
+      performance: 0.2
+    dependencies_match: [asyncpg, psycopg2, sqlalchemy]
+    weight: 1.0
+    description: "Connection pooling for database operations"
+
+  MixinTransactionManagement:
+    primary_category: database
+    required_scores:
+      database: 6.0
+    keywords_match: [transaction, commit, rollback, isolation]
+    prerequisites: [MixinConnectionPooling]
+    weight: 0.95
+    description: "Transaction management with commit/rollback support"
+
+  MixinDatabaseAdapter:
+    primary_category: database
+    required_scores:
+      database: 4.0
+    dependencies_match: [asyncpg, psycopg2, sqlalchemy]
+    weight: 0.9
+    description: "Generic database adapter interface"
+
+  # API Mixins
+  MixinCircuitBreaker:
+    primary_category: resilience
+    required_scores:
+      api: 4.0
+      resilience: 5.0
+    or_logic: true
+    keywords_match: [circuit, breaker, fault, tolerance]
+    weight: 0.9
+    description: "Circuit breaker pattern for fault tolerance"
+
+  MixinRetry:
+    primary_category: resilience
+    required_scores:
+      api: 3.0
+      resilience: 4.0
+    or_logic: true
+    keywords_match: [retry, backoff, exponential]
+    weight: 0.85
+    description: "Retry logic with exponential backoff"
+
+  MixinAPIClient:
+    primary_category: api
+    required_scores:
+      api: 5.0
+    dependencies_match: [httpx, aiohttp, requests]
+    weight: 0.9
+    description: "HTTP API client with standard methods"
+
+  # Kafka Mixins
+  MixinEventDrivenNode:
+    primary_category: kafka
+    required_scores:
+      kafka: 5.0
+    keywords_match: [event, message, consume, produce]
+    weight: 0.95
+    description: "Event-driven node with Kafka integration"
+
+  MixinEventPublisher:
+    primary_category: kafka
+    required_scores:
+      kafka: 4.0
+    operation_match: [publish, emit, send]
+    weight: 0.85
+    description: "Event publisher for Kafka topics"
+
+  MixinEventConsumer:
+    primary_category: kafka
+    required_scores:
+      kafka: 4.0
+    operation_match: [consume, handle, process]
+    weight: 0.85
+    description: "Event consumer for Kafka topics"
+
+  # Security Mixins
+  MixinSecurityValidation:
+    primary_category: security
+    required_scores:
+      security: 5.0
+    keywords_match: [auth, token, validate, secure]
+    weight: 0.95
+    description: "Security validation for authentication and authorization"
+
+  MixinSensitiveFieldRedaction:
+    primary_category: security
+    required_scores:
+      security: 4.0
+    keywords_match: [sensitive, pii, redact, mask]
+    weight: 0.9
+    description: "Sensitive field redaction for PII protection"
+
+  # Observability Mixins (Always recommended at low score)
+  MixinHealthCheck:
+    primary_category: observability
+    required_scores:
+      observability: 0.0  # Always include for production
+    default_score: 0.7
+    weight: 1.0
+    description: "Health check endpoint for liveness/readiness probes"
+
+  MixinMetrics:
+    primary_category: observability
+    required_scores:
+      observability: 0.0  # Always include for production
+    default_score: 0.8
+    weight: 1.0
+    description: "Metrics collection and reporting"
+
+  MixinStructuredLogging:
+    primary_category: observability
+    required_scores:
+      observability: 2.0
+    keywords_match: [log, logging, structured]
+    weight: 0.85
+    description: "Structured logging with JSON format"
+
+  # Caching Mixins
+  MixinCaching:
+    primary_category: caching
+    required_scores:
+      caching: 4.0
+      performance: 3.0
+    and_logic: true
+    keywords_match: [cache, caching, memoize]
+    weight: 0.85
+    description: "Caching layer with TTL support"
+
+  MixinCacheInvalidation:
+    primary_category: caching
+    required_scores:
+      caching: 5.0
+    keywords_match: [cache, invalidate, evict, ttl]
+    prerequisites: [MixinCaching]
+    weight: 0.8
+    description: "Cache invalidation strategies"
+
+  # Performance Mixins
+  MixinBatchProcessing:
+    primary_category: performance
+    required_scores:
+      performance: 5.0
+    keywords_match: [batch, bulk, parallel]
+    weight: 0.85
+    description: "Batch processing for high throughput"
+
+  # Node Type Wrappers (Special handling)
+  ModelServiceEffect:
+    primary_category: service
+    required_scores:
+      observability: 0.0
+    is_wrapper: true
+    includes_mixins: [MixinNodeService, MixinHealthCheck, MixinEventBus, MixinMetrics]
+    default_score: 0.6
+    weight: 1.0
+    description: "Service wrapper for Effect nodes with standard capabilities"
+
+  ModelServiceCompute:
+    primary_category: service
+    required_scores:
+      observability: 0.0
+    is_wrapper: true
+    includes_mixins: [MixinNodeService, MixinHealthCheck, MixinCaching, MixinMetrics]
+    default_score: 0.6
+    weight: 1.0
+    description: "Service wrapper for Compute nodes with caching"
+
+  ModelServiceReducer:
+    primary_category: service
+    required_scores:
+      observability: 0.0
+    is_wrapper: true
+    includes_mixins: [MixinNodeService, MixinHealthCheck, MixinCaching, MixinMetrics]
+    default_score: 0.6
+    weight: 1.0
+    description: "Service wrapper for Reducer nodes with caching"
+
+  ModelServiceOrchestrator:
+    primary_category: service
+    required_scores:
+      observability: 0.0
+    is_wrapper: true
+    includes_mixins: [MixinNodeService, MixinHealthCheck, MixinEventBus, MixinMetrics]
+    default_score: 0.6
+    weight: 1.0
+    description: "Service wrapper for Orchestrator nodes with event bus"

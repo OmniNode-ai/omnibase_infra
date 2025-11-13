@@ -1,0 +1,442 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://omninode.dev/schemas/contract/advanced-features/v1.0.0",
+  "title": "Contract Advanced Features Schema",
+  "description": "JSON Schema for advanced features configuration in ONEX v2.0 contracts",
+  "type": "object",
+  "properties": {
+    "circuit_breaker": {
+      "$ref": "#/definitions/CircuitBreakerConfig",
+      "description": "Circuit breaker configuration (built-in to NodeEffect)"
+    },
+    "retry_policy": {
+      "$ref": "#/definitions/RetryPolicyConfig",
+      "description": "Retry policy configuration (built-in to NodeEffect)"
+    },
+    "dead_letter_queue": {
+      "$ref": "#/definitions/DeadLetterQueueConfig",
+      "description": "Dead letter queue configuration for failed events"
+    },
+    "transactions": {
+      "$ref": "#/definitions/TransactionsConfig",
+      "description": "Transaction support configuration (built-in to NodeEffect)"
+    },
+    "security_validation": {
+      "$ref": "#/definitions/SecurityValidationConfig",
+      "description": "Input validation and sanitization configuration"
+    },
+    "observability": {
+      "$ref": "#/definitions/ObservabilityConfig",
+      "description": "Tracing, metrics, and logging configuration"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "CircuitBreakerConfig": {
+      "type": "object",
+      "description": "Circuit breaker configuration for fault tolerance",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable circuit breaker",
+          "default": true
+        },
+        "failure_threshold": {
+          "type": "integer",
+          "description": "Number of failures before opening circuit",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 5
+        },
+        "recovery_timeout_ms": {
+          "type": "integer",
+          "description": "Time to wait before attempting recovery (milliseconds)",
+          "minimum": 1000,
+          "maximum": 600000,
+          "default": 60000
+        },
+        "half_open_max_calls": {
+          "type": "integer",
+          "description": "Max calls allowed in half-open state",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3
+        },
+        "services": {
+          "type": "array",
+          "description": "Service-specific circuit breaker configurations",
+          "items": {
+            "$ref": "#/definitions/ServiceCircuitBreakerConfig"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ServiceCircuitBreakerConfig": {
+      "type": "object",
+      "description": "Circuit breaker configuration for a specific service",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Service name (postgres, kafka, redis, etc.)",
+          "minLength": 1
+        },
+        "failure_threshold": {
+          "type": "integer",
+          "description": "Service-specific failure threshold",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "recovery_timeout_ms": {
+          "type": "integer",
+          "description": "Service-specific recovery timeout (milliseconds)",
+          "minimum": 1000,
+          "maximum": 600000
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "RetryPolicyConfig": {
+      "type": "object",
+      "description": "Retry policy configuration with exponential backoff",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable retry policy",
+          "default": true
+        },
+        "max_attempts": {
+          "type": "integer",
+          "description": "Maximum number of retry attempts",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3
+        },
+        "initial_delay_ms": {
+          "type": "integer",
+          "description": "Initial retry delay in milliseconds",
+          "minimum": 100,
+          "maximum": 10000,
+          "default": 1000
+        },
+        "max_delay_ms": {
+          "type": "integer",
+          "description": "Maximum retry delay in milliseconds",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000
+        },
+        "backoff_multiplier": {
+          "type": "number",
+          "description": "Backoff multiplier for exponential backoff",
+          "minimum": 1.0,
+          "maximum": 5.0,
+          "default": 2.0
+        },
+        "retryable_exceptions": {
+          "type": "array",
+          "description": "List of exception types that should trigger retry",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": ["TimeoutError", "ConnectionError", "TemporaryFailure"]
+        },
+        "retryable_status_codes": {
+          "type": "array",
+          "description": "HTTP status codes that should trigger retry",
+          "items": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          },
+          "default": [429, 500, 502, 503, 504]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeadLetterQueueConfig": {
+      "type": "object",
+      "description": "Dead letter queue configuration for failed events",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable dead letter queue",
+          "default": true
+        },
+        "max_retries": {
+          "type": "integer",
+          "description": "Maximum retries before sending to DLQ",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3
+        },
+        "topic_suffix": {
+          "type": "string",
+          "description": "Suffix to append to original topic for DLQ",
+          "pattern": "^\\.[a-z0-9_-]+$",
+          "default": ".dlq"
+        },
+        "retry_delay_ms": {
+          "type": "integer",
+          "description": "Delay between retry attempts in milliseconds",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 5000
+        },
+        "alert_threshold": {
+          "type": "integer",
+          "description": "Number of DLQ messages that triggers alert",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 100
+        },
+        "monitoring": {
+          "type": "object",
+          "description": "DLQ monitoring configuration",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable DLQ monitoring",
+              "default": true
+            },
+            "check_interval_seconds": {
+              "type": "integer",
+              "description": "Interval between DLQ checks in seconds",
+              "minimum": 10,
+              "maximum": 3600,
+              "default": 60
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "TransactionsConfig": {
+      "type": "object",
+      "description": "Database transaction configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable transaction support",
+          "default": true
+        },
+        "isolation_level": {
+          "type": "string",
+          "description": "Transaction isolation level",
+          "enum": [
+            "READ_UNCOMMITTED",
+            "READ_COMMITTED",
+            "REPEATABLE_READ",
+            "SERIALIZABLE"
+          ],
+          "default": "READ_COMMITTED"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "description": "Transaction timeout in seconds",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 30
+        },
+        "rollback_on_error": {
+          "type": "boolean",
+          "description": "Automatically rollback on error",
+          "default": true
+        },
+        "savepoints": {
+          "type": "boolean",
+          "description": "Enable savepoint support for nested transactions",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "SecurityValidationConfig": {
+      "type": "object",
+      "description": "Input validation and sanitization configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable security validation",
+          "default": true
+        },
+        "sanitize_inputs": {
+          "type": "boolean",
+          "description": "Sanitize all user inputs",
+          "default": true
+        },
+        "sanitize_logs": {
+          "type": "boolean",
+          "description": "Sanitize sensitive data in logs",
+          "default": true
+        },
+        "validate_sql": {
+          "type": "boolean",
+          "description": "Validate SQL queries for injection attempts",
+          "default": true
+        },
+        "max_input_length": {
+          "type": "integer",
+          "description": "Maximum allowed input length (characters)",
+          "minimum": 100,
+          "maximum": 1000000,
+          "default": 10000
+        },
+        "forbidden_patterns": {
+          "type": "array",
+          "description": "Regex patterns that are forbidden in inputs",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "(?i)(DROP|DELETE|TRUNCATE)\\s+TABLE",
+            "(?i)EXEC(UTE)?\\s+"
+          ]
+        },
+        "redact_fields": {
+          "type": "array",
+          "description": "Field names to redact in logs (case-insensitive)",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": ["password", "api_key", "secret", "token"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ObservabilityConfig": {
+      "type": "object",
+      "description": "Observability configuration (tracing, metrics, logging)",
+      "properties": {
+        "tracing": {
+          "$ref": "#/definitions/TracingConfig",
+          "description": "Distributed tracing configuration"
+        },
+        "metrics": {
+          "$ref": "#/definitions/MetricsConfig",
+          "description": "Metrics collection and export configuration"
+        },
+        "logging": {
+          "$ref": "#/definitions/LoggingConfig",
+          "description": "Logging configuration"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TracingConfig": {
+      "type": "object",
+      "description": "Distributed tracing configuration (OpenTelemetry)",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable distributed tracing",
+          "default": true
+        },
+        "exporter": {
+          "type": "string",
+          "description": "Trace exporter type",
+          "enum": ["otlp", "jaeger", "zipkin", "console"],
+          "default": "otlp"
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Trace exporter endpoint (supports environment variables)",
+          "minLength": 1
+        },
+        "sample_rate": {
+          "type": "number",
+          "description": "Sampling rate (0.0 to 1.0)",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "MetricsConfig": {
+      "type": "object",
+      "description": "Metrics collection and export configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable metrics collection",
+          "default": true
+        },
+        "prometheus_port": {
+          "type": "integer",
+          "description": "Prometheus metrics export port",
+          "minimum": 1024,
+          "maximum": 65535,
+          "default": 9090
+        },
+        "export_interval_seconds": {
+          "type": "integer",
+          "description": "Metrics export interval in seconds",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 15
+        }
+      },
+      "additionalProperties": false
+    },
+    "LoggingConfig": {
+      "type": "object",
+      "description": "Logging configuration",
+      "properties": {
+        "structured": {
+          "type": "boolean",
+          "description": "Enable structured logging",
+          "default": true
+        },
+        "json_format": {
+          "type": "boolean",
+          "description": "Use JSON format for log output",
+          "default": true
+        },
+        "correlation_tracking": {
+          "type": "boolean",
+          "description": "Include correlation IDs in logs",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "circuit_breaker": {
+        "enabled": true,
+        "failure_threshold": 5,
+        "recovery_timeout_ms": 60000,
+        "services": [
+          {
+            "name": "postgres",
+            "failure_threshold": 3,
+            "recovery_timeout_ms": 30000
+          }
+        ]
+      },
+      "retry_policy": {
+        "enabled": true,
+        "max_attempts": 3,
+        "initial_delay_ms": 1000,
+        "backoff_multiplier": 2.0
+      },
+      "dead_letter_queue": {
+        "enabled": true,
+        "max_retries": 3,
+        "topic_suffix": ".dlq",
+        "alert_threshold": 100
+      },
+      "security_validation": {
+        "enabled": true,
+        "sanitize_inputs": true,
+        "max_input_length": 10000
+      }
+    }
+  ]
+}

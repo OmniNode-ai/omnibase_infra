@@ -1,0 +1,420 @@
+name: omninode_bridge
+
+networks:
+  omninode-bridge-network:
+    driver: bridge
+    name: omninode-bridge-network
+
+services:
+  # Consul Service Discovery
+  consul:
+    image: hashicorp/consul:1.22
+    container_name: omninode-bridge-consul
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    ports:
+      - "${CONSUL_PORT}:8500"
+      - "${CONSUL_DNS_PORT}:8600/udp"
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+      CONSUL_CLIENT_INTERFACE: eth0
+    command: >
+      consul agent
+      -server
+      -bootstrap-expect=1
+      -datacenter=omninode-bridge
+      -data-dir=/consul/data
+      -config-dir=/consul/config
+      -ui
+      -client=0.0.0.0
+      -bind=0.0.0.0
+      -log-level=${CONSUL_LOG_LEVEL}
+    volumes:
+      - consul_data:/consul/data
+      - consul_config:/consul/config
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # HashiCorp Vault - Secrets Management
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: omninode-bridge-vault
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    ports:
+      - "${VAULT_PORT}:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://0.0.0.0:8200
+      VAULT_API_ADDR: ${VAULT_ADDR}
+      VAULT_CLUSTER_ADDR: http://omninode-bridge-vault:8201
+    cap_add:
+      - IPC_LOCK
+    command: >
+      vault server -dev
+      -dev-root-token-id=${VAULT_TOKEN}
+      -dev-listen-address=0.0.0.0:8200
+    volumes:
+      - vault_data:/vault/data
+      - vault_logs:/vault/logs
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # PostgreSQL Database with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: omninode-bridge-postgres
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    secrets:
+      - postgres_password
+    environment:
+      POSTGRES_DB: omninode_bridge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    ports:
+      - "5436:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omninode_bridge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RedPanda - High-performance Kafka-compatible streaming
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-bridge-redpanda
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    ports:
+      - "9092:9092"                       # Kafka API (default port)
+      - "${REDPANDA_EXTERNAL_PORT}:29092" # External Kafka API
+      - "${REDPANDA_ADMIN_PORT}:9644"     # Admin API
+      - "${REDPANDA_PROXY_PORT}:8082"     # HTTP Proxy API
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:29092
+      - --advertise-kafka-addr=internal://omninode-bridge-redpanda:9092,external://localhost:29092,external://omninode-bridge-redpanda:29092
+      - --pandaproxy-addr=internal://0.0.0.0:8082,external://0.0.0.0:8083
+      - --advertise-pandaproxy-addr=internal://omninode-bridge-redpanda:8082,external://localhost:8083
+      - --schema-registry-addr=internal://0.0.0.0:8081,external://0.0.0.0:8084
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=omninode-bridge-redpanda:33145
+      - --mode=dev-container
+      - --smp=1
+      - --default-log-level=${REDPANDA_LOG_LEVEL}
+    environment:
+      REDPANDA_AUTO_CREATE_TOPICS_ENABLED: true
+      REDPANDA_DEFAULT_TOPIC_PARTITIONS: ${REDPANDA_DEFAULT_PARTITIONS}
+      REDPANDA_DEFAULT_TOPIC_REPLICATIONS: ${REDPANDA_DEFAULT_REPLICATION_FACTOR}
+      REDPANDA_TOPIC_CLEANUP_POLICY: delete
+      REDPANDA_LOG_RETENTION_MS: ${REDPANDA_LOG_RETENTION_MS}
+      REDPANDA_SEGMENT_MS: ${REDPANDA_SEGMENT_MS}
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G  # Prevent OOM crashes (exit code 137)
+          cpus: '1.0'  # Limit to 1 CPU core
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    restart: unless-stopped
+
+  # RedPanda Topic Manager - Setup ONEX infrastructure topics
+  redpanda-topic-manager:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-bridge-redpanda-topics
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        echo 'Waiting for RedPanda to be ready...'
+        rpk cluster info --brokers omninode-bridge-redpanda:9092
+        echo 'Creating OmniNode Bridge infrastructure topics (dev.omninode_bridge.onex)...'
+
+        echo 'Hook Receiver Event Topics...'
+        rpk topic create dev.omninode_bridge.onex.evt.hook-received.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.evt.session-created.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.evt.tool-executed.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'Service Discovery Topics...'
+        rpk topic create dev.omninode_bridge.onex.evt.service-registered.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.evt.service-deregistered.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'PostgreSQL Command Topics...'
+        rpk topic create dev.omninode_bridge.onex.cmd.postgres-execute-query.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.cmd.postgres-health-check.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'PostgreSQL Event Topics...'
+        rpk topic create dev.omninode_bridge.onex.evt.postgres-query-completed.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.evt.postgres-query-failed.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.evt.postgres-connection-established.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.evt.postgres-connection-failed.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'PostgreSQL Query-Response Topics...'
+        rpk topic create dev.omninode_bridge.onex.qrs.postgres-health-requests.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.qrs.postgres-health-replies.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.qrs.postgres-health-response.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'PostgreSQL CDC Topics...'
+        rpk topic create dev.omninode_bridge.onex.cdc.postgres-schema-changes.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'PostgreSQL Retry/DLT Topics...'
+        rpk topic create dev.omninode_bridge.onex.rty.postgres-execute-query.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.dlt.postgres-execute-query.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'Infrastructure Audit/Metrics Topics...'
+        rpk topic create dev.omninode_bridge.onex.aud.postgres-operations.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.met.postgres-performance.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'Metadata Stamping Service Topics...'
+        rpk topic create dev.omninode_bridge.onex.evt.metadata-stamp-created.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.evt.metadata-stamp-validated.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.evt.metadata-batch-processed.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.cmd.metadata-stamp-request.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode_bridge.onex.met.metadata-performance.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'Code Generation (Codegen) Event Topics...'
+        rpk topic create dev.omninode-bridge.codegen.generation-started.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode-bridge.codegen.stage-completed.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode-bridge.codegen.generation-completed.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode-bridge.codegen.generation-failed.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode-bridge.codegen.generation-requested.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode-bridge.codegen.checkpoint-response.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+        rpk topic create dev.omninode-bridge.codegen.metrics-recorded.v1 --brokers omninode-bridge-redpanda:9092 --partitions 3 --replicas 1 || true
+
+        echo 'OmniNode infrastructure topic creation completed'
+        echo 'Starting persistent topic monitoring service...'
+
+        # Keep container running with topic monitoring
+        while true; do
+          sleep 30
+          echo "Topic status check at $(date):"
+          rpk topic list --brokers omninode-bridge-redpanda:9092 | grep -E "(postgres|omnibase|workflow|metadata|codegen)" || echo "No infrastructure topics found"
+        done
+    healthcheck:
+      test: ["CMD", "rpk", "topic", "list", "--brokers", "omninode-bridge-redpanda:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # RedPanda UI (Development) - Web interface for topic management
+  redpanda-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: omninode-bridge-redpanda-ui
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "${REDPANDA_UI_PORT}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: omninode-bridge-redpanda
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: omninode-bridge-redpanda:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://omninode-bridge-redpanda:8081
+      SERVER_SERVLET_CONTEXT_PATH: /
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - development
+
+  # Registry Node - Node discovery and dual registration (Consul + PostgreSQL)
+  registry:
+    build:
+      context: ..
+      dockerfile: docker/bridge-nodes/Dockerfile.registry
+    container_name: omninode-bridge-registry
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    depends_on:
+      consul:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "${REGISTRY_PORT:-8062}:8062"
+      - "${REGISTRY_METRICS_PORT:-9093}:9093"
+    environment:
+      # Service configuration
+      REGISTRY_ID: ${REGISTRY_ID:-registry-main}
+      REGISTRY_PORT: 8062
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Consul configuration
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+
+      # PostgreSQL configuration
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: omninode_bridge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in environment}
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: omninode-bridge-redpanda:9092
+      KAFKA_ENVIRONMENT: ${KAFKA_ENVIRONMENT:-dev}
+
+      # Application metadata
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: 1.0.0
+      PYTHONPATH: /app/src
+
+    volumes:
+      - ../src:/app/src
+      - ../logs:/app/logs
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8062/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    restart: unless-stopped
+    profiles:
+      - production
+      - development
+
+  # Deployment Receiver - Remote container deployment service
+  deployment-receiver:
+    build:
+      context: .
+      dockerfile: docker/deployment-receiver/Dockerfile
+    container_name: omninode-bridge-deployment-receiver
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+      - "omninode-bridge-vault:192.168.86.200"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "${DEPLOYMENT_RECEIVER_PORT:-8001}:8001"
+    environment:
+      # Service configuration
+      DEPLOYMENT_RECEIVER_PORT: 8001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Docker configuration
+      DOCKER_HOST: unix:///var/run/docker.sock
+
+      # Security configuration
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-default-secret-key-change-me}
+      ALLOWED_IP_RANGES: ${ALLOWED_IP_RANGES:-192.168.86.0/24,10.0.0.0/8}
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: omninode-bridge-redpanda:9092
+
+      # Deployment configuration
+      PACKAGE_DIR: /tmp/deployment_packages
+
+      # Application metadata
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: 1.0.0
+      PYTHONPATH: /app/src
+
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+      # Mount Docker socket for container management
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount deployment packages directory
+      - deployment_packages:/tmp/deployment_packages
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    restart: unless-stopped
+
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"
+  postgres_password:
+    environment: "POSTGRES_PASSWORD"
+
+volumes:
+  postgres_data:
+  redpanda_data:
+  consul_data:
+  consul_config:
+  vault_data:
+  vault_logs:
+  deployment_packages:

@@ -1,0 +1,105 @@
+name: metrics_tracking
+description: "Comprehensive metrics tracking for operations, duration, and success rates"
+category: observability
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: medium
+code_template: |
+  def __init__(self, container: ModelContainer) -> None:
+      """Initialize with metrics tracking."""
+      super().__init__(container)
+
+      # Metrics tracking
+      self._total_operations = 0
+      self._total_duration_ms = 0.0
+      self._failed_operations = 0
+      self._successful_operations = 0
+
+  async def execute_{type}(self, contract: ModelContract{Type}) -> {OutputModel}:
+      """Execute with metrics tracking."""
+      start_time = time.perf_counter()
+
+      try:
+          # Execute operation
+          result = await self._do_operation()
+
+          # Track success metrics
+          duration_ms = (time.perf_counter() - start_time) * 1000
+          self._total_operations += 1
+          self._successful_operations += 1
+          self._total_duration_ms += duration_ms
+
+          return result
+
+      except Exception as e:
+          # Track failure metrics
+          duration_ms = (time.perf_counter() - start_time) * 1000
+          self._total_operations += 1
+          self._failed_operations += 1
+          self._total_duration_ms += duration_ms
+
+          raise
+
+  def get_metrics(self) -> dict[str, Any]:
+      """
+      Get metrics for monitoring and alerting.
+
+      Returns:
+          Dictionary with metrics
+      """
+      avg_duration_ms = (
+          self._total_duration_ms / self._total_operations
+          if self._total_operations > 0
+          else 0
+      )
+
+      success_rate = (
+          self._successful_operations / self._total_operations
+          if self._total_operations > 0
+          else 1.0
+      )
+
+      return {
+          "total_operations": self._total_operations,
+          "successful_operations": self._successful_operations,
+          "failed_operations": self._failed_operations,
+          "success_rate": round(success_rate, 4),
+          "avg_duration_ms": round(avg_duration_ms, 2),
+          "total_duration_ms": round(self._total_duration_ms, 2),
+      }
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - codegen_metrics_reducer
+
+configuration:
+  metrics_to_track:
+    - total_operations
+    - successful_operations
+    - failed_operations
+    - success_rate
+    - avg_duration_ms
+    - total_duration_ms
+
+prerequisites:
+  - time.perf_counter() for high-precision timing
+  - Instance variables for counter storage
+
+metrics:
+  overhead_ms: 0.05
+  memory_bytes: 64
+
+best_practices:
+  - "Track metrics in both success and failure paths"
+  - "Use time.perf_counter() for duration measurements"
+  - "Round durations to 2 decimal places"
+  - "Round success_rate to 4 decimal places"
+  - "Calculate averages only when total_operations > 0"
+  - "Default success_rate to 1.0 when no operations"
+  - "Track total_duration_ms for aggregate analysis"
+
+validation_rules:
+  - "Metrics must be updated in both try and except blocks"
+  - "Duration must be calculated even on failure"
+  - "get_metrics() must handle division by zero"
+  - "All numeric values must be rounded appropriately"

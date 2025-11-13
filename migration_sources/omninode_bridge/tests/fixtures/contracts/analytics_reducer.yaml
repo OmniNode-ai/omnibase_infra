@@ -1,0 +1,189 @@
+# Analytics Reducer Node Contract
+# Tests analytics_reducer template variant with complex aggregations and windowing
+
+node_id: analytics_reducer_node
+node_type: reducer
+version: v1_0_0
+
+metadata:
+  service_name: real_time_analytics_reducer
+  domain: analytics
+  description: Analytics reducer with multiple aggregation types and windows
+  author: test_suite
+  tags:
+    - analytics
+    - aggregation
+    - real_time
+    - windowing
+    - metrics
+  sla:
+    max_latency_ms: 500
+    min_throughput_rps: 5000
+    availability: 99.95
+
+# Analytics-heavy subcontracts
+subcontracts:
+  # Aggregation configuration
+  aggregation:
+    type: multi_metric
+    window_type: sliding
+    window_duration_seconds: 300
+    slide_interval_seconds: 60
+    aggregation_keys:
+      - user_id
+      - product_category
+      - region
+    metrics:
+      - name: total_events
+        type: count
+      - name: total_revenue
+        type: sum
+        field: transaction_amount
+      - name: avg_order_value
+        type: average
+        field: transaction_amount
+      - name: unique_users
+        type: count_distinct
+        field: user_id
+      - name: p95_response_time
+        type: percentile
+        field: response_time_ms
+        percentile: 95
+      - name: max_order_value
+        type: max
+        field: transaction_amount
+      - name: min_order_value
+        type: min
+        field: transaction_amount
+
+  # State management for aggregation windows
+  state_management:
+    persistence: hybrid  # Memory + database for durability
+    storage_backend: postgresql
+    state_schema:
+      type: object
+      properties:
+        active_windows: { type: array }
+        partial_aggregates: { type: object }
+        watermark_timestamp: { type: integer }
+        checkpoint_offset: { type: integer }
+    ttl_seconds: 86400
+    checkpoint_interval_seconds: 300
+
+  # Event publishing for aggregated results
+  event_type:
+    events:
+      - name: aggregation_window_opened
+        schema:
+          type: object
+          properties:
+            window_id: { type: string }
+            start_timestamp: { type: integer }
+            end_timestamp: { type: integer }
+      - name: aggregation_window_closed
+        schema:
+          type: object
+          properties:
+            window_id: { type: string }
+            aggregation_results: { type: object }
+            events_processed: { type: integer }
+      - name: aggregation_checkpoint_created
+        schema:
+          type: object
+          properties:
+            checkpoint_id: { type: string }
+            offset: { type: integer }
+            state_size_bytes: { type: integer }
+
+  # Caching for recent aggregations
+  caching:
+    cache_backend: redis
+    cache_strategy: write_through
+    ttl_seconds: 300
+    cached_operations:
+      - operation: get_current_window_aggregate
+        cache_key_template: "agg:{window_id}:{keys}"
+        ttl_seconds: 60
+      - operation: get_historical_aggregate
+        cache_key_template: "hist_agg:{period}:{keys}"
+        ttl_seconds: 3600
+
+# Reducer operations
+operations:
+  - name: initialize_reduction
+    description: Initialize reduction state
+    type: initialization
+  - name: execute_reduction
+    description: Execute streaming reduction
+    type: aggregation
+  - name: finalize_window
+    description: Finalize and emit window results
+    type: finalization
+  - name: checkpoint_state
+    description: Checkpoint aggregation state for recovery
+    type: persistence
+
+dependencies:
+  redis: "^5.0.0"
+  asyncpg: "^0.29.0"
+  numpy: "^1.24.0"  # For statistical aggregations
+  pandas: "^2.0.0"  # For data manipulation
+
+features:
+  - Multiple window types (tumbling, sliding, session)
+  - Complex aggregation functions
+  - Late event handling with watermarks
+  - State checkpointing for recovery
+  - Incremental aggregation
+  - Multi-level aggregation (by multiple keys)
+  - Real-time materialized views
+  - Anomaly detection in aggregates
+
+input_schema:
+  type: object
+  required:
+    - event_data
+    - event_timestamp
+  properties:
+    event_data:
+      type: object
+      properties:
+        user_id: { type: string }
+        product_category: { type: string }
+        region: { type: string }
+        transaction_amount: { type: number }
+        response_time_ms: { type: number }
+        event_type: { type: string }
+    event_timestamp:
+      type: integer
+      description: Event timestamp in milliseconds since epoch
+    watermark:
+      type: integer
+      description: Current watermark for late event handling
+
+output_schema:
+  type: object
+  required:
+    - window_id
+    - aggregation_results
+  properties:
+    window_id: { type: string }
+    window_start: { type: integer }
+    window_end: { type: integer }
+    aggregation_results:
+      type: object
+      properties:
+        total_events: { type: integer }
+        total_revenue: { type: number }
+        avg_order_value: { type: number }
+        unique_users: { type: integer }
+        p95_response_time: { type: number }
+        max_order_value: { type: number }
+        min_order_value: { type: number }
+    metadata:
+      type: object
+      properties:
+        events_processed: { type: integer }
+        late_events_count: { type: integer }
+        processing_time_ms: { type: number }
+        checkpoint_offset: { type: integer }

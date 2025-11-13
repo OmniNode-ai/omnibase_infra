@@ -1,0 +1,291 @@
+# NodeCodegenMetricsReducer Contract - Code Generation Metrics Aggregation
+# ONEX v2.0 Compliant Contract with Subcontract Composition
+
+# Required fields for ModelContractReducer
+name: "codegen_metrics_reducer"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "Aggregates code generation metrics across workflows with FSM state management and PostgreSQL persistence"
+node_type: "REDUCER"
+
+# Input/Output Models (required by omnibase_core) - must be strings (model class names)
+input_model: "ModelCodegenEvent"
+output_model: "ModelMetricsAggregationResult"
+
+# Tool specification (required by omnibase_core)
+tool_specification:
+  main_tool_class: "omninode_bridge.nodes.codegen_metrics_reducer.v1_0_0.node.NodeCodegenMetricsReducer"
+
+# Legacy fields for compatibility (using main version field)
+# contract_version removed - using main version field above
+# Note: This contract uses inline definitions instead of $ref to subcontracts
+# for better self-contained contracts and easier reading
+
+node_name: codegen_metrics_reducer
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+contract_name: codegen_metrics_reducer_contract
+author: omninode_bridge team
+created_at: "2025-10-29"
+
+# === INPUT STATE (required by ONEX v2.0) ===
+# Input state for metrics aggregation
+input_state:
+  type: object
+  description: "Input state for code generation metrics aggregation"
+  properties:
+    event_type:
+      type: string
+      enum: ["workflow_started", "workflow_completed", "workflow_failed", "stage_completed"]
+      description: "Type of codegen event to aggregate"
+    workflow_id:
+      type: string
+      format: uuid
+      description: "Workflow identifier"
+    timestamp:
+      type: string
+      format: date-time
+      description: "Event timestamp"
+    stage_name:
+      type: string
+      description: "Name of workflow stage (optional)"
+    stage_number:
+      type: integer
+      minimum: 1
+      maximum: 8
+      description: "Stage number in workflow (optional)"
+    duration_seconds:
+      type: number
+      minimum: 0.0
+      description: "Stage/workflow duration (optional)"
+    success:
+      type: boolean
+      description: "Whether operation succeeded (optional)"
+    quality_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+      description: "Code quality score (optional)"
+    total_tokens:
+      type: integer
+      minimum: 0
+      description: "Total LLM tokens used (optional)"
+    total_cost_usd:
+      type: number
+      minimum: 0.0
+      description: "Total cost in USD (optional)"
+    aggregation_window_start:
+      type: string
+      format: date-time
+      description: "Start of aggregation time window"
+    aggregation_window_end:
+      type: string
+      format: date-time
+      description: "End of aggregation time window"
+
+# === OUTPUT STATE (required by ONEX v2.0) ===
+# Output state after metrics aggregation
+output_state:
+  type: object
+  description: "Output state after code generation metrics aggregation"
+  properties:
+    success:
+      type: boolean
+      description: "Whether aggregation completed successfully"
+    aggregation_type:
+      type: string
+      enum: ["time_window", "stage_grouping", "workflow_grouping", "quality_score_buckets", "cost_buckets"]
+      description: "Type of aggregation performed"
+    aggregation_window:
+      type: object
+      description: "Aggregation time window"
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        window_size_ms:
+          type: integer
+          minimum: 0
+    total_generations:
+      type: integer
+      minimum: 0
+      description: "Total code generation workflows processed"
+    successful_generations:
+      type: integer
+      minimum: 0
+      description: "Number of successful generations"
+    failed_generations:
+      type: integer
+      minimum: 0
+      description: "Number of failed generations"
+    avg_duration_seconds:
+      type: number
+      minimum: 0.0
+      description: "Average workflow duration"
+    p95_duration_seconds:
+      type: number
+      minimum: 0.0
+      description: "95th percentile workflow duration"
+    avg_quality_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+      description: "Average code quality score"
+    total_cost_usd:
+      type: number
+      minimum: 0.0
+      description: "Total cost for aggregated workflows"
+    stage_breakdown:
+      type: object
+      description: "Per-stage metrics breakdown"
+      additionalProperties:
+        type: object
+        properties:
+          count:
+            type: integer
+          avg_duration_seconds:
+            type: number
+          success_rate:
+            type: number
+    aggregation_duration_ms:
+      type: number
+      minimum: 0.0
+      description: "Time taken to perform aggregation"
+    items_per_second:
+      type: number
+      minimum: 0.0
+      description: "Aggregation throughput (items/second)"
+    fsm_state:
+      type: string
+      enum: ["pending", "processing", "completed", "failed"]
+      description: "Final FSM state after aggregation"
+    error_message:
+      type: string
+      description: "Error message if aggregation failed"
+
+# === ONEX 2.0 COMPOSITION ===
+# Subcontracts define reducer capabilities through composition
+
+aggregation:
+  aggregation_functions:
+    - "sum"
+    - "count"
+    - "avg"
+    - "p95"
+    - "unique_count"
+  aggregation_type: "time_window"
+  supported_types:
+    - time_window
+    - stage_grouping
+    - workflow_grouping
+
+state_management:
+  enable_state_tracking: true
+  persistence_backend: "postgresql"
+
+fsm:
+  initial_state: "pending"
+  states:
+    - name: "pending"
+      transitions: ["processing"]
+    - name: "processing"
+      transitions: ["completed", "failed"]
+    - name: "completed"
+      transitions: []
+    - name: "failed"
+      transitions: []
+
+# === STREAMING CONFIGURATION ===
+# Windowed aggregation for efficient processing
+streaming:
+  mode: "windowed"
+  window_size_ms: 5000  # 5-second tumbling windows
+  batch_size: 100  # Items per batch
+  enable_late_arrival: true
+  late_arrival_tolerance_ms: 1000
+
+# === AGGREGATION STRATEGY ===
+# Primary aggregation approach
+aggregation_strategy:
+  primary_key: "time_window"  # Group by time window for temporal analysis
+  aggregation_type: "time_window"
+  supported_types:
+    - time_window
+    - stage_grouping
+    - workflow_grouping
+    - quality_score_buckets
+    - cost_buckets
+    - custom
+
+# === PERFORMANCE REQUIREMENTS ===
+# Resource limits and performance targets
+execution_capabilities:
+  aggregation_throughput_items_per_second: 1000
+  max_aggregation_latency_ms: 100
+  max_concurrent_aggregations: 10
+  memory_limit_mb: 512
+  cpu_limit_cores: 2
+
+# === STATE PERSISTENCE ===
+# PostgreSQL persistence configuration
+persistence:
+  backend: "postgresql"
+  enable_transactions: true
+  enable_batching: true
+  batch_size: 50
+  batch_flush_interval_ms: 1000
+
+# === FSM STATE TRACKING ===
+# Workflow state management
+fsm_tracking:
+  enable_state_tracking: true
+  track_transitions: true
+  persist_history: true
+  enable_state_recovery: true
+  recovery_on_startup: true
+
+# === INPUT/OUTPUT VALIDATION ===
+validation:
+  input:
+    required_fields:
+      - event_type
+      - workflow_id
+      - timestamp
+    optional_fields:
+      - stage_name
+      - stage_number
+      - duration_seconds
+      - success
+      - quality_score
+      - total_tokens
+      - total_cost_usd
+      - metrics
+      - failed_stage
+
+  output:
+    required_fields:
+      - aggregation_type
+      - total_generations
+      - successful_generations
+      - failed_generations
+      - avg_duration_seconds
+      - p95_duration_seconds
+      - avg_quality_score
+      - total_cost_usd
+      - aggregation_duration_ms
+      - items_per_second
+
+# === MONITORING & METRICS ===
+metrics:
+  enable_performance_metrics: true
+  enable_aggregation_metrics: true
+  enable_fsm_metrics: true
+  metrics_export_interval_ms: 10000

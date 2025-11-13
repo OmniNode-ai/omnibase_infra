@@ -1,0 +1,257 @@
+# ONEX v2.0 Node Contract
+name: distributed_lock_effect
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: |
+  PostgreSQL-backed distributed locking Effect node.
+
+  Provides distributed lock coordination for multi-instance deployments
+  with automatic lease expiration, deadlock detection, and metrics.
+
+  Operations:
+  - acquire_lock: Acquire distributed lock with lease duration
+  - release_lock: Release held lock
+  - extend_lock: Extend lock lease before expiration
+  - get_lock_info: Query lock status and metadata
+  - cleanup_expired: Clean up expired locks (background task)
+
+node_type: effect
+base_class: NodeEffect
+
+# Input/Output Models
+input_model: ModelDistributedLockRequest
+output_model: ModelDistributedLockResponse
+
+# Tool Specification
+tool_specification:
+  tool_name: distributed_lock
+  main_tool_class: omninode_bridge.nodes.distributed_lock_effect.v1_0_0.node.NodeDistributedLockEffect
+  description: Distributed locking operations
+  version: 1.0.0
+
+# Input State (required by ONEX v2.0)
+input_state:
+  type: object
+  description: "Input state for distributed locking operations"
+  properties:
+    operation_type:
+      type: string
+      enum: ["acquire_lock", "release_lock", "extend_lock", "get_lock_info", "cleanup_expired"]
+      description: "Type of lock operation to perform"
+    lock_name:
+      type: string
+      description: "Unique name/identifier for the lock"
+      minLength: 1
+    owner_id:
+      type: string
+      description: "Owner identifier (instance/process ID)"
+    lease_duration_seconds:
+      type: number
+      minimum: 1.0
+      maximum: 3600.0
+      default: 30.0
+      description: "Lock lease duration in seconds"
+    max_acquire_attempts:
+      type: integer
+      minimum: 1
+      maximum: 10
+      default: 3
+      description: "Maximum lock acquisition attempts"
+    connection_state:
+      type: object
+      description: "PostgreSQL connection state"
+      properties:
+        pool_size:
+          type: integer
+          description: "Current connection pool size"
+        active_connections:
+          type: integer
+          description: "Number of active connections"
+
+# Output State (required by ONEX v2.0)
+output_state:
+  type: object
+  description: "Output state after distributed locking operation"
+  properties:
+    success:
+      type: boolean
+      description: "Whether lock operation completed successfully"
+    operation_type:
+      type: string
+      enum: ["acquire_lock", "release_lock", "extend_lock", "get_lock_info", "cleanup_expired"]
+      description: "Type of operation that was performed"
+    lock_acquired:
+      type: boolean
+      description: "Whether lock was successfully acquired (for acquire_lock)"
+    lock_released:
+      type: boolean
+      description: "Whether lock was successfully released (for release_lock)"
+    lock_extended:
+      type: boolean
+      description: "Whether lock lease was successfully extended (for extend_lock)"
+    lock_info:
+      type: object
+      description: "Lock metadata information (for get_lock_info)"
+      properties:
+        lock_name:
+          type: string
+        owner_id:
+          type: string
+        acquired_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        lease_duration_seconds:
+          type: number
+        is_expired:
+          type: boolean
+    locks_cleaned:
+      type: integer
+      minimum: 0
+      description: "Number of expired locks cleaned up (for cleanup_expired)"
+    performance_metrics:
+      type: object
+      description: "Performance metrics for the operation"
+      properties:
+        execution_time_ms:
+          type: number
+          description: "Total execution time in milliseconds"
+        database_time_ms:
+          type: number
+          description: "Time spent in database operations"
+        retry_count:
+          type: integer
+          minimum: 0
+          description: "Number of retry attempts made"
+    error_message:
+      type: string
+      description: "Error message if operation failed"
+    error_code:
+      type: string
+      enum: ["LOCK_HELD_BY_OTHER", "LOCK_NOT_FOUND", "LOCK_EXPIRED", "DATABASE_ERROR", "DEADLOCK_DETECTED"]
+      description: "Structured error code for failed operations"
+
+# IO Operations
+io_operations:
+  - operation_type: database_write
+    description: Lock acquisition/release in PostgreSQL
+    atomic: true
+    timeout_seconds: 30
+
+  - operation_type: database_read
+    description: Lock status queries
+    atomic: false
+    timeout_seconds: 10
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 50
+    max_ms: 500
+    percentile: 95
+
+  throughput:
+    target_operations_per_second: 100
+    max_concurrent_operations: 50
+
+  resource_limits:
+    max_memory_mb: 256
+    max_cpu_percent: 50
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2
+    initial_delay_ms: 100
+
+  timeout_policy:
+    enabled: true
+    default_timeout_seconds: 30
+
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    timeout_seconds: 60
+
+# Subcontracts
+subcontracts:
+  - type: postgres_connection
+    enabled: true
+    config:
+      min_connections: 5
+      max_connections: 20
+
+  - type: metrics_collection
+    enabled: true
+    config:
+      collect_latency: true
+      collect_throughput: true
+
+  - type: health_monitoring
+    enabled: true
+    config:
+      check_interval_seconds: 30
+
+# Configuration
+configuration:
+  postgres_host:
+    type: string
+    default: "localhost"
+    description: PostgreSQL host address
+
+  postgres_port:
+    type: integer
+    default: 5432
+    description: PostgreSQL port
+
+  postgres_database:
+    type: string
+    required: true
+    description: PostgreSQL database name
+
+  default_lease_duration:
+    type: float
+    default: 30.0
+    description: Default lock lease duration in seconds
+
+  cleanup_interval:
+    type: float
+    default: 60.0
+    description: Expired lock cleanup interval in seconds
+
+  max_acquire_attempts:
+    type: integer
+    default: 3
+    description: Maximum lock acquisition attempts
+
+# Dependencies
+dependencies:
+  - name: postgresql
+    version: ">=12.0"
+    required: true
+
+  - name: asyncpg
+    version: ">=0.27.0"
+    required: true
+
+  - name: omnibase_core
+    version: ">=0.1.0"
+    required: true
+
+# Metadata
+metadata:
+  author: OmniNode Team
+  created_at: "2025-10-30"
+  tags:
+    - distributed-systems
+    - locking
+    - coordination
+    - postgres
+  category: infrastructure
+  maturity: production

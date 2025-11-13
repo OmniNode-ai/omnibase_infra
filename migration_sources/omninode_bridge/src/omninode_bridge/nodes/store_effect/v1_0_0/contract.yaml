@@ -1,0 +1,271 @@
+# Store Effect Node Contract - ONEX v2.0
+# Pure Reducer Refactor - Wave 4, Workstream 4A
+#
+# This contract defines the Store Effect Node's responsibilities,
+# capabilities, and interface for workflow state persistence.
+
+name: "store_effect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT"
+
+node_name: store_effect
+description: |
+  Store Effect Node - CQRS Write Path for Workflow State Persistence
+
+  Handles all state persistence operations with optimistic concurrency control
+  by delegating to CanonicalStoreService and publishing result events.
+
+# Node Capabilities
+capabilities:
+  - persist_state        # Persist workflow state with version control
+  - handle_conflicts     # Handle optimistic lock conflicts
+  - publish_events       # Publish StateCommitted/StateConflict events
+  - track_metrics        # Comprehensive metrics tracking
+
+# Supported Operations
+operations:
+  persist_state:
+    description: "Persist workflow state with optimistic concurrency control"
+    input:
+      workflow_key:
+        type: string
+        required: true
+        description: "Human-readable workflow identifier"
+        min_length: 1
+      expected_version:
+        type: integer
+        required: true
+        description: "Expected current version for optimistic lock"
+        minimum: 1
+      state_prime:
+        type: object
+        required: true
+        description: "New state to commit (complete state snapshot)"
+      action_id:
+        type: uuid
+        required: false
+        description: "Action ID that triggered this state change"
+      provenance:
+        type: object
+        required: false
+        description: "Provenance metadata (effect_id, timestamp, etc.)"
+        default: {}
+    output:
+      result:
+        type: union
+        options:
+          - EventStateCommitted  # Success path
+          - EventStateConflict   # Conflict path
+        description: "Persistence result event"
+
+# Input State (required by ONEX v2.0)
+input_state:
+  type: object
+  description: "Input state for workflow state persistence operations"
+  properties:
+    workflow_key:
+      type: string
+      description: "Human-readable workflow identifier"
+      minLength: 1
+    expected_version:
+      type: integer
+      description: "Expected current version for optimistic lock"
+      minimum: 1
+    state_prime:
+      type: object
+      description: "New state to commit (complete state snapshot)"
+    action_id:
+      type: string
+      format: uuid
+      description: "Action ID that triggered this state change"
+    provenance:
+      type: object
+      description: "Provenance metadata (effect_id, timestamp, etc.)"
+      default: {}
+    connection_state:
+      type: object
+      description: "Database connection state"
+      properties:
+        pool_size:
+          type: integer
+          description: "Current connection pool size"
+        active_connections:
+          type: integer
+          description: "Number of active database connections"
+
+# Output State (required by ONEX v2.0)
+output_state:
+  type: object
+  description: "Output state after state persistence operations"
+  properties:
+    persistence_result:
+      type: string
+      enum: ["committed", "conflict", "error"]
+      description: "Result of persistence operation"
+    new_version:
+      type: integer
+      description: "New state version after commit"
+      minimum: 1
+    conflict_details:
+      type: object
+      description: "Conflict details if optimistic lock failed"
+      properties:
+        expected_version:
+          type: integer
+        actual_version:
+          type: integer
+        conflicting_action_id:
+          type: string
+          format: uuid
+    performance_metrics:
+      type: object
+      description: "Performance metrics for persistence operation"
+      properties:
+        persist_latency_ms:
+          type: number
+          description: "Persistence operation latency in milliseconds"
+        kafka_publish_latency_ms:
+          type: number
+          description: "Kafka event publishing latency in milliseconds"
+    events_published:
+      type: array
+      items:
+        type: string
+        enum: ["StateCommitted", "StateConflict"]
+      description: "List of events published to Kafka"
+    error_message:
+      type: string
+      description: "Error message if operation failed"
+
+# Dependencies (injected via container)
+dependencies:
+  postgres_client:
+    type: PostgresClient
+    required: true
+    description: "PostgreSQL client for database operations"
+  kafka_client:
+    type: KafkaClient
+    required: true
+    description: "Kafka client for event streaming"
+
+# Event Topics
+event_topics:
+  subscribe:
+    - topic: omninode_bridge_intents_v1
+      description: "PersistState events from ReducerService"
+      event_types:
+        - PersistState
+  publish:
+    - topic: omninode_bridge_state_committed_v1
+      description: "StateCommitted events for successful persistence"
+      event_types:
+        - StateCommitted
+    - topic: omninode_bridge_state_conflicts_v1
+      description: "StateConflict events for version conflicts"
+      event_types:
+        - StateConflict
+
+# Performance Targets
+performance:
+  persistence_latency_ms:
+    p95: 10
+    p99: 15
+    description: "95th and 99th percentile persistence latency"
+  throughput:
+    target: 1000
+    unit: "operations/second"
+    description: "Target throughput for persistence operations"
+  success_rate:
+    target: 95.0
+    unit: "percent"
+    description: "Target success rate for persistence operations"
+  conflict_rate:
+    threshold: 5.0
+    unit: "percent"
+    description: "Maximum acceptable conflict rate"
+  error_rate:
+    threshold: 1.0
+    unit: "percent"
+    description: "Maximum acceptable error rate"
+
+# Metrics Tracked
+metrics:
+  - name: state_commits_total
+    type: counter
+    description: "Total successful state commits"
+  - name: state_conflicts_total
+    type: counter
+    description: "Total version conflicts (optimistic lock failures)"
+  - name: fsm_transitions_total
+    type: counter
+    description: "Total FSM state transitions processed"
+  - name: persist_errors_total
+    type: counter
+    description: "Total persistence errors encountered"
+  - name: avg_persist_latency_ms
+    type: gauge
+    description: "Average persistence latency in milliseconds"
+  - name: events_published_total
+    type: counter
+    description: "Total events published to Kafka"
+  - name: events_failed_total
+    type: counter
+    description: "Total failed event publications"
+  - name: current_workflows
+    type: gauge
+    description: "Number of active workflows being tracked"
+  - name: success_rate_pct
+    type: gauge
+    description: "Success rate as percentage (calculated)"
+  - name: conflict_rate_pct
+    type: gauge
+    description: "Conflict rate as percentage (calculated)"
+  - name: error_rate_pct
+    type: gauge
+    description: "Error rate as percentage (calculated)"
+
+# Error Handling
+error_handling:
+  - error_code: DEPENDENCY_ERROR
+    description: "Dependency resolution failure (postgres_client, kafka_client)"
+    recovery: "Fail fast during initialization, log error, retry on restart"
+  - error_code: DATABASE_ERROR
+    description: "Database connection or query failure"
+    recovery: "Log error, increment error counter, raise OnexError"
+  - error_code: KAFKA_PUBLISH_ERROR
+    description: "Kafka event publish failure"
+    recovery: "Log error, increment failed events counter, continue processing"
+  - error_code: INVALID_PARAMETER
+    description: "Invalid operation type or missing required parameters"
+    recovery: "Log error, raise OnexError with validation details"
+  - error_code: INTERNAL_ERROR
+    description: "Unexpected internal error during processing"
+    recovery: "Log error with full context, increment error counter, raise OnexError"
+
+# Health Checks
+health_checks:
+  - name: dependency_check
+    description: "Verify all dependencies are resolved"
+    interval_seconds: 60
+  - name: metrics_check
+    description: "Verify success rate meets target (>95%)"
+    interval_seconds: 300
+  - name: conflict_rate_check
+    description: "Verify conflict rate below threshold (<5%)"
+    interval_seconds: 300
+  - name: error_rate_check
+    description: "Verify error rate below threshold (<1%)"
+    interval_seconds: 300
+
+# ONEX v2.0 Compliance
+onex_compliance:
+  naming_convention: suffix_based  # NodeStoreEffect
+  pydantic_version: v2
+  error_handling: ModelOnexError
+  container_injection: ModelONEXContainer
+  contract_driven: true
+  event_driven: true
+  metrics_tracking: comprehensive

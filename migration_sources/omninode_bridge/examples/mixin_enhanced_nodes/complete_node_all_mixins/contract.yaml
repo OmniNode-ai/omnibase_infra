@@ -1,0 +1,235 @@
+# Complete Node with All Mixins - ONEX v2.0 Example
+# Demonstrates: Comprehensive example showing the full power of the mixin system
+
+# Required fields for ModelContractEffect
+name: "intelligent_processing_effect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "Comprehensive intelligent processing effect demonstrating the full mixin ecosystem. Includes health monitoring, performance tracking, structured logging, event publishing, service discovery, and result caching for production-grade microservices."
+node_type: "EFFECT"
+
+# Input/Output Models (required by omnibase_core)
+input_model: "ModelIntelligentProcessingInput"
+output_model: "ModelIntelligentProcessingOutput"
+
+# State schemas (ONEX v2.0 requirement)
+input_state:
+  type: "object"
+  properties:
+    operation:
+      type: "string"
+      enum: ["analyze", "transform", "aggregate"]
+      description: "Operation to perform"
+    data:
+      type: "object"
+      description: "Input data to process"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Request correlation ID"
+    cache_enabled:
+      type: "boolean"
+      default: true
+      description: "Whether to use result caching"
+  required:
+    - operation
+    - data
+
+output_state:
+  type: "object"
+  properties:
+    result:
+      type: "object"
+      description: "Processing result"
+    operation:
+      type: "string"
+      description: "Operation performed"
+    processing_time_ms:
+      type: "number"
+      description: "Processing duration"
+    cached:
+      type: "boolean"
+      description: "Whether result was cached"
+    metrics:
+      type: "object"
+      properties:
+        cache_hit_rate:
+          type: "number"
+        processing_count:
+          type: "integer"
+  required:
+    - result
+    - operation
+
+# Tool specification (required by omnibase_core)
+tool_specification:
+  tool_name: "intelligent_processing_effect"
+  main_tool_class: "examples.mixin_enhanced_nodes.complete_node_all_mixins.node.NodeIntelligentProcessingEffect"
+
+# IO operations for EFFECT node
+io_operations:
+  - operation_type: "database_query"
+    atomic: true
+    timeout_seconds: 30
+    validation_enabled: true
+
+  - operation_type: "external_api_call"
+    atomic: false
+    timeout_seconds: 60
+    validation_enabled: true
+
+# Comprehensive Mixin Configuration (All mixins enabled)
+mixins:
+  # Core observability mixins
+  - name: "MixinHealthCheck"
+    enabled: true
+    config:
+      cache_ttl_seconds: 10.0
+      critical_components:
+        - database
+        - cache
+        - event_bus
+
+  - name: "MixinMetrics"
+    enabled: true
+    config:
+      collect_histograms: true
+      histogram_buckets: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+      track_request_duration: true
+      track_error_rates: true
+      track_cache_hit_rate: true
+
+  - name: "MixinLogData"
+    enabled: true
+    config:
+      log_level: "INFO"
+      include_timestamps: true
+      include_correlation_ids: true
+      structured_format: true
+      log_performance_metrics: true
+
+  # Event-driven capabilities
+  - name: "MixinEventBus"
+    enabled: true
+    config:
+      kafka_bootstrap_servers: "localhost:9092"
+      default_topic_prefix: "intelligent_processing"
+      event_patterns:
+        - "*.processing.started"
+        - "*.processing.completed"
+        - "*.processing.failed"
+
+  # Service integration
+  - name: "MixinServiceRegistry"
+    enabled: true
+    config:
+      consul_host: "localhost"
+      consul_port: 8500
+      service_name: "intelligent-processing-effect"
+      domain_filter: "ai_services"
+      health_check_interval_seconds: 30
+
+  # Performance optimization
+  - name: "MixinCaching"
+    enabled: true
+    config:
+      default_ttl_seconds: 600
+      max_cache_size: 10000
+      cache_strategy: "lru"
+      enable_distributed_cache: false
+
+  # Additional utilities
+  - name: "MixinHashComputation"
+    enabled: true
+    config:
+      hash_algorithm: "blake3"
+      enable_content_addressing: true
+
+  - name: "MixinCanonicalYAMLSerializer"
+    enabled: true
+    config:
+      ensure_deterministic: true
+      preserve_order: true
+
+# Metadata
+metadata:
+  domain: "ai_services"
+  generated: true
+  generated_at: "2025-11-05T00:00:00Z"
+  tags:
+    - "example"
+    - "complete"
+    - "all_mixins"
+    - "production_ready"
+    - "event_driven"
+    - "distributed"
+    - "high_performance"
+
+# Operations supported
+operations:
+  - "analyze_data"
+  - "transform_data"
+  - "aggregate_results"
+  - "publish_event"
+  - "register_service"
+  - "health_check"
+  - "get_metrics"
+  - "clear_cache"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 50
+    max_ms: 500
+  memory_usage:
+    target_mb: 256
+    max_mb: 1024
+  throughput:
+    target_rps: 500
+    max_concurrent: 100
+  cache_hit_rate:
+    target: 0.80
+    min: 0.60
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 95
+    required: true
+  integration_tests:
+    required: true
+    include_cache_tests: true
+    include_event_tests: true
+  load_tests:
+    required: true
+    target_rps: 500
+    duration_seconds: 300
+  performance_tests:
+    required: true
+    max_p99_latency_ms: 100
+
+# Circuit Breaker Configuration
+advanced_features:
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 15
+    recovery_timeout_seconds: 180
+    half_open_max_calls: 10
+    track_per_operation: true
+
+# Retry Policy
+retry_policy:
+  max_attempts: 5
+  backoff_multiplier: 2.0
+  max_backoff_seconds: 60
+  retry_on_timeouts: true
+  retry_on_rate_limits: true
+
+# Rate Limiting
+rate_limiting:
+  enabled: true
+  max_requests_per_second: 500
+  burst_size: 100
+  strategy: "token_bucket"

@@ -1,0 +1,161 @@
+# FSM Subcontract
+# FSM state tracking and transition management for reducer
+# References: FSMStateManager (NodeBridgeReducer), ModelFSMSubcontract
+
+type: "workflow_state_machine"
+state_machine_name: "reducer_workflow_fsm"
+description: "FSM for tracking and aggregating workflow states across the reducer"
+
+# Valid workflow states (normalized to uppercase)
+states:
+  - state_name: "PENDING"
+    description: "Workflow initialized and awaiting processing"
+    is_initial: true
+    is_terminal: false
+    timeout_seconds: null
+    metadata_tracking:
+      - "workflow_id"
+      - "created_at"
+      - "namespace"
+
+  - state_name: "PROCESSING"
+    description: "Workflow actively being processed"
+    is_initial: false
+    is_terminal: false
+    timeout_seconds: 60
+    metadata_tracking:
+      - "workflow_id"
+      - "updated_at"
+      - "processing_steps"
+
+  - state_name: "COMPLETED"
+    description: "Workflow completed successfully"
+    is_initial: false
+    is_terminal: true
+    timeout_seconds: null
+    metadata_tracking:
+      - "workflow_id"
+      - "completed_at"
+      - "total_steps_executed"
+
+  - state_name: "FAILED"
+    description: "Workflow failed or timed out"
+    is_initial: false
+    is_terminal: true
+    timeout_seconds: null
+    metadata_tracking:
+      - "workflow_id"
+      - "failed_at"
+      - "error_message"
+      - "error_type"
+
+# State transition rules (loaded dynamically from FSM subcontract)
+transitions:
+  - from_state: "PENDING"
+    to_state: "PROCESSING"
+    trigger: "workflow_started"
+    description: "Workflow begins processing"
+    guard_conditions:
+      - "workflow_initialized"
+    actions:
+      - "update_state_cache"
+      - "generate_persist_transition_intent"
+      - "record_transition_history"
+
+  - from_state: "PENDING"
+    to_state: "FAILED"
+    trigger: "initialization_error"
+    description: "Workflow fails during initialization"
+    guard_conditions:
+      - "initialization_failed"
+    actions:
+      - "update_state_cache"
+      - "generate_persist_transition_intent"
+
+  - from_state: "PROCESSING"
+    to_state: "COMPLETED"
+    trigger: "workflow_completed"
+    description: "Workflow processing completes successfully"
+    guard_conditions:
+      - "all_steps_completed"
+    actions:
+      - "update_state_cache"
+      - "generate_persist_transition_intent"
+      - "finalize_metrics"
+
+  - from_state: "PROCESSING"
+    to_state: "FAILED"
+    trigger: "workflow_failed"
+    description: "Workflow processing fails"
+    guard_conditions:
+      - "error_occurred_or_timeout"
+    actions:
+      - "update_state_cache"
+      - "generate_persist_transition_intent"
+      - "record_error_details"
+
+# Initial and terminal states
+initial_state: "PENDING"
+terminal_states:
+  - "COMPLETED"
+  - "FAILED"
+
+# FSM state tracking configuration
+tracking:
+  persist_transitions: true
+  track_transition_history: true
+  track_state_duration: true
+  emit_transition_events: false  # Reducer doesn't emit Kafka events directly
+  cache_state_in_memory: true
+  max_cached_workflows: 10000
+
+# State recovery configuration
+recovery:
+  enabled: true
+  recovery_on_startup: true
+  recovery_source: "intent_based"  # Reducer uses intents for EFFECT node recovery
+  recovery_table: "fsm_workflow_states"
+  recovery_timeout_seconds: 30
+
+# Intent-based persistence (ONEX v2.0 Pure Function Pattern)
+persistence:
+  mode: "intent_based"  # No direct I/O, generate intents for EFFECT node
+  intent_types:
+    - "PERSIST_FSM_TRANSITION"
+    - "RECOVER_FSM_STATES"
+  target_node: "store_effect"
+  intent_priority_fsm_persistence: 1  # High priority
+  intent_priority_recovery: 2  # Highest priority
+
+# Validation rules
+validation:
+  validate_transitions: true
+  enforce_guard_conditions: true
+  prevent_invalid_transitions: true
+  log_transition_attempts: true
+  normalize_state_names: true  # Normalize to uppercase for consistency
+
+# Performance configuration
+performance:
+  max_workflows_tracked: 10000
+  cleanup_completed_workflows: true
+  cleanup_interval_hours: 24
+  cleanup_terminal_states_after_hours: 72
+
+# Aggregation of FSM states
+state_aggregation:
+  enabled: true
+  aggregate_by_state: true
+  aggregate_by_namespace: true
+  track_state_distribution: true
+  track_transition_counts: true
+  track_average_state_duration: true
+
+# Monitoring and metrics
+monitoring:
+  track_workflow_count_by_state: true
+  track_transition_rate: true
+  track_state_duration_histogram: true
+  track_invalid_transition_attempts: true
+  alert_on_high_failure_rate: true
+  failure_rate_threshold_percent: 10

@@ -1,0 +1,151 @@
+name: initialization_pattern
+description: "Defensive __init__ with container DI, service resolution, and health check mode"
+category: structure
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: critical
+code_template: |
+  def __init__(self, container: ModelContainer) -> None:
+      """
+      Initialize {Node} with dependency injection container.
+
+      Args:
+          container: ONEX container for dependency injection
+
+      Raises:
+          ModelOnexError: If container is invalid or initialization fails
+      """
+      super().__init__(container)
+
+      # Configuration - defensive pattern for dependency_injector
+      try:
+          if hasattr(container.config, "get") and callable(container.config.get):
+              self.config_value = container.config.get(
+                  "config_key",
+                  os.getenv("ENV_VAR", "default_value")
+              )
+          else:
+              # Fallback to defaults
+              self.config_value = os.getenv("ENV_VAR", "default_value")
+      except Exception:
+          # Fallback to defaults if any error
+          self.config_value = os.getenv("ENV_VAR", "default_value")
+
+      # Consul configuration for service discovery
+      self.consul_host: str = container.config.get(
+          "consul_host", os.getenv("CONSUL_HOST", "omninode-bridge-consul")
+      )
+      self.consul_port: int = container.config.get(
+          "consul_port", int(os.getenv("CONSUL_PORT", "28500"))
+      )
+      self.consul_enable_registration: bool = container.config.get(
+          "consul_enable_registration", True
+      )
+
+      # Detect health check mode
+      try:
+          health_check_mode = (
+              container.config.get("health_check_mode", False)
+              if hasattr(container.config, "get")
+              else False
+          )
+      except Exception:
+          health_check_mode = False
+
+      # Get or create KafkaClient from container
+      self.kafka_client = container.get_service("kafka_client")
+
+      if self.kafka_client is None and not health_check_mode:
+          try:
+              from omninode_bridge.services.kafka_client import KafkaClient
+
+              self.kafka_client = KafkaClient(
+                  bootstrap_servers=self.kafka_broker_url,
+                  enable_dead_letter_queue=True,
+                  max_retry_attempts=3,
+                  timeout_seconds=30,
+              )
+              container.register_service("kafka_client", self.kafka_client)
+          except ImportError:
+              emit_log_event(
+                  LogLevel.WARNING,
+                  "KafkaClient not available - events will be logged only",
+                  {"node_id": self.node_id},
+              )
+              self.kafka_client = None
+      elif health_check_mode:
+          emit_log_event(
+              LogLevel.DEBUG,
+              "Health check mode enabled - skipping Kafka initialization",
+              {"node_id": self.node_id},
+          )
+          self.kafka_client = None
+
+      # Initialize metrics tracking
+      self._total_operations = 0
+      self._total_duration_ms = 0.0
+      self._failed_operations = 0
+
+      emit_log_event(
+          LogLevel.INFO,
+          "Node{Name}{Type} initialized successfully",
+          {
+              "node_id": self.node_id,
+              "kafka_enabled": self.kafka_client is not None,
+              "config_key": self.config_value,
+          },
+      )
+
+      # Register with Consul for service discovery (skip in health check mode)
+      if not health_check_mode and self.consul_enable_registration:
+          self._register_with_consul_sync()
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - store_effect
+
+configuration:
+  health_check_mode: false
+  consul_registration: true
+  kafka_initialization: true
+
+initialization_sections:
+  - super().__init__() call
+  - Configuration loading with fallbacks
+  - Consul configuration
+  - Health check mode detection
+  - Service resolution (Kafka, etc.)
+  - Metrics initialization
+  - Initialization logging
+  - Consul registration
+
+prerequisites:
+  - ModelContainer passed in
+  - Base class __init__
+  - Configuration keys defined
+  - Service classes available
+
+metrics:
+  initialization_time_ms: 200
+  memory_bytes: 5242880  # 5MB
+
+best_practices:
+  - "Always call super().__init__(container) first"
+  - "Use defensive try/except for config.get()"
+  - "Provide fallbacks for all configuration"
+  - "Use os.getenv() as second-level fallback"
+  - "Detect health_check_mode before expensive operations"
+  - "Try container.get_service() before creating services"
+  - "Register created services with container"
+  - "Initialize metrics counters to 0"
+  - "Log successful initialization"
+  - "Register with Consul last (non-blocking)"
+  - "Skip Consul in health_check_mode"
+
+validation_rules:
+  - "Must call super().__init__(container)"
+  - "Must use defensive config.get() with try/except"
+  - "Must detect health_check_mode"
+  - "Must initialize metrics counters"
+  - "Must log initialization success"
+  - "Must handle service initialization failures"

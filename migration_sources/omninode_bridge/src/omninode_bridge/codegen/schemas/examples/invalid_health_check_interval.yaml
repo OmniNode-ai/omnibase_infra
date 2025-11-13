@@ -1,0 +1,32 @@
+# Example: Invalid Contract - Health Check Interval Too Low
+#
+# VALIDATION ERROR: check_interval_ms below minimum threshold
+# Expected: minimum 1000ms
+# Actual: 500ms
+
+schema_version: "v2.0.0"
+name: "NodeInvalidHealthCheckEffect"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "effect"
+description: "Example contract with invalid health check configuration"
+
+mixins:
+  - name: "MixinHealthCheck"
+    enabled: true
+    config:
+      check_interval_ms: 500  # ERROR: Below minimum 1000ms
+      components:
+        - name: "database"
+          critical: true
+
+subcontracts:
+  effect:
+    operations:
+      - "initialize"
+      - "shutdown"
+
+# Expected validation error:
+# ValidationError: mixins[0].config.check_interval_ms: 500 is less than minimum 1000

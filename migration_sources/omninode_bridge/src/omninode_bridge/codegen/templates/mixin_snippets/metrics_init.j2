@@ -1,0 +1,9 @@
+{# Metrics Mixin Initialization Snippet #}
+{# Usage: Include in initialize() method when MixinMetrics is enabled #}
+{% if 'MixinMetrics' in enabled_mixins %}
+        # Setup metrics collection
+        self.initialize_metrics(
+            metrics_prefix="{{ service_name }}",
+            enable_system_metrics=True,
+        )
+{% endif %}

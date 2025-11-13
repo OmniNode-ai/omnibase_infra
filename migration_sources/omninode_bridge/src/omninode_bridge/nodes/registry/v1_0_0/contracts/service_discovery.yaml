@@ -1,0 +1,199 @@
+# Service Discovery Subcontract
+# Dual registration configuration (Consul + PostgreSQL)
+# References: NodeBridgeRegistry dual registration system
+
+type: "service_discovery"
+discovery_name: "dual_registry_system"
+description: "Dual registration for node discovery in Consul and PostgreSQL with production-ready features"
+
+# Primary registration strategy
+primary_strategy: "dual"  # Register in both Consul and PostgreSQL
+
+# Service discovery backends
+backends:
+  - backend_name: "consul"
+    type: "consul_service_discovery"
+    description: "Consul service registry for dynamic service discovery"
+    enabled: true
+    priority: 1
+    configuration:
+      host: "localhost"
+      port: 8500
+      scheme: "http"
+      token: null  # Set via CONSUL_HTTP_TOKEN environment variable
+      datacenter: "dc1"
+      namespace: "omninode-bridge"
+    registration:
+      service_name_template: "{node_type}-{node_id}"
+      service_id_template: "{node_type}-{node_id}-{instance_id}"
+      tags:
+        - "omninode"
+        - "bridge"
+        - "onex-v2.0"
+      meta:
+        node_version: "1.0.0"
+        onex_version: "2.0"
+        environment: "development"
+      health_check:
+        interval: "30s"
+        timeout: "5s"
+        deregister_critical_service_after: "90s"
+    deregistration:
+      on_shutdown: true
+      on_failure: false
+
+  - backend_name: "postgresql"
+    type: "postgresql_tool_registry"
+    description: "PostgreSQL tool registry for persistent node registration"
+    enabled: true
+    priority: 2
+    configuration:
+      host: "localhost"
+      port: 5432
+      database: "omninode_bridge"
+      user: "postgres"
+      password_env: "POSTGRES_PASSWORD"  # pragma: allowlist secret - Environment variable name, not actual secret
+      schema: "public"
+      table: "node_registrations"
+      connection_pool:
+        min_connections: 10
+        max_connections: 50
+        acquire_timeout_seconds: 30
+    registration:
+      table_schema:
+        node_id: "UUID PRIMARY KEY"
+        node_type: "TEXT NOT NULL"
+        registry_id: "TEXT NOT NULL"
+        capabilities: "JSONB"
+        endpoints: "JSONB"
+        metadata: "JSONB"
+        health_status: "TEXT"
+        registered_at: "TIMESTAMPTZ DEFAULT NOW()"
+        last_heartbeat: "TIMESTAMPTZ"
+        updated_at: "TIMESTAMPTZ DEFAULT NOW()"
+      conflict_resolution: "on_conflict_update"
+      conflict_columns: ["node_id"]
+    deregistration:
+      mark_inactive: true
+      hard_delete: false
+      inactive_after_hours: 24
+
+# Kafka event consumption
+kafka_consumption:
+  enabled: true
+  topics:
+    - topic: "node-introspection.v1"
+      event_type: "NODE_INTROSPECTION"
+      description: "Consume introspection events from nodes"
+      consumer_group: "bridge-registry-group"
+      auto_offset_reset: "latest"
+      enable_auto_commit: true
+      max_poll_records: 100
+    - topic: "registry-request-introspection.v1"
+      event_type: "REGISTRY_REQUEST_INTROSPECTION"
+      description: "Publish requests for nodes to broadcast introspection"
+      consumer_group: "bridge-registry-group"
+  processing:
+    deserialize_envelope: true
+    envelope_format: "OnexEnvelopeV1"
+    validate_event_schema: true
+    track_message_offsets: true
+    idempotency_enabled: true
+    offset_cache_ttl_seconds: 3600
+
+# Production-ready features
+production_features:
+  memory_leak_prevention:
+    enabled: true
+    offset_cache_type: "ttl_cache"
+    max_tracked_offsets: 10000
+    offset_cache_ttl_seconds: 3600
+    offset_cleanup_interval_seconds: 300
+
+  race_condition_prevention:
+    enabled: true
+    cleanup_locks: true
+    shutdown_locks: true
+    concurrent_cleanup_protection: true
+
+  circuit_breaker:
+    enabled: true
+    registration_circuit_breaker:
+      failure_threshold: 5
+      success_threshold: 2
+      timeout_seconds: 60
+      half_open_max_calls: 3
+    kafka_circuit_breaker:
+      failure_threshold: 3
+      success_threshold: 1
+      timeout_seconds: 30
+
+  atomic_registration:
+    enabled: true
+    transaction_based: true
+    rollback_on_partial_failure: true
+
+  security_aware_logging:
+    enabled: true
+    mask_passwords: true
+    mask_tokens: true
+    mask_sensitive_fields:
+      - "password"
+      - "token"
+      - "api_key"
+      - "secret"
+
+# Node tracking and cleanup
+node_tracking:
+  max_registered_nodes: 10000
+  node_ttl_hours: 24
+  cleanup_interval_hours: 1
+  cleanup_terminal_nodes: true
+  track_last_seen: true
+  track_heartbeat: true
+
+# Health monitoring
+health_monitoring:
+  enabled: true
+  check_interval_seconds: 30
+  components:
+    - "node_runtime"
+    - "kafka_consumer"
+    - "consul_client"
+    - "postgres_client"
+  alert_on_unhealthy: true
+  alert_threshold_failures: 5
+
+# Performance configuration
+performance:
+  max_concurrent_registrations: 100
+  registration_timeout_seconds: 30
+  batch_registration_size: 50
+  async_registration: true
+
+# Monitoring and metrics
+monitoring:
+  track_registration_latency: true
+  track_registration_success_rate: true
+  track_memory_usage: true
+  track_cleanup_operations: true
+  track_kafka_consumption_lag: true
+  alert_on_high_memory: true
+  memory_threshold_mb: 1024
+
+# Background tasks
+background_tasks:
+  enabled: true
+  tasks:
+    - name: "kafka_consumer"
+      description: "Consume introspection events from Kafka"
+      enabled: true
+      restart_on_failure: true
+    - name: "cleanup_task"
+      description: "Periodic cleanup of stale node registrations"
+      enabled: true
+      interval_hours: 1
+    - name: "memory_monitor"
+      description: "Monitor memory usage and trigger cleanup if needed"
+      enabled: true
+      interval_seconds: 300

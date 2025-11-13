@@ -1,0 +1,158 @@
+{#
+Generation Instructions Template
+
+Specifies output format and quality requirements.
+
+Template Variables:
+- method_name: str - Name of method being generated
+- indentation_level: int - Indentation level (spaces, default: 8)
+- quality_requirements: list[str] - Quality checklist items
+#}
+# Generation Instructions
+
+## Output Format
+
+Return ONLY the method body implementation (indented, no method signature).
+
+**Format Requirements:**
+- Start with input validation
+- Use try/except for error handling
+- Include emit_log_event calls
+- Return ModelContractResponse
+- Use {{ indentation_level }} spaces for base indentation
+
+**Expected Structure:**
+```python
+        # Validate inputs
+        if not contract.input_state:
+            raise ModelOnexError(
+                error_code=EnumCoreErrorCode.INVALID_INPUT,
+                message="Contract input_state is required",
+                details={"correlation_id": contract.correlation_id},
+            )
+
+        # Extract parameters
+        param1 = contract.input_state.get("param1")
+        param2 = contract.input_state.get("param2")
+
+        # Validate parameters
+        if not param1:
+            raise ModelOnexError(
+                error_code=EnumCoreErrorCode.INVALID_INPUT,
+                message="Parameter 'param1' is required",
+            )
+
+        # Start timing
+        start_time = time.perf_counter()
+
+        try:
+            emit_log_event(
+                level=EnumLogLevel.INFO,
+                message="Starting {{ method_name }}",
+                details={
+                    "correlation_id": contract.correlation_id,
+                    "param1": param1,
+                },
+            )
+
+            # ═══════════════════════════════════════════════
+            # MAIN LOGIC HERE
+            # ═══════════════════════════════════════════════
+
+            # Your implementation goes here
+            # Use patterns and references provided above
+
+            # ═══════════════════════════════════════════════
+
+            # Calculate metrics
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            emit_log_event(
+                level=EnumLogLevel.INFO,
+                message="{{ method_name }} completed successfully",
+                details={
+                    "correlation_id": contract.correlation_id,
+                    "latency_ms": latency_ms,
+                },
+            )
+
+            return ModelContractResponse(
+                success=True,
+                output_state={"result": result},  # Your results here
+                metadata={"latency_ms": latency_ms},
+            )
+
+        except ModelOnexError:
+            raise
+
+        except asyncio.TimeoutError:
+            emit_log_event(
+                level=EnumLogLevel.ERROR,
+                message="{{ method_name }} timeout",
+                details={"correlation_id": contract.correlation_id},
+            )
+            raise ModelOnexError(
+                error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
+                message="Operation timed out",
+            )
+
+        except Exception as e:
+            emit_log_event(
+                level=EnumLogLevel.ERROR,
+                message="{{ method_name }} failed",
+                details={
+                    "correlation_id": contract.correlation_id,
+                    "error": str(e),
+                },
+            )
+            raise ModelOnexError(
+                error_code=EnumCoreErrorCode.EXECUTION_ERROR,
+                message=f"Operation failed: {e}",
+            )
+```
+
+## Quality Requirements
+
+Your implementation MUST satisfy these requirements:
+
+{% for req in quality_requirements %}
+{{ loop.index }}. {{ req }}
+{% endfor %}
+
+**Code Quality Checklist:**
+- ✅ Use async/await throughout
+- ✅ Include comprehensive error handling
+- ✅ Emit log events (INFO and ERROR)
+- ✅ Use type hints for all variables
+- ✅ Follow ONEX patterns from examples
+- ✅ Use recommended mixins (self.pool, self.circuit_breaker, etc.)
+- ✅ Track and return execution metrics (latency_ms)
+- ✅ Include correlation_id in all log events
+- ✅ Validate all inputs before processing
+- ✅ NO import statements (already imported at top of file)
+- ✅ NO hardcoded secrets or credentials
+- ✅ NO blocking operations (use async alternatives)
+
+## Important Notes
+
+**Imports:**
+ALL imports are ALREADY available in the node file. DO NOT add import statements.
+
+**Available Imports Include:**
+- Standard library: os, time, asyncio, typing
+- ONEX core: ModelOnexError, EnumCoreErrorCode, ModelContainer
+- ONEX contracts: ModelContractEffect, ModelContractResponse
+- Logging: emit_log_event, EnumLogLevel
+- All necessary dependencies for your node type
+
+**Indentation:**
+- Method body uses {{ indentation_level }} spaces
+- Nested blocks add 4 spaces per level
+- Use consistent indentation throughout
+
+**Variable Naming:**
+- Use descriptive variable names
+- Follow Python naming conventions (snake_case)
+- Avoid single-letter variables except for loops
+
+Now, generate the implementation for `{{ method_name }}`:

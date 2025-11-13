@@ -1,0 +1,62 @@
+Generate the implementation for this method:
+
+## Service Context
+
+**Service Name**: {service_name}
+**Node Type**: {node_type}
+**Purpose**: {business_description}
+
+**Operations**: {operations}
+**Key Features**: {features}
+
+## Method to Implement
+
+### Signature:
+```python
+{method_signature}
+```
+
+### Docstring:
+{method_docstring}
+
+## Contract Specification
+
+{contract_spec}
+
+## Performance Requirements
+
+{performance_requirements}
+
+## Similar Patterns (for reference)
+
+{similar_patterns}
+
+## ONEX Best Practices
+
+{best_practices}
+
+## Error Handling Patterns
+
+{error_handling_patterns}
+
+## Implementation Requirements
+
+1. **Return Format**: Return ONLY the method body (indented, no signature)
+2. **Error Handling**: Use try/except with ModelOnexError for domain errors
+3. **Logging**:
+   - emit_log_event(EnumLogLevel.INFO, ...) at method start
+   - emit_log_event(EnumLogLevel.INFO, ...) on success
+   - emit_log_event(EnumLogLevel.ERROR, ...) on failures
+4. **Type Hints**: Use type hints for all variables
+5. **Correlation**: Use self.correlation_id for distributed tracing
+6. **Validation**: Validate contract inputs before processing
+7. **Security**: No hardcoded secrets or sensitive data
+8. **ONEX Patterns**: Follow node type-specific patterns above
+
+## Current Stub (to replace):
+
+```python
+{stub_code}
+```
+
+Generate the production-ready implementation now:

@@ -1,0 +1,46 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: omninode-bridge-ingress
+  namespace: omninode-bridge
+  labels:
+    app.kubernetes.io/name: omninode-bridge
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - api.omninode.ai
+    secretName: omninode-bridge-tls
+  rules:
+  - host: api.omninode.ai
+    http:
+      paths:
+      - path: /hook
+        pathType: Prefix
+        backend:
+          service:
+            name: omninode-bridge-hook-receiver
+            port:
+              number: 8001
+      - path: /metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: omninode-bridge-model-metrics
+            port:
+              number: 8005
+      - path: /workflow
+        pathType: Prefix
+        backend:
+          service:
+            name: omninode-bridge-workflow-coordinator
+            port:
+              number: 8006

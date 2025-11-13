@@ -1,0 +1,184 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for development
+  postgres:
+    image: postgres:15-alpine
+    container_name: omninode-bridge-postgres-dev
+    environment:
+      POSTGRES_DB: omninode_bridge_dev
+      POSTGRES_USER: omninode_user
+      POSTGRES_PASSWORD: omninode_pass  # pragma: allowlist secret
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omninode_user -d omninode_bridge_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - omninode-dev
+
+  # Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: omninode-bridge-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - omninode-dev
+
+  # Redpanda (Kafka-compatible) for event streaming
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: omninode-bridge-redpanda-dev
+    command:
+      - redpanda
+      - start
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --default-log-level=info
+    ports:
+      - "18081:18081" # Schema Registry
+      - "18082:18082" # Pandaproxy
+      - "19092:19092" # Kafka
+      - "19644:9644"  # Admin API
+    volumes:
+      - redpanda_dev_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    networks:
+      - omninode-dev
+
+  # Consul for service discovery (optional)
+  consul:
+    image: consul:1.18
+    container_name: omninode-bridge-consul-dev
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+    command: >
+      consul agent
+        -dev
+        -client=0.0.0.0
+        -log-level=INFO
+        -ui-config-enabled=true
+    volumes:
+      - consul_dev_data:/consul/data
+    healthcheck:
+      test: ["CMD", "consul", "kv", "get", "consul"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - omninode-dev
+
+  # Metadata Stamping Service (for development testing)
+  metadata-stamping:
+    build:
+      context: .
+      dockerfile: src/omninode_bridge/services/metadata_stamping/Dockerfile
+    container_name: omninode-bridge-metadata-stamping-dev
+    ports:
+      - "8053:8053"
+      - "9090:9090"
+    environment:
+      # Database configuration
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: omninode_bridge_dev
+      POSTGRES_USER: omninode_user
+      POSTGRES_PASSWORD: omninode_pass  # pragma: allowlist secret
+
+      # Service configuration
+      SERVICE_HOST: 0.0.0.0
+      SERVICE_PORT: 8053
+      LOG_LEVEL: DEBUG
+
+      # O.N.E. Protocol configuration
+      NAMESPACE: omninode.services.metadata.dev
+      METADATA_VERSION: 0.1
+      PROTOCOL_VERSION: 1.0
+
+      # Performance configuration
+      HASH_GENERATOR_POOL_SIZE: 50
+      DATABASE_POOL_MAX_SIZE: 10
+
+      # Event publishing
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      KAFKA_ENABLED: true
+
+      # Service registry
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      CONSUL_ENABLED: true
+
+      # Security - use correct pydantic-settings variable name
+      METADATA_STAMPING_ENABLE_SECURITY: false  # Disabled for development
+
+      # Monitoring
+      METRICS_ENABLED: true
+      PROMETHEUS_PORT: 9090
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8053/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - omninode-dev
+
+volumes:
+  postgres_dev_data:
+  redis_dev_data:
+  redpanda_dev_data:
+  consul_dev_data:
+
+networks:
+  omninode-dev:
+    driver: bridge

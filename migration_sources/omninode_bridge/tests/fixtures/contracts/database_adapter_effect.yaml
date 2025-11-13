@@ -1,0 +1,114 @@
+# Database-Heavy Effect Node Contract
+# Tests database_heavy template variant with complex DB operations
+
+node_id: database_adapter_effect_node
+node_type: effect
+version: v1_0_0
+
+metadata:
+  service_name: postgres_analytics_adapter
+  domain: database
+  description: Database-heavy effect with connection pooling, transactions, and complex queries
+  author: test_suite
+  tags:
+    - database
+    - postgres
+    - analytics
+    - connection_pooling
+  sla:
+    max_latency_ms: 500
+    min_throughput_rps: 200
+    availability: 99.95
+
+# Database-heavy subcontracts
+subcontracts:
+  # State Management with database persistence
+  state_management:
+    persistence: database
+    storage_backend: postgresql
+    state_schema:
+      type: object
+      properties:
+        query_cache: { type: object }
+        connection_stats: { type: object }
+        last_sync_timestamp: { type: string, format: date-time }
+    ttl_seconds: 3600
+
+  # Caching for query optimization
+  caching:
+    cache_backend: redis
+    cache_strategy: write_through
+    ttl_seconds: 300
+    cached_operations:
+      - operation: get_analytics_summary
+        cache_key_template: "analytics:{dataset_id}:{period}"
+        ttl_seconds: 600
+      - operation: get_dataset_metadata
+        cache_key_template: "metadata:{dataset_id}"
+        ttl_seconds: 1800
+
+# Database-heavy operations
+operations:
+  - name: execute_complex_query
+    description: Execute complex analytical query with multiple joins
+    type: database_read
+  - name: bulk_insert_records
+    description: Bulk insert records with transaction management
+    type: database_write
+  - name: execute_transaction
+    description: Execute multi-statement transaction with rollback support
+    type: database_transaction
+  - name: stream_query_results
+    description: Stream large query results for memory efficiency
+    type: database_stream
+
+dependencies:
+  asyncpg: "^0.29.0"
+  redis: "^5.0.0"
+  sqlalchemy: "^2.0.0"  # For query building
+  psycopg2-binary: "^2.9.0"  # Fallback driver
+
+features:
+  - Connection pooling (10-50 connections)
+  - Transaction management with savepoints
+  - Query result streaming
+  - Prepared statement caching
+  - Connection health monitoring
+  - Automatic reconnection logic
+  - Query timeout management
+  - Batch operation support
+
+input_schema:
+  type: object
+  required:
+    - operation
+    - params
+  properties:
+    operation:
+      type: string
+      enum: [execute_query, bulk_insert, execute_transaction, stream_results]
+    params:
+      type: object
+      properties:
+        query: { type: string }
+        parameters: { type: object }
+        batch_size: { type: integer, minimum: 1, maximum: 10000 }
+        timeout_seconds: { type: integer, default: 30 }
+
+output_schema:
+  type: object
+  required:
+    - success
+    - operation_type
+  properties:
+    success: { type: boolean }
+    operation_type: { type: string }
+    rows_affected: { type: integer }
+    execution_time_ms: { type: number }
+    result_data: { type: array }
+    metadata:
+      type: object
+      properties:
+        connection_pool_stats: { type: object }
+        query_plan: { type: object }
+        cache_hit: { type: boolean }

@@ -1,0 +1,83 @@
+# Metrics Collection Pattern
+name: metrics_collection
+category: monitoring
+description: Metrics collection and reporting for observability
+
+# Applicability
+node_types:
+  - effect
+  - compute
+  - orchestrator
+  - reducer
+
+complexity: 3
+recommended_for:
+  - production_monitoring
+  - performance_tracking
+  - sla_compliance
+
+# Pattern Definition
+code_template: |
+  class MetricsCollector:
+      """Metrics collector for operation tracking."""
+
+      def __init__(self):
+          self._metrics = {
+              "operation_count": 0,
+              "success_count": 0,
+              "failure_count": 0,
+              "total_duration_ms": 0.0,
+              "min_duration_ms": float('inf'),
+              "max_duration_ms": 0.0,
+          }
+
+      def record_operation(self, success: bool, duration_ms: float):
+          """Record an operation execution."""
+          self._metrics["operation_count"] += 1
+          if success:
+              self._metrics["success_count"] += 1
+          else:
+              self._metrics["failure_count"] += 1
+
+          self._metrics["total_duration_ms"] += duration_ms
+          self._metrics["min_duration_ms"] = min(
+              self._metrics["min_duration_ms"], duration_ms
+          )
+          self._metrics["max_duration_ms"] = max(
+              self._metrics["max_duration_ms"], duration_ms
+          )
+
+      def get_metrics(self) -> dict[str, Any]:
+          """Get current metrics snapshot."""
+          metrics = self._metrics.copy()
+          if metrics["operation_count"] > 0:
+              metrics["avg_duration_ms"] = (
+                  metrics["total_duration_ms"] / metrics["operation_count"]
+              )
+              metrics["success_rate"] = (
+                  metrics["success_count"] / metrics["operation_count"]
+              )
+          return metrics
+
+dependencies: []
+
+imports:
+  - from typing import Any
+
+# Usage Example
+example: |
+  # Initialize metrics collector
+  metrics = MetricsCollector()
+
+  # Record operation
+  start = time.perf_counter()
+  try:
+      result = await operation()
+      duration_ms = (time.perf_counter() - start) * 1000
+      metrics.record_operation(success=True, duration_ms=duration_ms)
+  except Exception:
+      duration_ms = (time.perf_counter() - start) * 1000
+      metrics.record_operation(success=False, duration_ms=duration_ms)
+
+  # Get metrics snapshot
+  current_metrics = metrics.get_metrics()

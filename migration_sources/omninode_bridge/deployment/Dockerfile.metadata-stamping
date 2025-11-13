@@ -1,0 +1,93 @@
+# Multi-stage Dockerfile for MetadataStampingService Phase 2
+FROM python:3.12-slim as base
+
+# System dependencies
+# BuildKit cache mounts persist APT cache between builds for faster subsequent builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y \
+    # Required for file type detection
+    libmagic1 \
+    libmagic-dev \
+    # Required for building Python packages
+    build-essential \
+    gcc \
+    # Required for PostgreSQL client
+    libpq-dev \
+    # Utilities
+    curl \
+    netcat-openbsd
+
+# Install Poetry (version 2.1.3 to match local development)
+ENV POETRY_VERSION=2.1.3
+RUN pip install --no-cache-dir poetry==${POETRY_VERSION}
+
+# Configure Poetry - disable virtualenv in Docker (container provides isolation)
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
+
+WORKDIR /app
+
+# Development stage
+FROM base as development
+
+# Copy Poetry configuration
+COPY pyproject.toml poetry.lock ./
+
+# Copy source code first (required for editable install)
+COPY . .
+
+# Copy entrypoint script to /app
+COPY deployment/docker-entrypoint-metadata.sh /app/docker-entrypoint.sh
+
+# Install development dependencies (system install, no virtualenv)
+# BuildKit cache mount persists Poetry cache between builds (wheels, metadata) for faster installs
+RUN --mount=type=cache,target=/tmp/poetry_cache \
+    poetry install --no-interaction
+
+# Create non-root user for development and give ownership of all files
+RUN useradd --create-home --shell /bin/bash dev && \
+    chown -R dev:dev /app && \
+    chmod +x /app/docker-entrypoint.sh
+USER dev
+
+# Set PYTHONPATH to include src directory
+ENV PYTHONPATH=/app/src:$PYTHONPATH
+
+EXPOSE 8053 9090
+
+# Development command - use entrypoint script for debugging
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
+# Production stage
+FROM base as production
+
+# Copy Poetry configuration
+COPY pyproject.toml poetry.lock ./
+
+# Copy source code first (required for editable install)
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+# Install only production dependencies (system install, no virtualenv)
+# BuildKit cache mount persists Poetry cache between builds (wheels, metadata) for faster installs
+RUN --mount=type=cache,target=/tmp/poetry_cache \
+    poetry install --only=main --no-interaction
+
+# Create non-root user for production
+RUN useradd --create-home --shell /bin/bash stamping && \
+    chown -R stamping:stamping /app
+USER stamping
+
+# Set PYTHONPATH to include src directory
+ENV PYTHONPATH=/app/src:$PYTHONPATH
+
+EXPOSE 8053 9090
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8053/health || exit 1
+
+# Production command - use system Python (no virtualenv needed in Docker)
+CMD ["python", "-m", "omninode_bridge.services.metadata_stamping.main"]

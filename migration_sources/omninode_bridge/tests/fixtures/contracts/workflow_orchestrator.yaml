@@ -1,0 +1,262 @@
+# Workflow Orchestrator Node Contract
+# Tests workflow_orchestrator template variant with complex orchestration patterns
+
+node_id: workflow_orchestrator_node
+node_type: orchestrator
+version: v1_0_0
+
+metadata:
+  service_name: loan_approval_workflow
+  domain: workflow
+  description: Complex workflow orchestrator with parallel steps and conditional routing
+  author: test_suite
+  tags:
+    - workflow
+    - orchestrator
+    - parallel_execution
+    - conditional_routing
+    - saga_pattern
+  sla:
+    max_latency_ms: 5000
+    min_throughput_rps: 20
+    availability: 99.9
+
+# Workflow-specific subcontracts
+subcontracts:
+  # FSM for workflow stages
+  fsm:
+    states:
+      - initiated
+      - document_verification
+      - parallel_checks
+      - credit_assessment
+      - manual_review
+      - approved
+      - rejected
+      - completed
+      - compensating
+    initial_state: initiated
+    transitions:
+      - from: initiated
+        to: document_verification
+        trigger: start_workflow
+      - from: document_verification
+        to: parallel_checks
+        trigger: documents_verified
+      - from: document_verification
+        to: rejected
+        trigger: documents_invalid
+      - from: parallel_checks
+        to: credit_assessment
+        trigger: all_checks_passed
+      - from: parallel_checks
+        to: rejected
+        trigger: any_check_failed
+      - from: credit_assessment
+        to: manual_review
+        trigger: borderline_credit_score
+      - from: credit_assessment
+        to: approved
+        trigger: high_credit_score
+      - from: credit_assessment
+        to: rejected
+        trigger: low_credit_score
+      - from: manual_review
+        to: approved
+        trigger: manually_approved
+      - from: manual_review
+        to: rejected
+        trigger: manually_rejected
+      - from: approved
+        to: completed
+        trigger: finalize_approval
+      - from: rejected
+        to: completed
+        trigger: finalize_rejection
+      - from: "*"
+        to: compensating
+        trigger: workflow_error
+
+  # Event publishing for workflow progress
+  event_type:
+    events:
+      - name: workflow_started
+        schema:
+          type: object
+          properties:
+            workflow_id: { type: string }
+            applicant_id: { type: string }
+            started_at: { type: string, format: date-time }
+      - name: step_completed
+        schema:
+          type: object
+          properties:
+            workflow_id: { type: string }
+            step_name: { type: string }
+            step_result: { type: object }
+      - name: parallel_checks_completed
+        schema:
+          type: object
+          properties:
+            workflow_id: { type: string }
+            check_results: { type: array }
+            all_passed: { type: boolean }
+      - name: workflow_completed
+        schema:
+          type: object
+          properties:
+            workflow_id: { type: string }
+            final_decision: { type: string }
+            total_duration_ms: { type: number }
+
+  # State management for workflow context
+  state_management:
+    persistence: database
+    storage_backend: postgresql
+    state_schema:
+      type: object
+      properties:
+        workflow_id: { type: string }
+        current_step: { type: string }
+        applicant_data: { type: object }
+        step_results: { type: object }
+        parallel_task_statuses: { type: object }
+        compensation_history: { type: array }
+    ttl_seconds: 2592000  # 30 days
+
+  # Routing for decision logic
+  routing:
+    routing_rules:
+      - condition: credit_score >= 750
+        destination: auto_approve
+        priority: 1
+      - condition: credit_score >= 600 and credit_score < 750
+        destination: manual_review
+        priority: 2
+      - condition: credit_score < 600
+        destination: auto_reject
+        priority: 3
+    fallback_destination: manual_review
+
+  # Aggregation for workflow metrics
+  aggregation:
+    type: workflow_analytics
+    window_type: session
+    aggregation_keys:
+      - workflow_type
+      - final_decision
+    metrics:
+      - name: total_workflows
+        type: count
+      - name: avg_workflow_duration_ms
+        type: average
+        field: total_duration_ms
+      - name: approval_rate
+        type: ratio
+        numerator_field: approved_count
+        denominator_field: total_count
+      - name: step_failure_count
+        type: count
+        filter: step_status == 'failed'
+
+# Orchestration operations
+operations:
+  - name: start_workflow
+    description: Initialize workflow with applicant data
+    type: initialization
+  - name: verify_documents
+    description: Verify applicant documents
+    type: sequential_step
+  - name: execute_parallel_checks
+    description: Execute identity, employment, and fraud checks in parallel
+    type: parallel_steps
+  - name: assess_credit
+    description: Perform credit assessment
+    type: sequential_step
+  - name: route_for_review
+    description: Route to appropriate review process
+    type: conditional_routing
+  - name: finalize_decision
+    description: Finalize workflow decision
+    type: finalization
+  - name: execute_compensation
+    description: Execute compensating transactions on error
+    type: compensation
+
+dependencies:
+  asyncpg: "^0.29.0"
+  redis: "^5.0.0"
+  aiokafka: "^0.10.0"
+  aiohttp: "^3.9.0"  # For external service calls
+
+features:
+  - Sequential step execution
+  - Parallel step execution with aggregation
+  - Conditional routing based on results
+  - Saga pattern for distributed transactions
+  - Automatic compensation on failure
+  - Manual intervention support
+  - Workflow state persistence
+  - Real-time progress tracking
+
+workflow_config:
+  parallel_checks:
+    - name: identity_verification
+      service: identity_service
+      timeout_seconds: 30
+    - name: employment_verification
+      service: employment_service
+      timeout_seconds: 60
+    - name: fraud_check
+      service: fraud_service
+      timeout_seconds: 45
+  compensation_strategy: reverse_chronological
+  max_retry_attempts: 3
+
+input_schema:
+  type: object
+  required:
+    - workflow_type
+    - applicant_data
+  properties:
+    workflow_type:
+      type: string
+      enum: [loan_approval, credit_increase, account_upgrade]
+    applicant_data:
+      type: object
+      required: [applicant_id, name, requested_amount]
+      properties:
+        applicant_id: { type: string }
+        name: { type: string }
+        requested_amount: { type: number }
+        employment_info: { type: object }
+        financial_info: { type: object }
+    options:
+      type: object
+      properties:
+        skip_manual_review: { type: boolean, default: false }
+        priority: { type: string, enum: [normal, high, urgent] }
+
+output_schema:
+  type: object
+  required:
+    - workflow_id
+    - final_decision
+    - workflow_status
+  properties:
+    workflow_id: { type: string }
+    final_decision: { type: string, enum: [approved, rejected, pending] }
+    workflow_status: { type: string }
+    decision_details:
+      type: object
+      properties:
+        credit_score: { type: number }
+        verification_results: { type: object }
+        review_notes: { type: string }
+    metadata:
+      type: object
+      properties:
+        total_duration_ms: { type: number }
+        steps_executed: { type: array }
+        parallel_tasks_completed: { type: integer }
+        compensation_executed: { type: boolean }

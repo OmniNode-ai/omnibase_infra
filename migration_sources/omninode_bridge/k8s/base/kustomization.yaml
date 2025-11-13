@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: omninode-bridge-base
+  annotations:
+    description: "Base Kubernetes manifests for OmniNode Bridge"
+
+resources:
+- namespace.yaml
+- configmap.yaml
+- secrets.yaml
+- rbac.yaml
+- hook-receiver-deployment.yaml
+- postgres-deployment.yaml
+- ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/name: omninode-bridge
+  app.kubernetes.io/part-of: omninode-bridge
+  app.kubernetes.io/managed-by: kustomize
+
+images:
+- name: omninode/hook-receiver
+  newTag: latest
+- name: omninode/model-metrics
+  newTag: latest
+- name: omninode/workflow-coordinator
+  newTag: latest
+
+configMapGenerator:
+- name: omninode-bridge-version
+  literals:
+  - VERSION=0.1.0
+  - BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  - GIT_COMMIT=unknown
+
+secretGenerator:
+- name: omninode-bridge-runtime-secrets
+  literals:
+  - RUNTIME_TOKEN=$(openssl rand -base64 32)

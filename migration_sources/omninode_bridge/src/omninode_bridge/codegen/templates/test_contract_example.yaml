@@ -1,0 +1,306 @@
+# Test Contract Example - ONEX Standards Compliant
+#
+# This example demonstrates a complete test contract for generating
+# comprehensive tests for an Effect node.
+#
+# VERSION: 1.0.0
+
+# === CORE TEST CONTRACT IDENTIFICATION ===
+
+name: test_contract_bridge_orchestrator
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: |
+  Comprehensive test contract for NodeBridgeOrchestrator.
+  Generates unit, integration, and contract tests with full coverage
+  of workflow orchestration, FSM transitions, and error handling.
+
+# === TEST TARGET IDENTIFICATION ===
+
+target_node: NodeBridgeOrchestrator
+target_version: "1.0.0"
+target_node_type: orchestrator
+
+test_suite_name: test_node_bridge_orchestrator
+test_file_path: tests/nodes/orchestrator/
+
+# === COVERAGE REQUIREMENTS ===
+
+coverage_minimum: 85
+coverage_target: 95
+coverage_by_file: true
+coverage_by_function: true
+
+# === TEST TYPE SPECIFICATIONS ===
+
+test_types:
+  - unit
+  - integration
+  - contract
+  - performance
+
+# === TEST TARGETS AND SCENARIOS ===
+
+test_targets:
+  # Test workflow initiation
+  - target_name: execute_orchestration
+    target_type: method
+    test_scenarios:
+      - "successful workflow initiation with valid contract"
+      - "workflow initiation with missing required fields"
+      - "workflow initiation with invalid FSM state"
+      - "concurrent workflow initiations"
+    expected_behaviors:
+      - "creates workflow in PENDING state"
+      - "publishes workflow_initiated event to Kafka"
+      - "stores workflow state in PostgreSQL"
+      - "returns WorkflowResult with correlation_id"
+    input_parameters:
+      contract:
+        type: ModelContractOrchestrator
+        required: true
+    expected_outputs:
+      result:
+        type: WorkflowResult
+        success: true
+    edge_cases:
+      - "empty contract"
+      - "contract with null workflow_id"
+      - "contract with extremely long description (>10000 chars)"
+    error_conditions:
+      - "database connection failure"
+      - "Kafka producer timeout"
+      - "invalid FSM state transition"
+    assertions:
+      - "assert result.success is True"
+      - "assert result.workflow_id is not None"
+      - "assert workflow_state == FSMState.PENDING"
+    test_priority: 1
+
+  # Test FSM state transitions
+  - target_name: _transition_workflow_state
+    target_type: method
+    test_scenarios:
+      - "valid state transition (PENDING -> PROCESSING)"
+      - "valid state transition (PROCESSING -> COMPLETED)"
+      - "valid state transition (PROCESSING -> FAILED)"
+      - "invalid state transition (PENDING -> COMPLETED)"
+    expected_behaviors:
+      - "updates workflow state in database"
+      - "publishes state_transition event"
+      - "validates FSM transition rules"
+    edge_cases:
+      - "transition to same state"
+      - "transition from terminal state"
+    error_conditions:
+      - "invalid state transition"
+      - "state transition validation failure"
+    assertions:
+      - "assert new_state in valid_transitions[current_state]"
+      - "assert state_transition_event_published"
+    test_priority: 1
+
+  # Test Kafka event publishing
+  - target_name: _publish_workflow_event
+    target_type: method
+    test_scenarios:
+      - "successful event publish"
+      - "event publish with Kafka broker unavailable"
+      - "event publish with serialization error"
+    expected_behaviors:
+      - "serializes event to OnexEnvelopeV1 format"
+      - "publishes to correct Kafka topic"
+      - "retries on transient failures"
+    error_conditions:
+      - "Kafka broker timeout"
+      - "serialization error"
+      - "topic does not exist"
+    assertions:
+      - "assert event.envelope.version == 'v1'"
+      - "assert kafka_producer.send.called"
+    test_priority: 2
+
+  # Test error handling
+  - target_name: _handle_workflow_error
+    target_type: method
+    test_scenarios:
+      - "handle database error"
+      - "handle Kafka error"
+      - "handle validation error"
+    expected_behaviors:
+      - "transitions workflow to FAILED state"
+      - "publishes workflow_failed event"
+      - "stores error context"
+    assertions:
+      - "assert workflow.state == FSMState.FAILED"
+      - "assert error_context is not None"
+    test_priority: 2
+
+# === MOCK REQUIREMENTS ===
+
+mock_requirements:
+  # Dependencies to mock
+  mock_dependencies:
+    - "omninode_bridge.infrastructure.database.PostgreSQLClient"
+    - "omninode_bridge.infrastructure.kafka.KafkaProducer"
+    - "omninode_bridge.clients.onex_tree_client.OnexTreeClient"
+
+  mock_external_services:
+    - "PostgreSQL database"
+    - "Kafka broker"
+    - "OnexTree intelligence service"
+
+  # Database mocking
+  mock_database: true
+  database_mock_config:
+    use_in_memory: true
+    preload_data: true
+
+  # HTTP/API mocking
+  mock_http_clients: true
+  http_mock_responses:
+    - endpoint: "http://localhost:8058/intelligence"
+      status_code: 200
+      response_body:
+        intelligence_data:
+          patterns: ["workflow_orchestration"]
+          confidence: 0.95
+    - endpoint: "http://localhost:8058/intelligence"
+      status_code: 503
+      response_body:
+        error: "Service unavailable"
+
+  # Kafka mocking
+  mock_kafka_producer: true
+  mock_kafka_consumer: false
+  kafka_mock_config:
+    simulate_failures: true
+    failure_rate: 0.1
+
+  # Mock return values
+  mock_return_values:
+    PostgreSQLClient.execute_query:
+      success: true
+      rows_affected: 1
+    KafkaProducer.send:
+      success: true
+      offset: 12345
+
+  # Mock exceptions
+  mock_exceptions:
+    - "asyncpg.exceptions.ConnectionDoesNotExistError"
+    - "kafka.errors.KafkaTimeoutError"
+    - "pydantic.ValidationError"
+
+  # Fixture configuration
+  use_fixtures: true
+  fixture_scope: function
+
+# === ASSERTION REQUIREMENTS ===
+
+assertion_types:
+  - "equality"
+  - "type"
+  - "exception"
+  - "state_verification"
+  - "mock_call_verification"
+
+custom_assertions:
+  - "assert_workflow_state_valid"
+  - "assert_kafka_event_published"
+  - "assert_database_state_consistent"
+
+# === TEST CONFIGURATION ===
+
+test_configuration:
+  # Pytest configuration
+  pytest_markers:
+    - "unit"
+    - "integration"
+    - "asyncio"
+
+  pytest_plugins:
+    - "pytest-asyncio"
+    - "pytest-mock"
+    - "pytest-cov"
+
+  pytest_options:
+    verbose: true
+    capture: "no"
+
+  # Test execution settings
+  parallel_execution: true
+  parallel_workers: 4
+  timeout_seconds: 300
+
+  # Coverage configuration
+  coverage_enabled: true
+  coverage_threshold: 85
+  coverage_fail_under: true
+
+  # Fixtures
+  required_fixtures:
+    - "mock_postgres_client"
+    - "mock_kafka_producer"
+    - "mock_onex_tree_client"
+
+  # Test data
+  test_data_directory: "tests/data/orchestrator"
+  use_test_database: true
+  test_database_config:
+    database: "test_omninode_bridge"
+    recreate: true
+
+  # Output configuration
+  verbose_output: true
+  generate_html_report: true
+  report_output_directory: "htmlcov"
+
+  # Retry configuration
+  retry_failed_tests: true
+  max_retries: 3
+
+  # Environment setup
+  setup_commands:
+    - "docker compose up -d postgres kafka"
+  teardown_commands:
+    - "docker compose down"
+
+  environment_variables:
+    TESTING: "true"
+    LOG_LEVEL: "DEBUG"
+    POSTGRES_HOST: "localhost"
+    KAFKA_BOOTSTRAP_SERVERS: "localhost:9092"
+
+  # Quality gates
+  enforce_type_checking: true
+  enforce_linting: true
+  allowed_warnings:
+    - "DeprecationWarning"
+
+# === TEST GENERATION OPTIONS ===
+
+include_docstrings: true
+include_type_hints: true
+use_async_tests: true
+parametrize_tests: true
+
+# === QUALITY GATES ===
+
+enforce_test_naming: true
+enforce_test_isolation: true
+enforce_deterministic_tests: true
+
+# === METADATA ===
+
+author: "OmniNode Bridge Team"
+documentation_url: "https://docs.omninode.dev/testing/contracts"
+tags:
+  - "orchestrator"
+  - "workflow"
+  - "fsm"
+  - "kafka"
+  - "postgresql"

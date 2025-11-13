@@ -1,0 +1,61 @@
+---
+# Orchestrator node with workflow coordination
+node_id: "orchestrator_workflow"
+node_type: "orchestrator"
+version: "v1_0_0"
+namespace: "omninode.services.workflow"
+
+metadata:
+  name: "Workflow Orchestrator Node"
+  description: "Orchestrator with event-driven workflow and service coordination"
+  author: "Test Generator"
+  tags: ["orchestrator", "workflow", "coordination", "events"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinEventDrivenNode"
+      config:
+        event_bus_enabled: true
+        introspection_enabled: true
+
+    - mixin_name: "MixinMetrics"
+      config:
+        metrics_enabled: true
+        track_workflow_steps: true
+
+    - mixin_name: "MixinHealthCheck"
+      config:
+        health_check_interval_seconds: 30
+
+    - mixin_name: "MixinServiceRegistry"
+      config:
+        service_name: "workflow_orchestrator"
+        auto_register: true
+
+event_patterns:
+  subscribes:
+    - topic: "test.workflow.step.completed"
+      event_type: "StepCompletedEvent"
+  publishes:
+    - topic: "test.workflow.completed"
+      event_type: "WorkflowCompletedEvent"
+    - topic: "test.workflow.failed"
+      event_type: "WorkflowFailedEvent"
+
+input_schema:
+  type: "object"
+  properties:
+    workflow_id:
+      type: "string"
+    steps:
+      type: "array"
+
+output_schema:
+  type: "object"
+  properties:
+    workflow_result:
+      type: "object"
+    execution_time_ms:
+      type: "number"
+    steps_completed:
+      type: "integer"

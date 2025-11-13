@@ -1,0 +1,6 @@
+{# Event-Driven Node Mixin Initialization Snippet #}
+{# Usage: Include in initialize() method when MixinEventDrivenNode is enabled #}
+{% if 'MixinEventDrivenNode' in enabled_mixins %}
+        # Setup event consumption
+        await self.start_event_consumption()
+{% endif %}

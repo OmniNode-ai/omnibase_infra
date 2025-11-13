@@ -1,0 +1,181 @@
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     EVENT NAMING CONSOLIDATION MAP                          │
+│                                                                             │
+│  ⚠️ MIGRATION COMPLETE - ARCHIVED DOCUMENT (October 2025)                  │
+│                                                                             │
+│  All events migrated to ModelEvent* prefix pattern (ONEX v2.0 compliant)   │
+│  See docs/events/SCHEMA_VERSIONING.md for current standards                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+HISTORICAL STATE (Pre-Migration - Competing Patterns):
+══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ OLD STYLE (Suffix-based) - 611 lines                                       │
+│ File: src/omninode_bridge/events/models/codegen_events.py                  │
+│                                                                             │
+│ Pattern: <Domain><Action>Event                                             │
+│ ┌───────────────────────────────────────────────────────────────────────┐ │
+│ │ NodeGenerationRequestedEvent                                          │ │
+│ │ NodeGenerationStartedEvent                                            │ │
+│ │ NodeGenerationStageCompletedEvent                                     │ │
+│ │ NodeGenerationCompletedEvent                                          │ │
+│ │ NodeGenerationFailedEvent                                             │ │
+│ │ GenerationMetricsRecordedEvent                                        │ │
+│ │ PatternStorageRequestedEvent                                          │ │
+│ │ PatternStoredEvent                                                    │ │
+│ │ IntelligenceQueryRequestedEvent                                       │ │
+│ │ IntelligenceQueryCompletedEvent                                       │ │
+│ │ OrchestratorCheckpointReachedEvent                                    │ │
+│ │ OrchestratorCheckpointResponseEvent                                   │ │
+│ └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│ USED BY (~45+ occurrences):                                                │
+│   ├─ NodeCodegenMetricsReducer (node.py, aggregator.py, tests)            │
+│   ├─ E2E Integration Tests (test_codegen_event_system_e2e.py)             │
+│   └─ Main Events Module (__init__.py) - exports                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                                    VS.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ NEW STYLE (Prefix-based, ONEX v2.0) - 524 lines                           │
+│ File: src/omninode_bridge/events/codegen/model_event_node_generation.py   │
+│                                                                             │
+│ Pattern: ModelEvent<Domain><Action>                                        │
+│ ┌───────────────────────────────────────────────────────────────────────┐ │
+│ │ ModelEventNodeGenerationRequested           ✓ ONEX v2.0 Compliant    │ │
+│ │ ModelEventNodeGenerationStarted             ✓ Model* prefix          │ │
+│ │ ModelEventNodeGenerationStageCompleted      ✓ Intent pattern match   │ │
+│ │ ModelEventNodeGenerationCompleted                                     │ │
+│ │ ModelEventNodeGenerationFailed                                        │ │
+│ │ ModelEventGenerationMetricsRecorded                                   │ │
+│ │ ModelEventPatternStorageRequested                                     │ │
+│ │ ModelEventPatternStored                                               │ │
+│ │ ModelEventIntelligenceQueryRequested                                  │ │
+│ │ ModelEventIntelligenceQueryCompleted                                  │ │
+│ │ ModelEventOrchestratorCheckpointReached                               │ │
+│ │ ModelEventOrchestratorCheckpointResponse                              │ │
+│ └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│ USED BY (~26+ occurrences):                                                │
+│   ├─ NodeCodegenOrchestrator (node.py, workflow.py)                       │
+│   ├─ CLI Commands (generate.py, kafka_client.py, protocols.py)            │
+│   └─ CLI Tests (conftest.py, test_cli_*.py)                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+SUPPORTING EVIDENCE FOR NEW STYLE:
+══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Intent Events (Already using Model* prefix)                                │
+│ File: src/omninode_bridge/events/models/intent_events.py                   │
+│                                                                             │
+│   ModelEventPublishIntent         ← Already follows new pattern            │
+│   ModelIntentExecutionResult      ← Already follows new pattern            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Omnibase Core Conventions (Model* prefix throughout)                       │
+│                                                                             │
+│   ModelContainer                  ← Core DI container                      │
+│   ModelContractOrchestrator       ← Contract model                         │
+│   ModelContractReducer            ← Contract model                         │
+│   ModelOnexError                  ← Error model                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+MIGRATION PATH:
+══════════════════════════════════════════════════════════════════════════════
+
+Phase 1: Preparation
+────────────────────
+├─ Create branch: refactor/consolidate-event-naming
+├─ Run baseline tests (501 tests, 92.8% coverage)
+└─ Backup old definitions
+
+Phase 2: Update Metrics Reducer (~45 occurrences)
+─────────────────────────────────────────────────
+├─ node.py (imports, type hints, deserialization)
+├─ aggregator.py (imports, type hints, processing)
+└─ tests/test_aggregator.py (fixtures, assertions)
+
+Phase 3: Update E2E Tests (~15 occurrences)
+────────────────────────────────────────────
+└─ test_codegen_event_system_e2e.py (imports, instantiations)
+
+Phase 4: Update Main Module (~26 exports)
+──────────────────────────────────────────
+└─ events/__init__.py (re-export with new names)
+
+Phase 5: Update Documentation (5 files)
+────────────────────────────────────────
+├─ docs/events/SCHEMA_VERSIONING.md
+├─ TEST_REPORT_CODEGEN_MVP.md
+├─ POLY-12-SUMMARY.md
+├─ POLY_9_FINAL_SUMMARY.md
+└─ POLY_9_COMPLETION_REPORT.md
+
+Phase 6: Remove Old Definitions
+────────────────────────────────
+└─ DELETE: src/omninode_bridge/events/models/codegen_events.py (611 lines)
+
+Phase 7: Final Validation
+──────────────────────────
+├─ Run full test suite
+├─ Verify no old imports remain
+└─ Update CLAUDE.md
+
+
+TARGET STATE (After Migration):
+══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ UNIFIED EVENT NAMING (ONEX v2.0 Compliant)                                 │
+│                                                                             │
+│ Single Source: src/omninode_bridge/events/codegen/                         │
+│                                                                             │
+│ ALL Components Use:                                                         │
+│   ├─ NodeCodegenOrchestrator     ────┐                                     │
+│   ├─ NodeCodegenMetricsReducer   ────┤                                     │
+│   ├─ CLI Commands                ────┼─→ ModelEvent* prefix                │
+│   ├─ E2E Tests                   ────┤                                     │
+│   └─ Intent Publishers           ────┘                                     │
+│                                                                             │
+│ ✅ Consistent naming across codebase                                       │
+│ ✅ ONEX v2.0 compliance                                                     │
+│ ✅ Matches omnibase_core conventions                                        │
+│ ✅ Zero technical debt from dual patterns                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+FILES IMPACTED:
+══════════════════════════════════════════════════════════════════════════════
+
+High Priority (Code):
+  ├─ src/omninode_bridge/nodes/codegen_metrics_reducer/v1_0_0/node.py
+  ├─ src/omninode_bridge/nodes/codegen_metrics_reducer/v1_0_0/aggregator.py
+  ├─ src/omninode_bridge/nodes/codegen_metrics_reducer/v1_0_0/tests/test_aggregator.py
+  ├─ tests/integration/e2e/test_codegen_event_system_e2e.py
+  └─ src/omninode_bridge/events/__init__.py
+
+Medium Priority (Docs):
+  ├─ docs/events/SCHEMA_VERSIONING.md
+  ├─ TEST_REPORT_CODEGEN_MVP.md
+  ├─ POLY-12-SUMMARY.md
+  ├─ POLY_9_FINAL_SUMMARY.md
+  └─ POLY_9_COMPLETION_REPORT.md
+
+Low Priority (Delete):
+  └─ src/omninode_bridge/events/models/codegen_events.py (611 lines) ✗
+
+
+METRICS:
+══════════════════════════════════════════════════════════════════════════════
+
+Scope:           13 files total
+Occurrences:     ~90 updates needed
+Time Estimate:   ~3 hours (careful, methodical approach)
+Risk Level:      LOW (high test coverage, isolated scope)
+Breaking Change: YES (MVP foundation allows this)

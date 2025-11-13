@@ -1,0 +1,18 @@
+# Backwards Compatibility Configuration
+# This file controls backwards compatibility validation behavior
+
+baseline_version: main
+strict_mode: false
+enabled: false  # Disabled for MVP - no external consumers yet
+check_functions: true
+check_classes: true
+check_models: true
+check_type_annotations: true
+severity_threshold: error
+ignore_patterns:
+- tests/
+- test_*.py
+- '*_test.py'
+- examples/
+- scripts/
+exemptions: {}

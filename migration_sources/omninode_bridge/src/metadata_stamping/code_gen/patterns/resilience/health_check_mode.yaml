@@ -1,0 +1,64 @@
+name: health_check_mode
+description: "Defensive initialization that skips expensive operations in health check mode"
+category: resilience
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: high
+code_template: |
+  # Always check for health_check_mode before initializing services
+  try:
+      health_check_mode = (
+          container.config.get("health_check_mode", False)
+          if hasattr(container.config, "get")
+          else False
+      )
+  except Exception:
+      health_check_mode = False
+
+  if health_check_mode:
+      # Skip expensive initialization
+      emit_log_event(
+          LogLevel.DEBUG,
+          "Health check mode enabled - skipping {service} initialization",
+          {"node_id": self.node_id},
+      )
+      self.service = None
+  else:
+      # Normal initialization
+      self.service = self._initialize_service()
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - store_effect
+
+configuration:
+  health_check_mode_key: "health_check_mode"
+  default_value: false
+  services_to_skip:
+    - kafka_client
+    - database_connection
+    - external_api_client
+    - consul_registration
+
+prerequisites:
+  - container.config available
+  - emit_log_event for logging
+  - hasattr() check for defensive programming
+
+metrics:
+  startup_time_reduction_ms: 500
+  memory_saved_bytes: 10485760  # 10MB
+
+best_practices:
+  - "Always use defensive try/except around config.get()"
+  - "Default to False if health_check_mode detection fails"
+  - "Skip initialization of: Kafka, DB, external APIs, Consul"
+  - "Log at DEBUG level when health check mode is detected"
+  - "Set service attributes to None rather than omitting them"
+  - "Document which services are skipped in health check mode"
+
+validation_rules:
+  - "Must use hasattr() check before calling config.get()"
+  - "Must have try/except wrapper around health_check_mode detection"
+  - "Must default to False on any exception"
+  - "Must set skipped services to None (not undefined)"

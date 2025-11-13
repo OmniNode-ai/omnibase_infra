@@ -1,0 +1,87 @@
+# ONEX v2.0 Subcontract - Generation Stages
+# Code generation workflow stages and execution patterns
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Standard code generation workflow stages for ONEX node generation.
+  Defines 8-stage generation process with validation gates.
+
+workflow_stages:
+  - stage: 1
+    name: "contract_generation"
+    description: "Generate ONEX v2.0 contract YAML"
+    required_outputs:
+      - "contract_yaml"
+    quality_gates:
+      - "schema_validation"
+      - "onex_compliance"
+
+  - stage: 2
+    name: "subcontract_generation"
+    description: "Generate subcontract specifications"
+    required_outputs:
+      - "subcontract_refs"
+    quality_gates:
+      - "reference_validation"
+
+  - stage: 3
+    name: "model_generation"
+    description: "Generate Pydantic data models"
+    required_outputs:
+      - "model_classes"
+    quality_gates:
+      - "type_safety"
+      - "pydantic_compliance"
+
+  - stage: 4
+    name: "node_implementation"
+    description: "Generate node implementation code"
+    required_outputs:
+      - "node_class"
+      - "execute_method"
+    quality_gates:
+      - "onex_naming_convention"
+      - "method_signature"
+
+  - stage: 5
+    name: "test_generation"
+    description: "Generate unit and integration tests"
+    required_outputs:
+      - "test_suite"
+    quality_gates:
+      - "coverage_target"
+      - "critical_paths"
+
+  - stage: 6
+    name: "integration"
+    description: "Integrate with existing system"
+    required_outputs:
+      - "integration_points"
+    quality_gates:
+      - "compatibility_check"
+
+  - stage: 7
+    name: "validation"
+    description: "End-to-end validation"
+    required_outputs:
+      - "validation_report"
+    quality_gates:
+      - "e2e_tests"
+      - "performance_tests"
+
+  - stage: 8
+    name: "documentation"
+    description: "Generate documentation"
+    required_outputs:
+      - "api_docs"
+      - "usage_examples"
+    quality_gates:
+      - "completeness_check"
+
+stage_execution:
+  timeout_per_stage_seconds: 300
+  retry_on_failure: true
+  max_retries_per_stage: 2

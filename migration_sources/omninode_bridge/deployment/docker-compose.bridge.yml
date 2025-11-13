@@ -1,0 +1,178 @@
+# Docker Compose configuration for OmniNode Bridge Nodes
+# ONEX-compliant orchestrator and reducer for metadata stamping workflows
+#
+# IMPORTANT: This file expects infrastructure services (postgres, redpanda, consul)
+# to be running from docker-compose.yml
+#
+# Usage:
+#   Start infra first: docker compose up -d
+#   Then bridge nodes: docker compose -f docker-compose.yml -f docker-compose.bridge.yml up -d
+
+name: omninode_bridge
+
+networks:
+  omninode-bridge-network:
+    external: true
+    name: omninode-bridge-network
+
+volumes:
+  orchestrator_logs:
+    name: omninode-bridge-orchestrator-logs
+  reducer_logs:
+    name: omninode-bridge-reducer-logs
+
+services:
+  # ===========================================================================
+  # NodeBridgeOrchestrator - Workflow coordination
+  # ===========================================================================
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/bridge-nodes/Dockerfile.orchestrator
+    container_name: omninode-bridge-orchestrator
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+    depends_on:
+      - postgres
+      - redpanda
+      - consul
+    environment:
+      # Database configuration
+      POSTGRES_HOST: omninode-bridge-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: omninode-bridge-redpanda:9092
+
+      # Service configuration
+      ORCHESTRATOR_HOST: 0.0.0.0
+      ORCHESTRATOR_PORT: 8060
+      ORCHESTRATOR_WORKERS: ${ORCHESTRATOR_WORKERS:-4}
+
+      # Bridge configuration
+      METADATA_STAMPING_SERVICE_URL: ${METADATA_STAMPING_SERVICE_URL:-http://omninode-bridge-metadata-stamping:8053}
+      ONEXTREE_SERVICE_URL: ${ONEXTREE_SERVICE_URL:-http://omninode-bridge-onextree:8058}
+      DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE:-omninode.bridge}
+
+      # Consul configuration
+      CONSUL_HOST: omninode-bridge-consul
+      CONSUL_PORT: 8500
+      CONSUL_ENABLE_REGISTRATION: ${CONSUL_ENABLE_REGISTRATION:-true}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+
+      # Performance tuning
+      WORKER_CONCURRENCY: ${ORCHESTRATOR_CONCURRENCY:-10}
+      MAX_WORKFLOW_QUEUE_SIZE: ${MAX_WORKFLOW_QUEUE_SIZE:-1000}
+
+    ports:
+      - "${ORCHESTRATOR_PORT:-8060}:8060"
+      - "${ORCHESTRATOR_METRICS_PORT:-9094}:9091"
+
+    volumes:
+      - orchestrator_logs:/app/logs
+      - ../src:/app/src:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8060/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ===========================================================================
+  # NodeBridgeReducer - Metadata aggregation
+  # ===========================================================================
+  reducer:
+    build:
+      context: ..
+      dockerfile: docker/bridge-nodes/Dockerfile.reducer
+    container_name: omninode-bridge-reducer
+    networks:
+      - omninode-bridge-network
+    extra_hosts:
+      - "omninode-bridge-postgres:192.168.86.200"
+      - "omninode-bridge-redpanda:192.168.86.200"
+      - "omninode-bridge-consul:192.168.86.200"
+    depends_on:
+      - postgres
+      - redpanda
+      - consul
+    environment:
+      # Database configuration
+      POSTGRES_HOST: omninode-bridge-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: omninode-bridge-redpanda:9092
+      KAFKA_CONSUMER_GROUP: reducer-consumer-group
+
+      # Service configuration
+      REDUCER_HOST: 0.0.0.0
+      REDUCER_PORT: 8061
+      REDUCER_WORKERS: ${REDUCER_WORKERS:-2}
+
+      # Aggregation configuration
+      AGGREGATION_TYPE: ${AGGREGATION_TYPE:-NAMESPACE_GROUPING}
+      AGGREGATION_WINDOW_MS: ${AGGREGATION_WINDOW_MS:-5000}
+      MAX_BATCH_SIZE: ${MAX_BATCH_SIZE:-100}
+
+      # Consul configuration
+      CONSUL_HOST: omninode-bridge-consul
+      CONSUL_PORT: 8500
+      CONSUL_ENABLE_REGISTRATION: ${CONSUL_ENABLE_REGISTRATION:-true}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+
+    ports:
+      - "${REDUCER_PORT:-8061}:8061"
+      - "${REDUCER_METRICS_PORT:-9095}:9092"
+
+    volumes:
+      - reducer_logs:/app/logs
+      - ../src:/app/src:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8061/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 768M
+        reservations:
+          cpus: '0.25'
+          memory: 256M

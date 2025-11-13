@@ -1,0 +1,311 @@
+# ONEX v2.0 Contract - Metadata Stamping Effect
+# Effect node for O.N.E. v0.1 compliant metadata stamping operations
+
+schema_version: "2.0"
+contract_version: "1.0.0"
+last_updated: "2025-10-24"
+
+# Node Identity
+node_identity:
+  name: "stamping_effect"
+  display_name: "Metadata Stamping Effect"
+  node_type: "effect"
+  version: "1.0.0"
+  description: |
+    Effect node for metadata stamping operations with O.N.E. v0.1 protocol compliance.
+    Generates BLAKE3 hashes, creates metadata stamps with intelligence enrichment,
+    and publishes stamping events to Kafka. Integrates with MetadataStampingService API.
+
+# Core Metadata
+metadata:
+  author: "OmniNode Team"
+  created_date: "2025-10-24"
+  tags:
+    - "metadata-stamping"
+    - "blake3-hashing"
+    - "effect-node"
+    - "one-protocol"
+    - "kafka-events"
+
+# Associated Documents
+associated_documents:
+  - path: "docs/api/API_REFERENCE.md"
+    type: "reference"
+    description: "Complete API documentation"
+  - path: "docs/guides/BRIDGE_NODES_GUIDE.md"
+    type: "guide"
+    description: "Bridge node implementation patterns"
+  - path: "docs/architecture/ARCHITECTURE.md"
+    type: "architecture"
+    description: "System architecture and ONEX v2.0 compliance"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 10      # <10ms API response
+    max_ms: 50         # Max acceptable latency
+  hash_generation:
+    target_ms: 2       # <2ms BLAKE3 hash generation
+    max_ms: 5          # Max acceptable hash time
+  throughput:
+    target_requests_per_second: 1000
+    max_concurrent_requests: 100
+  memory_usage:
+    target_mb: 128
+    max_mb: 512
+
+# Input State
+input_state:
+  type: "object"
+  required:
+    - content
+    - namespace
+  properties:
+    content:
+      type: "string"
+      description: "Content to be stamped (text, code, or binary data)"
+      minLength: 1
+    namespace:
+      type: "string"
+      description: "Multi-tenant namespace identifier"
+      pattern: "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+      example: "omninode.services.metadata"
+    file_type:
+      type: "string"
+      description: "Optional file type hint"
+      enum: ["image", "document", "audio", "video", "archive", "code", "text"]
+    enable_intelligence:
+      type: "boolean"
+      default: false
+      description: "Enable OnexTree intelligence enrichment"
+    correlation_id:
+      type: "string"
+      format: "uuid"
+      description: "Optional correlation ID for tracking"
+
+# Output State
+output_state:
+  type: "object"
+  required:
+    - success
+    - file_hash
+    - execution_time_ms
+  properties:
+    success:
+      type: "boolean"
+      description: "Operation success status"
+    file_hash:
+      type: "string"
+      pattern: "^[a-f0-9]{64}$"
+      description: "BLAKE3 hash (256-bit hex)"
+    stamp_data:
+      type: "object"
+      description: "Complete O.N.E. v0.1 metadata stamp"
+      properties:
+        hash:
+          type: "string"
+        namespace:
+          type: "string"
+        timestamp:
+          type: "string"
+          format: "date-time"
+        protocol_version:
+          type: "string"
+        file_metadata:
+          type: "object"
+        intelligence_data:
+          type: "object"
+    execution_time_ms:
+      type: "integer"
+      minimum: 0
+      description: "Total execution time in milliseconds"
+    kafka_event_published:
+      type: "boolean"
+      description: "Whether Kafka event was successfully published"
+    error_message:
+      type: "string"
+      description: "Error message if operation failed"
+
+# Subcontracts
+subcontracts:
+  refs:
+    - "./contracts/effect_operations.yaml"
+    - "./contracts/kafka_events.yaml"
+    - "./contracts/state_management.yaml"
+
+# Dependencies
+dependencies:
+  services:
+    - name: "metadata_stamping_service"
+      type: "rest_api"
+      required: true
+      endpoint: "http://localhost:8053"
+    - name: "kafka"
+      type: "event_bus"
+      required: true
+    - name: "onextree_intelligence"
+      type: "intelligence_service"
+      required: false
+  libraries:
+    - name: "blake3"
+      version: ">=0.4.0"
+      description: "BLAKE3 cryptographic hash function"
+    - name: "pydantic"
+      version: ">=2.0.0"
+      description: "Data validation and settings management"
+    - name: "aiokafka"
+      version: ">=0.11.0"
+      description: "Async Kafka client"
+
+# IO Operations (Effect Node Specific)
+io_operations:
+  - name: "generate_blake3_hash"
+    description: "Generate BLAKE3 hash from content"
+    target_ms: 2
+    input_model: "ModelHashGenerationInput"
+    output_model: "ModelHashGenerationOutput"
+    side_effects:
+      - "memory_allocation"
+      - "cpu_intensive_operation"
+
+  - name: "create_metadata_stamp"
+    description: "Create O.N.E. v0.1 compliant metadata stamp"
+    target_ms: 5
+    input_model: "ModelStampCreationInput"
+    output_model: "ModelStampCreationOutput"
+    side_effects:
+      - "timestamp_generation"
+      - "metadata_assembly"
+
+  - name: "publish_kafka_event"
+    description: "Publish STAMP_CREATED event to Kafka"
+    target_ms: 3
+    input_model: "ModelKafkaPublishInput"
+    output_model: "ModelKafkaPublishOutput"
+    side_effects:
+      - "network_io"
+      - "kafka_producer_call"
+
+# Kafka Integration
+kafka:
+  producer_topics:
+    - "dev.omninode-bridge.stamping.stamp-created.v1"
+  event_envelope: "OnexEnvelopeV1"
+  event_types:
+    - "STAMP_CREATED"
+  batch_size: 1
+  acks: "all"
+  compression: "snappy"
+
+# Error Handling
+error_handling:
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 1.5
+    timeout_ms: 60000  # 1 minute
+  fallback_strategy: "graceful_degradation"
+  error_codes:
+    - code: "HASH_GENERATION_FAILED"
+      description: "BLAKE3 hash generation failed"
+      severity: "error"
+    - code: "STAMP_CREATION_FAILED"
+      description: "Metadata stamp creation failed"
+      severity: "error"
+    - code: "KAFKA_PUBLISH_FAILED"
+      description: "Kafka event publish failed"
+      severity: "warning"
+    - code: "VALIDATION_ERROR"
+      description: "Input validation failed"
+      severity: "error"
+
+# Quality Gates
+quality_gates:
+  - name: "hash_generation_performance"
+    description: "Verify BLAKE3 hash generation <2ms"
+    threshold: 0.95
+  - name: "api_response_time"
+    description: "Verify API response time <10ms"
+    threshold: 0.95
+  - name: "type_safety"
+    description: "Verify Pydantic v2 type safety"
+    threshold: 1.0
+  - name: "kafka_reliability"
+    description: "Verify Kafka event publishing >99% success"
+    threshold: 0.99
+
+# Health Checks
+health_checks:
+  - name: "metadata_stamping_api"
+    type: "http"
+    endpoint: "/health"
+    interval_seconds: 30
+    timeout_seconds: 5
+    critical: true
+  - name: "kafka_connectivity"
+    type: "network"
+    interval_seconds: 60
+    timeout_seconds: 3
+    critical: false
+  - name: "blake3_hash_generator"
+    type: "internal"
+    interval_seconds: 120
+    critical: true
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 90
+    required: true
+    critical_paths:
+      - "hash_generation"
+      - "stamp_creation"
+      - "kafka_publishing"
+  integration_tests:
+    required: true
+    test_scenarios:
+      - "end_to_end_stamping"
+      - "kafka_event_flow"
+      - "error_handling"
+      - "retry_logic"
+  performance_tests:
+    required: true
+    benchmarks:
+      - metric: "hash_generation_time"
+        target: 2.0
+        unit: "milliseconds"
+      - metric: "api_response_time"
+        target: 10.0
+        unit: "milliseconds"
+      - metric: "throughput"
+        target: 1000
+        unit: "requests_per_second"
+
+# Monitoring and Observability
+monitoring:
+  metrics:
+    - name: "stamps_created_total"
+      type: "counter"
+      description: "Total stamps created"
+    - name: "hash_generation_duration_seconds"
+      type: "histogram"
+      description: "BLAKE3 hash generation duration"
+      buckets: [0.001, 0.002, 0.005, 0.01, 0.05]
+    - name: "stamp_operation_duration_seconds"
+      type: "histogram"
+      description: "Complete stamp operation duration"
+      buckets: [0.005, 0.01, 0.02, 0.05, 0.1]
+    - name: "kafka_events_published_total"
+      type: "counter"
+      description: "Total Kafka events published"
+    - name: "operation_errors_total"
+      type: "counter"
+      description: "Total operation errors by type"
+      labels: ["error_type"]
+  logs:
+    level: "INFO"
+    structured: true
+    correlation_tracking: true
+  traces:
+    enabled: true
+    sampling_rate: 0.1
+    trace_kafka_events: true

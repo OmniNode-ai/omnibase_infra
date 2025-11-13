@@ -1,0 +1,45 @@
+# ONEX v2.0 Subcontract - Circuit Breaker Pattern
+# Circuit breaker configuration and behavior
+
+schema_version: "2.0"
+subcontract_version: "1.0.0"
+last_updated: "2025-10-27"
+
+description: |
+  Circuit breaker pattern implementation for resilient service calls.
+  Prevents cascading failures and provides graceful degradation.
+
+states:
+  - state: "closed"
+    description: "Normal operation, requests pass through"
+    transitions:
+      - to: "open"
+        condition: "failure_threshold_exceeded"
+
+  - state: "open"
+    description: "Blocking requests, fast-fail mode"
+    transitions:
+      - to: "half_open"
+        condition: "timeout_expired"
+
+  - state: "half_open"
+    description: "Testing recovery, limited requests"
+    transitions:
+      - to: "closed"
+        condition: "success_threshold_met"
+      - to: "open"
+        condition: "failure_detected"
+
+configuration_defaults:
+  failure_threshold: 5
+  success_threshold: 2
+  timeout_seconds: 60
+  half_open_timeout_seconds: 30
+  failure_rate_threshold: 0.5
+
+metrics:
+  - "total_requests"
+  - "failed_requests"
+  - "success_requests"
+  - "circuit_state"
+  - "state_transitions"

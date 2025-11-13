@@ -1,0 +1,155 @@
+# API-Heavy Effect Node Contract
+# Tests api_heavy template variant with HTTP operations, retry logic, circuit breaker
+
+node_id: api_client_effect_node
+node_type: effect
+version: v1_0_0
+
+metadata:
+  service_name: payment_gateway_client
+  domain: external_api
+  description: API-heavy effect with retry logic, circuit breaker, and rate limiting
+  author: test_suite
+  tags:
+    - api
+    - http
+    - circuit_breaker
+    - retry
+    - rate_limiting
+  sla:
+    max_latency_ms: 3000
+    min_throughput_rps: 100
+    availability: 99.5
+
+# API-heavy subcontracts
+subcontracts:
+  # FSM for circuit breaker states
+  fsm:
+    states:
+      - closed
+      - open
+      - half_open
+    initial_state: closed
+    transitions:
+      - from: closed
+        to: open
+        trigger: failure_threshold_exceeded
+      - from: open
+        to: half_open
+        trigger: timeout_elapsed
+      - from: half_open
+        to: closed
+        trigger: health_check_passed
+      - from: half_open
+        to: open
+        trigger: health_check_failed
+
+  # Event publishing for API metrics
+  event_type:
+    events:
+      - name: api_request_started
+        schema:
+          type: object
+          properties:
+            request_id: { type: string }
+            endpoint: { type: string }
+            method: { type: string }
+      - name: api_request_completed
+        schema:
+          type: object
+          properties:
+            request_id: { type: string }
+            status_code: { type: integer }
+            duration_ms: { type: number }
+      - name: api_request_failed
+        schema:
+          type: object
+          properties:
+            request_id: { type: string }
+            error_type: { type: string }
+            retry_count: { type: integer }
+
+  # Caching for API responses
+  caching:
+    cache_backend: redis
+    cache_strategy: cache_aside
+    ttl_seconds: 60
+    cached_operations:
+      - operation: get_account_info
+        cache_key_template: "account:{account_id}"
+        ttl_seconds: 300
+      - operation: get_transaction_status
+        cache_key_template: "transaction:{transaction_id}"
+        ttl_seconds: 30
+
+# API operations
+operations:
+  - name: process_payment
+    description: Process payment via external gateway
+    type: http_post
+  - name: check_transaction_status
+    description: Check transaction status
+    type: http_get
+  - name: refund_payment
+    description: Refund a completed payment
+    type: http_post
+  - name: get_account_balance
+    description: Get current account balance
+    type: http_get
+
+dependencies:
+  aiohttp: "^3.9.0"
+  tenacity: "^8.2.0"  # Retry logic
+  circuitbreaker: "^1.4.0"
+  redis: "^5.0.0"  # Response caching
+
+features:
+  - Exponential backoff retry (3 attempts)
+  - Circuit breaker pattern
+  - Rate limiting (100 req/sec)
+  - Response caching
+  - Request/response logging
+  - Timeout management
+  - Connection pooling
+  - Automatic token refresh
+
+input_schema:
+  type: object
+  required:
+    - operation
+    - params
+  properties:
+    operation:
+      type: string
+      enum: [process_payment, check_status, refund_payment, get_balance]
+    params:
+      type: object
+      properties:
+        transaction_id: { type: string }
+        amount: { type: number }
+        currency: { type: string }
+        account_id: { type: string }
+    retry_config:
+      type: object
+      properties:
+        max_attempts: { type: integer, default: 3 }
+        backoff_factor: { type: number, default: 2.0 }
+
+output_schema:
+  type: object
+  required:
+    - success
+    - operation
+  properties:
+    success: { type: boolean }
+    operation: { type: string }
+    response_data: { type: object }
+    status_code: { type: integer }
+    retry_count: { type: integer }
+    execution_time_ms: { type: number }
+    metadata:
+      type: object
+      properties:
+        circuit_breaker_state: { type: string }
+        cache_hit: { type: boolean }
+        rate_limit_remaining: { type: integer }

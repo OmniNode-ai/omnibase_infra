@@ -1,0 +1,226 @@
+# Reducer Node Configuration
+# Base configuration for NodeBridgeReducerReducer
+# Environment-specific overrides are applied from development.yaml or production.yaml
+
+# Node identification
+node:
+  type: "reducer"
+  name: "bridge-reducer"
+  version: "0.1.0"
+  namespace: "omninode.bridge.reducer"
+
+# Reducer-specific settings
+reducer:
+  # Aggregation settings
+  aggregation_window_seconds: 60
+  aggregation_batch_size: 100
+  max_aggregation_buffer_size: 10000
+  enable_incremental_aggregation: true
+
+  # State management
+  state_persistence_interval_seconds: 30
+  state_snapshot_interval_seconds: 300
+  enable_state_compression: true
+  max_state_size_mb: 100
+
+  # Batch processing
+  batch_size: 50
+  batch_timeout_seconds: 5
+  max_batch_retry_attempts: 3
+  batch_retry_delay_seconds: 2
+
+  # Data retention
+  retain_aggregated_data_hours: 24
+  retain_raw_data_hours: 6
+  enable_automatic_cleanup: true
+
+  # Performance tuning
+  worker_pool_size: 8
+  aggregation_worker_threads: 4
+  io_worker_threads: 4
+  event_processing_buffer_size: 500
+
+# Database configuration for state persistence
+database:
+  host: "localhost"
+  port: 5432
+  database: "omninode_bridge"
+  user: "postgres"
+  # Password should be set via environment variable: POSTGRES_PASSWORD
+
+  # Connection pooling
+  pool_min_size: 3
+  pool_max_size: 15
+  pool_timeout_seconds: 10
+
+  # Performance
+  query_timeout_seconds: 30
+  command_timeout_seconds: 60
+  statement_cache_size: 50
+
+  # Batch operations
+  batch_insert_size: 500
+  batch_upsert_enabled: true
+  enable_prepared_statements: true
+
+# Consul service discovery
+consul:
+  host: "192.168.86.200"
+  port: 28500
+  enable_registration: true
+  registration_timeout_seconds: 10
+  health_check_interval_seconds: 30
+  health_check_timeout_seconds: 5
+
+# Kafka event streaming
+kafka:
+  bootstrap_servers: "localhost:9092"
+
+  # Consumer settings
+  consumer:
+    group_id: "bridge-reducer-consumer"
+    auto_offset_reset: "earliest"
+    enable_auto_commit: false
+    max_poll_records: 500
+    max_poll_interval_ms: 300000
+    session_timeout_ms: 30000
+    heartbeat_interval_ms: 3000
+    fetch_min_bytes: 1024
+    fetch_max_wait_ms: 500
+
+  # Producer settings for aggregated results
+  producer:
+    compression_type: "snappy"
+    batch_size: 16384
+    linger_ms: 10
+    acks: "all"
+    max_in_flight_requests: 5
+
+  # Topics
+  topics:
+    task_events: "omninode.bridge.task.events.v1"
+    workflow_events: "omninode.bridge.workflow.events.v1"
+    aggregated_metrics: "omninode.bridge.metrics.aggregated.v1"
+    state_snapshots: "omninode.bridge.state.snapshots.v1"
+
+# Aggregation strategies
+aggregation:
+  # Metric aggregation
+  metrics:
+    enabled: true
+    window_seconds: 60
+    functions: ["count", "sum", "avg", "min", "max", "p50", "p95", "p99"]
+    dimensions: ["node_type", "operation", "status"]
+
+  # Event aggregation
+  events:
+    enabled: true
+    window_seconds: 30
+    group_by: ["event_type", "source"]
+    count_threshold: 100
+
+  # Workflow state aggregation
+  workflow_state:
+    enabled: true
+    window_seconds: 120
+    track_transitions: true
+    track_duration: true
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "json"
+  enable_structured_logging: true
+  log_aggregations: true
+  log_state_changes: true
+
+  # Log destinations
+  outputs:
+    - type: "console"
+      enabled: true
+    - type: "file"
+      enabled: true
+      path: "logs/reducer.log"
+      max_size_mb: 100
+      backup_count: 5
+
+# Monitoring and metrics
+monitoring:
+  enable_prometheus: true
+  prometheus_port: 9091
+  metrics_interval_seconds: 15
+
+  # Health checks
+  health_check_interval_seconds: 30
+
+  # Performance metrics
+  track_aggregation_latency: true
+  track_batch_processing_latency: true
+  track_state_persistence_latency: true
+  track_buffer_utilization: true
+
+# Circuit breaker configuration
+circuit_breaker:
+  enabled: true
+  failure_threshold: 5
+  recovery_timeout_seconds: 60
+  half_open_max_requests: 3
+
+# Caching configuration
+cache:
+  enabled: true
+  aggregation_state_ttl_seconds: 600
+  dimension_cache_ttl_seconds: 1800
+  max_cache_size_mb: 128
+
+# Window configuration for time-based aggregations
+windowing:
+  # Tumbling windows (fixed-size, non-overlapping)
+  tumbling:
+    enabled: true
+    sizes: [60, 300, 3600]  # 1min, 5min, 1hour
+
+  # Sliding windows (overlapping)
+  sliding:
+    enabled: false
+    size_seconds: 300
+    slide_seconds: 60
+
+  # Session windows (activity-based)
+  session:
+    enabled: false
+    gap_seconds: 300
+
+# Batch size configuration for all operations
+batch_sizes:
+  # Database operations
+  database_batch_size: 50
+  database_query_limit: 1000
+  database_statement_cache_size: 100
+
+  # Kafka operations
+  kafka_producer_batch_size: 16384
+  kafka_consumer_max_poll_records: 500
+  kafka_consumer_fetch_min_bytes: 1
+  kafka_consumer_fetch_max_bytes: 1048576
+
+  # Redis operations (for future use)
+  redis_batch_size: 100
+  redis_pipeline_size: 100
+
+  # Node operations
+  orchestrator_batch_size: 50
+  reducer_batch_size: 100
+  registry_batch_size: 50
+
+  # Performance optimization
+  performance_task_batch_size: 50
+  processing_buffer_size: 1000
+
+  # Cleanup operations
+  cleanup_batch_size: 100
+  retention_cleanup_batch_size: 1000
+
+  # File operations
+  file_processing_batch_size: 50
+  metadata_extraction_batch_size: 20

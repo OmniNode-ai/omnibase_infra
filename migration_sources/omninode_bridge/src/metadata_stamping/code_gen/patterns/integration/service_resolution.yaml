@@ -1,0 +1,84 @@
+name: service_resolution
+description: "Service resolution from dependency injection container with fallbacks"
+category: integration
+applicable_to: [effect, orchestrator, reducer, compute]
+priority: medium
+code_template: |
+  # Get service from container (with fallback creation)
+  self.service = container.get_service("service_name")
+
+  if self.service is None and not health_check_mode:
+      try:
+          # Create service if not available
+          self.service = ServiceClass(
+              config_param=self.config_value,
+              # ... other params
+          )
+          # Register with container for reuse
+          container.register_service("service_name", self.service)
+
+          emit_log_event(
+              LogLevel.INFO,
+              "Service created and registered",
+              {
+                  "node_id": self.node_id,
+                  "service_name": "service_name",
+              },
+          )
+      except Exception as e:
+          emit_log_event(
+              LogLevel.WARNING,
+              f"Service initialization failed: {e}",
+              {
+                  "node_id": self.node_id,
+                  "service_name": "service_name",
+                  "error": str(e),
+              },
+          )
+          self.service = None
+  elif health_check_mode:
+      emit_log_event(
+          LogLevel.DEBUG,
+          "Health check mode - skipping service initialization",
+          {"node_id": self.node_id, "service_name": "service_name"},
+      )
+      self.service = None
+
+example_nodes:
+  - codegen_orchestrator
+  - llm_effect
+  - store_effect
+
+configuration:
+  container_methods:
+    get_service: "Retrieve registered service"
+    register_service: "Register service for reuse"
+  fallback_mode: "create_if_missing"
+
+prerequisites:
+  - Container with get_service() method
+  - Container with register_service() method
+  - health_check_mode detection
+  - Service class available for creation
+
+metrics:
+  resolution_time_ms: 1.0
+  creation_time_ms: 50
+  memory_bytes: 2048
+
+best_practices:
+  - "Always try container.get_service() first"
+  - "Create new service only if not available"
+  - "Register created service with container"
+  - "Skip creation in health_check_mode"
+  - "Handle creation failures gracefully"
+  - "Log service creation and failures"
+  - "Set to None on failure (not undefined)"
+  - "Use service_name consistently"
+
+validation_rules:
+  - "Must try get_service() before creating"
+  - "Must check health_check_mode before creating"
+  - "Must register created service with container"
+  - "Must handle exceptions without failing"
+  - "Must set to None if unavailable or health check mode"

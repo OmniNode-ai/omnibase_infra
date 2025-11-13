@@ -1,0 +1,172 @@
+# NodeVaultSecretsEffect Contract - ONEX v2.0 Compliant
+# Generated: 2025-11-02
+
+# Required fields for ModelContractEffect
+name: "vault_secrets"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "HashiCorp Vault secrets management integration"
+node_type: "EFFECT"
+
+# Input/Output Models (required by omnibase_core) - must be strings (model class names)
+input_model: "ModelVaultSecretsRequest"
+output_model: "ModelVaultSecretsResponse"
+
+# State Schemas (required by ONEX v2.0)
+input_state:
+  type: object
+  description: "Input state for Vault secrets operations"
+  properties:
+    vault_connection:
+      type: object
+      description: "Vault connection state"
+      properties:
+        url:
+          type: string
+          description: "Vault server URL"
+        namespace:
+          type: string
+          description: "Vault namespace (if using Vault Enterprise)"
+        is_authenticated:
+          type: boolean
+          description: "Whether currently authenticated"
+    token_state:
+      type: object
+      description: "Authentication token state"
+      properties:
+        token:
+          type: string
+          description: "Current Vault token"
+        expires_at:
+          type: string
+          format: date-time
+          description: "Token expiration time"
+        renewable:
+          type: boolean
+          description: "Whether token can be renewed"
+    secret_cache:
+      type: object
+      description: "Cached secrets for performance"
+      properties:
+        enabled:
+          type: boolean
+          description: "Whether caching is enabled"
+        ttl_seconds:
+          type: integer
+          description: "Cache TTL in seconds"
+        entries:
+          type: object
+          description: "Cached secret entries"
+          additionalProperties: true
+
+output_state:
+  type: object
+  description: "Output state after Vault secrets operations"
+  properties:
+    last_access_time:
+      type: string
+      format: date-time
+      description: "Timestamp of last Vault access"
+    operation_metadata:
+      type: object
+      description: "Metadata about the operation performed"
+      properties:
+        operation_type:
+          type: string
+          enum: ["read_secret", "write_secret", "list_secrets", "delete_secret", "authenticate", "renew_token"]
+          description: "Type of operation performed"
+        path:
+          type: string
+          description: "Vault path accessed"
+        success:
+          type: boolean
+          description: "Whether operation succeeded"
+    secrets_retrieved:
+      type: integer
+      description: "Count of secrets retrieved in this operation"
+      minimum: 0
+    token_renewed:
+      type: boolean
+      description: "Whether token was renewed during operation"
+    cache_updated:
+      type: boolean
+      description: "Whether cache was updated"
+    performance_metrics:
+      type: object
+      description: "Performance metrics for the operation"
+      properties:
+        execution_time_ms:
+          type: number
+          description: "Total execution time in milliseconds"
+        vault_api_time_ms:
+          type: number
+          description: "Time spent in Vault API calls"
+
+# Tool specification (required by omnibase_core)
+tool_specification:
+  tool_name: "vault_secrets"
+  main_tool_class: "generated_nodes.vault_secrets_effect.node.NodeVaultSecretsEffect"
+
+# IO operations for EFFECT node (required)
+# Each operation follows ModelIOOperationConfig schema
+io_operations:
+  - operation_type: "database_query"
+    atomic: true
+    timeout_seconds: 30
+    validation_enabled: true
+
+
+# Legacy fields for compatibility
+node_name: vault_secrets
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+contract_name: vault_secrets_contract
+author: OmniNode Code Generation
+created_at: "2025-11-02"
+
+# Core Metadata
+metadata:
+  domain: "security"
+  generated: true
+  generated_at: "2025-11-02T23:52:56.343758+00:00"
+  tags:
+    - "connection_pooling"
+    - "retry_logic"
+    - "circuit_breaker"
+    - "authentication"
+    - "token_renewal"
+    - "validation"
+    - "logging"
+    - "metrics"
+    - "error_handling"
+
+# Operations supported by this node
+operations:
+  - "read_secret"
+  - "write_secret"
+  - "list_secrets"
+  - "delete_secret"
+  - "authenticate"
+  - "renew_token"
+
+# Performance Requirements
+performance_requirements:
+  execution_time:
+    target_ms: 100
+    max_ms: 1000
+  memory_usage:
+    target_mb: 128
+    max_mb: 512
+
+# Testing Requirements
+testing:
+  unit_tests:
+    coverage_target: 85
+    required: true
+  integration_tests:
+    required: true

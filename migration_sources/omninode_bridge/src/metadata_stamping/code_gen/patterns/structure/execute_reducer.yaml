@@ -1,0 +1,126 @@
+name: execute_reducer
+description: "Reducer execute_reduction method with pure aggregation logic"
+category: structure
+applicable_to: [reducer]
+priority: critical
+code_template: |
+  async def execute_reduction(
+      self, contract: ModelContractReducer
+  ) -> {OutputState}:
+      """
+      Execute pure {aggregation} reduction.
+
+      Args:
+          contract: Reducer contract with aggregation configuration
+
+      Returns:
+          {OutputState} with aggregated results
+
+      Raises:
+          OnexError: If reduction fails or validation errors occur
+      """
+      start_time = time.perf_counter()
+
+      try:
+          # Validate input
+          if not hasattr(contract, "input_stream") and not hasattr(
+              contract, "input_state"
+          ):
+              raise ValueError(
+                  "Contract must have either 'input_stream' or 'input_state' attribute"
+              )
+
+          # Extract configuration
+          aggregation_type = self._get_aggregation_type(contract)
+          batch_size = self._get_batch_size(contract)
+
+          # Initialize aggregation state
+          aggregated_data = defaultdict(dict)
+          total_items = 0
+
+          # Stream and aggregate data (pure computation)
+          async for batch in self._stream_data(contract, batch_size=batch_size):
+              for item in batch:
+                  # Aggregate item
+                  self._aggregate_item(item, aggregated_data)
+                  total_items += 1
+
+          # Calculate metrics
+          duration_ms = (time.perf_counter() - start_time) * 1000
+          items_per_second = (
+              total_items / (duration_ms / 1000) if duration_ms > 0 else 0.0
+          )
+
+          # Build output state
+          return {OutputState}(
+              aggregation_type=aggregation_type,
+              total_items=total_items,
+              aggregated_data=aggregated_data,
+              duration_ms=duration_ms,
+              items_per_second=items_per_second,
+          )
+
+      except Exception as e:
+          duration_ms = (time.perf_counter() - start_time) * 1000
+
+          # Log failure
+          emit_log_event(
+              LogLevel.ERROR,
+              f"{Aggregation} reduction failed: {e}",
+              {
+                  "node_id": self.node_id,
+                  "error": str(e),
+                  "duration_ms": duration_ms,
+              },
+          )
+
+          # Re-raise
+          raise
+
+example_nodes:
+  - codegen_metrics_reducer
+
+configuration:
+  method_signature: "execute_reduction"
+  contract_type: "ModelContractReducer"
+  returns_async: true
+  pure_computation: true
+
+execution_phases:
+  - initialization (start_time)
+  - validation (check input_stream or input_state)
+  - configuration extraction
+  - streaming aggregation
+  - metrics calculation
+  - output state construction
+
+prerequisites:
+  - ModelContractReducer imported
+  - time.perf_counter available
+  - defaultdict for aggregation
+  - Async streaming support
+
+metrics:
+  overhead_ms: 1.0
+  memory_bytes: 4096
+
+best_practices:
+  - "Start timer at top of method"
+  - "Validate input_stream or input_state exists"
+  - "Extract aggregation configuration"
+  - "Use async streaming for large datasets"
+  - "Use defaultdict for aggregation state"
+  - "Track total_items processed"
+  - "Calculate duration_ms and throughput"
+  - "Return structured output state"
+  - "Log failures with duration"
+  - "Keep logic pure (no I/O in core aggregation)"
+
+validation_rules:
+  - "Method must be async"
+  - "Must accept ModelContractReducer"
+  - "Must validate input_stream or input_state"
+  - "Must calculate duration_ms"
+  - "Must calculate items_per_second"
+  - "Must return typed output state"
+  - "Must be pure computation (no I/O)"

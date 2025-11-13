@@ -1,0 +1,219 @@
+---
+# Event Type Subcontract
+# Event publishing and consumption configuration for workflow
+# orchestration
+# References: EnumWorkflowEvent,
+#             NodeBridgeOrchestrator._publish_event()
+
+publisher: true
+consumer: false  # Orchestrator is primarily a publisher
+event_format: "OnexEnvelopeV1"
+correlation_tracking: true
+namespace: "omninode.bridge"
+
+# Kafka topic configuration
+topics:
+  publishes:
+    # Primary workflow lifecycle events
+    - topic: "stamp-workflow-started.v1"
+      event_type: "WORKFLOW_STARTED"
+      description: >-
+        Published when workflow execution begins
+        (PENDING → PROCESSING)
+      schema_version: "v1"
+      retention_hours: 168  # 7 days
+      partitions: 3
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        timestamp: "ISO8601 timestamp"
+        state: "FSM state string"
+        mode: "execution mode (event_driven|legacy)"
+
+    - topic: "stamp-workflow-completed.v1"
+      event_type: "WORKFLOW_COMPLETED"
+      description: >-
+        Published when workflow completes successfully
+      schema_version: "v1"
+      retention_hours: 168
+      partitions: 3
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        stamp_id: "UUID (string)"
+        file_hash: "BLAKE3 hash string"
+        namespace: "namespace string"
+        processing_time_ms: "float"
+        timestamp: "ISO8601 timestamp"
+
+    - topic: "stamp-workflow-failed.v1"
+      event_type: "WORKFLOW_FAILED"
+      description: >-
+        Published when workflow execution fails
+      schema_version: "v1"
+      retention_hours: 168
+      partitions: 3
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        error: "error message string"
+        error_type: "error type string"
+        timestamp: "ISO8601 timestamp"
+        retry_count: "integer (optional)"
+
+    # Step-level events
+    - topic: "workflow-step-completed.v1"
+      event_type: "STEP_COMPLETED"
+      description: >-
+        Published after each workflow step completes
+      schema_version: "v1"
+      retention_hours: 72  # 3 days
+      partitions: 3
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        step_type: "step type string"
+        step_id: "step identifier string"
+        timestamp: "ISO8601 timestamp"
+
+    # Intelligence service events
+    - topic: "onextree-intelligence-requested.v1"
+      event_type: "INTELLIGENCE_REQUESTED"
+      description: >-
+        Published when OnexTree AI intelligence analysis
+        is requested
+      schema_version: "v1"
+      retention_hours: 72
+      partitions: 2
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        context: "analysis context string"
+        timestamp: "ISO8601 timestamp"
+
+    - topic: "onextree-intelligence-received.v1"
+      event_type: "INTELLIGENCE_RECEIVED"
+      description: >-
+        Published when OnexTree AI intelligence analysis
+        completes
+      schema_version: "v1"
+      retention_hours: 72
+      partitions: 2
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        analysis_time_ms: "float"
+        confidence_score: "float (0.0-1.0)"
+        timestamp: "ISO8601 timestamp"
+
+    # Stamping operation events
+    - topic: "metadata-stamp-created.v1"
+      event_type: "STAMP_CREATED"
+      description: >-
+        Published when metadata stamp is successfully created
+      schema_version: "v1"
+      retention_hours: 168
+      partitions: 3
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        stamp_id: "UUID (string)"
+        creation_time_ms: "float"
+        timestamp: "ISO8601 timestamp"
+
+    - topic: "blake3-hash-generated.v1"
+      event_type: "HASH_GENERATED"
+      description: >-
+        Published when BLAKE3 hash generation completes
+      schema_version: "v1"
+      retention_hours: 168
+      partitions: 3
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        file_hash: "BLAKE3 hash string"
+        generation_time_ms: "float"
+        timestamp: "ISO8601 timestamp"
+
+    # FSM state transition events
+    - topic: "workflow-state-transition.v1"
+      event_type: "STATE_TRANSITION"
+      description: >-
+        Published on FSM state transitions
+      schema_version: "v1"
+      retention_hours: 168
+      partitions: 2
+      replication_factor: 2
+      payload_schema:
+        workflow_id: "UUID (string)"
+        from_state: "previous FSM state"
+        to_state: "new FSM state"
+        timestamp: "ISO8601 timestamp"
+
+    # Node introspection events
+    - topic: "node-introspection.v1"
+      event_type: "NODE_INTROSPECTION"
+      description: >-
+        Published when node broadcasts introspection data
+      schema_version: "v1"
+      retention_hours: 24
+      partitions: 2
+      replication_factor: 2
+      payload_schema:
+        node_id: "UUID (string)"
+        node_type: "node type string"
+        capabilities: "array of capability strings"
+        endpoints: "object with endpoint URLs"
+        metadata: "object with node metadata"
+
+    - topic: "registry-request-introspection.v1"
+      event_type: "REGISTRY_REQUEST_INTROSPECTION"
+      description: >-
+        Published when registry requests all nodes to
+        broadcast introspection
+      schema_version: "v1"
+      retention_hours: 24
+      partitions: 1
+      replication_factor: 2
+      payload_schema:
+        request_id: "UUID (string)"
+        timestamp: "ISO8601 timestamp"
+
+    - topic: "node-heartbeat.v1"
+      event_type: "NODE_HEARTBEAT"
+      description: >-
+        Published periodically by nodes to indicate health
+      schema_version: "v1"
+      retention_hours: 24
+      partitions: 2
+      replication_factor: 2
+      payload_schema:
+        node_id: "UUID (string)"
+        status: "health status string"
+        timestamp: "ISO8601 timestamp"
+
+  # Orchestrator doesn't consume events (event-driven via EventBus)
+  consumes: []
+
+# Event publishing configuration
+publishing:
+  envelope_format: "OnexEnvelopeV1"
+  correlation_id_required: true
+  metadata_tracking:
+    - "event_category: workflow_orchestration"
+    - "node_type: orchestrator"
+    - "namespace: omninode.bridge"
+  error_handling:
+    log_publish_failures: true
+    fail_workflow_on_critical_events: false
+    retry_on_failure: true
+    max_retries: 3
+    retry_backoff_ms: 100
+
+# Event monitoring and metrics
+monitoring:
+  track_publish_latency: true
+  track_publish_success_rate: true
+  track_event_payload_size: true
+  alert_on_publish_failures: true
+  alert_threshold_failures: 10

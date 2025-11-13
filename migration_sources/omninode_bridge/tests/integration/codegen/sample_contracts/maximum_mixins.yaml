@@ -1,0 +1,72 @@
+---
+# Maximum mixins test - Complex node with many mixins
+node_id: "maximum_mixins_effect"
+node_type: "effect"
+version: "v1_0_0"
+namespace: "omninode.services.test"
+
+metadata:
+  name: "Maximum Mixins Test"
+  description: "Test contract with maximum number of compatible mixins"
+  author: "Test Generator"
+  tags: ["test", "complex", "maximum", "stress-test"]
+
+mixin_configuration:
+  mixins:
+    - mixin_name: "MixinHealthCheck"
+      config:
+        health_check_interval_seconds: 30
+
+    - mixin_name: "MixinMetrics"
+      config:
+        metrics_enabled: true
+
+    - mixin_name: "MixinLogData"
+      config:
+        log_level: "DEBUG"
+
+    - mixin_name: "MixinRequestResponseIntrospection"
+      config:
+        introspection_enabled: true
+
+    - mixin_name: "MixinEventBus"
+      config:
+        event_bus_enabled: true
+
+    - mixin_name: "MixinServiceRegistry"
+      config:
+        service_name: "maximum_mixins"
+
+    - mixin_name: "MixinCaching"
+      config:
+        cache_enabled: true
+
+    - mixin_name: "MixinHashComputation"
+      config:
+        hash_algorithm: "blake3"
+
+    - mixin_name: "MixinCanonicalYAMLSerializer"
+      config:
+        yaml_output: true
+
+event_patterns:
+  subscribes:
+    - topic: "test.events.input"
+      event_type: "InputEvent"
+  publishes:
+    - topic: "test.events.output"
+      event_type: "OutputEvent"
+
+input_schema:
+  type: "object"
+  properties:
+    complex_data:
+      type: "object"
+
+output_schema:
+  type: "object"
+  properties:
+    processed_data:
+      type: "object"
+    metadata:
+      type: "object"

@@ -1,0 +1,112 @@
+{#
+Constraints Template
+
+Defines requirements and restrictions for the generated code.
+
+Template Variables:
+- mixins: list[dict] - Recommended mixins
+  Each mixin contains:
+    - name: str
+    - confidence: float
+    - provides: list[str]
+    - usage_notes: str
+- error_codes: list[dict] - Error codes to use
+- security_rules: list[str] - Security constraints
+- performance_targets: dict - Performance requirements
+- onex_compliance: list[str] - ONEX compliance rules
+#}
+# Constraints
+
+## Required Mixins
+{% if mixins %}
+Your implementation MUST use these mixins (they are already available):
+
+{% for mixin in mixins %}
+### {{ loop.index }}. {{ mixin.name }} (confidence: {{ "%.2f"|format(mixin.confidence) }})
+**Provides**: {{ mixin.provides|join(', ') }}
+
+**Usage Notes:**
+{{ mixin.usage_notes }}
+
+{% endfor %}
+{% else %}
+No specific mixins required for this operation. Standard node base class is sufficient.
+{% endif %}
+
+## Error Handling Requirements
+
+All exceptions MUST be wrapped in ModelOnexError with appropriate error codes.
+
+**Error Codes to Use:**
+{% for error in error_codes %}
+- **{{ error.code }}**: {{ error.description }}
+  - Use when: {{ error.use_when }}
+{% endfor %}
+
+**Error Handling Pattern:**
+```python
+try:
+    # Main logic here
+    emit_log_event(level=EnumLogLevel.INFO, message="Operation started", ...)
+
+    # ... your implementation ...
+
+    emit_log_event(level=EnumLogLevel.INFO, message="Operation completed", ...)
+    return ModelContractResponse(success=True, ...)
+
+except ModelOnexError:
+    # Already properly formatted, re-raise
+    raise
+
+except asyncio.TimeoutError:
+    emit_log_event(level=EnumLogLevel.ERROR, message="Operation timeout", ...)
+    raise ModelOnexError(
+        error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
+        message=f"Operation timed out after Xs",
+        details={"correlation_id": contract.correlation_id},
+    )
+
+except Exception as e:
+    emit_log_event(level=EnumLogLevel.ERROR, message="Operation failed", ...)
+    raise ModelOnexError(
+        error_code=EnumCoreErrorCode.EXECUTION_ERROR,
+        message=f"Operation failed: {e}",
+        details={"correlation_id": contract.correlation_id, "error": str(e)},
+    )
+```
+
+## ONEX Compliance Rules
+{% for rule in onex_compliance %}
+{{ loop.index }}. {{ rule }}
+{% endfor %}
+
+## Security Constraints
+{% for rule in security_rules %}
+{{ loop.index }}. {{ rule }}
+{% endfor %}
+
+**Security Checklist:**
+- ✅ NO hardcoded credentials (use os.getenv() or configuration)
+- ✅ NO SQL injection vulnerabilities (use parameterized queries)
+- ✅ NO sensitive data in logs (mask secrets, tokens, passwords)
+- ✅ Validate ALL inputs before processing
+- ✅ Use HTTPS for external API calls
+- ✅ Implement rate limiting where appropriate
+
+## Performance Requirements
+{% if performance_targets %}
+{% for target, value in performance_targets.items() %}
+- **{{ target }}**: {{ value }}
+{% endfor %}
+{% else %}
+- Follow standard ONEX performance guidelines
+- Log execution time for all operations
+- Optimize hot paths (database queries, API calls)
+{% endif %}
+
+**Performance Best Practices:**
+1. Use connection pooling for database operations
+2. Implement caching where appropriate
+3. Use async/await properly (no blocking operations)
+4. Track and log latency for all operations
+5. Set appropriate timeouts for I/O operations

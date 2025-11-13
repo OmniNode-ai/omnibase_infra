@@ -1,0 +1,514 @@
+# NodeCodegenOrchestrator Contract - Code Generation Workflow Coordination
+# ONEX v2.0 Compliant Contract with Subcontract Composition
+
+# Required fields for ModelContractOrchestrator
+name: "codegen_orchestrator"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+description: "Orchestrates ONEX node code generation workflows with 8-stage pipeline and RAG intelligence integration"
+node_type: "ORCHESTRATOR"
+
+# Input/Output Models (placeholders - actual types defined in execute_orchestration)
+# Note: omnibase_core requires these fields but the actual type is ModelContractOrchestrator
+input_model: "dict"
+output_model: "dict"
+
+# Tool specification (required by omnibase_core)
+tool_specification:
+  main_tool_class: "omninode_bridge.nodes.codegen_orchestrator.v1_0_0.node.NodeCodegenOrchestrator"
+
+# Legacy fields for compatibility (using main version field)
+# contract_version removed - using main version field above
+# Note: This contract uses inline definitions instead of $ref to subcontracts
+# for better self-contained contracts and easier reading
+
+node_name: codegen_orchestrator
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+contract_name: codegen_orchestrator_contract
+author: omninode_bridge team
+created_at: "2025-10-29"
+
+# === INPUT STATE (required by ONEX v2.0) ===
+# Input state for code generation orchestration
+input_state:
+  type: object
+  description: "Input state for code generation workflow orchestration"
+  properties:
+    workflow_id:
+      type: string
+      format: uuid
+      description: "Unique workflow identifier"
+    prompt:
+      type: string
+      description: "Code generation prompt/requirements"
+      minLength: 1
+    output_directory:
+      type: string
+      description: "Target directory for generated files"
+      default: "./generated_nodes"
+    node_type_hint:
+      type: string
+      enum: ["effect", "compute", "reducer", "orchestrator"]
+      description: "Optional hint for node type classification"
+    enable_intelligence:
+      type: boolean
+      default: true
+      description: "Enable RAG intelligence gathering"
+    enable_quorum:
+      type: boolean
+      default: false
+      description: "Enable AI quorum validation"
+    interactive_mode:
+      type: boolean
+      default: false
+      description: "Enable interactive refinement mode"
+    current_fsm_state:
+      type: string
+      enum: ["pending", "parsing", "intelligence_gathering", "contract_generation", "code_generation", "event_integration", "validation", "refinement", "completed", "failed"]
+      default: "pending"
+      description: "Current FSM state of workflow"
+
+# === OUTPUT STATE (required by ONEX v2.0) ===
+# Output state after orchestration execution
+output_state:
+  type: object
+  description: "Output state after code generation workflow completes"
+  properties:
+    success:
+      type: boolean
+      description: "Whether workflow completed successfully"
+    workflow_id:
+      type: string
+      format: uuid
+      description: "Workflow identifier"
+    final_fsm_state:
+      type: string
+      enum: ["completed", "failed"]
+      description: "Final FSM state"
+    generated_files:
+      type: array
+      items:
+        type: string
+      description: "List of generated file paths"
+    node_type:
+      type: string
+      enum: ["effect", "compute", "reducer", "orchestrator"]
+      description: "Classified node type"
+    total_duration_seconds:
+      type: number
+      description: "Total workflow execution time"
+    stage_durations:
+      type: object
+      description: "Duration of each workflow stage"
+      properties:
+        parse_request:
+          type: number
+        intelligence_gathering:
+          type: number
+        contract_generation:
+          type: number
+        code_generation:
+          type: number
+        event_bus_integration:
+          type: number
+        validation:
+          type: number
+        refinement:
+          type: number
+        file_writing:
+          type: number
+    quality_metrics:
+      type: object
+      description: "Code quality metrics"
+      properties:
+        validation_score:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        onex_compliance:
+          type: boolean
+        quorum_consensus:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+    events_published:
+      type: array
+      items:
+        type: string
+      description: "List of Kafka events published during workflow"
+    error_message:
+      type: string
+      description: "Error message if workflow failed"
+    failed_stage:
+      type: string
+      description: "Stage where workflow failed (if applicable)"
+
+# === CONFIGURATION ===
+# Node configuration options with defaults
+configuration:
+  kafka_broker_url:
+    default: "localhost:29092"
+    description: "Kafka broker URL for event publishing"
+  omniarchon_url:
+    default: "http://omniarchon:8060"
+    description: "OmniArchon service URL for RAG intelligence"
+  default_output_dir:
+    default: "./generated_nodes"
+    description: "Default directory for generated code files"
+
+# === ONEX 2.0 COMPOSITION ===
+# Subcontracts define orchestrator capabilities through composition
+workflow_coordination:
+  workflow_steps:
+    - parse_request
+    - intelligence_gathering
+    - contract_generation
+    - code_generation
+    - event_bus_integration
+    - validation
+    - refinement
+    - file_writing
+
+routing:
+  routing_strategy: "service_based"
+  services:
+    - omniarchon
+    - code_generator
+    - validator
+
+fsm:
+  initial_state: "pending"
+  states:
+    - name: "pending"
+      transitions: ["parsing"]
+    - name: "parsing"
+      transitions: ["intelligence_gathering", "failed"]
+    - name: "intelligence_gathering"
+      transitions: ["contract_generation", "failed"]
+    - name: "contract_generation"
+      transitions: ["code_generation", "failed"]
+    - name: "code_generation"
+      transitions: ["event_integration", "failed"]
+    - name: "event_integration"
+      transitions: ["validation", "failed"]
+    - name: "validation"
+      transitions: ["refinement", "completed", "failed"]
+    - name: "refinement"
+      transitions: ["validation", "completed", "failed"]
+    - name: "completed"
+      transitions: []
+    - name: "failed"
+      transitions: []
+
+event_type:
+  published_events:
+    - codegen_workflow_started
+    - codegen_workflow_completed
+    - codegen_workflow_failed
+    - codegen_stage_completed
+    - code_files_generated
+    - validation_completed
+
+# === WORKFLOW DEFINITION ===
+# Sequential steps for code generation workflow execution
+workflow_steps:
+  - step_id: "parse_request"
+    step_type: "validation"
+    description: "Parse and validate code generation request input data"
+    required: true
+    timeout_ms: 2000
+    retry_policy:
+      max_retries: 2
+      backoff_ms: 100
+
+  - step_id: "intelligence_gathering"
+    step_type: "rag_intelligence"
+    description: "Route to OmniArchon for RAG intelligence gathering and pattern analysis"
+    required: false  # Optional AI enhancement
+    service: "omniarchon"
+    timeout_ms: 10000
+    retry_policy:
+      max_retries: 2
+      backoff_ms: 1000
+
+  - step_id: "contract_generation"
+    step_type: "contract_generation"
+    description: "Generate ONEX v2.0 compliant contract YAML"
+    required: true
+    timeout_ms: 8000
+    retry_policy:
+      max_retries: 2
+      backoff_ms: 500
+
+  - step_id: "code_generation"
+    step_type: "code_generation"
+    description: "Generate Python node implementation code"
+    required: true
+    service: "code_generator"
+    timeout_ms: 15000
+    retry_policy:
+      max_retries: 3
+      backoff_ms: 1000
+
+  - step_id: "event_bus_integration"
+    step_type: "event_integration"
+    description: "Generate Kafka event publishing integration code"
+    required: true
+    timeout_ms: 5000
+    retry_policy:
+      max_retries: 2
+      backoff_ms: 500
+
+  - step_id: "validation"
+    step_type: "validation"
+    description: "Validate generated code against ONEX v2.0 standards"
+    required: true
+    service: "validator"
+    timeout_ms: 10000
+    retry_policy:
+      max_retries: 2
+      backoff_ms: 500
+
+  - step_id: "refinement"
+    step_type: "refinement"
+    description: "Refine code based on validation feedback"
+    required: false  # Optional quality enhancement
+    timeout_ms: 8000
+    retry_policy:
+      max_retries: 1
+      backoff_ms: 500
+
+  - step_id: "file_writing"
+    step_type: "file_writing"
+    description: "Write generated files to disk with proper structure"
+    required: true
+    timeout_ms: 3000
+    retry_policy:
+      max_retries: 3
+      backoff_ms: 200
+
+# === SERVICE ROUTING ===
+# Service discovery and endpoint configuration
+services:
+  omniarchon:
+    discovery_method: "dns"
+    endpoint: "${OMNIARCHON_SERVICE_URL}"
+    health_check_endpoint: "/health"
+    timeout_ms: 10000
+    circuit_breaker:
+      failure_threshold: 5
+      timeout_ms: 60000
+      half_open_max_requests: 3
+
+  code_generator:
+    discovery_method: "internal"
+    endpoint: "internal://codegen_engine"
+    timeout_ms: 15000
+    circuit_breaker:
+      failure_threshold: 3
+      timeout_ms: 30000
+      half_open_max_requests: 2
+
+  validator:
+    discovery_method: "internal"
+    endpoint: "internal://code_validator"
+    timeout_ms: 10000
+    circuit_breaker:
+      failure_threshold: 3
+      timeout_ms: 20000
+      half_open_max_requests: 5
+
+# === FSM STATE MACHINE ===
+# Workflow state management
+fsm_states:
+  initial_state: "pending"
+
+  states:
+    - name: "pending"
+      description: "Workflow initialized, awaiting processing"
+      transitions:
+        - "parsing"
+      actions:
+        on_enter: "log_workflow_started"
+        on_exit: "update_timestamp"
+
+    - name: "parsing"
+      description: "Parsing and validating input request"
+      transitions:
+        - "intelligence_gathering"
+        - "failed"
+      actions:
+        on_enter: "increment_processing_count"
+        on_exit: "log_transition"
+
+    - name: "intelligence_gathering"
+      description: "Gathering RAG intelligence and patterns"
+      transitions:
+        - "contract_generation"
+        - "failed"
+      actions:
+        on_enter: "start_intelligence_timer"
+        on_exit: "log_intelligence_results"
+
+    - name: "contract_generation"
+      description: "Generating ONEX v2.0 contract"
+      transitions:
+        - "code_generation"
+        - "failed"
+      actions:
+        on_enter: "start_contract_timer"
+        on_exit: "log_contract_generated"
+
+    - name: "code_generation"
+      description: "Generating Python implementation code"
+      transitions:
+        - "event_integration"
+        - "failed"
+      actions:
+        on_enter: "start_codegen_timer"
+        on_exit: "log_code_generated"
+
+    - name: "event_integration"
+      description: "Integrating Kafka event publishing"
+      transitions:
+        - "validation"
+        - "failed"
+      actions:
+        on_enter: "start_integration_timer"
+        on_exit: "log_integration_complete"
+
+    - name: "validation"
+      description: "Validating generated code"
+      transitions:
+        - "refinement"
+        - "completed"
+        - "failed"
+      actions:
+        on_enter: "start_validation_timer"
+        on_exit: "log_validation_results"
+
+    - name: "refinement"
+      description: "Refining code based on feedback"
+      transitions:
+        - "validation"
+        - "completed"
+        - "failed"
+      actions:
+        on_enter: "start_refinement_timer"
+        on_exit: "log_refinement_complete"
+
+    - name: "completed"
+      description: "Workflow successfully completed"
+      transitions: []  # Terminal state
+      actions:
+        on_enter: "publish_completion_event"
+
+    - name: "failed"
+      description: "Workflow execution failed"
+      transitions: []  # Terminal state
+      actions:
+        on_enter: "publish_failure_event"
+
+# === EVENT DEFINITIONS ===
+# Kafka event publishing configuration
+published_events:
+  - event_type: "codegen_workflow_started"
+    schema: "ModelCodegenWorkflowEvent"
+    description: "Published when code generation workflow begins"
+    kafka_topic: "${KAFKA_TOPIC_CODEGEN_WORKFLOWS}"
+    partition_key: "workflow_id"
+
+  - event_type: "codegen_workflow_completed"
+    schema: "ModelCodegenWorkflowEvent"
+    description: "Published when workflow completes successfully"
+    kafka_topic: "${KAFKA_TOPIC_CODEGEN_WORKFLOWS}"
+    partition_key: "workflow_id"
+
+  - event_type: "codegen_workflow_failed"
+    schema: "ModelCodegenWorkflowEvent"
+    description: "Published when workflow fails"
+    kafka_topic: "${KAFKA_TOPIC_CODEGEN_WORKFLOWS}"
+    partition_key: "workflow_id"
+
+  - event_type: "codegen_stage_completed"
+    schema: "ModelCodegenStageEvent"
+    description: "Published when each stage completes"
+    kafka_topic: "${KAFKA_TOPIC_CODEGEN_STAGES}"
+    partition_key: "workflow_id"
+
+  - event_type: "code_files_generated"
+    schema: "ModelCodeFilesEvent"
+    description: "Published when code files are generated"
+    kafka_topic: "${KAFKA_TOPIC_CODEGEN_FILES}"
+    partition_key: "node_type"
+
+  - event_type: "validation_completed"
+    schema: "ModelValidationEvent"
+    description: "Published when validation completes"
+    kafka_topic: "${KAFKA_TOPIC_CODEGEN_VALIDATION}"
+    partition_key: "workflow_id"
+
+# === PERFORMANCE REQUIREMENTS ===
+# Resource limits and performance targets
+execution_capabilities:
+  max_concurrent_workflows: 10
+  timeout_ms: 90000  # 90 seconds total
+  memory_limit_mb: 1024
+  cpu_limit_cores: 4
+
+# === VALIDATION RULES ===
+# Input/output validation configuration
+validation:
+  input:
+    required_fields:
+      - prompt
+      - output_directory
+    optional_fields:
+      - node_type_hint
+      - interactive_mode
+      - enable_intelligence
+      - enable_quorum
+
+  output:
+    required_fields:
+      - success
+      - workflow_id
+      - generated_files
+      - node_type
+      - total_duration_seconds
+
+# === THUNK EMISSION ===
+# Async task emission configuration
+thunk_emission:
+  enabled: true
+  max_concurrent_thunks: 20
+  timeout_ms: 30000
+
+# === CONDITIONAL BRANCHING ===
+# Workflow branching logic
+conditional_branching:
+  enabled: true
+  conditions:
+    - condition_id: "intelligence_required"
+      field: "enable_intelligence"
+      operator: "equals"
+      value: true
+      branch_to: "intelligence_gathering"
+
+    - condition_id: "refinement_needed"
+      field: "validation_score"
+      operator: "less_than"
+      value: 0.8
+      branch_to: "refinement"
+
+    - condition_id: "quorum_validation"
+      field: "enable_quorum"
+      operator: "equals"
+      value: true
+      branch_to: "quorum_validation_step"

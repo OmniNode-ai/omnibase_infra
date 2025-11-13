@@ -1,0 +1,131 @@
+version: '3.8'
+
+services:
+  metadata-stamping:
+    build:
+      context: .
+      dockerfile: src/omninode_bridge/services/metadata_stamping/Dockerfile
+    container_name: omninode-bridge-metadata-stamping
+    ports:
+      - "8057:8053"  # External 8057 to avoid conflict with archon-intelligence on 8053
+      - "9093:9090"  # Prometheus metrics port
+    environment:
+      # Database Configuration
+      - POSTGRES_HOST=omninode-bridge-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=omninode_bridge
+      - POSTGRES_USER=omninode_user
+      - POSTGRES_PASSWORD=omninode_pass
+
+      # Service Configuration
+      - SERVICE_PORT=8053
+      - SERVICE_HOST=0.0.0.0
+      - LOG_LEVEL=INFO
+
+      # O.N.E. Protocol Configuration
+      - NAMESPACE=omninode.services.metadata
+      - METADATA_VERSION=0.1
+      - PROTOCOL_VERSION=1.0
+
+      # Performance Configuration
+      - HASH_GENERATOR_POOL_SIZE=100
+      - DATABASE_POOL_MIN_SIZE=5
+      - DATABASE_POOL_MAX_SIZE=20
+      - MAX_CONCURRENT_OPERATIONS=1000
+
+      # Service Registry (Consul)
+      - CONSUL_ENABLED=true
+      - CONSUL_HOST=omninode-bridge-consul
+      - CONSUL_PORT=8500
+      - SERVICE_REGISTRY_HEALTH_INTERVAL=10
+
+      # Event Publishing (Kafka/Redpanda)
+      - KAFKA_ENABLED=true
+      - KAFKA_BOOTSTRAP_SERVERS=omninode-bridge-redpanda:9092
+      - KAFKA_TOPIC_PREFIX=omninode.events
+
+      # Security Configuration - use correct pydantic-settings variable names
+      - METADATA_STAMPING_ENABLE_SECURITY=true
+      - TRUST_ZONES_ENABLED=true
+      - METADATA_STAMPING_SIGNATURE_VALIDATION_ENABLED=true
+
+      # Monitoring
+      - METRICS_ENABLED=true
+      - PROMETHEUS_PORT=9090
+
+      # Redis Cache Configuration (Phase 2)
+      - REDIS_ENABLED=true
+      - REDIS_HOST=metadata-stamping-redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_MAX_CONNECTIONS=50
+      - CACHE_TTL_SECONDS=3600
+      # Set via .env or CI secret; required if Redis AUTH is enabled
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?}
+
+    networks:
+      - omninode-bridge-network
+
+    depends_on:
+      omninode-bridge-postgres:
+        condition: service_healthy
+      omninode-bridge-consul:
+        condition: service_healthy
+      omninode-bridge-redpanda:
+        condition: service_healthy
+      metadata-stamping-redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8053/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+    # Resource limits for performance targets
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+        reservations:
+          cpus: '1.0'
+          memory: 256M
+
+  metadata-stamping-redis:
+    image: redis:7.2-alpine
+    container_name: metadata-stamping-redis
+    # Internal-only; enable AUTH and add memory headroom
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?}
+    command: ["sh", "-lc", "exec redis-server --appendonly yes --appendfsync everysec --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass \"$REDIS_PASSWORD\""]
+    volumes:
+      - metadata-stamping-redis-data:/data
+    networks:
+      - omninode-bridge-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  metadata-stamping-redis-data:
+    driver: local
+
+networks:
+  omninode-bridge-network:
+    external: true

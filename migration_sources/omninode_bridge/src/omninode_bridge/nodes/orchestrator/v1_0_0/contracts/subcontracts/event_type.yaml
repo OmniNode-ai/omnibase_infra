@@ -1,0 +1,422 @@
+# Event Type Subcontract
+# Defines Kafka event publishing and event schema definitions for NodeBridgeOrchestrator
+
+subcontract_type: event_type
+version:
+  major: 1
+  minor: 0
+  patch: 0
+
+description: "Kafka event publishing with OnexEnvelopeV1 format and schema validation"
+
+# === KAFKA CONFIGURATION ===
+kafka:
+  # Kafka broker configuration
+  brokers: "${KAFKA_BROKERS}"
+
+  # Connection configuration
+  connection:
+    client_id: "bridge_orchestrator"
+    security_protocol: "SASL_SSL"  # Options: PLAINTEXT, SASL_SSL, SSL
+    sasl_mechanism: "PLAIN"
+    sasl_username: "${KAFKA_USERNAME}"
+    sasl_password: "${KAFKA_PASSWORD}"
+
+  # Producer configuration
+  producer:
+    acks: "all"  # Options: 0, 1, all
+    retries: 3
+    max_in_flight_requests: 5
+    compression_type: "snappy"  # Options: none, gzip, snappy, lz4, zstd
+    batch_size: 16384
+    linger_ms: 10
+    buffer_memory: 33554432
+    max_request_size: 1048576
+
+  # Idempotence and delivery guarantees
+  delivery:
+    enable_idempotence: true
+    max_retries: 3
+    retry_backoff_ms: 100
+
+# === TOPIC CONFIGURATION ===
+topics:
+  # Workflow events topic
+  workflows:
+    name: "${KAFKA_TOPIC_WORKFLOWS}"
+    partitions: 10
+    replication_factor: 3
+    retention_ms: 604800000  # 7 days
+    compression_type: "snappy"
+    cleanup_policy: "delete"
+
+  # Stamp events topic
+  stamps:
+    name: "${KAFKA_TOPIC_STAMPS}"
+    partitions: 20
+    replication_factor: 3
+    retention_ms: 2592000000  # 30 days
+    compression_type: "snappy"
+    cleanup_policy: "delete"
+
+  # Error events topic
+  errors:
+    name: "${KAFKA_TOPIC_ERRORS}"
+    partitions: 5
+    replication_factor: 3
+    retention_ms: 1209600000  # 14 days
+    compression_type: "gzip"
+    cleanup_policy: "compact"
+
+# === EVENT DEFINITIONS ===
+events:
+  # Workflow lifecycle events
+  stamp_workflow_started:
+    description: "Published when stamp workflow begins"
+    topic: "${KAFKA_TOPIC_WORKFLOWS}"
+    schema: "ModelStampWorkflowEvent"
+    partition_key: "correlation_id"
+    priority: "high"
+    envelope_version: "v1"
+    schema_validation: true
+    payload_schema:
+      correlation_id:
+        type: "UUID"
+        required: true
+      namespace:
+        type: "string"
+        required: true
+      file_path:
+        type: "string"
+        required: true
+      intelligence_enabled:
+        type: "boolean"
+        required: false
+        default: false
+      timestamp:
+        type: "datetime"
+        required: true
+
+  stamp_workflow_completed:
+    description: "Published when stamp workflow completes successfully"
+    topic: "${KAFKA_TOPIC_WORKFLOWS}"
+    schema: "ModelStampWorkflowEvent"
+    partition_key: "correlation_id"
+    priority: "high"
+    envelope_version: "v1"
+    schema_validation: true
+    payload_schema:
+      correlation_id:
+        type: "UUID"
+        required: true
+      stamp_id:
+        type: "UUID"
+        required: true
+      file_hash:
+        type: "string"
+        required: true
+      namespace:
+        type: "string"
+        required: true
+      execution_time_ms:
+        type: "integer"
+        required: true
+      timestamp:
+        type: "datetime"
+        required: true
+
+  stamp_workflow_failed:
+    description: "Published when stamp workflow fails"
+    topic: "${KAFKA_TOPIC_WORKFLOWS}"
+    schema: "ModelStampWorkflowEvent"
+    partition_key: "correlation_id"
+    priority: "critical"
+    envelope_version: "v1"
+    schema_validation: true
+    payload_schema:
+      correlation_id:
+        type: "UUID"
+        required: true
+      error:
+        type: "string"
+        required: true
+      error_code:
+        type: "string"
+        required: true
+      failed_step:
+        type: "string"
+        required: false
+      retry_count:
+        type: "integer"
+        required: false
+      timestamp:
+        type: "datetime"
+        required: true
+
+  # Stamp creation events
+  stamp_created:
+    description: "Published when metadata stamp is created"
+    topic: "${KAFKA_TOPIC_STAMPS}"
+    schema: "ModelStampCreatedEvent"
+    partition_key: "namespace"
+    priority: "normal"
+    envelope_version: "v1"
+    schema_validation: true
+    payload_schema:
+      stamp_id:
+        type: "UUID"
+        required: true
+      file_hash:
+        type: "string"
+        required: true
+      file_path:
+        type: "string"
+        required: true
+      file_size:
+        type: "integer"
+        required: true
+      content_type:
+        type: "string"
+        required: false
+      namespace:
+        type: "string"
+        required: true
+      op_id:
+        type: "UUID"
+        required: true
+      version:
+        type: "integer"
+        required: true
+        default: 1
+      timestamp:
+        type: "datetime"
+        required: true
+
+  # Intelligence analysis events
+  intelligence_analysis_requested:
+    description: "Published when OnexTree intelligence is requested"
+    topic: "${KAFKA_TOPIC_WORKFLOWS}"
+    schema: "ModelIntelligenceEvent"
+    partition_key: "correlation_id"
+    priority: "normal"
+    envelope_version: "v1"
+    schema_validation: true
+    payload_schema:
+      correlation_id:
+        type: "UUID"
+        required: true
+      file_path:
+        type: "string"
+        required: true
+      analysis_type:
+        type: "string"
+        required: true
+      timestamp:
+        type: "datetime"
+        required: true
+
+  intelligence_analysis_completed:
+    description: "Published when OnexTree intelligence analysis completes"
+    topic: "${KAFKA_TOPIC_WORKFLOWS}"
+    schema: "ModelIntelligenceEvent"
+    partition_key: "correlation_id"
+    priority: "normal"
+    envelope_version: "v1"
+    schema_validation: true
+    payload_schema:
+      correlation_id:
+        type: "UUID"
+        required: true
+      analysis_result:
+        type: "object"
+        required: true
+      confidence_score:
+        type: "float"
+        required: false
+      timestamp:
+        type: "datetime"
+        required: true
+
+# === ONEX ENVELOPE FORMAT ===
+envelope:
+  # Use OnexEnvelopeV1 format
+  format: "OnexEnvelopeV1"
+
+  # Envelope fields
+  fields:
+    envelope_version:
+      type: "string"
+      default: "v1"
+      required: true
+
+    event_type:
+      type: "string"
+      required: true
+
+    correlation_id:
+      type: "UUID"
+      required: true
+
+    timestamp:
+      type: "datetime"
+      required: true
+
+    source_service:
+      type: "string"
+      default: "bridge_orchestrator"
+      required: true
+
+    source_version:
+      type: "string"
+      default: "1.0.0"
+      required: true
+
+    trace_id:
+      type: "UUID"
+      required: false
+
+    span_id:
+      type: "UUID"
+      required: false
+
+    payload:
+      type: "object"
+      required: true
+
+    metadata:
+      type: "object"
+      required: false
+
+# === PARTITIONING STRATEGY ===
+partitioning:
+  # Default partitioning strategy
+  default_strategy: "hash"  # Options: hash, round_robin, custom
+
+  # Event-specific partitioning
+  event_strategies:
+    stamp_workflow_started:
+      strategy: "hash"
+      key: "correlation_id"
+
+    stamp_workflow_completed:
+      strategy: "hash"
+      key: "correlation_id"
+
+    stamp_workflow_failed:
+      strategy: "hash"
+      key: "correlation_id"
+
+    stamp_created:
+      strategy: "hash"
+      key: "namespace"
+
+# === SERIALIZATION ===
+serialization:
+  # Serialization format
+  format: "json"  # Options: json, avro, protobuf
+
+  # Schema registry integration
+  schema_registry:
+    enabled: false
+    url: "${KAFKA_SCHEMA_REGISTRY_URL}"
+
+  # JSON serialization options
+  json:
+    ensure_ascii: false
+    indent: null  # Compact JSON
+    sort_keys: false
+
+# === ERROR HANDLING ===
+error_handling:
+  # On serialization error
+  on_serialization_error: "log_and_skip"  # Options: log_and_skip, retry, fail
+
+  # On publishing error
+  on_publish_error: "retry"  # Options: retry, log_and_skip, fail, dead_letter
+
+  # Dead letter queue
+  dead_letter_queue:
+    enabled: true
+    topic: "${KAFKA_TOPIC_ERRORS}"
+
+# === RETRY POLICY ===
+retry_policy:
+  # Maximum retry attempts
+  max_retries: 3
+
+  # Backoff strategy
+  backoff_strategy: "exponential"
+
+  # Backoff configuration
+  backoff:
+    initial_ms: 100
+    multiplier: 2.0
+    max_ms: 5000
+
+  # Retry on errors
+  retry_on_errors:
+    - "NetworkError"
+    - "TimeoutError"
+    - "BrokerNotAvailable"
+    - "LeaderNotAvailable"
+
+# === MONITORING & METRICS ===
+monitoring:
+  # Emit publishing metrics
+  emit_metrics: true
+
+  # Metrics to track
+  metrics:
+    - "events_published_total"
+    - "events_published_by_type"
+    - "publishing_latency_ms"
+    - "publishing_errors_total"
+    - "serialization_time_ms"
+
+  # Logging configuration
+  logging:
+    log_published_events: true
+    log_level: "INFO"
+    log_payload: false  # Don't log payload in production
+
+# === BATCHING ===
+batching:
+  # Enable event batching
+  enabled: true
+
+  # Batch configuration
+  max_batch_size: 100
+  max_batch_wait_ms: 100
+
+  # Batch by event type
+  batch_by_event_type: true
+
+# === VALIDATION ===
+validation:
+  # Schema validation
+  schema_validation:
+    enabled: true
+    strict: true  # Fail on schema violations
+
+  # Pre-publish checks
+  pre_publish_checks:
+    - check: "validate_schema"
+      required: true
+    - check: "validate_envelope"
+      required: true
+    - check: "validate_partition_key"
+      required: true
+
+  # Post-publish checks
+  post_publish_checks:
+    - check: "confirm_delivery"
+      required: true
+      timeout_ms: 5000
+
+# === ORDERING GUARANTEES ===
+ordering:
+  # Guarantee ordering per partition key
+  guarantee_ordering: true
+
+  # Ordering strategy
+  strategy: "partition_key"  # Options: partition_key, global, none
