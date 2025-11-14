@@ -1,0 +1,249 @@
+# NodeOmniInfraOrchestrator Contract - LlamaIndex Workflow Orchestration
+# Coordinates infrastructure operations using LlamaIndex workflows
+
+contract_version: {major: 1, minor: 0, patch: 0}
+node_name: "omni_infra_orchestrator"
+node_version: {major: 1, minor: 0, patch: 0}
+contract_name: "omni_infra_orchestrator_contract"
+description: "Infrastructure workflow orchestrator using LlamaIndex workflows"
+node_type: "ORCHESTRATOR"
+name: "omni_infra_orchestrator"
+version: {major: 1, minor: 0, patch: 0}
+input_model: "ModelOmniInfraOrchestratorInput"
+output_model: "ModelOmniInfraOrchestratorOutput"
+
+# Metadata
+uuid: "omni-infra-orchestrator-uuid-v1"
+created_at: "2025-11-14T12:00:00Z"
+last_modified_at: "2025-11-14T12:00:00Z"
+hash: "sha256:orchestrator-v1"
+entrypoint: "omnibase_infra.nodes.omni_infra_orchestrator.v1_0_0.node:NodeOmniInfraOrchestrator"
+namespace: "omnibase_infra.infrastructure"
+author: "ONEX"
+
+# Node Specification
+node_specification:
+  node_name: "omni_infra_orchestrator"
+  version: {major: 1, minor: 0, patch: 0}
+  description: "Infrastructure workflow orchestrator - LlamaIndex workflows"
+  main_node_class: "NodeOmniInfraOrchestrator"
+  container_injection: "ONEXContainer"
+  business_logic_pattern: "orchestrator"
+  workflow_engine: "llamaindex"  # LlamaIndex workflows
+
+# Capabilities
+capabilities:
+  - name: "health_check_orchestration"
+    description: "Coordinate health checks across all infrastructure nodes"
+    workflow: "health_check_workflow"
+
+  - name: "failover_coordination"
+    description: "Coordinate service failover and recovery"
+    workflow: "failover_workflow"
+
+  - name: "initialization_sequence"
+    description: "Orchestrate initialization of all infrastructure adapters"
+    workflow: "initialization_workflow"
+
+  - name: "intent_processing"
+    description: "Process intents from reducer and trigger workflows"
+    workflow: "intent_processing_workflow"
+
+# Dependencies
+dependencies:
+  # Event bus for intent consumption
+  - name: "protocol_event_bus"
+    type: "protocol"
+    class_name: "ProtocolEventBus"
+    module: "omnibase_core.protocol.protocol_event_bus"
+
+  # Reducer for state queries
+  - name: "omni_infra_reducer"
+    type: "node"
+    class_name: "NodeOmniInfraReducer"
+    module: "omnibase_infra.nodes.omni_infra_reducer.v1_0_0.node"
+
+  # Infrastructure adapters
+  - name: "postgres_adapter"
+    type: "node"
+    class_name: "NodePostgresAdapterEffect"
+    module: "omnibase_infra.nodes.postgres_adapter.v1_0_0.node"
+
+  - name: "kafka_adapter"
+    type: "node"
+    class_name: "NodeKafkaAdapterEffect"
+    module: "omnibase_infra.nodes.kafka_adapter.v1_0_0.node"
+
+  - name: "consul_adapter"
+    type: "node"
+    class_name: "NodeConsulAdapterEffect"
+    module: "omnibase_infra.nodes.consul_adapter.v1_0_0.node"
+
+# LlamaIndex Workflows (Declared in Contract)
+workflows:
+  # Health Check Orchestration Workflow
+  health_check_workflow:
+    name: "HealthCheckOrchestrationWorkflow"
+    description: "Coordinate health checks across all infrastructure adapters"
+    trigger: "health_check_requested"
+
+    steps:
+      - step: "query_adapter_states"
+        action: "query_reducer_for_adapter_states"
+        output: "adapter_states"
+
+      - step: "trigger_health_checks"
+        action: "parallel_health_check_all_adapters"
+        depends_on: ["query_adapter_states"]
+        output: "health_check_results"
+
+      - step: "aggregate_results"
+        action: "aggregate_health_check_results"
+        depends_on: ["trigger_health_checks"]
+        output: "overall_health_status"
+
+      - step: "emit_health_report"
+        action: "publish_health_report_event"
+        depends_on: ["aggregate_results"]
+        output: "health_report_published"
+
+  # Failover Coordination Workflow
+  failover_workflow:
+    name: "FailoverCoordinationWorkflow"
+    description: "Coordinate service failover when adapter becomes unhealthy"
+    trigger: "failover_required_intent"
+
+    steps:
+      - step: "identify_failed_adapter"
+        action: "query_reducer_for_failed_adapter"
+        output: "failed_adapter_info"
+
+      - step: "initiate_circuit_breaker"
+        action: "trigger_circuit_breaker_open"
+        depends_on: ["identify_failed_adapter"]
+        output: "circuit_breaker_opened"
+
+      - step: "attempt_recovery"
+        action: "trigger_adapter_recovery_sequence"
+        depends_on: ["initiate_circuit_breaker"]
+        output: "recovery_initiated"
+
+      - step: "monitor_recovery"
+        action: "poll_adapter_health_until_recovered"
+        depends_on: ["attempt_recovery"]
+        output: "recovery_status"
+
+      - step: "close_circuit_breaker"
+        action: "trigger_circuit_breaker_close_if_recovered"
+        depends_on: ["monitor_recovery"]
+        output: "circuit_breaker_closed"
+
+  # Initialization Sequence Workflow
+  initialization_workflow:
+    name: "InitializationSequenceWorkflow"
+    description: "Orchestrate initialization of all infrastructure adapters"
+    trigger: "infrastructure_initialization_requested"
+
+    steps:
+      - step: "initialize_postgres"
+        action: "call_postgres_adapter_initialize"
+        output: "postgres_initialized"
+
+      - step: "initialize_kafka"
+        action: "call_kafka_adapter_initialize"
+        depends_on: ["initialize_postgres"]
+        output: "kafka_initialized"
+
+      - step: "initialize_consul"
+        action: "call_consul_adapter_initialize"
+        depends_on: ["initialize_kafka"]
+        output: "consul_initialized"
+
+      - step: "verify_all_adapters"
+        action: "run_health_check_workflow"
+        depends_on: ["initialize_consul"]
+        output: "all_adapters_verified"
+
+  # Intent Processing Workflow
+  intent_processing_workflow:
+    name: "IntentProcessingWorkflow"
+    description: "Process intents from reducer and trigger appropriate workflows"
+    trigger: "intent_received_from_reducer"
+
+    steps:
+      - step: "parse_intent"
+        action: "extract_intent_type_and_data"
+        output: "intent_details"
+
+      - step: "route_intent"
+        action: "route_to_appropriate_workflow"
+        depends_on: ["parse_intent"]
+        output: "workflow_triggered"
+
+# Intent Consumption (Orchestrator consumes intents from reducer)
+intent_consumption:
+  subscribed_intents:
+    - "infrastructure_health_degraded"
+    - "infrastructure_health_critical"
+    - "circuit_breaker_opened"
+    - "connection_pool_exhausted"
+    - "failover_required"
+    - "recovery_initiated"
+
+  intent_routing_table:
+    infrastructure_health_degraded: "health_check_workflow"
+    infrastructure_health_critical: "health_check_workflow"
+    circuit_breaker_opened: "failover_workflow"
+    failover_required: "failover_workflow"
+    connection_pool_exhausted: "health_check_workflow"
+    recovery_initiated: "failover_workflow"
+
+# Definitions
+definitions:
+  models:
+    ModelOmniInfraOrchestratorInput:
+      type: "object"
+      description: "Input for orchestrator - intent or direct workflow trigger"
+      properties:
+        operation_type:
+          type: "string"
+          enum: ["process_intent", "trigger_workflow", "query_workflow_status"]
+          description: "Type of orchestration operation"
+        intent_type:
+          type: "string"
+          description: "Intent from reducer (if operation_type=process_intent)"
+        workflow_name:
+          type: "string"
+          description: "Workflow to trigger (if operation_type=trigger_workflow)"
+        workflow_params:
+          type: "object"
+          description: "Parameters for workflow execution"
+        correlation_id:
+          type: "string"
+          format: "uuid"
+        timestamp:
+          type: "number"
+      required: ["operation_type", "correlation_id", "timestamp"]
+
+    ModelOmniInfraOrchestratorOutput:
+      type: "object"
+      description: "Output from orchestrator - workflow execution result"
+      properties:
+        workflow_executed:
+          type: "boolean"
+          description: "Whether workflow was successfully executed"
+        workflow_name:
+          type: "string"
+          description: "Name of executed workflow"
+        workflow_result:
+          type: "object"
+          description: "Result data from workflow execution"
+        correlation_id:
+          type: "string"
+          format: "uuid"
+        timestamp:
+          type: "number"
+      required: ["workflow_executed", "correlation_id", "timestamp"]
+
+  schemas: {}
+  responses: {}

@@ -1,0 +1,369 @@
+# Kafka Connection Management Subcontract - Broker Pool Integration Pattern
+# This subcontract defines connection pooling and broker management patterns for Kafka adapter
+
+contract_type: "kafka_connection_management_subcontract"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+
+metadata:
+  name: "KafkaConnectionManagementSubcontract"
+  description: "Broker connection management and streaming operations integration pattern"
+  author: "ONEX Framework Team"
+  created: "2025-09-12"
+  purpose: "Define consistent broker connection management and streaming operation patterns"
+
+business_logic:
+  pattern: "broker_connection_management"
+  ai_agent:
+    capabilities: ["broker_pooling", "producer_management", "consumer_group_management", "streaming_monitoring"]
+    coordination_patterns: ["broker_pool_management", "client_lifecycle", "partition_management"]
+    performance_targets:
+      broker_connection_latency: "<20ms"
+      message_produce_latency: "<10ms"
+      consumer_lag_target: "<1000ms"
+      throughput_target: "10000 msgs/sec"
+
+# Broker Connection Strategy
+connection_strategy:
+  name: "KafkaBrokerConnectionStrategy"
+  description: "Enterprise-grade Kafka broker connection management with pooling and monitoring"
+
+  # Broker connection configuration
+  broker_configuration:
+    broker_connection_settings:
+      bootstrap_servers: "localhost:9092"
+      client_dns_lookup: "use_all_dns_ips"
+      reconnect_backoff_ms: 50
+      reconnect_backoff_max_ms: 1000
+      connection_max_idle_ms: 540000  # 9 minutes
+      request_timeout_ms: 30000       # 30 seconds
+      metadata_max_age_ms: 300000     # 5 minutes
+
+    broker_health_monitoring:
+      health_check_interval: "15s"
+      broker_availability_check: "metadata_request"
+      failed_broker_threshold: 3
+      broker_recovery_strategy: "automatic_failover"
+
+  # Producer management patterns
+  producer_patterns:
+    producer_pool_settings:
+      min_producers: 2
+      max_producers: 10
+      producer_reuse: true
+      producer_lifetime: "3600s"
+
+    producer_configurations:
+      high_throughput:
+        acks: "1"
+        batch_size: 65536
+        linger_ms: 5
+        compression_type: "lz4"
+        enable_idempotence: false
+
+      high_reliability:
+        acks: "all"
+        batch_size: 16384
+        linger_ms: 0
+        compression_type: "gzip"
+        enable_idempotence: true
+        retries: 10
+        max_in_flight_requests_per_connection: 1
+
+      balanced:
+        acks: "1"
+        batch_size: 32768
+        linger_ms: 1
+        compression_type: "snappy"
+        enable_idempotence: true
+
+  # Consumer management patterns
+  consumer_patterns:
+    consumer_group_settings:
+      session_timeout_ms: 10000
+      heartbeat_interval_ms: 3000
+      max_poll_interval_ms: 300000
+      max_poll_records: 500
+      auto_offset_reset: "latest"
+      enable_auto_commit: true
+      auto_commit_interval_ms: 5000
+
+    consumer_strategies:
+      batch_processing:
+        fetch_min_bytes: 1024
+        fetch_max_wait_ms: 500
+        max_partition_fetch_bytes: 1048576
+
+      streaming_processing:
+        fetch_min_bytes: 1
+        fetch_max_wait_ms: 100
+        max_partition_fetch_bytes: 65536
+
+      bulk_processing:
+        fetch_min_bytes: 65536
+        fetch_max_wait_ms: 1000
+        max_partition_fetch_bytes: 10485760  # 10MB
+
+# Streaming Operation Patterns
+streaming_patterns:
+  message_production:
+    synchronous_send:
+      timeout: "10s"
+      retry_attempts: 3
+      guarantee: "at_least_once"
+
+    asynchronous_send:
+      callback_enabled: true
+      future_timeout: "30s"
+      batch_optimization: true
+
+    transactional_send:
+      transaction_timeout_ms: 60000
+      isolation_level: "read_committed"
+      transactional_id_prefix: "kafka-adapter"
+
+  message_consumption:
+    poll_based_consumption:
+      poll_timeout_ms: 1000
+      max_records_per_poll: 500
+      commit_strategy: "auto"
+
+    streaming_consumption:
+      continuous_polling: true
+      backpressure_handling: true
+      offset_management: "manual"
+
+    batch_consumption:
+      batch_size: 1000
+      batch_timeout_ms: 5000
+      parallel_processing: true
+
+# Topic and Partition Management
+topic_management:
+  topic_operations:
+    topic_creation:
+      default_partitions: 3
+      default_replication_factor: 1
+      config_overrides_allowed: true
+      cleanup_policy: "delete"
+
+    topic_deletion:
+      soft_delete: false
+      validation_required: true
+      admin_approval: true
+
+    partition_management:
+      partition_expansion: true
+      partition_reassignment: false
+      replica_management: true
+
+  topic_monitoring:
+    partition_health_check:
+      under_replicated_detection: true
+      offline_partition_detection: true
+      leader_election_monitoring: true
+
+    topic_metrics:
+      - "messages_per_second"
+      - "bytes_per_second"
+      - "partition_count"
+      - "replica_health"
+
+# Client Lifecycle Management
+lifecycle_management:
+  producer_lifecycle:
+    initialization_strategy: "lazy_initialization"
+    cleanup_strategy: "graceful_shutdown"
+    resource_management: "automatic"
+
+  consumer_lifecycle:
+    group_coordination: "automatic_rebalancing"
+    partition_assignment: "range_assignor"
+    offset_management: "automatic_commits"
+
+  admin_client_lifecycle:
+    connection_pooling: true
+    operation_timeout: "30s"
+    retry_configuration: "exponential_backoff"
+
+# Health Check Integration
+health_integration:
+  broker_health:
+    connectivity_check:
+      method: "metadata_fetch"
+      timeout: "5s"
+      frequency: "30s"
+
+    cluster_health:
+      controller_availability: true
+      broker_availability: true
+      partition_leadership: true
+
+  client_health:
+    producer_health:
+      - "successful_sends_rate"
+      - "error_rate"
+      - "batch_size_avg"
+
+    consumer_health:
+      - "records_consumed_rate"
+      - "consumer_lag"
+      - "rebalance_frequency"
+
+  health_status_reporting:
+    status_levels:
+      - "healthy": "all_brokers_available_low_lag"
+      - "degraded": "some_brokers_unavailable_acceptable_lag"
+      - "unhealthy": "cluster_unavailable_high_lag"
+
+    health_metrics:
+      - "available_broker_count"
+      - "total_broker_count"
+      - "active_producer_count"
+      - "active_consumer_count"
+      - "average_consumer_lag"
+      - "message_throughput"
+
+# Error Handling and Recovery
+error_handling:
+  broker_connection_errors:
+    network_failures:
+      retry_strategy: "exponential_backoff"
+      max_retries: 5
+      backoff_multiplier: 2
+      recovery_action: "broker_discovery_refresh"
+
+    authentication_failures:
+      retry_strategy: "none"
+      alert_strategy: "immediate_security_alert"
+      recovery_action: "credential_refresh"
+
+    broker_unavailability:
+      detection: "metadata_request_failure"
+      mitigation: "automatic_failover"
+      fallback: "partition_reassignment"
+
+  streaming_errors:
+    producer_errors:
+      retriable_errors:
+        - "NETWORK_EXCEPTION"
+        - "LEADER_NOT_AVAILABLE"
+        - "NOT_ENOUGH_REPLICAS"
+      retry_strategy: "immediate_retry_with_backoff"
+
+      non_retriable_errors:
+        - "INVALID_TOPIC_EXCEPTION"
+        - "RECORD_TOO_LARGE"
+        - "AUTHORIZATION_FAILED"
+      handling: "immediate_failure_response"
+
+    consumer_errors:
+      offset_out_of_range:
+        handling: "auto_offset_reset_policy"
+        recovery: "seek_to_valid_offset"
+
+      rebalance_errors:
+        handling: "rejoin_consumer_group"
+        recovery: "partition_reassignment"
+
+# Performance Optimization
+performance_optimization:
+  throughput_optimization:
+    producer_batching: true
+    compression_enabled: true
+    pipeline_parallelism: true
+
+  latency_optimization:
+    producer_linger_ms: 1
+    consumer_fetch_min_bytes: 1
+    network_buffer_optimization: true
+
+  resource_optimization:
+    connection_pooling: true
+    client_reuse: true
+    memory_management: "gc_friendly"
+
+  monitoring_optimization:
+    metrics_aggregation: true
+    performance_baseline_tracking: true
+    auto_scaling_triggers: true
+
+# Security Integration
+security_integration:
+  broker_security:
+    ssl_encryption: true
+    sasl_authentication: "PLAIN"  # or SCRAM, OAuth
+    acl_enforcement: true
+
+  topic_security:
+    topic_level_permissions: true
+    consumer_group_permissions: true
+    producer_permissions: true
+
+  message_security:
+    message_encryption: false  # Can be enabled for sensitive topics
+    message_signing: false
+    audit_logging: true
+
+# Schema Management
+schema_management:
+  message_schema:
+    schema_validation: false  # Can integrate with Schema Registry
+    schema_evolution: true
+    compatibility_checking: false
+
+  serialization:
+    supported_formats:
+      - "json"
+      - "avro"
+      - "protobuf"
+      - "string"
+      - "binary"
+
+    default_serialization: "json"
+    custom_serializers: true
+
+# Observability
+observability:
+  metrics:
+    - "kafka.broker_connection_count"
+    - "kafka.producer_send_rate"
+    - "kafka.consumer_fetch_rate"
+    - "kafka.consumer_lag"
+    - "kafka.message_throughput"
+    - "kafka.error_rate"
+    - "kafka.partition_count"
+    - "kafka.rebalance_rate"
+
+  events:
+    - "broker_connected"
+    - "broker_disconnected"
+    - "producer_created"
+    - "consumer_group_rebalanced"
+    - "topic_created"
+    - "partition_assigned"
+    - "offset_committed"
+
+# Code Generation
+generation_targets:
+  python_runtime:
+    broker_managers: true
+    producer_pools: true
+    consumer_managers: true
+    admin_clients: true
+    health_checkers: true
+
+  configuration_templates:
+    broker_config: true
+    producer_config: true
+    consumer_config: true
+    security_settings: true
+    monitoring_config: true
+
+# Integration with Main Contract
+integration:
+  main_contract_field: "connection_management_configuration"
+  mapping_strategy: "dependency_injection"
+  backward_compatibility: true
