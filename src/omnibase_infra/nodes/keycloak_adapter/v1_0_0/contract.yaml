@@ -1,0 +1,238 @@
+name: "keycloak_adapter"
+contract_name: "keycloak_adapter"
+node_name: "keycloak_adapter"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+contract_version: "1.0.0"
+node_version: "1.0.0"
+
+node_type: "EFFECT"
+
+description: >
+  Keycloak authentication and user management adapter for SSO and identity management.
+  Message bus bridge pattern for Keycloak operations including authentication,
+  user management, role assignment, and token verification.
+
+capabilities:
+  - name: "authentication"
+    description: "User login, logout, and token refresh"
+  - name: "token_verification"
+    description: "Verify and validate JWT tokens"
+  - name: "user_management"
+    description: "Create, update, delete, and list users"
+  - name: "role_management"
+    description: "Assign and manage user roles"
+  - name: "group_management"
+    description: "Manage user groups and memberships"
+  - name: "health_monitoring"
+    description: "Monitor Keycloak health and availability"
+
+input_model: "ModelKeycloakAdapterInput"
+output_model: "ModelKeycloakAdapterOutput"
+
+io_operations:
+  - operation: "login"
+    description: "Authenticate user and obtain tokens"
+    input_fields:
+      - username
+      - password
+      - client_id
+      - realm
+    output_fields:
+      - access_token
+      - refresh_token
+      - expires_in
+
+  - operation: "logout"
+    description: "Logout user and invalidate session"
+    input_fields:
+      - token
+      - refresh_token
+      - client_id
+      - realm
+    output_fields:
+      - success
+
+  - operation: "refresh_token"
+    description: "Refresh access token using refresh token"
+    input_fields:
+      - refresh_token
+      - client_id
+      - realm
+    output_fields:
+      - access_token
+      - refresh_token
+      - expires_in
+
+  - operation: "verify_token"
+    description: "Verify and decode JWT token"
+    input_fields:
+      - token
+      - client_id
+      - realm
+    output_fields:
+      - valid
+      - user_id
+      - username
+      - roles
+
+  - operation: "create_user"
+    description: "Create new user account"
+    input_fields:
+      - username
+      - email
+      - first_name
+      - last_name
+      - password
+      - realm
+    output_fields:
+      - user_id
+      - success
+
+  - operation: "get_user"
+    description: "Get user details"
+    input_fields:
+      - user_id
+      - realm
+    output_fields:
+      - user_data
+
+  - operation: "update_user"
+    description: "Update user details"
+    input_fields:
+      - user_id
+      - username
+      - email
+      - realm
+    output_fields:
+      - success
+
+  - operation: "delete_user"
+    description: "Delete user account"
+    input_fields:
+      - user_id
+      - realm
+    output_fields:
+      - success
+
+  - operation: "assign_roles"
+    description: "Assign roles to user"
+    input_fields:
+      - user_id
+      - roles
+      - realm
+    output_fields:
+      - success
+
+  - operation: "health_check"
+    description: "Check Keycloak health status"
+    input_fields: []
+    output_fields:
+      - healthy
+      - version
+      - uptime
+
+dependencies:
+  - name: "protocol_event_bus"
+    type: "protocol"
+    class_name: "ProtocolEventBus"
+    module: "omnibase_spi.protocols.event_bus"
+
+  - name: "protocol_http_client"
+    type: "protocol"
+    class_name: "ProtocolHttpClient"
+    module: "omnibase_spi.protocols.core"
+
+  - name: "model_keycloak_auth_request"
+    type: "model"
+    class_name: "ModelKeycloakAuthRequest"
+    module: "omnibase_infra.models.keycloak.model_keycloak_auth_request"
+
+  - name: "model_keycloak_auth_response"
+    type: "model"
+    class_name: "ModelKeycloakAuthResponse"
+    module: "omnibase_infra.models.keycloak.model_keycloak_auth_response"
+
+  - name: "model_keycloak_user_request"
+    type: "model"
+    class_name: "ModelKeycloakUserRequest"
+    module: "omnibase_infra.models.keycloak.model_keycloak_user_request"
+
+definitions:
+  ModelKeycloakAdapterInput:
+    type: object
+    description: "Input model for Keycloak adapter operations"
+    properties:
+      operation:
+        type: string
+        description: "Operation to perform (login, logout, etc.)"
+      username:
+        type: string
+        description: "Username for authentication"
+      password:
+        type: string
+        description: "Password for authentication"
+      token:
+        type: string
+        description: "Access or refresh token"
+      client_id:
+        type: string
+        description: "Keycloak client ID"
+      realm:
+        type: string
+        description: "Keycloak realm"
+      correlation_id:
+        type: string
+        description: "Request correlation ID"
+    required:
+      - operation
+      - client_id
+      - realm
+      - correlation_id
+
+  ModelKeycloakAdapterOutput:
+    type: object
+    description: "Output model for Keycloak adapter operations"
+    properties:
+      success:
+        type: boolean
+        description: "Whether operation succeeded"
+      access_token:
+        type: string
+        description: "JWT access token"
+      refresh_token:
+        type: string
+        description: "Refresh token"
+      user_id:
+        type: string
+        description: "User ID"
+      username:
+        type: string
+        description: "Username"
+      roles:
+        type: array
+        items:
+          type: string
+        description: "User roles"
+      error:
+        type: string
+        description: "Error message if failed"
+      correlation_id:
+        type: string
+        description: "Request correlation ID"
+    required:
+      - success
+      - correlation_id
+
+metadata:
+  author: "ONEX Infrastructure Team"
+  created: "2025-11-14"
+  tags:
+    - keycloak
+    - authentication
+    - sso
+    - identity
+    - adapter
+    - effect

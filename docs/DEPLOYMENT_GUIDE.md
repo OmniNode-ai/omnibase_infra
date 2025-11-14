@@ -43,19 +43,31 @@ This guide covers deploying the complete OmniBase infrastructure stack with all 
    - Service registration/deregistration
    - Health check coordination
 
+6. **HashiCorp Vault Adapter** (port 8085)
+   - Secret management and encryption services
+   - Dynamic secrets generation
+   - Token lifecycle management
+   - Transit encryption engine
+
+7. **Keycloak Adapter** (port 8086)
+   - Identity and access management (IAM)
+   - Single sign-on (SSO) integration
+   - User authentication and authorization
+   - JWT token management
+
 ### Optional Services
 
-6. **RedPanda UI** (port 8080, dev profile)
+8. **RedPanda UI** (port 8080, dev profile)
    - Web interface for topic management
    - Message inspection and debugging
 
-7. **Kafka Adapter** (port 8083)
+9. **Kafka Adapter** (port 8083)
    - Event streaming coordination
    - Producer pool management
 
-8. **Hook Node** (port 8084)
-   - Webhook notifications (Slack, Discord, etc.)
-   - Infrastructure alerting
+10. **Hook Node** (port 8084)
+    - Webhook notifications (Slack, Discord, etc.)
+    - Infrastructure alerting
 
 ---
 
@@ -81,6 +93,9 @@ nano .env
 ```bash
 POSTGRES_PASSWORD=your_secure_password
 GITHUB_TOKEN=ghp_your_github_token
+VAULT_DEV_ROOT_TOKEN=dev-root-token-change-in-production
+KEYCLOAK_ADMIN_PASSWORD=admin_password_change_in_production
+KEYCLOAK_DB_PASSWORD=keycloak_db_password_change_in_production
 ```
 
 ### 2. Start Infrastructure
@@ -103,6 +118,10 @@ docker-compose -f docker-compose.infrastructure.yml ps
 curl http://localhost:8500/v1/agent/health/service/name/consul  # Consul
 curl http://localhost:8081/health                               # PostgreSQL Adapter
 curl http://localhost:8082/health                               # Consul Adapter
+curl http://localhost:8085/health                               # Vault Adapter
+curl http://localhost:8086/health                               # Keycloak Adapter
+curl http://localhost:8200/v1/sys/health                        # Vault
+curl http://localhost:8180/health/ready                         # Keycloak
 ```
 
 ---
@@ -182,6 +201,78 @@ CONSUL_ADAPTER_PORT=8082            # Adapter port
 - API: http://localhost:8500/v1/
 - DNS: localhost:8600
 
+### Vault Configuration
+
+**Environment Variables:**
+```bash
+VAULT_PORT=8200                         # HTTP API
+VAULT_DEV_ROOT_TOKEN=dev-root-token     # Development root token (CHANGE IN PRODUCTION!)
+VAULT_NAMESPACE=                        # Vault namespace (Enterprise feature)
+VAULT_ADAPTER_PORT=8085                 # Adapter port
+```
+
+**Access:**
+- UI: http://localhost:8200/ui
+- API: http://localhost:8200/v1/
+
+**Important Notes:**
+- Running in **dev mode** for local development
+- Dev mode stores data in-memory (lost on restart)
+- For production: Use proper storage backend and unseal keys
+- Never use dev root token in production
+
+**Common Operations:**
+```bash
+# Check Vault status
+docker exec omnibase-infra-vault vault status
+
+# List secrets engines
+docker exec omnibase-infra-vault vault secrets list
+
+# Write a secret
+docker exec omnibase-infra-vault vault kv put secret/myapp/config username=admin password=secret
+
+# Read a secret
+docker exec omnibase-infra-vault vault kv get secret/myapp/config
+```
+
+### Keycloak Configuration
+
+**Environment Variables:**
+```bash
+KEYCLOAK_PORT=8180                      # HTTP port
+KEYCLOAK_ADMIN_USER=admin               # Admin username
+KEYCLOAK_ADMIN_PASSWORD=admin_password  # Admin password (CHANGE IN PRODUCTION!)
+KEYCLOAK_DB_PASSWORD=keycloak_db_pass   # Database password (CHANGE IN PRODUCTION!)
+KEYCLOAK_REALM=master                   # Default realm
+KEYCLOAK_CLIENT_ID=omnibase-infrastructure  # Client ID for adapters
+KEYCLOAK_CLIENT_SECRET=client_secret    # Client secret
+KEYCLOAK_ADAPTER_PORT=8086              # Adapter port
+```
+
+**Access:**
+- Admin Console: http://localhost:8180/admin
+- Account Console: http://localhost:8180/realms/master/account
+- API: http://localhost:8180
+
+**Important Notes:**
+- Running in **development mode** (start-dev)
+- Uses dedicated PostgreSQL database (keycloak-postgres)
+- Default admin credentials should be changed immediately
+- For production: Enable HTTPS and configure proper hostname
+
+**Common Operations:**
+```bash
+# Access Keycloak admin CLI
+docker exec -it omnibase-infra-keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin
+
+# Create a new realm
+docker exec omnibase-infra-keycloak /opt/keycloak/bin/kcadm.sh create realms -s realm=myrealm -s enabled=true
+
+# List users in realm
+docker exec omnibase-infra-keycloak /opt/keycloak/bin/kcadm.sh get users -r master
+```
+
 ---
 
 ## 🔧 Service Management
@@ -257,6 +348,21 @@ docker exec omnibase-infra-consul consul members
 ```bash
 curl http://localhost:8081/health  # PostgreSQL Adapter
 curl http://localhost:8082/health  # Consul Adapter
+curl http://localhost:8085/health  # Vault Adapter
+curl http://localhost:8086/health  # Keycloak Adapter
+```
+
+### Vault
+```bash
+docker exec omnibase-infra-vault vault status
+curl http://localhost:8200/v1/sys/health
+```
+
+### Keycloak
+```bash
+curl http://localhost:8180/health/ready
+curl http://localhost:8180/health/live
+docker exec omnibase-infra-keycloak curl -f http://localhost:8080/health/ready
 ```
 
 ---
@@ -474,6 +580,9 @@ docker-compose -f docker-compose.infrastructure.yml up -d
 - [ ] Copy `.env.example` to `.env`
 - [ ] Set `GITHUB_TOKEN` in `.env`
 - [ ] Set `POSTGRES_PASSWORD` in `.env`
+- [ ] Set `VAULT_DEV_ROOT_TOKEN` in `.env`
+- [ ] Set `KEYCLOAK_ADMIN_PASSWORD` in `.env`
+- [ ] Set `KEYCLOAK_DB_PASSWORD` in `.env`
 - [ ] Review and adjust port configurations
 - [ ] Run `./start-infrastructure.sh`
 - [ ] Verify all services are healthy
@@ -481,10 +590,14 @@ docker-compose -f docker-compose.infrastructure.yml up -d
 - [ ] Verify topics are created in RedPanda
 - [ ] Test database connection
 - [ ] Test Consul service discovery
+- [ ] Test Vault secret operations
+- [ ] Test Keycloak authentication
 - [ ] Review logs for any errors
 - [ ] Set up monitoring/alerting (production)
 - [ ] Configure backups (production)
 - [ ] Enable TLS/SSL (production)
+- [ ] Rotate Vault dev token (production)
+- [ ] Configure Keycloak realms and clients (production)
 
 ---
 

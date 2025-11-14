@@ -1,0 +1,176 @@
+name: "vault_adapter"
+contract_name: "vault_adapter"
+node_name: "vault_adapter"
+version:
+  major: 1
+  minor: 0
+  patch: 0
+contract_version: "1.0.0"
+node_version: "1.0.0"
+
+node_type: "EFFECT"
+
+description: >
+  HashiCorp Vault secret management adapter for secure credential storage and retrieval.
+  Message bus bridge pattern for Vault operations including secret management,
+  token operations, and encryption services.
+
+capabilities:
+  - name: "secret_management"
+    description: "Read, write, delete, and list secrets in Vault"
+  - name: "token_management"
+    description: "Create, renew, revoke, and lookup Vault tokens"
+  - name: "encryption_services"
+    description: "Encrypt and decrypt data using Vault transit engine"
+  - name: "lease_management"
+    description: "Manage secret leases and renewals"
+  - name: "health_monitoring"
+    description: "Monitor Vault health and seal status"
+
+input_model: "ModelVaultAdapterInput"
+output_model: "ModelVaultAdapterOutput"
+
+io_operations:
+  - operation: "get_secret"
+    description: "Retrieve secret from Vault"
+    input_fields:
+      - path
+      - version
+      - mount_path
+    output_fields:
+      - data
+      - metadata
+      - version
+
+  - operation: "set_secret"
+    description: "Store secret in Vault"
+    input_fields:
+      - path
+      - data
+      - mount_path
+    output_fields:
+      - version
+      - created_time
+
+  - operation: "delete_secret"
+    description: "Delete secret from Vault"
+    input_fields:
+      - path
+      - mount_path
+    output_fields:
+      - success
+
+  - operation: "list_secrets"
+    description: "List secrets at path"
+    input_fields:
+      - path
+      - mount_path
+    output_fields:
+      - keys
+
+  - operation: "create_token"
+    description: "Create new Vault token"
+    input_fields:
+      - policies
+      - ttl
+      - renewable
+    output_fields:
+      - token
+      - accessor
+
+  - operation: "renew_token"
+    description: "Renew existing token"
+    input_fields:
+      - token
+      - increment
+    output_fields:
+      - lease_duration
+
+  - operation: "health_check"
+    description: "Check Vault health and seal status"
+    input_fields: []
+    output_fields:
+      - initialized
+      - sealed
+      - standby
+      - version
+
+dependencies:
+  - name: "protocol_event_bus"
+    type: "protocol"
+    class_name: "ProtocolEventBus"
+    module: "omnibase_spi.protocols.event_bus"
+
+  - name: "protocol_http_client"
+    type: "protocol"
+    class_name: "ProtocolHttpClient"
+    module: "omnibase_spi.protocols.core"
+
+  - name: "model_vault_secret_request"
+    type: "model"
+    class_name: "ModelVaultSecretRequest"
+    module: "omnibase_infra.models.vault.model_vault_secret_request"
+
+  - name: "model_vault_secret_response"
+    type: "model"
+    class_name: "ModelVaultSecretResponse"
+    module: "omnibase_infra.models.vault.model_vault_secret_response"
+
+  - name: "model_vault_token_request"
+    type: "model"
+    class_name: "ModelVaultTokenRequest"
+    module: "omnibase_infra.models.vault.model_vault_token_request"
+
+definitions:
+  ModelVaultAdapterInput:
+    type: object
+    description: "Input model for Vault adapter operations"
+    properties:
+      operation:
+        type: string
+        description: "Operation to perform (get_secret, set_secret, etc.)"
+      path:
+        type: string
+        description: "Vault secret path"
+      data:
+        type: object
+        description: "Secret data for write operations"
+      token:
+        type: string
+        description: "Vault token for operations"
+      correlation_id:
+        type: string
+        description: "Request correlation ID"
+    required:
+      - operation
+      - correlation_id
+
+  ModelVaultAdapterOutput:
+    type: object
+    description: "Output model for Vault adapter operations"
+    properties:
+      success:
+        type: boolean
+        description: "Whether operation succeeded"
+      data:
+        type: object
+        description: "Response data"
+      error:
+        type: string
+        description: "Error message if failed"
+      correlation_id:
+        type: string
+        description: "Request correlation ID"
+    required:
+      - success
+      - correlation_id
+
+metadata:
+  author: "ONEX Infrastructure Team"
+  created: "2025-11-14"
+  tags:
+    - vault
+    - secrets
+    - security
+    - adapter
+    - effect
