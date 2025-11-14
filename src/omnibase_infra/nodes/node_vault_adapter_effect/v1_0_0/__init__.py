@@ -1,10 +1,10 @@
 """Vault adapter node package."""
 
 from .models import ModelVaultAdapterInput, ModelVaultAdapterOutput
-from .node import NodeInfrastructureVaultAdapterEffect
+from .node import NodeVaultAdapterEffect
 
 __all__ = [
-    "NodeInfrastructureVaultAdapterEffect",
+    "NodeVaultAdapterEffect",
     "ModelVaultAdapterInput",
     "ModelVaultAdapterOutput",
 ]

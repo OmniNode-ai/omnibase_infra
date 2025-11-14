@@ -309,7 +309,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    command: ["python", "-m", "omnibase_infra.nodes.vault_adapter.v1_0_0.node"]
+    command: ["python", "-m", "omnibase_infra.nodes.node_vault_adapter_effect.v1_0_0.node"]
 
   # Keycloak PostgreSQL Database
   keycloak-postgres:
@@ -398,7 +398,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    command: ["python", "-m", "omnibase_infra.nodes.keycloak_adapter.v1_0_0.node"]
+    command: ["python", "-m", "omnibase_infra.nodes.node_keycloak_adapter_effect.v1_0_0.node"]
 
 secrets:
   github_token:

@@ -307,7 +307,7 @@ class VaultConnectionPool:
         self._failed_connections.clear()
 
 
-class NodeInfrastructureVaultAdapterEffect(NodeEffectService):
+class NodeVaultAdapterEffect(NodeEffectService):
     """
     Vault Adapter - Event-Driven Secret Management Effect
 
@@ -695,7 +695,7 @@ if __name__ == "__main__":
     container = ModelONEXContainer()
 
     # Create and run the node
-    node = NodeInfrastructureVaultAdapterEffect(container)
+    node = NodeVaultAdapterEffect(container)
 
     # Run the node with asyncio
     try:

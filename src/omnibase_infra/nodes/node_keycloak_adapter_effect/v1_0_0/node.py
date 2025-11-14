@@ -308,7 +308,7 @@ class KeycloakConnectionPool:
         self._failed_connections.clear()
 
 
-class NodeInfrastructureKeycloakAdapterEffect(NodeEffectService):
+class NodeKeycloakAdapterEffect(NodeEffectService):
     """
     Keycloak Adapter - Event-Driven Identity and Access Management Effect
 
@@ -789,7 +789,7 @@ if __name__ == "__main__":
     container = ModelONEXContainer()
 
     # Create and run the node
-    node = NodeInfrastructureKeycloakAdapterEffect(container)
+    node = NodeKeycloakAdapterEffect(container)
 
     # Run the node with asyncio
     try:

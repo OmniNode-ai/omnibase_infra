@@ -1,10 +1,10 @@
 """Keycloak adapter node package."""
 
 from .models import ModelKeycloakAdapterInput, ModelKeycloakAdapterOutput
-from .node import NodeInfrastructureKeycloakAdapterEffect
+from .node import NodeKeycloakAdapterEffect
 
 __all__ = [
-    "NodeInfrastructureKeycloakAdapterEffect",
+    "NodeKeycloakAdapterEffect",
     "ModelKeycloakAdapterInput",
     "ModelKeycloakAdapterOutput",
 ]
