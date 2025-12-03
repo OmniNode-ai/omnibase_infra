@@ -1,0 +1,218 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  POETRY_VERSION: "2.2.1"
+  PYTHON_VERSION: "3.12"
+  CACHE_VERSION: "0.1.0"
+
+jobs:
+  # Quick smoke test - fails fast on basic issues
+  smoke-test:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: >-
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}- ${{ hashFiles('**/poetry.lock') }}- ${{ env.CACHE_VERSION }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}-${{ env.CACHE_VERSION }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: |
+          poetry install --no-interaction --no-root || {
+            echo "Dependency install failed"
+            exit 1
+          }
+
+      - name: Install project
+        run: |
+          poetry install --no-interaction || {
+            echo "Project install failed"
+            exit 1
+          }
+
+      - name: Run smoke tests
+        run: |
+          poetry run pytest tests/unit \
+            --maxfail=5 \
+            -x \
+            --tb=short \
+            -m "smoke or not slow"
+
+  # Full test suite
+  test:
+    name: Full Tests
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: >-
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}- ${{ hashFiles('**/poetry.lock') }}- ${{ env.CACHE_VERSION }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}-${{ env.CACHE_VERSION }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: |
+          poetry install --no-interaction --no-root || {
+            echo "Dependency install failed"
+            exit 1
+          }
+
+      - name: Install project
+        run: |
+          poetry install --no-interaction || {
+            echo "Project install failed"
+            exit 1
+          }
+
+      - name: Run full test suite
+        run: |
+          poetry run pytest tests/ \
+            -n auto \
+            --timeout=60 \
+            --timeout-method=thread \
+            --tb=short \
+            --junitxml=junit.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: junit.xml
+          retention-days: 7
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: >-
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}- ${{ hashFiles('**/poetry.lock') }}- ${{ env.CACHE_VERSION }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}-${{ env.CACHE_VERSION }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      - name: Install project
+        run: poetry install --no-interaction
+
+      - name: Check Black formatting
+        run: poetry run black --check src/ tests/
+
+      - name: Check isort import sorting
+        run: poetry run isort --check-only src/ tests/
+
+      - name: Run ruff linting
+        run: poetry run ruff check src/ tests/
+
+      - name: Run mypy type checking
+        run: poetry run mypy src/omnibase_infra
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [smoke-test, test, lint]
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          smoke="${{ needs.smoke-test.result }}"
+          test="${{ needs.test.result }}"
+          lint="${{ needs.lint.result }}"
+
+          if [[ "$smoke" == "success" ]] && \
+             [[ "$test" == "success" ]] && \
+             [[ "$lint" == "success" ]]; then
+            echo "All tests passed successfully"
+            echo "Smoke Tests: Passed"
+            echo "Full Tests: Passed"
+            echo "Code Quality: Passed"
+            exit 0
+          else
+            echo "Tests failed"
+            echo "Smoke Tests: $smoke"
+            echo "Full Tests: $test"
+            echo "Lint: $lint"
+            exit 1
+          fi
