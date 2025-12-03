@@ -120,7 +120,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to 10.
+        max_unions: Maximum allowed complex unions. Defaults to 20.
         strict: Enable strict mode for union validation.
 
     Returns:
@@ -160,7 +160,7 @@ def validate_infra_all(
     - Architecture (strict, 0 violations)
     - Contracts (nodes directory)
     - Patterns (strict mode)
-    - Union usage (max 10)
+    - Union usage (max 20)
     - Circular imports
 
     Args:

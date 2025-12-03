@@ -127,10 +127,10 @@ def run_imports(verbose: bool = False) -> bool:
     except ImportError as e:
         print(f"Skipping circular import check: {e}")
         return True
-    except Exception as e:
+    except (AttributeError, RuntimeError, OSError) as e:
         # CircularImportValidator may fail on incomplete codebases
-        if verbose:
-            print(f"Imports: SKIP (error: {e})")
+        # Always log to avoid hiding bugs
+        print(f"Imports: SKIP (error: {e})")
         return True
 
 

@@ -246,7 +246,7 @@ target-version = ['py312']
 profile = "black"
 line_length = 88
 multi_line_output = 3
-known_first_party = ["omnibase_infra", "omnibase_core", "omnibase_spi"]
+known_first_party = ["omnibase_infra"]
 extend_skip = [
     "archived", "archive",
 ]

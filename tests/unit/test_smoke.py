@@ -44,45 +44,24 @@ def test_validation_module_import() -> None:
 
 
 @pytest.mark.smoke
-def test_errors_module_structure() -> None:
-    """Verify errors module exists and is structured correctly."""
-    from omnibase_infra import errors
-
-    assert errors is not None
-
-
-@pytest.mark.smoke
-def test_event_bus_module_structure() -> None:
-    """Verify event_bus module exists and has expected structure."""
-    from omnibase_infra import event_bus
-
-    assert event_bus is not None
-    assert hasattr(event_bus, "__all__")
-
-
-@pytest.mark.smoke
 def test_submodule_structure() -> None:
-    """Verify all expected submodules can be imported."""
+    """Verify all committed submodules can be imported."""
     from omnibase_infra import (
         clients,
         enums,
-        handlers,
         infrastructure,
         models,
         nodes,
-        runtime,
         shared,
         utils,
     )
 
-    # All modules should be importable
+    # All committed modules should be importable
     assert clients is not None
     assert enums is not None
-    assert handlers is not None
     assert infrastructure is not None
     assert models is not None
     assert nodes is not None
-    assert runtime is not None
     assert shared is not None
     assert utils is not None
 

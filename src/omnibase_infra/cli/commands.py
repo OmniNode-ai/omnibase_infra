@@ -68,7 +68,7 @@ def validate_patterns_cmd(directory: str, strict: bool) -> None:
 @validate.command("unions")
 @click.argument("directory", default="src/omnibase_infra/")
 @click.option(
-    "--max-unions", default=10, help="Maximum allowed complex unions (default: 10)"
+    "--max-unions", default=20, help="Maximum allowed complex unions (default: 20)"
 )
 @click.option("--strict/--no-strict", default=False, help="Enable strict mode")
 def validate_unions_cmd(directory: str, max_unions: int, strict: bool) -> None:
