@@ -1,8 +1,10 @@
 """Pytest configuration and shared fixtures for omnibase_infra tests."""
+
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 @pytest.fixture
