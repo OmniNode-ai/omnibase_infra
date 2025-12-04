@@ -65,7 +65,7 @@ class RuntimeHostError(ModelOnexError):
     def __init__(
         self,
         message: str,
-        error_code: Optional[EnumCoreErrorCode | str] = None,
+        error_code: Optional[EnumCoreErrorCode] = None,
         context: Optional[ModelInfraErrorContext] = None,
         **extra_context: object,
     ) -> None:

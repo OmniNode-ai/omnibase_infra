@@ -536,3 +536,355 @@ class TestStructuredFieldsComprehensive:
 
         for error, target in zip(errors, targets, strict=True):
             assert error.model.context["target_name"] == target
+
+
+class TestErrorChaining:
+    """Test error chaining across all infrastructure error classes.
+
+    Validates that the `raise ... from e` pattern properly chains exceptions
+    and preserves the original error as __cause__ for all error classes.
+    """
+
+    def test_runtime_host_error_chaining_preserves_cause(self) -> None:
+        """Test RuntimeHostError properly chains and preserves original exception."""
+        original = ValueError("Original value error")
+        try:
+            try:
+                raise original
+            except ValueError as e:
+                raise RuntimeHostError("Wrapped error") from e
+        except RuntimeHostError as wrapped:
+            assert wrapped.__cause__ is original
+            assert isinstance(wrapped.__cause__, ValueError)
+            assert str(wrapped.__cause__) == "Original value error"
+
+    def test_protocol_configuration_error_chaining_preserves_cause(self) -> None:
+        """Test ProtocolConfigurationError properly chains and preserves original exception."""
+        original = KeyError("missing_config_key")
+        try:
+            try:
+                raise original
+            except KeyError as e:
+                raise ProtocolConfigurationError("Configuration error") from e
+        except ProtocolConfigurationError as wrapped:
+            assert wrapped.__cause__ is original
+            assert isinstance(wrapped.__cause__, KeyError)
+            assert "missing_config_key" in str(wrapped.__cause__)
+
+    def test_secret_resolution_error_chaining_preserves_cause(self) -> None:
+        """Test SecretResolutionError properly chains and preserves original exception."""
+        original = ConnectionError("Vault connection failed")
+        try:
+            try:
+                raise original
+            except ConnectionError as e:
+                raise SecretResolutionError("Cannot resolve secret") from e
+        except SecretResolutionError as wrapped:
+            assert wrapped.__cause__ is original
+            assert isinstance(wrapped.__cause__, ConnectionError)
+            assert "Vault connection failed" in str(wrapped.__cause__)
+
+    def test_infra_connection_error_chaining_preserves_cause(self) -> None:
+        """Test InfraConnectionError properly chains and preserves original exception."""
+        original = OSError("Connection refused")
+        try:
+            try:
+                raise original
+            except OSError as e:
+                raise InfraConnectionError("Database connection failed") from e
+        except InfraConnectionError as wrapped:
+            assert wrapped.__cause__ is original
+            assert isinstance(wrapped.__cause__, OSError)
+            assert "Connection refused" in str(wrapped.__cause__)
+
+    def test_infra_timeout_error_chaining_preserves_cause(self) -> None:
+        """Test InfraTimeoutError properly chains and preserves original exception."""
+        original = TimeoutError("Operation timed out after 30s")
+        try:
+            try:
+                raise original
+            except TimeoutError as e:
+                raise InfraTimeoutError("Query timeout") from e
+        except InfraTimeoutError as wrapped:
+            assert wrapped.__cause__ is original
+            assert isinstance(wrapped.__cause__, TimeoutError)
+            assert "30s" in str(wrapped.__cause__)
+
+    def test_infra_authentication_error_chaining_preserves_cause(self) -> None:
+        """Test InfraAuthenticationError properly chains and preserves original exception."""
+        original = PermissionError("Access denied")
+        try:
+            try:
+                raise original
+            except PermissionError as e:
+                raise InfraAuthenticationError("Authentication failed") from e
+        except InfraAuthenticationError as wrapped:
+            assert wrapped.__cause__ is original
+            assert isinstance(wrapped.__cause__, PermissionError)
+            assert "Access denied" in str(wrapped.__cause__)
+
+    def test_infra_resource_unavailable_error_chaining_preserves_cause(self) -> None:
+        """Test InfraResourceUnavailableError properly chains and preserves original exception."""
+        original = ConnectionRefusedError("Service not responding")
+        try:
+            try:
+                raise original
+            except ConnectionRefusedError as e:
+                raise InfraResourceUnavailableError("Resource unavailable") from e
+        except InfraResourceUnavailableError as wrapped:
+            assert wrapped.__cause__ is original
+            assert isinstance(wrapped.__cause__, ConnectionRefusedError)
+            assert "Service not responding" in str(wrapped.__cause__)
+
+    def test_chained_error_with_context_preserved(self) -> None:
+        """Test that context is preserved when chaining errors."""
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="execute_query",
+            target_name="postgresql",
+            correlation_id=correlation_id,
+        )
+        original = TimeoutError("Query exceeded deadline")
+        try:
+            try:
+                raise original
+            except TimeoutError as e:
+                raise InfraTimeoutError(
+                    "Database query timeout",
+                    context=context,
+                    timeout_seconds=30,
+                ) from e
+        except InfraTimeoutError as wrapped:
+            # Verify chaining
+            assert wrapped.__cause__ is original
+            # Verify context preserved
+            assert wrapped.model.correlation_id == correlation_id
+            assert (
+                wrapped.model.context["transport_type"]
+                == EnumInfraTransportType.DATABASE
+            )
+            assert wrapped.model.context["operation"] == "execute_query"
+            assert wrapped.model.context["target_name"] == "postgresql"
+            assert wrapped.model.context["timeout_seconds"] == 30
+
+    def test_multi_level_chaining(self) -> None:
+        """Test error chaining through multiple levels."""
+        root_error = OSError("Network unreachable")
+        try:
+            try:
+                try:
+                    raise root_error
+                except OSError as e:
+                    raise InfraConnectionError("Connection layer error") from e
+            except InfraConnectionError as e:
+                raise InfraResourceUnavailableError("Service unavailable") from e
+        except InfraResourceUnavailableError as final:
+            # Verify immediate cause
+            assert isinstance(final.__cause__, InfraConnectionError)
+            # Verify root cause through chain
+            assert isinstance(final.__cause__.__cause__, OSError)
+            assert final.__cause__.__cause__ is root_error
+
+
+class TestContextSerialization:
+    """Test ModelInfraErrorContext serialization and deserialization.
+
+    Validates that the context model correctly serializes to dict and JSON,
+    handles UUID and enum fields properly, and supports roundtrip serialization.
+    """
+
+    def test_context_to_dict_empty(self) -> None:
+        """Test serialization of empty context to dict."""
+        context = ModelInfraErrorContext()
+        data = context.model_dump()
+        assert data == {
+            "transport_type": None,
+            "operation": None,
+            "target_name": None,
+            "correlation_id": None,
+        }
+
+    def test_context_to_dict_with_all_fields(self) -> None:
+        """Test serialization of fully populated context to dict."""
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="produce_message",
+            target_name="events-topic",
+            correlation_id=correlation_id,
+        )
+        data = context.model_dump()
+        assert data["transport_type"] == EnumInfraTransportType.KAFKA
+        assert data["operation"] == "produce_message"
+        assert data["target_name"] == "events-topic"
+        assert data["correlation_id"] == correlation_id
+
+    def test_context_to_dict_mode_json(self) -> None:
+        """Test serialization with mode='json' for JSON-compatible output."""
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="request",
+            target_name="api-endpoint",
+            correlation_id=correlation_id,
+        )
+        data = context.model_dump(mode="json")
+        # Enum should be serialized as string value
+        assert data["transport_type"] == "http"
+        # UUID should be serialized as string
+        assert data["correlation_id"] == str(correlation_id)
+        assert data["operation"] == "request"
+        assert data["target_name"] == "api-endpoint"
+
+    def test_context_to_json_string(self) -> None:
+        """Test serialization to JSON string."""
+        import json
+
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="connect",
+            target_name="postgresql",
+            correlation_id=correlation_id,
+        )
+        json_str = context.model_dump_json()
+        # Verify valid JSON
+        parsed = json.loads(json_str)
+        # DATABASE enum value is "db"
+        assert parsed["transport_type"] == "db"
+        assert parsed["operation"] == "connect"
+        assert parsed["target_name"] == "postgresql"
+        assert parsed["correlation_id"] == str(correlation_id)
+
+    def test_context_roundtrip_serialization(self) -> None:
+        """Test roundtrip serialization: model -> dict -> model."""
+        correlation_id = uuid4()
+        original = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.VAULT,
+            operation="get_secret",
+            target_name="secrets/database",
+            correlation_id=correlation_id,
+        )
+        # Serialize to dict
+        data = original.model_dump()
+        # Deserialize back to model
+        restored = ModelInfraErrorContext(**data)
+        # Verify equality
+        assert restored.transport_type == original.transport_type
+        assert restored.operation == original.operation
+        assert restored.target_name == original.target_name
+        assert restored.correlation_id == original.correlation_id
+
+    def test_context_roundtrip_via_json(self) -> None:
+        """Test roundtrip serialization via JSON string."""
+        import json
+
+        correlation_id = uuid4()
+        original = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="register_service",
+            target_name="my-service",
+            correlation_id=correlation_id,
+        )
+        # Serialize to JSON string
+        json_str = original.model_dump_json()
+        # Parse JSON
+        data = json.loads(json_str)
+        # Deserialize back to model
+        restored = ModelInfraErrorContext.model_validate(data)
+        # Verify equality
+        assert restored.transport_type == original.transport_type
+        assert restored.operation == original.operation
+        assert restored.target_name == original.target_name
+        assert restored.correlation_id == original.correlation_id
+
+    def test_context_uuid_field_serialization(self) -> None:
+        """Test that UUID fields serialize and deserialize correctly."""
+        from uuid import UUID
+
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(correlation_id=correlation_id)
+
+        # Verify internal type is UUID
+        assert isinstance(context.correlation_id, UUID)
+
+        # Serialize with mode='json' converts to string
+        json_data = context.model_dump(mode="json")
+        assert isinstance(json_data["correlation_id"], str)
+        assert json_data["correlation_id"] == str(correlation_id)
+
+        # Standard dump preserves UUID type
+        data = context.model_dump()
+        assert isinstance(data["correlation_id"], UUID)
+        assert data["correlation_id"] == correlation_id
+
+    def test_context_enum_field_serialization(self) -> None:
+        """Test that enum fields serialize and deserialize correctly."""
+        context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.REDIS)
+
+        # Verify internal type is enum
+        assert isinstance(context.transport_type, EnumInfraTransportType)
+
+        # Serialize with mode='json' converts to string value
+        json_data = context.model_dump(mode="json")
+        assert isinstance(json_data["transport_type"], str)
+        assert json_data["transport_type"] == "redis"
+
+        # Standard dump preserves enum type
+        data = context.model_dump()
+        assert isinstance(data["transport_type"], EnumInfraTransportType)
+        assert data["transport_type"] == EnumInfraTransportType.REDIS
+
+    def test_context_none_fields_in_serialization(self) -> None:
+        """Test that None fields are properly handled in serialization."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation=None,
+            target_name="endpoint",
+            correlation_id=None,
+        )
+        data = context.model_dump()
+        assert data["transport_type"] == EnumInfraTransportType.HTTP
+        assert data["operation"] is None
+        assert data["target_name"] == "endpoint"
+        assert data["correlation_id"] is None
+
+        # JSON serialization
+        json_data = context.model_dump(mode="json")
+        assert json_data["operation"] is None
+        assert json_data["correlation_id"] is None
+
+    def test_context_exclude_none_serialization(self) -> None:
+        """Test serialization with exclude_none option."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="consume",
+        )
+        data = context.model_dump(exclude_none=True)
+        assert "transport_type" in data
+        assert "operation" in data
+        assert "target_name" not in data
+        assert "correlation_id" not in data
+
+    def test_context_all_transport_types_serialize(self) -> None:
+        """Test that all transport types serialize correctly."""
+        transport_types = [
+            EnumInfraTransportType.HTTP,
+            EnumInfraTransportType.VAULT,
+            EnumInfraTransportType.DATABASE,
+            EnumInfraTransportType.KAFKA,
+            EnumInfraTransportType.CONSUL,
+            EnumInfraTransportType.REDIS,
+        ]
+        for transport in transport_types:
+            context = ModelInfraErrorContext(transport_type=transport)
+            # Standard serialization
+            data = context.model_dump()
+            assert data["transport_type"] == transport
+            # JSON-mode serialization
+            json_data = context.model_dump(mode="json")
+            assert json_data["transport_type"] == transport.value
+            # Roundtrip
+            restored = ModelInfraErrorContext.model_validate(data)
+            assert restored.transport_type == transport

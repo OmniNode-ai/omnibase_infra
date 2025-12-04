@@ -59,6 +59,155 @@ This project follows a **ZERO BACKWARDS COMPATIBILITY** policy:
 - **Protocol Resolution** - Use duck typing through protocols, never isinstance
 - **OnexError Only** - All exceptions converted to OnexError with chaining: `raise OnexError(...) from e`
 
+## 🚨 Infrastructure Error Usage Patterns
+
+### Error Class Selection Guide
+
+| Scenario | Error Class | Example |
+|----------|-------------|---------|
+| Service configuration invalid | `ProtocolConfigurationError` | Missing required config field |
+| Secret/credential not found | `SecretResolutionError` | Vault secret missing |
+| Cannot connect to service | `InfraConnectionError` | Database connection refused |
+| Operation times out | `InfraTimeoutError` | Consul health check timeout |
+| Authentication fails | `InfraAuthenticationError` | Invalid API key |
+| Service unavailable | `InfraResourceUnavailableError` | Kafka broker down |
+
+### Error Context Usage
+
+All infrastructure errors accept `ModelInfraErrorContext` for structured context:
+
+```python
+from uuid import uuid4
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+# Create structured context
+context = ModelInfraErrorContext(
+    transport_type=EnumInfraTransportType.DATABASE,
+    operation="execute_query",
+    target_name="postgresql-primary",
+    correlation_id=request.correlation_id,  # Propagate from request
+)
+
+# Raise with proper error chaining
+try:
+    connection.execute(query)
+except Exception as original_error:
+    raise InfraConnectionError(
+        "Failed to connect to database",
+        context=context,
+        host="db.example.com",  # Additional context via kwargs
+        port=5432,
+    ) from original_error
+```
+
+### Correlation ID Assignment Rules
+
+Correlation IDs enable distributed tracing across infrastructure components:
+
+1. **Always propagate**: Pass `correlation_id` from incoming requests to error context
+2. **Auto-generation**: If no `correlation_id` exists, generate one using `uuid4()`
+3. **UUID format**: Use UUID4 format for all new correlation IDs
+4. **Include everywhere**: Add `correlation_id` in all error context for tracing
+
+```python
+from uuid import UUID, uuid4
+
+# Pattern 1: Propagate from request
+correlation_id = request.correlation_id or uuid4()
+
+# Pattern 2: Generate if not available
+context = ModelInfraErrorContext(
+    transport_type=EnumInfraTransportType.KAFKA,
+    operation="produce_message",
+    correlation_id=correlation_id,
+)
+
+# Pattern 3: Extract from incoming event
+correlation_id = event.metadata.get("correlation_id")
+if isinstance(correlation_id, str):
+    correlation_id = UUID(correlation_id)
+```
+
+### Error Sanitization Guidelines
+
+**NEVER include in error messages or context**:
+- Passwords, API keys, tokens, secrets
+- Full connection strings with credentials
+- PII (names, emails, SSNs, phone numbers)
+- Internal IP addresses (in production logs)
+- Private keys or certificates
+- Session tokens or cookies
+
+**SAFE to include**:
+- Service names (e.g., "postgresql", "kafka")
+- Operation names (e.g., "connect", "query", "authenticate")
+- Correlation IDs (always include for tracing)
+- Error codes (e.g., `EnumCoreErrorCode.DATABASE_CONNECTION_ERROR`)
+- Sanitized hostnames (e.g., "db.example.com")
+- Port numbers
+- Retry counts and timeout values
+- Resource identifiers (non-sensitive)
+
+```python
+# BAD - Exposes credentials
+raise InfraConnectionError(
+    f"Failed to connect with password={password}",  # NEVER DO THIS
+    context=context,
+)
+
+# GOOD - Sanitized error message
+raise InfraConnectionError(
+    "Failed to connect to database",
+    context=context,
+    host="db.example.com",
+    port=5432,
+    retry_count=3,
+)
+
+# BAD - Full connection string
+raise InfraConnectionError(
+    f"Connection failed: {connection_string}",  # May contain credentials
+    context=context,
+)
+
+# GOOD - Sanitized connection info
+raise InfraConnectionError(
+    "Connection failed",
+    context=context,
+    host=parsed_host,
+    port=parsed_port,
+    database=database_name,
+)
+```
+
+### Error Hierarchy Reference
+
+```
+ModelOnexError (from omnibase_core)
+└── RuntimeHostError (base infrastructure error)
+    ├── ProtocolConfigurationError  # Config validation failures
+    ├── SecretResolutionError       # Secret/credential resolution
+    ├── InfraConnectionError        # Connection failures
+    ├── InfraTimeoutError           # Operation timeouts
+    ├── InfraAuthenticationError    # Auth/authz failures
+    └── InfraResourceUnavailableError  # Resource unavailable
+```
+
+### Transport Type Reference
+
+Use `EnumInfraTransportType` for transport identification in error context:
+
+| Transport Type | Value | Usage |
+|---------------|-------|-------|
+| `HTTP` | `"http"` | REST API transport |
+| `DATABASE` | `"db"` | PostgreSQL, etc. |
+| `KAFKA` | `"kafka"` | Kafka message broker |
+| `CONSUL` | `"consul"` | Service discovery |
+| `VAULT` | `"vault"` | Secret management |
+| `REDIS` | `"redis"` | Cache/message transport |
+| `GRPC` | `"grpc"` | gRPC protocol |
+
 ## 🏗️ Infrastructure-Specific Patterns
 
 ### Service Integration Architecture
