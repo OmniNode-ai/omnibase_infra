@@ -18,7 +18,7 @@ omni-infra = "omnibase_infra.cli.commands:cli"
 python = "^3.12"
 
 # ONEX dependencies - from PyPI
-omnibase-core = "^0.3.5"
+omnibase-core = "^0.3.6"
 omnibase-spi = "0.2.0"
 
 # Core dependencies
