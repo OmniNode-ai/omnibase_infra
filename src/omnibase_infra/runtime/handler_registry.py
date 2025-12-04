@@ -3,7 +3,7 @@
 """Handler Registry - SINGLE SOURCE OF TRUTH for handler registration.
 
 This module provides the ProtocolBindingRegistry class which implements the
-ProtocolProtocolBindingRegistry protocol from omnibase_spi. It serves as the
+ProtocolHandlerRegistry protocol from omnibase_spi. It serves as the
 centralized location for registering and resolving protocol handlers
 in the omnibase_infra layer.
 
@@ -70,10 +70,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
@@ -123,13 +120,15 @@ EVENT_BUS_KAFKA: str = "kafka"
 # =============================================================================
 
 
-class RegistryError(ModelOnexError):
+class RegistryError(RuntimeHostError):
     """Error raised when handler registry operations fail.
 
     Used for:
     - Attempting to get an unregistered handler
     - Registration failures (if duplicate registration is disallowed)
     - Invalid protocol type identifiers
+
+    Extends RuntimeHostError as this is an infrastructure-layer runtime concern.
 
     Example:
         >>> registry = ProtocolBindingRegistry()
@@ -143,6 +142,7 @@ class RegistryError(ModelOnexError):
         self,
         message: str,
         protocol_type: str | None = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize RegistryError.
@@ -150,16 +150,17 @@ class RegistryError(ModelOnexError):
         Args:
             message: Human-readable error message
             protocol_type: The protocol type that caused the error (if applicable)
+            context: Bundled infrastructure context for correlation_id and structured fields
             **extra_context: Additional context information
         """
-        context: dict[str, object] = dict(extra_context)
+        # Add protocol_type to extra_context if provided
         if protocol_type is not None:
-            context["protocol_type"] = protocol_type
+            extra_context["protocol_type"] = protocol_type
 
         super().__init__(
             message=message,
-            error_code=EnumCoreErrorCode.RESOURCE_NOT_FOUND,
-            **context,
+            context=context,
+            **extra_context,
         )
 
 
@@ -171,7 +172,7 @@ class RegistryError(ModelOnexError):
 class ProtocolBindingRegistry:
     """SINGLE SOURCE OF TRUTH for handler registration in omnibase_infra.
 
-    Thread-safe registry for protocol handlers. Implements ProtocolProtocolBindingRegistry
+    Thread-safe registry for protocol handlers. Implements ProtocolHandlerRegistry
     protocol from omnibase_spi.
 
     The registry maintains a mapping from protocol type identifiers (strings like
