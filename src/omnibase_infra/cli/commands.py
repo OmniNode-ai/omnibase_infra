@@ -26,14 +26,23 @@ def validate() -> None:
 @validate.command("architecture")
 @click.argument("directory", default="src/omnibase_infra/")
 @click.option(
-    "--max-violations", default=0, help="Maximum allowed violations (default: 0)"
+    "--max-violations",
+    default=None,
+    help="Maximum allowed violations (default: INFRA_MAX_VIOLATIONS)",
 )
-def validate_architecture_cmd(directory: str, max_violations: int) -> None:
+def validate_architecture_cmd(directory: str, max_violations: int | None) -> None:
     """Validate architecture (one-model-per-file)."""
-    from omnibase_infra.validation.infra_validators import validate_infra_architecture
+    from omnibase_infra.validation.infra_validators import (
+        INFRA_MAX_VIOLATIONS,
+        validate_infra_architecture,
+    )
 
     console.print(f"[bold blue]Validating architecture in {directory}...[/bold blue]")
-    result = validate_infra_architecture(directory, max_violations)
+    # Use INFRA_MAX_VIOLATIONS constant if no override provided
+    effective_max_violations = (
+        max_violations if max_violations is not None else INFRA_MAX_VIOLATIONS
+    )
+    result = validate_infra_architecture(directory, effective_max_violations)
     _print_result("Architecture", result)
     raise SystemExit(0 if result.is_valid else 1)
 
@@ -53,14 +62,21 @@ def validate_contracts_cmd(directory: str) -> None:
 @validate.command("patterns")
 @click.argument("directory", default="src/omnibase_infra/")
 @click.option(
-    "--strict/--no-strict", default=True, help="Enable strict mode (default: True)"
+    "--strict/--no-strict",
+    default=None,
+    help="Enable strict mode (default: INFRA_PATTERNS_STRICT)",
 )
-def validate_patterns_cmd(directory: str, strict: bool) -> None:
+def validate_patterns_cmd(directory: str, strict: bool | None) -> None:
     """Validate code patterns and naming conventions."""
-    from omnibase_infra.validation.infra_validators import validate_infra_patterns
+    from omnibase_infra.validation.infra_validators import (
+        INFRA_PATTERNS_STRICT,
+        validate_infra_patterns,
+    )
 
     console.print(f"[bold blue]Validating patterns in {directory}...[/bold blue]")
-    result = validate_infra_patterns(directory, strict)
+    # Use INFRA_PATTERNS_STRICT constant if no override provided
+    effective_strict = strict if strict is not None else INFRA_PATTERNS_STRICT
+    result = validate_infra_patterns(directory, effective_strict)
     _print_result("Patterns", result)
     raise SystemExit(0 if result.is_valid else 1)
 
@@ -68,15 +84,32 @@ def validate_patterns_cmd(directory: str, strict: bool) -> None:
 @validate.command("unions")
 @click.argument("directory", default="src/omnibase_infra/")
 @click.option(
-    "--max-unions", default=20, help="Maximum allowed complex unions (default: 20)"
+    "--max-unions",
+    default=None,
+    help="Maximum allowed complex unions (default: INFRA_MAX_UNIONS)",
 )
-@click.option("--strict/--no-strict", default=False, help="Enable strict mode")
-def validate_unions_cmd(directory: str, max_unions: int, strict: bool) -> None:
+@click.option(
+    "--strict/--no-strict",
+    default=None,
+    help="Enable strict mode (default: INFRA_UNIONS_STRICT)",
+)
+def validate_unions_cmd(
+    directory: str, max_unions: int | None, strict: bool | None
+) -> None:
     """Validate Union type usage."""
-    from omnibase_infra.validation.infra_validators import validate_infra_union_usage
+    from omnibase_infra.validation.infra_validators import (
+        INFRA_MAX_UNIONS,
+        INFRA_UNIONS_STRICT,
+        validate_infra_union_usage,
+    )
 
     console.print(f"[bold blue]Validating union usage in {directory}...[/bold blue]")
-    result = validate_infra_union_usage(directory, max_unions, strict)
+    # Use constants if no override provided
+    effective_max_unions = max_unions if max_unions is not None else INFRA_MAX_UNIONS
+    effective_strict = strict if strict is not None else INFRA_UNIONS_STRICT
+    result = validate_infra_union_usage(
+        directory, effective_max_unions, effective_strict
+    )
     _print_result("Union Usage", result)
     raise SystemExit(0 if result.is_valid else 1)
 

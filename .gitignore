@@ -203,9 +203,15 @@ reports/
 *_errors*.txt
 mypy_*.txt
 
-# OmniBase / ONEX .gitignore
+# OmniBase / ONEX .gitignore - Infrastructure-specific patterns
 
-# Virtual environments
+# Environment files (refined pattern)
+# Match all .env variants (.env.local, .env.production, etc.)
+# but preserve example files for documentation
+.env*
+!.env.example
+
+# Virtual environments (consolidated - duplicates removed)
 .venv/
 venv/
 ENV/
@@ -217,15 +223,8 @@ env.bak/
 # MacOS
 .DS_Store
 
-# Env files
-.env
-.env.*
-
-# Misc
+# Logs (consolidated - duplicates removed)
 *.log
-
-# OmniBase/ONEX specific
-# (add any project-specific ignores here)
 
 # Docker runtime data directories
 data/
@@ -235,22 +234,17 @@ reports/
 secrets/
 
 # Ignore sensitive and legacy files
-.cursor/
 legacy/
-
-#ignore private docs
 docs_private/
 
-# Optimization cache files
+# Optimization cache files (consolidated - duplicates removed)
 .onex_cache/
 docs_archived/
 
-# AI IDE tools (entire directories ignored)
+# AI IDE tools (consolidated - duplicates removed)
 .codanna/
 .serena/
 .cursor/
-
-# AI Tools and Generated Content
 .hive-mind/
 .swarm/
 .claude-flow/

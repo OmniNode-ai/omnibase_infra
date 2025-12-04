@@ -24,15 +24,43 @@ from omnibase_core.validation import (
 from omnibase_core.validation.circular_import_validator import CircularImportValidator
 from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
+# Type alias for cleaner return types in infrastructure validators
+# Most validation results return None as the data payload (validation only)
+# Using Python 3.12+ type keyword for modern type alias syntax
+type ValidationResult = ModelValidationResult[None]
+
 # Default paths for infrastructure validation
 INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
+# Maximum allowed complex union types in infrastructure code.
+# Infrastructure code has many typed handlers (Consul, Kafka, Vault, PostgreSQL adapters)
+# which require typed unions for protocol implementations and message routing.
+# Set to 20 to accommodate infrastructure service integration patterns while preventing
+# overly complex union types that would complicate code maintenance.
+INFRA_MAX_UNIONS = 20
+
+# Maximum allowed architecture violations in infrastructure code.
+# Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
+# Infrastructure nodes require strict architecture compliance for maintainability and
+# contract-driven code generation.
+INFRA_MAX_VIOLATIONS = 0
+
+# Strict mode for pattern validation in infrastructure code.
+# Set to True to enforce all naming conventions and anti-patterns (no *Manager, *Handler, *Helper).
+# Infrastructure code must follow ONEX patterns strictly for consistency across service adapters.
+INFRA_PATTERNS_STRICT = True
+
+# Strict mode for union usage validation in infrastructure code.
+# Set to False to allow necessary unions for protocol implementations and service adapters
+# while still preventing overly complex union types via INFRA_MAX_UNIONS limit.
+INFRA_UNIONS_STRICT = False
+
 
 def validate_infra_architecture(
     directory: str | Path = INFRA_SRC_PATH,
-    max_violations: int = 0,
-) -> ModelValidationResult[None]:
+    max_violations: int = INFRA_MAX_VIOLATIONS,
+) -> ValidationResult:
     """
     Validate infrastructure architecture with strict defaults.
 
@@ -40,7 +68,7 @@ def validate_infra_architecture(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_violations: Maximum allowed violations. Defaults to 0 (strict).
+        max_violations: Maximum allowed violations. Defaults to INFRA_MAX_VIOLATIONS (0).
 
     Returns:
         ModelValidationResult with validation status and any errors.
@@ -50,7 +78,7 @@ def validate_infra_architecture(
 
 def validate_infra_contracts(
     directory: str | Path = INFRA_NODES_PATH,
-) -> ModelValidationResult[None]:
+) -> ValidationResult:
     """
     Validate all infrastructure node contracts.
 
@@ -67,8 +95,8 @@ def validate_infra_contracts(
 
 def validate_infra_patterns(
     directory: str | Path = INFRA_SRC_PATH,
-    strict: bool = True,
-) -> ModelValidationResult[None]:
+    strict: bool = INFRA_PATTERNS_STRICT,
+) -> ValidationResult:
     """
     Validate infrastructure code patterns.
 
@@ -79,7 +107,7 @@ def validate_infra_patterns(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        strict: Enable strict mode. Defaults to True for infrastructure.
+        strict: Enable strict mode. Defaults to INFRA_PATTERNS_STRICT (True).
 
     Returns:
         ModelValidationResult with validation status and any errors.
@@ -110,9 +138,9 @@ def validate_infra_contract_deep(
 
 def validate_infra_union_usage(
     directory: str | Path = INFRA_SRC_PATH,
-    max_unions: int = 20,  # Infrastructure code has many typed handlers
-    strict: bool = False,
-) -> ModelValidationResult[None]:
+    max_unions: int = INFRA_MAX_UNIONS,
+    strict: bool = INFRA_UNIONS_STRICT,
+) -> ValidationResult:
     """
     Validate Union type usage in infrastructure code.
 
@@ -120,8 +148,8 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to 20.
-        strict: Enable strict mode for union validation.
+        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (20).
+        strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:
         ModelValidationResult with validation status and any errors.
@@ -152,7 +180,7 @@ def validate_infra_circular_imports(
 def validate_infra_all(
     directory: str | Path = INFRA_SRC_PATH,
     nodes_directory: str | Path = INFRA_NODES_PATH,
-) -> dict[str, ModelValidationResult[None] | CircularImportValidationResult]:
+) -> dict[str, ValidationResult | CircularImportValidationResult]:
     """
     Run all validations on infrastructure code.
 
@@ -160,7 +188,7 @@ def validate_infra_all(
     - Architecture (strict, 0 violations)
     - Contracts (nodes directory)
     - Patterns (strict mode)
-    - Union usage (max 20)
+    - Union usage (max INFRA_MAX_UNIONS)
     - Circular imports
 
     Args:
@@ -170,9 +198,7 @@ def validate_infra_all(
     Returns:
         Dictionary mapping validator name to result.
     """
-    results: dict[str, ModelValidationResult[None] | CircularImportValidationResult] = (
-        {}
-    )
+    results: dict[str, ValidationResult | CircularImportValidationResult] = {}
 
     # HIGH priority validators
     results["architecture"] = validate_infra_architecture(directory)
@@ -187,7 +213,7 @@ def validate_infra_all(
 
 
 def get_validation_summary(
-    results: dict[str, ModelValidationResult[None] | CircularImportValidationResult],
+    results: dict[str, ValidationResult | CircularImportValidationResult],
 ) -> dict[str, int | list[str]]:
     """
     Generate a summary of validation results.
@@ -203,6 +229,10 @@ def get_validation_summary(
     failed_validators: list[str] = []
 
     for name, result in results.items():
+        # NOTE: isinstance usage here is justified as CircularImportValidationResult
+        # and ValidationResult have different APIs (has_circular_imports vs is_valid).
+        # Duck typing would require protocol definitions in omnibase_core.
+        # This is acceptable for result type discrimination in summary generation.
         if isinstance(result, CircularImportValidationResult):
             # Circular import validator uses has_circular_imports
             if not result.has_circular_imports:
@@ -226,8 +256,16 @@ def get_validation_summary(
 
 
 __all__ = [
+    # Type aliases
+    "ValidationResult",
+    # Constants
     "INFRA_SRC_PATH",
     "INFRA_NODES_PATH",
+    "INFRA_MAX_UNIONS",
+    "INFRA_MAX_VIOLATIONS",
+    "INFRA_PATTERNS_STRICT",
+    "INFRA_UNIONS_STRICT",
+    # Validators
     "validate_infra_architecture",
     "validate_infra_contracts",
     "validate_infra_patterns",
