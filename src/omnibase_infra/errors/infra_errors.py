@@ -30,6 +30,7 @@ from typing import Optional
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
 
 
@@ -46,7 +47,6 @@ class RuntimeHostError(ModelOnexError):
         target_name: Target resource/endpoint name
 
     Example:
-        >>> from omnibase_infra.enums import EnumInfraTransportType
         >>> context = ModelInfraErrorContext(
         ...     transport_type=EnumInfraTransportType.HTTP,
         ...     operation="process_request",
@@ -107,7 +107,6 @@ class ProtocolConfigurationError(RuntimeHostError):
     invalid configuration values, or schema validation failures.
 
     Example:
-        >>> from omnibase_infra.enums import EnumInfraTransportType
         >>> context = ModelInfraErrorContext(
         ...     transport_type=EnumInfraTransportType.HTTP,
         ...     operation="validate_config",
@@ -147,8 +146,9 @@ class SecretResolutionError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     target_name="vault",
+        ...     transport_type=EnumInfraTransportType.VAULT,
         ...     operation="get_secret",
+        ...     target_name="vault-primary",
         ... )
         >>> raise SecretResolutionError(
         ...     "Secret not found in Vault",
@@ -186,8 +186,9 @@ class InfraConnectionError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     target_name="postgresql",
+        ...     transport_type=EnumInfraTransportType.DATABASE,
         ...     operation="connect",
+        ...     target_name="postgresql-primary",
         ... )
         >>> raise InfraConnectionError(
         ...     "Failed to connect to PostgreSQL",
@@ -226,8 +227,9 @@ class InfraTimeoutError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.DATABASE,
         ...     operation="execute_query",
-        ...     target_name="postgresql",
+        ...     target_name="postgresql-primary",
         ... )
         >>> raise InfraTimeoutError(
         ...     "Database query exceeded timeout",
@@ -265,8 +267,9 @@ class InfraAuthenticationError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     target_name="vault",
+        ...     transport_type=EnumInfraTransportType.VAULT,
         ...     operation="authenticate",
+        ...     target_name="vault-primary",
         ... )
         >>> raise InfraAuthenticationError(
         ...     "Invalid Vault token",
@@ -304,8 +307,9 @@ class InfraUnavailableError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     target_name="kafka",
+        ...     transport_type=EnumInfraTransportType.KAFKA,
         ...     operation="produce",
+        ...     target_name="kafka-broker-1",
         ... )
         >>> raise InfraUnavailableError(
         ...     "Kafka broker unavailable",
