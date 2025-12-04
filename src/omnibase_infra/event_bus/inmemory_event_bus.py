@@ -44,10 +44,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from typing import Optional
+from uuid import uuid4
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
 logger = logging.getLogger(__name__)
@@ -114,8 +117,8 @@ class InMemoryEventBus:
             str, list[tuple[str, Callable[[ModelEventMessage], Awaitable[None]]]]
         ] = defaultdict(list)
 
-        # Event history for debugging (circular buffer behavior)
-        self._event_history: list[ModelEventMessage] = []
+        # Event history for debugging (circular buffer with O(1) operations)
+        self._event_history: deque[ModelEventMessage] = deque(maxlen=max_history)
 
         # Topic -> offset counter for message ordering
         self._topic_offsets: dict[str, int] = defaultdict(int)
@@ -128,6 +131,13 @@ class InMemoryEventBus:
 
         # Shutdown flag for consuming loop
         self._shutdown = False
+
+        # Subscriber failure tracking for circuit breaker pattern
+        # Maps (topic, group_id) to consecutive failure count
+        self._subscriber_failures: dict[tuple[str, str], int] = {}
+        self._max_consecutive_failures: int = (
+            5  # Circuit opens after 5 consecutive failures
+        )
 
     @property
     def adapter(self) -> InMemoryEventBus:
@@ -216,10 +226,19 @@ class InMemoryEventBus:
             headers: Optional event headers with metadata
 
         Raises:
-            RuntimeError: If the bus has not been started
+            InfraUnavailableError: If the bus has not been started
         """
         if not self._started:
-            raise RuntimeError("InMemoryEventBus not started. Call start() first.")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="publish",
+                target_name=f"event_bus.{self._environment}",
+                correlation_id=headers.correlation_id if headers else uuid4(),
+            )
+            raise InfraUnavailableError(
+                "Event bus not started. Call start() first.",
+                context=context,
+            )
 
         # Create headers if not provided
         if headers is None:
@@ -242,19 +261,42 @@ class InMemoryEventBus:
                 partition=0,
             )
 
-            # Add to history (circular buffer)
+            # Add to history (deque handles maxlen automatically with O(1) performance)
             self._event_history.append(message)
-            if len(self._event_history) > self._max_history:
-                self._event_history.pop(0)
 
             # Get subscribers snapshot
             subscribers = list(self._subscribers.get(topic, []))
 
         # Call subscribers outside lock to avoid deadlocks
         for group_id, callback in subscribers:
+            failure_key = (topic, group_id)
+
+            # Check if circuit is open (too many consecutive failures)
+            if (
+                self._subscriber_failures.get(failure_key, 0)
+                >= self._max_consecutive_failures
+            ):
+                logger.warning(
+                    "Subscriber circuit breaker open - skipping callback",
+                    extra={
+                        "topic": topic,
+                        "group_id": group_id,
+                        "consecutive_failures": self._subscriber_failures[failure_key],
+                        "correlation_id": str(headers.correlation_id),
+                    },
+                )
+                continue
+
             try:
                 await callback(message)
+                # Reset failure count on success
+                if failure_key in self._subscriber_failures:
+                    del self._subscriber_failures[failure_key]
             except Exception as e:
+                # Increment failure count
+                self._subscriber_failures[failure_key] = (
+                    self._subscriber_failures.get(failure_key, 0) + 1
+                )
                 # Log but don't fail other subscribers
                 logger.exception(
                     "Subscriber callback failed",
@@ -262,6 +304,7 @@ class InMemoryEventBus:
                         "topic": topic,
                         "group_id": group_id,
                         "error": str(e),
+                        "consecutive_failures": self._subscriber_failures[failure_key],
                         "correlation_id": str(headers.correlation_id),
                     },
                 )
@@ -426,10 +469,11 @@ class InMemoryEventBus:
     async def close(self) -> None:
         """Close the event bus and release resources.
 
-        Clears all subscribers and marks the bus as stopped.
+        Clears all subscribers, failure tracking, and marks the bus as stopped.
         """
         async with self._lock:
             self._subscribers.clear()
+            self._subscriber_failures.clear()
             self._started = False
             self._shutdown = True
         logger.info(
@@ -486,7 +530,11 @@ class InMemoryEventBus:
             List of recent events (most recent last)
         """
         async with self._lock:
-            history = self._event_history[-limit:]
+            # Convert deque to list for slicing operations
+            history_list = list(self._event_history)
+            history = (
+                history_list[-limit:] if limit < len(history_list) else history_list
+            )
             if topic:
                 history = [msg for msg in history if msg.topic == topic]
             return list(history)
@@ -533,6 +581,56 @@ class InMemoryEventBus:
         """
         async with self._lock:
             return self._topic_offsets.get(topic, 0)
+
+    # =========================================================================
+    # Circuit Breaker Methods
+    # =========================================================================
+
+    async def reset_subscriber_circuit(self, topic: str, group_id: str) -> bool:
+        """Reset the circuit breaker for a specific subscriber.
+
+        Clears the failure count for the specified topic/group_id combination,
+        allowing the subscriber to receive messages again.
+
+        Args:
+            topic: Topic name
+            group_id: Consumer group identifier
+
+        Returns:
+            True if the circuit was reset, False if there was no circuit to reset
+        """
+        failure_key = (topic, group_id)
+        async with self._lock:
+            if failure_key in self._subscriber_failures:
+                del self._subscriber_failures[failure_key]
+                logger.info(
+                    "Subscriber circuit breaker reset",
+                    extra={"topic": topic, "group_id": group_id},
+                )
+                return True
+            return False
+
+    async def get_circuit_breaker_status(self) -> dict[str, object]:
+        """Get circuit breaker status for all subscribers.
+
+        Returns:
+            Dictionary with circuit breaker status information:
+                - open_circuits: List of dicts with topic/group_id for open circuits
+                - failure_counts: Dict mapping "topic:group_id" to failure count
+        """
+        async with self._lock:
+            open_circuits = [
+                {"topic": topic, "group_id": group_id}
+                for (topic, group_id), count in self._subscriber_failures.items()
+                if count >= self._max_consecutive_failures
+            ]
+            return {
+                "open_circuits": open_circuits,
+                "failure_counts": {
+                    f"{topic}:{group_id}": count
+                    for (topic, group_id), count in self._subscriber_failures.items()
+                },
+            }
 
 
 __all__: list[str] = ["InMemoryEventBus"]

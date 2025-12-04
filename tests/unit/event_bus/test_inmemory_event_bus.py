@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
@@ -132,7 +133,7 @@ class TestInMemoryEventBusPublish:
     @pytest.mark.asyncio
     async def test_publish_requires_start(self, event_bus: InMemoryEventBus) -> None:
         """Test that publish fails if bus not started."""
-        with pytest.raises(RuntimeError, match="not started"):
+        with pytest.raises(InfraUnavailableError, match="not started"):
             await event_bus.publish("test-topic", None, b"test")
 
     @pytest.mark.asyncio
@@ -1068,8 +1069,139 @@ class TestInMemoryEventBusEdgeCases:
         await event_bus.start()
         await event_bus.close()
 
-        with pytest.raises(RuntimeError, match="not started"):
+        with pytest.raises(InfraUnavailableError, match="not started"):
             await event_bus.publish("test", None, b"test")
+
+
+class TestInMemoryEventBusCircuitBreaker:
+    """Test suite for circuit breaker functionality."""
+
+    @pytest.fixture
+    def event_bus(self) -> InMemoryEventBus:
+        """Create event bus fixture."""
+        return InMemoryEventBus(environment="test", group="test-group")
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_opens_after_failures(
+        self, event_bus: InMemoryEventBus
+    ) -> None:
+        """Test circuit breaker opens after consecutive failures."""
+        await event_bus.start()
+        call_count = 0
+
+        async def failing_handler(msg: ModelEventMessage) -> None:
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("Intentional failure")
+
+        await event_bus.subscribe("test-topic", "fail-group", failing_handler)
+        for _ in range(6):
+            await event_bus.publish("test-topic", None, b"test")
+        assert call_count == 5  # Circuit opens after 5 failures
+        await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_resets_on_success(
+        self, event_bus: InMemoryEventBus
+    ) -> None:
+        """Test circuit breaker resets after successful callback."""
+        await event_bus.start()
+        fail_count = 0
+        should_fail = True
+
+        async def flaky_handler(msg: ModelEventMessage) -> None:
+            nonlocal fail_count, should_fail
+            if should_fail:
+                fail_count += 1
+                raise ValueError("Intentional failure")
+
+        await event_bus.subscribe("test-topic", "flaky-group", flaky_handler)
+        for _ in range(3):
+            await event_bus.publish("test-topic", None, b"test")
+        assert fail_count == 3
+        should_fail = False
+        await event_bus.publish("test-topic", None, b"test")  # Success resets
+        should_fail = True
+        for _ in range(6):
+            await event_bus.publish("test-topic", None, b"test")
+        assert fail_count == 8  # 3 + 5 more after reset
+        await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_reset_subscriber_circuit(self, event_bus: InMemoryEventBus) -> None:
+        """Test manual circuit breaker reset."""
+        await event_bus.start()
+        call_count = 0
+
+        async def failing_handler(msg: ModelEventMessage) -> None:
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("Intentional failure")
+
+        await event_bus.subscribe("test-topic", "fail-group", failing_handler)
+        for _ in range(6):
+            await event_bus.publish("test-topic", None, b"test")
+        assert call_count == 5
+        reset = await event_bus.reset_subscriber_circuit("test-topic", "fail-group")
+        assert reset is True
+        await event_bus.publish("test-topic", None, b"test")
+        assert call_count == 6
+        await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_get_circuit_breaker_status(
+        self, event_bus: InMemoryEventBus
+    ) -> None:
+        """Test getting circuit breaker status."""
+        await event_bus.start()
+
+        async def failing_handler(msg: ModelEventMessage) -> None:
+            raise ValueError("Intentional failure")
+
+        await event_bus.subscribe("test-topic", "fail-group", failing_handler)
+        for _ in range(3):
+            await event_bus.publish("test-topic", None, b"test")
+        status = await event_bus.get_circuit_breaker_status()
+        assert status["failure_counts"]["test-topic:fail-group"] == 3
+        assert len(status["open_circuits"]) == 0
+        for _ in range(3):
+            await event_bus.publish("test-topic", None, b"test")
+        status = await event_bus.get_circuit_breaker_status()
+        assert len(status["open_circuits"]) == 1
+        await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_reset_nonexistent_circuit(self, event_bus: InMemoryEventBus) -> None:
+        """Test resetting a circuit that doesn't exist returns False."""
+        await event_bus.start()
+        reset = await event_bus.reset_subscriber_circuit("nonexistent", "group")
+        assert reset is False
+        await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_close_clears_circuit_breaker_state(
+        self, event_bus: InMemoryEventBus
+    ) -> None:
+        """Test that close() clears circuit breaker failure tracking."""
+        await event_bus.start()
+
+        async def failing_handler(msg: ModelEventMessage) -> None:
+            raise ValueError("Intentional failure")
+
+        await event_bus.subscribe("test-topic", "fail-group", failing_handler)
+        for _ in range(3):
+            await event_bus.publish("test-topic", None, b"test")
+
+        status = await event_bus.get_circuit_breaker_status()
+        assert status["failure_counts"]["test-topic:fail-group"] == 3
+
+        await event_bus.close()
+
+        # After close and restart, circuit breaker state should be cleared
+        await event_bus.start()
+        status = await event_bus.get_circuit_breaker_status()
+        assert len(status["failure_counts"]) == 0
+        await event_bus.close()
 
 
 class TestModelEventMessage:
