@@ -217,6 +217,258 @@ ModelOnexError (from omnibase_core)
 | `InfraAuthenticationError` | `AUTHENTICATION_ERROR` | 401 Unauthorized |
 | `InfraUnavailableError` | `SERVICE_UNAVAILABLE` | 503 Service Unavailable |
 
+### Error Recovery Patterns
+
+Infrastructure errors often require recovery strategies. Here are common patterns for handling infrastructure failures:
+
+#### Retry with Exponential Backoff (Connection Errors)
+
+Use exponential backoff for transient connection failures. This pattern is ideal for `InfraConnectionError` when services are temporarily unavailable:
+
+```python
+import time
+from uuid import uuid4
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+def connect_with_retry(host: str, port: int, max_retries: int = 3) -> Connection:
+    """Connect to database with exponential backoff retry strategy."""
+    correlation_id = uuid4()
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.DATABASE,
+        operation="connect",
+        target_name="postgresql-primary",
+        correlation_id=correlation_id,
+    )
+
+    for attempt in range(max_retries):
+        try:
+            return create_connection(host, port)
+        except ConnectionError as e:
+            if attempt == max_retries - 1:
+                raise InfraConnectionError(
+                    f"Failed to connect after {max_retries} attempts",
+                    context=context,
+                    host=host,
+                    port=port,
+                    retry_count=attempt + 1,
+                ) from e
+
+            # Exponential backoff: 1s, 2s, 4s
+            wait_time = 2 ** attempt
+            time.sleep(wait_time)
+```
+
+#### Circuit Breaker Pattern (Unavailable Services)
+
+Use the circuit breaker pattern for `InfraUnavailableError` to prevent cascading failures and give services time to recover:
+
+```python
+import time
+from enum import Enum
+from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+class CircuitState(str, Enum):
+    """Circuit breaker state machine."""
+    CLOSED = "closed"        # Normal operation
+    OPEN = "open"            # Blocking requests
+    HALF_OPEN = "half_open"  # Testing recovery
+
+class CircuitBreaker:
+    """Prevents cascading failures with configurable circuit breaker."""
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        reset_timeout: float = 30.0,
+        context: ModelInfraErrorContext = None,
+    ):
+        self.failure_count = 0
+        self.threshold = failure_threshold
+        self.reset_timeout = reset_timeout
+        self.last_failure_time = 0.0
+        self.state = CircuitState.CLOSED
+        self.context = context or ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="circuit_breaker",
+            target_name="service",
+        )
+
+    def call(self, func, *args, **kwargs):
+        """Execute function through circuit breaker protection."""
+        if self.state == CircuitState.OPEN:
+            # Check if reset timeout has passed
+            if time.time() - self.last_failure_time > self.reset_timeout:
+                self.state = CircuitState.HALF_OPEN
+                self.failure_count = 0
+            else:
+                raise InfraUnavailableError(
+                    "Circuit breaker is open - service temporarily unavailable",
+                    context=self.context,
+                    circuit_state=self.state.value,
+                    retry_after_seconds=int(
+                        self.reset_timeout - (time.time() - self.last_failure_time)
+                    ),
+                )
+
+        try:
+            result = func(*args, **kwargs)
+
+            # Success - reset circuit
+            if self.state == CircuitState.HALF_OPEN:
+                self.state = CircuitState.CLOSED
+            self.failure_count = 0
+            return result
+
+        except Exception as e:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+
+            # Open circuit if threshold exceeded
+            if self.failure_count >= self.threshold:
+                self.state = CircuitState.OPEN
+
+            raise
+```
+
+#### Graceful Degradation (Timeout Errors)
+
+Use graceful degradation for `InfraTimeoutError` to maintain service availability with reduced functionality:
+
+```python
+from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+def fetch_with_timeout_fallback(
+    primary_func,
+    fallback_func,
+    timeout_seconds: float = 5.0,
+    correlation_id = None,
+) -> dict:
+    """Fetch from primary source with graceful degradation to fallback."""
+    import signal
+
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.DATABASE,
+        operation="fetch",
+        target_name="primary-source",
+        correlation_id=correlation_id,
+    )
+
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Operation exceeded timeout")
+
+    # Set timeout handler
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(int(timeout_seconds))
+
+    try:
+        # Try primary data source
+        return {"data": primary_func(), "source": "primary", "degraded": False}
+
+    except TimeoutError as e:
+        # Log timeout but continue with fallback
+        context_with_fallback = ModelInfraErrorContext(
+            transport_type=context.transport_type,
+            operation=context.operation,
+            target_name=context.target_name,
+            correlation_id=context.correlation_id,
+        )
+
+        try:
+            # Use fallback source (cache, secondary database, etc.)
+            return {
+                "data": fallback_func(),
+                "source": "fallback",
+                "degraded": True,
+                "warning": f"Primary source timed out, using fallback data",
+            }
+
+        except Exception as fallback_error:
+            raise InfraTimeoutError(
+                "Primary timeout and fallback failed",
+                context=context_with_fallback,
+                timeout_seconds=timeout_seconds,
+            ) from fallback_error
+
+    finally:
+        signal.alarm(0)  # Cancel alarm
+```
+
+#### Credential Refresh (Authentication Errors)
+
+Use credential refresh for `InfraAuthenticationError` to handle token expiration gracefully:
+
+```python
+from omnibase_infra.errors import InfraAuthenticationError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+import time
+
+class CredentialRefreshManager:
+    """Manages credential refresh with automatic token renewal."""
+
+    def __init__(
+        self,
+        credential_provider,
+        refresh_threshold_seconds: float = 300.0,
+    ):
+        self.provider = credential_provider
+        self.refresh_threshold = refresh_threshold_seconds
+        self.current_credential = None
+        self.credential_expires_at = 0.0
+        self.context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.VAULT,
+            operation="credential_refresh",
+            target_name="vault-server",
+        )
+
+    def get_valid_credential(self):
+        """Get credential, refreshing if near expiration."""
+        current_time = time.time()
+
+        # Check if credential exists and is still valid
+        if (
+            self.current_credential is not None
+            and current_time < self.credential_expires_at - self.refresh_threshold
+        ):
+            return self.current_credential
+
+        # Credential missing, expired, or approaching expiration - refresh
+        try:
+            credential = self.provider.refresh_credential()
+            self.current_credential = credential
+            self.credential_expires_at = (
+                current_time + credential.get("ttl_seconds", 3600)
+            )
+            return credential
+
+        except Exception as e:
+            raise InfraAuthenticationError(
+                "Failed to refresh authentication credentials",
+                context=self.context,
+                provider="vault",
+            ) from e
+
+    def call_with_auth(self, func, *args, **kwargs):
+        """Execute function with automatic credential refresh on auth failure."""
+        max_retries = 2
+
+        for attempt in range(max_retries):
+            try:
+                credential = self.get_valid_credential()
+                return func(*args, credential=credential, **kwargs)
+
+            except InfraAuthenticationError as e:
+                if attempt == max_retries - 1:
+                    # Last attempt failed - propagate error
+                    raise
+
+                # Force refresh and retry
+                self.current_credential = None
+                self.credential_expires_at = 0.0
+```
+
 ### Transport Type Reference
 
 Use `EnumInfraTransportType` for transport identification in error context:
