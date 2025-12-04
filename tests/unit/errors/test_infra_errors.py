@@ -22,6 +22,7 @@ from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.errors import ModelOnexError
 from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumInfraHandlerType
 from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.errors.infra_errors import (
     InfraAuthenticationError,
@@ -49,21 +50,21 @@ class TestModelInfraErrorContext:
         """Test context model with all fields populated."""
         correlation_id = uuid4()
         context = ModelInfraErrorContext(
-            handler_type="http",
+            handler_type=EnumInfraHandlerType.HTTP,
             operation="process_request",
             service_name="api-gateway",
             correlation_id=correlation_id,
         )
-        assert context.handler_type == "http"
+        assert context.handler_type == EnumInfraHandlerType.HTTP
         assert context.operation == "process_request"
         assert context.service_name == "api-gateway"
         assert context.correlation_id == correlation_id
 
     def test_immutability(self) -> None:
         """Test that context model is immutable (frozen)."""
-        context = ModelInfraErrorContext(handler_type="http")
+        context = ModelInfraErrorContext(handler_type=EnumInfraHandlerType.HTTP)
         with pytest.raises(ValidationError):
-            context.handler_type = "db"  # type: ignore[misc]
+            context.handler_type = EnumInfraHandlerType.DATABASE  # type: ignore[misc]
 
 
 class TestRuntimeHostError:
@@ -79,14 +80,14 @@ class TestRuntimeHostError:
         """Test error with context model."""
         correlation_id = uuid4()
         context = ModelInfraErrorContext(
-            handler_type="http",
+            handler_type=EnumInfraHandlerType.HTTP,
             operation="process_request",
             service_name="api-service",
             correlation_id=correlation_id,
         )
         error = RuntimeHostError("Test error", context=context)
         assert error.model.correlation_id == correlation_id
-        assert error.model.context["handler_type"] == "http"
+        assert error.model.context["handler_type"] == EnumInfraHandlerType.HTTP
         assert error.model.context["operation"] == "process_request"
         assert error.model.context["service_name"] == "api-service"
 
@@ -100,7 +101,7 @@ class TestRuntimeHostError:
     def test_with_extra_context(self) -> None:
         """Test error with extra context via kwargs."""
         context = ModelInfraErrorContext(
-            handler_type="http",
+            handler_type=EnumInfraHandlerType.HTTP,
             operation="process_request",
         )
         error = RuntimeHostError(
@@ -109,7 +110,7 @@ class TestRuntimeHostError:
             retry_count=3,
             endpoint="/api/v1/users",
         )
-        assert error.model.context["handler_type"] == "http"
+        assert error.model.context["handler_type"] == EnumInfraHandlerType.HTTP
         assert error.model.context["retry_count"] == 3
         assert error.model.context["endpoint"] == "/api/v1/users"
 
@@ -142,11 +143,11 @@ class TestProtocolConfigurationError:
     def test_with_context_model(self) -> None:
         """Test error with context model."""
         context = ModelInfraErrorContext(
-            handler_type="http",
+            handler_type=EnumInfraHandlerType.HTTP,
             operation="validate_config",
         )
         error = ProtocolConfigurationError("Invalid config", context=context)
-        assert error.model.context["handler_type"] == "http"
+        assert error.model.context["handler_type"] == EnumInfraHandlerType.HTTP
         assert error.model.context["operation"] == "validate_config"
 
     def test_error_code_mapping(self) -> None:
@@ -156,7 +157,7 @@ class TestProtocolConfigurationError:
 
     def test_error_chaining(self) -> None:
         """Test error chaining from original exception."""
-        context = ModelInfraErrorContext(handler_type="db")
+        context = ModelInfraErrorContext(handler_type=EnumInfraHandlerType.DATABASE)
         config_error = KeyError("missing_key")
         try:
             raise ProtocolConfigurationError(
@@ -164,7 +165,7 @@ class TestProtocolConfigurationError:
             ) from config_error
         except ProtocolConfigurationError as e:
             assert e.__cause__ == config_error
-            assert e.model.context["handler_type"] == "db"
+            assert e.model.context["handler_type"] == EnumInfraHandlerType.DATABASE
 
 
 class TestSecretResolutionError:
@@ -425,25 +426,42 @@ class TestStructuredFieldsComprehensive:
 
     def test_all_errors_support_handler_type(self) -> None:
         """Test that all errors support handler_type via context model."""
-        handler_types = ["http", "vault", "db", "kafka", "consul", "redis"]
+        handler_types = [
+            EnumInfraHandlerType.HTTP,
+            EnumInfraHandlerType.VAULT,
+            EnumInfraHandlerType.DATABASE,
+            EnumInfraHandlerType.KAFKA,
+            EnumInfraHandlerType.CONSUL,
+            EnumInfraHandlerType.REDIS,
+        ]
         errors = [
             ProtocolConfigurationError(
-                "test", context=ModelInfraErrorContext(handler_type="http")
+                "test",
+                context=ModelInfraErrorContext(handler_type=EnumInfraHandlerType.HTTP),
             ),
             SecretResolutionError(
-                "test", context=ModelInfraErrorContext(handler_type="vault")
+                "test",
+                context=ModelInfraErrorContext(handler_type=EnumInfraHandlerType.VAULT),
             ),
             InfraConnectionError(
-                "test", context=ModelInfraErrorContext(handler_type="db")
+                "test",
+                context=ModelInfraErrorContext(
+                    handler_type=EnumInfraHandlerType.DATABASE
+                ),
             ),
             InfraTimeoutError(
-                "test", context=ModelInfraErrorContext(handler_type="kafka")
+                "test",
+                context=ModelInfraErrorContext(handler_type=EnumInfraHandlerType.KAFKA),
             ),
             InfraAuthenticationError(
-                "test", context=ModelInfraErrorContext(handler_type="consul")
+                "test",
+                context=ModelInfraErrorContext(
+                    handler_type=EnumInfraHandlerType.CONSUL
+                ),
             ),
             InfraResourceUnavailableError(
-                "test", context=ModelInfraErrorContext(handler_type="redis")
+                "test",
+                context=ModelInfraErrorContext(handler_type=EnumInfraHandlerType.REDIS),
             ),
         ]
 
