@@ -456,7 +456,7 @@ class TestInMemoryEventBusHistory:
         history = await event_bus.get_event_history()
         assert len(history) == 1
 
-        event_bus.clear_event_history()
+        await event_bus.clear_event_history()
         history = await event_bus.get_event_history()
         assert len(history) == 0
 

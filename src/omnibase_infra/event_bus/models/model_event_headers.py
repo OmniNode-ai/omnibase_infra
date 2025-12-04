@@ -68,8 +68,8 @@ class ModelEventHeaders(BaseModel):
     )
     routing_key: Optional[str] = Field(default=None)
     partition_key: Optional[str] = Field(default=None)
-    retry_count: Optional[int] = Field(default=0)
-    max_retries: Optional[int] = Field(default=3)
+    retry_count: int = Field(default=0)
+    max_retries: int = Field(default=3)
     ttl_seconds: Optional[int] = Field(default=None)
 
     model_config = {"frozen": False, "extra": "forbid"}

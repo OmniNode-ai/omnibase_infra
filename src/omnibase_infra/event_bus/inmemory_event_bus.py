@@ -198,6 +198,8 @@ class InMemoryEventBus:
             self._group = str(config["group"])
         if "max_history" in config:
             self._max_history = int(str(config["max_history"]))
+            # Recreate deque with new maxlen, preserving existing history
+            self._event_history = deque(self._event_history, maxlen=self._max_history)
         await self.start()
 
     async def shutdown(self) -> None:
@@ -329,7 +331,10 @@ class InMemoryEventBus:
             envelope_dict = envelope.model_dump(mode="json")  # type: ignore[union-attr]
         elif hasattr(envelope, "dict"):
             envelope_dict = envelope.dict()  # type: ignore[union-attr]
+        elif isinstance(envelope, dict):
+            envelope_dict = envelope
         else:
+            # Fallback for other types - attempt to use as-is
             envelope_dict = envelope  # type: ignore[assignment]
 
         value = json.dumps(envelope_dict).encode("utf-8")
@@ -539,12 +544,13 @@ class InMemoryEventBus:
                 history = [msg for msg in history if msg.topic == topic]
             return list(history)
 
-    def clear_event_history(self) -> None:
+    async def clear_event_history(self) -> None:
         """Clear event history.
 
         Useful for test isolation between test cases.
         """
-        self._event_history.clear()
+        async with self._lock:
+            self._event_history.clear()
         logger.debug("Event history cleared")
 
     async def get_subscriber_count(self, topic: Optional[str] = None) -> int:
