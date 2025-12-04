@@ -8,7 +8,7 @@ while maintaining strong typing per ONEX standards.
 """
 
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,6 +60,34 @@ class ModelInfraErrorContext(BaseModel):
         default=None,
         description="Request correlation ID for distributed tracing",
     )
+
+    @classmethod
+    def with_correlation(
+        cls,
+        correlation_id: Optional[UUID] = None,
+        **kwargs: object,
+    ) -> "ModelInfraErrorContext":
+        """Create context with auto-generated correlation_id if not provided.
+
+        This factory method ensures a correlation_id is always present,
+        generating one if not explicitly provided. Useful for distributed
+        tracing scenarios where every error should be traceable.
+
+        Args:
+            correlation_id: Optional correlation ID. If None, one is auto-generated.
+            **kwargs: Additional context fields (transport_type, operation, target_name).
+
+        Returns:
+            ModelInfraErrorContext with guaranteed correlation_id.
+
+        Example:
+            >>> context = ModelInfraErrorContext.with_correlation(
+            ...     transport_type=EnumInfraTransportType.HTTP,
+            ...     operation="process_request",
+            ... )
+            >>> assert context.correlation_id is not None
+        """
+        return cls(correlation_id=correlation_id or uuid4(), **kwargs)
 
 
 __all__ = ["ModelInfraErrorContext"]

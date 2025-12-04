@@ -14,7 +14,7 @@ Exports:
     InfraConnectionError: Infrastructure connection errors
     InfraTimeoutError: Infrastructure timeout errors
     InfraAuthenticationError: Infrastructure authentication errors
-    InfraResourceUnavailableError: Infrastructure resource unavailable errors
+    InfraUnavailableError: Infrastructure resource unavailable errors
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -83,8 +83,8 @@ Error Sanitization Guidelines:
 from omnibase_infra.errors.infra_errors import (
     InfraAuthenticationError,
     InfraConnectionError,
-    InfraResourceUnavailableError,
     InfraTimeoutError,
+    InfraUnavailableError,
     ProtocolConfigurationError,
     RuntimeHostError,
     SecretResolutionError,
@@ -101,5 +101,5 @@ __all__: list[str] = [
     "InfraConnectionError",
     "InfraTimeoutError",
     "InfraAuthenticationError",
-    "InfraResourceUnavailableError",
+    "InfraUnavailableError",
 ]

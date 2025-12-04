@@ -27,12 +27,49 @@ from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.errors.infra_errors import (
     InfraAuthenticationError,
     InfraConnectionError,
-    InfraResourceUnavailableError,
     InfraTimeoutError,
+    InfraUnavailableError,
     ProtocolConfigurationError,
     RuntimeHostError,
     SecretResolutionError,
 )
+
+
+class TestModelInfraErrorContextWithCorrelation:
+    """Tests for ModelInfraErrorContext.with_correlation() factory method."""
+
+    def test_with_correlation_generates_uuid_when_none(self) -> None:
+        """Test that with_correlation generates a UUID when none is provided."""
+        context = ModelInfraErrorContext.with_correlation()
+        assert context.correlation_id is not None
+
+    def test_with_correlation_uses_provided_uuid(self) -> None:
+        """Test that with_correlation uses the provided UUID when given."""
+        provided_id = uuid4()
+        context = ModelInfraErrorContext.with_correlation(correlation_id=provided_id)
+        assert context.correlation_id == provided_id
+
+    def test_with_correlation_with_other_fields(self) -> None:
+        """Test that with_correlation correctly passes through other kwargs."""
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="process_request",
+            target_name="api-gateway",
+        )
+        assert context.correlation_id is not None
+        assert context.transport_type == EnumInfraTransportType.HTTP
+        assert context.operation == "process_request"
+        assert context.target_name == "api-gateway"
+
+    def test_with_correlation_uuid_is_valid(self) -> None:
+        """Test that the generated UUID is a valid UUID4."""
+        from uuid import UUID
+
+        context = ModelInfraErrorContext.with_correlation()
+        # Verify it's a valid UUID object
+        assert isinstance(context.correlation_id, UUID)
+        # Verify it's a valid UUID4 (version 4)
+        assert context.correlation_id.version == 4
 
 
 class TestModelInfraErrorContext:
@@ -339,19 +376,19 @@ class TestInfraAuthenticationError:
             assert e.model.context["target_name"] == "vault"
 
 
-class TestInfraResourceUnavailableError:
-    """Tests for InfraResourceUnavailableError."""
+class TestInfraUnavailableError:
+    """Tests for InfraUnavailableError."""
 
     def test_basic_instantiation(self) -> None:
         """Test basic error instantiation."""
-        error = InfraResourceUnavailableError("Resource unavailable")
+        error = InfraUnavailableError("Resource unavailable")
         assert "Resource unavailable" in str(error)
         assert isinstance(error, RuntimeHostError)
 
     def test_with_context_model(self) -> None:
         """Test error with context model and details."""
         context = ModelInfraErrorContext(target_name="kafka")
-        error = InfraResourceUnavailableError(
+        error = InfraUnavailableError(
             "Kafka broker unavailable",
             context=context,
             host="kafka.example.com",
@@ -365,7 +402,7 @@ class TestInfraResourceUnavailableError:
 
     def test_error_code_mapping(self) -> None:
         """Test that error uses appropriate CoreErrorCode."""
-        error = InfraResourceUnavailableError("Resource error")
+        error = InfraUnavailableError("Resource error")
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
     def test_error_chaining(self) -> None:
@@ -373,13 +410,13 @@ class TestInfraResourceUnavailableError:
         context = ModelInfraErrorContext(target_name="consul")
         resource_error = ConnectionRefusedError("Not responding")
         try:
-            raise InfraResourceUnavailableError(
+            raise InfraUnavailableError(
                 "Consul unavailable",
                 context=context,
                 host="consul.local",
                 port=8500,
             ) from resource_error
-        except InfraResourceUnavailableError as e:
+        except InfraUnavailableError as e:
             assert e.__cause__ == resource_error
             assert e.model.context["target_name"] == "consul"
             assert e.model.context["port"] == 8500
@@ -396,7 +433,7 @@ class TestAllErrorsInheritance:
             InfraConnectionError("test"),
             InfraTimeoutError("test"),
             InfraAuthenticationError("test"),
-            InfraResourceUnavailableError("test"),
+            InfraUnavailableError("test"),
         ]
 
         for error in errors:
@@ -418,7 +455,7 @@ class TestStructuredFieldsComprehensive:
             InfraConnectionError("test", context=context),
             InfraTimeoutError("test", context=context),
             InfraAuthenticationError("test", context=context),
-            InfraResourceUnavailableError("test", context=context),
+            InfraUnavailableError("test", context=context),
         ]
 
         for error in errors:
@@ -465,7 +502,7 @@ class TestStructuredFieldsComprehensive:
                     transport_type=EnumInfraTransportType.CONSUL
                 ),
             ),
-            InfraResourceUnavailableError(
+            InfraUnavailableError(
                 "test",
                 context=ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.REDIS
@@ -502,7 +539,7 @@ class TestStructuredFieldsComprehensive:
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(operation="authenticate")
             ),
-            InfraResourceUnavailableError(
+            InfraUnavailableError(
                 "test", context=ModelInfraErrorContext(operation="check_health")
             ),
         ]
@@ -529,7 +566,7 @@ class TestStructuredFieldsComprehensive:
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(target_name="consul")
             ),
-            InfraResourceUnavailableError(
+            InfraUnavailableError(
                 "test", context=ModelInfraErrorContext(target_name="redis")
             ),
         ]
@@ -623,15 +660,15 @@ class TestErrorChaining:
             assert isinstance(wrapped.__cause__, PermissionError)
             assert "Access denied" in str(wrapped.__cause__)
 
-    def test_infra_resource_unavailable_error_chaining_preserves_cause(self) -> None:
-        """Test InfraResourceUnavailableError properly chains and preserves original exception."""
+    def test_infra_unavailable_error_chaining_preserves_cause(self) -> None:
+        """Test InfraUnavailableError properly chains and preserves original exception."""
         original = ConnectionRefusedError("Service not responding")
         try:
             try:
                 raise original
             except ConnectionRefusedError as e:
-                raise InfraResourceUnavailableError("Resource unavailable") from e
-        except InfraResourceUnavailableError as wrapped:
+                raise InfraUnavailableError("Resource unavailable") from e
+        except InfraUnavailableError as wrapped:
             assert wrapped.__cause__ is original
             assert isinstance(wrapped.__cause__, ConnectionRefusedError)
             assert "Service not responding" in str(wrapped.__cause__)
@@ -678,8 +715,8 @@ class TestErrorChaining:
                 except OSError as e:
                     raise InfraConnectionError("Connection layer error") from e
             except InfraConnectionError as e:
-                raise InfraResourceUnavailableError("Service unavailable") from e
-        except InfraResourceUnavailableError as final:
+                raise InfraUnavailableError("Service unavailable") from e
+        except InfraUnavailableError as final:
             # Verify immediate cause
             assert isinstance(final.__cause__, InfraConnectionError)
             # Verify root cause through chain

@@ -70,7 +70,7 @@ This project follows a **ZERO BACKWARDS COMPATIBILITY** policy:
 | Cannot connect to service | `InfraConnectionError` | Database connection refused |
 | Operation times out | `InfraTimeoutError` | Consul health check timeout |
 | Authentication fails | `InfraAuthenticationError` | Invalid API key |
-| Service unavailable | `InfraResourceUnavailableError` | Kafka broker down |
+| Service unavailable | `InfraUnavailableError` | Kafka broker down |
 
 ### Error Context Usage
 
@@ -191,7 +191,7 @@ ModelOnexError (from omnibase_core)
     ├── InfraConnectionError        # Connection failures
     ├── InfraTimeoutError           # Operation timeouts
     ├── InfraAuthenticationError    # Auth/authz failures
-    └── InfraResourceUnavailableError  # Resource unavailable
+    └── InfraUnavailableError           # Resource unavailable
 ```
 
 ### Transport Type Reference

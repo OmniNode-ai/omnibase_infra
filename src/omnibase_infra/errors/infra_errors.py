@@ -14,7 +14,7 @@ Error Hierarchy:
         ├── InfraConnectionError
         ├── InfraTimeoutError
         ├── InfraAuthenticationError
-        └── InfraResourceUnavailableError
+        └── InfraUnavailableError
 
 All errors:
     - Extend ModelOnexError from omnibase_core
@@ -296,7 +296,7 @@ class InfraAuthenticationError(RuntimeHostError):
         )
 
 
-class InfraResourceUnavailableError(RuntimeHostError):
+class InfraUnavailableError(RuntimeHostError):
     """Raised when infrastructure resource is unavailable.
 
     Used for resource downtime, maintenance mode, circuit breaker states,
@@ -307,7 +307,7 @@ class InfraResourceUnavailableError(RuntimeHostError):
         ...     target_name="kafka",
         ...     operation="produce",
         ... )
-        >>> raise InfraResourceUnavailableError(
+        >>> raise InfraUnavailableError(
         ...     "Kafka broker unavailable",
         ...     context=context,
         ...     host="kafka.example.com",
@@ -322,7 +322,7 @@ class InfraResourceUnavailableError(RuntimeHostError):
         context: Optional[ModelInfraErrorContext] = None,
         **extra_context: object,
     ) -> None:
-        """Initialize InfraResourceUnavailableError.
+        """Initialize InfraUnavailableError.
 
         Args:
             message: Human-readable error message
@@ -344,5 +344,5 @@ __all__ = [
     "InfraConnectionError",
     "InfraTimeoutError",
     "InfraAuthenticationError",
-    "InfraResourceUnavailableError",
+    "InfraUnavailableError",
 ]
