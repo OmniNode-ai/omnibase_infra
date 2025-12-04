@@ -12,7 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumInfraHandlerType
+from omnibase_infra.enums import EnumInfraServiceType
 
 
 class ModelInfraErrorContext(BaseModel):
@@ -24,14 +24,14 @@ class ModelInfraErrorContext(BaseModel):
     bundle related parameters.
 
     Attributes:
-        handler_type: Type of infrastructure handler (HTTP, DATABASE, KAFKA, etc.)
+        service_type: Type of infrastructure service (HTTP, DATABASE, KAFKA, etc.)
         operation: Operation being performed (connect, query, authenticate, etc.)
         service_name: Service or resource name
         correlation_id: Request correlation ID for distributed tracing
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     handler_type=EnumInfraHandlerType.HTTP,
+        ...     service_type=EnumInfraServiceType.HTTP,
         ...     operation="process_request",
         ...     service_name="api-gateway",
         ...     correlation_id=uuid4(),
@@ -44,9 +44,9 @@ class ModelInfraErrorContext(BaseModel):
         extra="forbid",  # Strict validation - no extra fields
     )
 
-    handler_type: Optional[EnumInfraHandlerType] = Field(
+    service_type: Optional[EnumInfraServiceType] = Field(
         default=None,
-        description="Type of infrastructure handler (HTTP, DATABASE, KAFKA, etc.)",
+        description="Type of infrastructure service (HTTP, DATABASE, KAFKA, etc.)",
     )
     operation: Optional[str] = Field(
         default=None,
