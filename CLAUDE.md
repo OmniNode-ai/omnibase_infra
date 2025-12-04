@@ -101,6 +101,18 @@ except Exception as original_error:
     ) from original_error
 ```
 
+Example: gRPC handler error
+
+```python
+# Example: gRPC handler error
+context = ModelInfraErrorContext(
+    transport_type=EnumInfraTransportType.GRPC,
+    operation="unary_call",
+    target_name="grpc-service",
+)
+raise InfraConnectionError("gRPC connection failed", context=context)
+```
+
 ### Correlation ID Assignment Rules
 
 Correlation IDs enable distributed tracing across infrastructure components:
@@ -193,6 +205,17 @@ ModelOnexError (from omnibase_core)
     ├── InfraAuthenticationError    # Auth/authz failures
     └── InfraUnavailableError           # Resource unavailable
 ```
+
+### Error Code Mapping Reference
+
+| Error Class | EnumCoreErrorCode | HTTP Equivalent |
+|-------------|-------------------|-----------------|
+| `ProtocolConfigurationError` | `INVALID_CONFIGURATION` | 400 Bad Request |
+| `SecretResolutionError` | `RESOURCE_NOT_FOUND` | 404 Not Found |
+| `InfraConnectionError` | `DATABASE_CONNECTION_ERROR` | 503 Service Unavailable |
+| `InfraTimeoutError` | `TIMEOUT_ERROR` | 504 Gateway Timeout |
+| `InfraAuthenticationError` | `AUTHENTICATION_ERROR` | 401 Unauthorized |
+| `InfraUnavailableError` | `SERVICE_UNAVAILABLE` | 503 Service Unavailable |
 
 ### Transport Type Reference
 

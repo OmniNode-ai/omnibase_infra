@@ -723,6 +723,26 @@ class TestErrorChaining:
             assert isinstance(final.__cause__.__cause__, OSError)
             assert final.__cause__.__cause__ is root_error
 
+    def test_correlation_id_propagates_through_chain(self) -> None:
+        """Test correlation_id preserved through multi-level error chaining."""
+        correlation_id = uuid4()
+        context = ModelInfraErrorContext(correlation_id=correlation_id)
+
+        try:
+            try:
+                raise InfraConnectionError("Connection failed", context=context)
+            except InfraConnectionError as e:
+                # Correlation ID should propagate
+                new_context = ModelInfraErrorContext(
+                    correlation_id=e.model.correlation_id
+                )
+                raise InfraUnavailableError("Service down", context=new_context) from e
+        except InfraUnavailableError as final:
+            # Same correlation ID throughout the chain
+            assert final.model.correlation_id == correlation_id
+            assert final.__cause__ is not None
+            assert isinstance(final.__cause__, InfraConnectionError)
+
 
 class TestContextSerialization:
     """Test ModelInfraErrorContext serialization and deserialization.
