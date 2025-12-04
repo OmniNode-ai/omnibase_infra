@@ -25,7 +25,7 @@ All errors:
     - Accept ModelInfraErrorContext for bundled context parameters
 """
 
-from typing import Any, Optional
+from typing import Optional
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
@@ -66,7 +66,7 @@ class RuntimeHostError(ModelOnexError):
         message: str,
         error_code: Optional[EnumCoreErrorCode | str] = None,
         context: Optional[ModelInfraErrorContext] = None,
-        **extra_context: Any,
+        **extra_context: object,
     ) -> None:
         """Initialize RuntimeHostError with structured fields.
 
@@ -77,7 +77,7 @@ class RuntimeHostError(ModelOnexError):
             **extra_context: Additional context information
         """
         # Build structured context from model and extra kwargs
-        structured_context: dict[str, Any] = dict(extra_context)
+        structured_context: dict[str, object] = dict(extra_context)
 
         # Extract fields from context model if provided
         correlation_id = None
@@ -120,7 +120,7 @@ class HandlerConfigurationError(RuntimeHostError):
         self,
         message: str,
         context: Optional[ModelInfraErrorContext] = None,
-        **extra_context: Any,
+        **extra_context: object,
     ) -> None:
         """Initialize HandlerConfigurationError.
 
@@ -159,7 +159,7 @@ class SecretResolutionError(RuntimeHostError):
         self,
         message: str,
         context: Optional[ModelInfraErrorContext] = None,
-        **extra_context: Any,
+        **extra_context: object,
     ) -> None:
         """Initialize SecretResolutionError.
 
@@ -199,7 +199,7 @@ class InfraConnectionError(RuntimeHostError):
         self,
         message: str,
         context: Optional[ModelInfraErrorContext] = None,
-        **extra_context: Any,
+        **extra_context: object,
     ) -> None:
         """Initialize InfraConnectionError.
 
@@ -238,7 +238,7 @@ class InfraTimeoutError(RuntimeHostError):
         self,
         message: str,
         context: Optional[ModelInfraErrorContext] = None,
-        **extra_context: Any,
+        **extra_context: object,
     ) -> None:
         """Initialize InfraTimeoutError.
 
@@ -277,7 +277,7 @@ class InfraAuthenticationError(RuntimeHostError):
         self,
         message: str,
         context: Optional[ModelInfraErrorContext] = None,
-        **extra_context: Any,
+        **extra_context: object,
     ) -> None:
         """Initialize InfraAuthenticationError.
 
@@ -318,7 +318,7 @@ class InfraServiceUnavailableError(RuntimeHostError):
         self,
         message: str,
         context: Optional[ModelInfraErrorContext] = None,
-        **extra_context: Any,
+        **extra_context: object,
     ) -> None:
         """Initialize InfraServiceUnavailableError.
 

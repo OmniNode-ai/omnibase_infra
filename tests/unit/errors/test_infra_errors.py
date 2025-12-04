@@ -17,8 +17,10 @@ All tests validate:
 
 from uuid import uuid4
 
+import pytest
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.errors import ModelOnexError
+from pydantic import ValidationError
 
 from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.errors.infra_errors import (
@@ -60,11 +62,8 @@ class TestModelInfraErrorContext:
     def test_immutability(self) -> None:
         """Test that context model is immutable (frozen)."""
         context = ModelInfraErrorContext(handler_type="http")
-        try:
+        with pytest.raises(ValidationError):
             context.handler_type = "db"  # type: ignore[misc]
-            raise AssertionError("Should have raised validation error")
-        except Exception:
-            pass  # Expected - model is frozen
 
 
 class TestRuntimeHostError:
