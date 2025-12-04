@@ -9,20 +9,20 @@ to maintain consistency with the ONEX error handling patterns.
 Exports:
     ModelInfraErrorContext: Configuration model for bundled error context
     RuntimeHostError: Base infrastructure error class
-    HandlerConfigurationError: Handler configuration validation errors
+    ProtocolConfigurationError: Protocol configuration validation errors
     SecretResolutionError: Secret/credential resolution errors
     InfraConnectionError: Infrastructure connection errors
     InfraTimeoutError: Infrastructure timeout errors
     InfraAuthenticationError: Infrastructure authentication errors
-    InfraServiceUnavailableError: Infrastructure service unavailable errors
+    InfraResourceUnavailableError: Infrastructure resource unavailable errors
 """
 
 from omnibase_infra.errors.infra_errors import (
-    HandlerConfigurationError,
     InfraAuthenticationError,
     InfraConnectionError,
-    InfraServiceUnavailableError,
+    InfraResourceUnavailableError,
     InfraTimeoutError,
+    ProtocolConfigurationError,
     RuntimeHostError,
     SecretResolutionError,
 )
@@ -33,10 +33,10 @@ __all__: list[str] = [
     "ModelInfraErrorContext",
     # Error classes
     "RuntimeHostError",
-    "HandlerConfigurationError",
+    "ProtocolConfigurationError",
     "SecretResolutionError",
     "InfraConnectionError",
     "InfraTimeoutError",
     "InfraAuthenticationError",
-    "InfraServiceUnavailableError",
+    "InfraResourceUnavailableError",
 ]

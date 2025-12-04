@@ -24,11 +24,11 @@ from pydantic import ValidationError
 
 from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.errors.infra_errors import (
-    HandlerConfigurationError,
     InfraAuthenticationError,
     InfraConnectionError,
-    InfraServiceUnavailableError,
+    InfraResourceUnavailableError,
     InfraTimeoutError,
+    ProtocolConfigurationError,
     RuntimeHostError,
     SecretResolutionError,
 )
@@ -130,12 +130,12 @@ class TestRuntimeHostError:
         assert isinstance(error, Exception)
 
 
-class TestHandlerConfigurationError:
-    """Tests for HandlerConfigurationError."""
+class TestProtocolConfigurationError:
+    """Tests for ProtocolConfigurationError."""
 
     def test_basic_instantiation(self) -> None:
         """Test basic error instantiation."""
-        error = HandlerConfigurationError("Invalid handler config")
+        error = ProtocolConfigurationError("Invalid handler config")
         assert "Invalid handler config" in str(error)
         assert isinstance(error, RuntimeHostError)
 
@@ -145,13 +145,13 @@ class TestHandlerConfigurationError:
             handler_type="http",
             operation="validate_config",
         )
-        error = HandlerConfigurationError("Invalid config", context=context)
+        error = ProtocolConfigurationError("Invalid config", context=context)
         assert error.model.context["handler_type"] == "http"
         assert error.model.context["operation"] == "validate_config"
 
     def test_error_code_mapping(self) -> None:
         """Test that error uses appropriate CoreErrorCode."""
-        error = HandlerConfigurationError("Config error")
+        error = ProtocolConfigurationError("Config error")
         assert error.model.error_code == EnumCoreErrorCode.INVALID_CONFIGURATION
 
     def test_error_chaining(self) -> None:
@@ -159,10 +159,10 @@ class TestHandlerConfigurationError:
         context = ModelInfraErrorContext(handler_type="db")
         config_error = KeyError("missing_key")
         try:
-            raise HandlerConfigurationError(
+            raise ProtocolConfigurationError(
                 "Missing required config key", context=context
             ) from config_error
-        except HandlerConfigurationError as e:
+        except ProtocolConfigurationError as e:
             assert e.__cause__ == config_error
             assert e.model.context["handler_type"] == "db"
 
@@ -338,19 +338,19 @@ class TestInfraAuthenticationError:
             assert e.model.context["service_name"] == "vault"
 
 
-class TestInfraServiceUnavailableError:
-    """Tests for InfraServiceUnavailableError."""
+class TestInfraResourceUnavailableError:
+    """Tests for InfraResourceUnavailableError."""
 
     def test_basic_instantiation(self) -> None:
         """Test basic error instantiation."""
-        error = InfraServiceUnavailableError("Service unavailable")
+        error = InfraResourceUnavailableError("Service unavailable")
         assert "Service unavailable" in str(error)
         assert isinstance(error, RuntimeHostError)
 
     def test_with_context_model(self) -> None:
         """Test error with context model and service details."""
         context = ModelInfraErrorContext(service_name="kafka")
-        error = InfraServiceUnavailableError(
+        error = InfraResourceUnavailableError(
             "Kafka broker unavailable",
             context=context,
             host="kafka.example.com",
@@ -364,7 +364,7 @@ class TestInfraServiceUnavailableError:
 
     def test_error_code_mapping(self) -> None:
         """Test that error uses appropriate CoreErrorCode."""
-        error = InfraServiceUnavailableError("Service error")
+        error = InfraResourceUnavailableError("Service error")
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
     def test_error_chaining(self) -> None:
@@ -372,13 +372,13 @@ class TestInfraServiceUnavailableError:
         context = ModelInfraErrorContext(service_name="consul")
         service_error = ConnectionRefusedError("Service not responding")
         try:
-            raise InfraServiceUnavailableError(
+            raise InfraResourceUnavailableError(
                 "Consul unavailable",
                 context=context,
                 host="consul.local",
                 port=8500,
             ) from service_error
-        except InfraServiceUnavailableError as e:
+        except InfraResourceUnavailableError as e:
             assert e.__cause__ == service_error
             assert e.model.context["service_name"] == "consul"
             assert e.model.context["port"] == 8500
@@ -390,12 +390,12 @@ class TestAllErrorsInheritance:
     def test_all_errors_inherit_from_runtime_host_error(self) -> None:
         """Test inheritance chain for all error classes."""
         errors = [
-            HandlerConfigurationError("test"),
+            ProtocolConfigurationError("test"),
             SecretResolutionError("test"),
             InfraConnectionError("test"),
             InfraTimeoutError("test"),
             InfraAuthenticationError("test"),
-            InfraServiceUnavailableError("test"),
+            InfraResourceUnavailableError("test"),
         ]
 
         for error in errors:
@@ -412,12 +412,12 @@ class TestStructuredFieldsComprehensive:
         correlation_id = uuid4()
         context = ModelInfraErrorContext(correlation_id=correlation_id)
         errors = [
-            HandlerConfigurationError("test", context=context),
+            ProtocolConfigurationError("test", context=context),
             SecretResolutionError("test", context=context),
             InfraConnectionError("test", context=context),
             InfraTimeoutError("test", context=context),
             InfraAuthenticationError("test", context=context),
-            InfraServiceUnavailableError("test", context=context),
+            InfraResourceUnavailableError("test", context=context),
         ]
 
         for error in errors:
@@ -427,7 +427,7 @@ class TestStructuredFieldsComprehensive:
         """Test that all errors support handler_type via context model."""
         handler_types = ["http", "vault", "db", "kafka", "consul", "redis"]
         errors = [
-            HandlerConfigurationError(
+            ProtocolConfigurationError(
                 "test", context=ModelInfraErrorContext(handler_type="http")
             ),
             SecretResolutionError(
@@ -442,7 +442,7 @@ class TestStructuredFieldsComprehensive:
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(handler_type="consul")
             ),
-            InfraServiceUnavailableError(
+            InfraResourceUnavailableError(
                 "test", context=ModelInfraErrorContext(handler_type="redis")
             ),
         ]
@@ -461,7 +461,7 @@ class TestStructuredFieldsComprehensive:
             "check_health",
         ]
         errors = [
-            HandlerConfigurationError(
+            ProtocolConfigurationError(
                 "test", context=ModelInfraErrorContext(operation="validate")
             ),
             SecretResolutionError(
@@ -476,7 +476,7 @@ class TestStructuredFieldsComprehensive:
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(operation="authenticate")
             ),
-            InfraServiceUnavailableError(
+            InfraResourceUnavailableError(
                 "test", context=ModelInfraErrorContext(operation="check_health")
             ),
         ]
@@ -488,7 +488,7 @@ class TestStructuredFieldsComprehensive:
         """Test that all errors support service_name via context model."""
         services = ["api", "vault", "postgresql", "kafka", "consul", "redis"]
         errors = [
-            HandlerConfigurationError(
+            ProtocolConfigurationError(
                 "test", context=ModelInfraErrorContext(service_name="api")
             ),
             SecretResolutionError(
@@ -503,7 +503,7 @@ class TestStructuredFieldsComprehensive:
             InfraAuthenticationError(
                 "test", context=ModelInfraErrorContext(service_name="consul")
             ),
-            InfraServiceUnavailableError(
+            InfraResourceUnavailableError(
                 "test", context=ModelInfraErrorContext(service_name="redis")
             ),
         ]

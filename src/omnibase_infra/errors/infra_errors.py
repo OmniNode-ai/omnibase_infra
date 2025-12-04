@@ -9,12 +9,12 @@ omnibase_infra package. All error classes extend from ModelOnexError
 Error Hierarchy:
     ModelOnexError (from omnibase_core)
     └── RuntimeHostError (base infrastructure error)
-        ├── HandlerConfigurationError
+        ├── ProtocolConfigurationError
         ├── SecretResolutionError
         ├── InfraConnectionError
         ├── InfraTimeoutError
         ├── InfraAuthenticationError
-        └── InfraServiceUnavailableError
+        └── InfraResourceUnavailableError
 
 All errors:
     - Extend ModelOnexError from omnibase_core
@@ -99,8 +99,8 @@ class RuntimeHostError(ModelOnexError):
         )
 
 
-class HandlerConfigurationError(RuntimeHostError):
-    """Raised when handler configuration validation fails.
+class ProtocolConfigurationError(RuntimeHostError):
+    """Raised when protocol configuration validation fails.
 
     Used for configuration parsing errors, missing required fields,
     invalid configuration values, or schema validation failures.
@@ -110,7 +110,7 @@ class HandlerConfigurationError(RuntimeHostError):
         ...     handler_type="http",
         ...     operation="validate_config",
         ... )
-        >>> raise HandlerConfigurationError(
+        >>> raise ProtocolConfigurationError(
         ...     "Missing required field 'endpoint'",
         ...     context=context,
         ... )
@@ -122,7 +122,7 @@ class HandlerConfigurationError(RuntimeHostError):
         context: Optional[ModelInfraErrorContext] = None,
         **extra_context: object,
     ) -> None:
-        """Initialize HandlerConfigurationError.
+        """Initialize ProtocolConfigurationError.
 
         Args:
             message: Human-readable error message
@@ -294,10 +294,10 @@ class InfraAuthenticationError(RuntimeHostError):
         )
 
 
-class InfraServiceUnavailableError(RuntimeHostError):
-    """Raised when infrastructure service is unavailable.
+class InfraResourceUnavailableError(RuntimeHostError):
+    """Raised when infrastructure resource is unavailable.
 
-    Used for service downtime, maintenance mode, circuit breaker states,
+    Used for resource downtime, maintenance mode, circuit breaker states,
     or health check failures.
 
     Example:
@@ -305,7 +305,7 @@ class InfraServiceUnavailableError(RuntimeHostError):
         ...     service_name="kafka",
         ...     operation="produce",
         ... )
-        >>> raise InfraServiceUnavailableError(
+        >>> raise InfraResourceUnavailableError(
         ...     "Kafka broker unavailable",
         ...     context=context,
         ...     host="kafka.example.com",
@@ -320,7 +320,7 @@ class InfraServiceUnavailableError(RuntimeHostError):
         context: Optional[ModelInfraErrorContext] = None,
         **extra_context: object,
     ) -> None:
-        """Initialize InfraServiceUnavailableError.
+        """Initialize InfraResourceUnavailableError.
 
         Args:
             message: Human-readable error message
@@ -337,10 +337,10 @@ class InfraServiceUnavailableError(RuntimeHostError):
 
 __all__ = [
     "RuntimeHostError",
-    "HandlerConfigurationError",
+    "ProtocolConfigurationError",
     "SecretResolutionError",
     "InfraConnectionError",
     "InfraTimeoutError",
     "InfraAuthenticationError",
-    "InfraServiceUnavailableError",
+    "InfraResourceUnavailableError",
 ]
