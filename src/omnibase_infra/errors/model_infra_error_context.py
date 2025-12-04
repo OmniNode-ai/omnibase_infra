@@ -12,7 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumInfraServiceType
+from omnibase_infra.enums import EnumInfraTransportType
 
 
 class ModelInfraErrorContext(BaseModel):
@@ -24,16 +24,16 @@ class ModelInfraErrorContext(BaseModel):
     bundle related parameters.
 
     Attributes:
-        service_type: Type of infrastructure service (HTTP, DATABASE, KAFKA, etc.)
+        transport_type: Type of infrastructure transport (HTTP, DATABASE, KAFKA, etc.)
         operation: Operation being performed (connect, query, authenticate, etc.)
-        service_name: Service or resource name
+        target_name: Target resource or endpoint name
         correlation_id: Request correlation ID for distributed tracing
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     service_type=EnumInfraServiceType.HTTP,
+        ...     transport_type=EnumInfraTransportType.HTTP,
         ...     operation="process_request",
-        ...     service_name="api-gateway",
+        ...     target_name="api-gateway",
         ...     correlation_id=uuid4(),
         ... )
         >>> raise RuntimeHostError("Operation failed", context=context)
@@ -44,17 +44,17 @@ class ModelInfraErrorContext(BaseModel):
         extra="forbid",  # Strict validation - no extra fields
     )
 
-    service_type: Optional[EnumInfraServiceType] = Field(
+    transport_type: Optional[EnumInfraTransportType] = Field(
         default=None,
-        description="Type of infrastructure service (HTTP, DATABASE, KAFKA, etc.)",
+        description="Type of infrastructure transport (HTTP, DATABASE, KAFKA, etc.)",
     )
     operation: Optional[str] = Field(
         default=None,
         description="Operation being performed (connect, query, authenticate, etc.)",
     )
-    service_name: Optional[str] = Field(
+    target_name: Optional[str] = Field(
         default=None,
-        description="Service or resource name",
+        description="Target resource or endpoint name",
     )
     correlation_id: Optional[UUID] = Field(
         default=None,

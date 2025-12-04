@@ -22,7 +22,7 @@ from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.errors import ModelOnexError
 from pydantic import ValidationError
 
-from omnibase_infra.enums import EnumInfraServiceType
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.errors.infra_errors import (
     InfraAuthenticationError,
@@ -41,30 +41,30 @@ class TestModelInfraErrorContext:
     def test_basic_instantiation(self) -> None:
         """Test basic context model instantiation."""
         context = ModelInfraErrorContext()
-        assert context.service_type is None
+        assert context.transport_type is None
         assert context.operation is None
-        assert context.service_name is None
+        assert context.target_name is None
         assert context.correlation_id is None
 
     def test_with_all_fields(self) -> None:
         """Test context model with all fields populated."""
         correlation_id = uuid4()
         context = ModelInfraErrorContext(
-            service_type=EnumInfraServiceType.HTTP,
+            transport_type=EnumInfraTransportType.HTTP,
             operation="process_request",
-            service_name="api-gateway",
+            target_name="api-gateway",
             correlation_id=correlation_id,
         )
-        assert context.service_type == EnumInfraServiceType.HTTP
+        assert context.transport_type == EnumInfraTransportType.HTTP
         assert context.operation == "process_request"
-        assert context.service_name == "api-gateway"
+        assert context.target_name == "api-gateway"
         assert context.correlation_id == correlation_id
 
     def test_immutability(self) -> None:
         """Test that context model is immutable (frozen)."""
-        context = ModelInfraErrorContext(service_type=EnumInfraServiceType.HTTP)
+        context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.HTTP)
         with pytest.raises(ValidationError):
-            context.service_type = EnumInfraServiceType.DATABASE  # type: ignore[misc]
+            context.transport_type = EnumInfraTransportType.DATABASE  # type: ignore[misc]
 
 
 class TestRuntimeHostError:
@@ -80,16 +80,16 @@ class TestRuntimeHostError:
         """Test error with context model."""
         correlation_id = uuid4()
         context = ModelInfraErrorContext(
-            service_type=EnumInfraServiceType.HTTP,
+            transport_type=EnumInfraTransportType.HTTP,
             operation="process_request",
-            service_name="api-service",
+            target_name="api-endpoint",
             correlation_id=correlation_id,
         )
         error = RuntimeHostError("Test error", context=context)
         assert error.model.correlation_id == correlation_id
-        assert error.model.context["service_type"] == EnumInfraServiceType.HTTP
+        assert error.model.context["transport_type"] == EnumInfraTransportType.HTTP
         assert error.model.context["operation"] == "process_request"
-        assert error.model.context["service_name"] == "api-service"
+        assert error.model.context["target_name"] == "api-endpoint"
 
     def test_with_error_code(self) -> None:
         """Test error with explicit error code."""
@@ -101,7 +101,7 @@ class TestRuntimeHostError:
     def test_with_extra_context(self) -> None:
         """Test error with extra context via kwargs."""
         context = ModelInfraErrorContext(
-            service_type=EnumInfraServiceType.HTTP,
+            transport_type=EnumInfraTransportType.HTTP,
             operation="process_request",
         )
         error = RuntimeHostError(
@@ -110,7 +110,7 @@ class TestRuntimeHostError:
             retry_count=3,
             endpoint="/api/v1/users",
         )
-        assert error.model.context["service_type"] == EnumInfraServiceType.HTTP
+        assert error.model.context["transport_type"] == EnumInfraTransportType.HTTP
         assert error.model.context["retry_count"] == 3
         assert error.model.context["endpoint"] == "/api/v1/users"
 
@@ -136,18 +136,18 @@ class TestProtocolConfigurationError:
 
     def test_basic_instantiation(self) -> None:
         """Test basic error instantiation."""
-        error = ProtocolConfigurationError("Invalid handler config")
-        assert "Invalid handler config" in str(error)
+        error = ProtocolConfigurationError("Invalid config")
+        assert "Invalid config" in str(error)
         assert isinstance(error, RuntimeHostError)
 
     def test_with_context_model(self) -> None:
         """Test error with context model."""
         context = ModelInfraErrorContext(
-            service_type=EnumInfraServiceType.HTTP,
+            transport_type=EnumInfraTransportType.HTTP,
             operation="validate_config",
         )
         error = ProtocolConfigurationError("Invalid config", context=context)
-        assert error.model.context["service_type"] == EnumInfraServiceType.HTTP
+        assert error.model.context["transport_type"] == EnumInfraTransportType.HTTP
         assert error.model.context["operation"] == "validate_config"
 
     def test_error_code_mapping(self) -> None:
@@ -157,7 +157,7 @@ class TestProtocolConfigurationError:
 
     def test_error_chaining(self) -> None:
         """Test error chaining from original exception."""
-        context = ModelInfraErrorContext(service_type=EnumInfraServiceType.DATABASE)
+        context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.DATABASE)
         config_error = KeyError("missing_key")
         try:
             raise ProtocolConfigurationError(
@@ -165,7 +165,7 @@ class TestProtocolConfigurationError:
             ) from config_error
         except ProtocolConfigurationError as e:
             assert e.__cause__ == config_error
-            assert e.model.context["service_type"] == EnumInfraServiceType.DATABASE
+            assert e.model.context["transport_type"] == EnumInfraTransportType.DATABASE
 
 
 class TestSecretResolutionError:
@@ -180,7 +180,7 @@ class TestSecretResolutionError:
     def test_with_context_model(self) -> None:
         """Test error with context model and extra context."""
         context = ModelInfraErrorContext(
-            service_name="vault",
+            target_name="vault",
             operation="get_secret",
         )
         error = SecretResolutionError(
@@ -188,7 +188,7 @@ class TestSecretResolutionError:
             context=context,
             secret_key="db_password",  # noqa: S106
         )
-        assert error.model.context["service_name"] == "vault"
+        assert error.model.context["target_name"] == "vault"
         assert error.model.context["operation"] == "get_secret"
         assert error.model.context["secret_key"] == "db_password"
 
@@ -199,7 +199,7 @@ class TestSecretResolutionError:
 
     def test_error_chaining(self) -> None:
         """Test error chaining from vault client error."""
-        context = ModelInfraErrorContext(service_name="vault")
+        context = ModelInfraErrorContext(target_name="vault")
         vault_error = ConnectionError("Vault unreachable")
         try:
             raise SecretResolutionError(
@@ -207,7 +207,7 @@ class TestSecretResolutionError:
             ) from vault_error
         except SecretResolutionError as e:
             assert e.__cause__ == vault_error
-            assert e.model.context["service_name"] == "vault"
+            assert e.model.context["target_name"] == "vault"
 
 
 class TestInfraConnectionError:
@@ -221,14 +221,14 @@ class TestInfraConnectionError:
 
     def test_with_context_model(self) -> None:
         """Test error with context model and connection details."""
-        context = ModelInfraErrorContext(service_name="postgresql")
+        context = ModelInfraErrorContext(target_name="postgresql")
         error = InfraConnectionError(
             "Database connection failed",
             context=context,
             host="db.example.com",
             port=5432,
         )
-        assert error.model.context["service_name"] == "postgresql"
+        assert error.model.context["target_name"] == "postgresql"
         assert error.model.context["host"] == "db.example.com"
         assert error.model.context["port"] == 5432
 
@@ -239,7 +239,7 @@ class TestInfraConnectionError:
 
     def test_error_chaining(self) -> None:
         """Test error chaining from connection exception."""
-        context = ModelInfraErrorContext(service_name="redis")
+        context = ModelInfraErrorContext(target_name="redis")
         conn_error = OSError("Connection refused")
         try:
             raise InfraConnectionError(
@@ -247,7 +247,7 @@ class TestInfraConnectionError:
             ) from conn_error
         except InfraConnectionError as e:
             assert e.__cause__ == conn_error
-            assert e.model.context["service_name"] == "redis"
+            assert e.model.context["target_name"] == "redis"
             assert e.model.context["port"] == 6379
 
 
@@ -264,7 +264,7 @@ class TestInfraTimeoutError:
         """Test error with context model and timeout details."""
         context = ModelInfraErrorContext(
             operation="execute_query",
-            service_name="postgresql",
+            target_name="postgresql",
         )
         error = InfraTimeoutError(
             "Query timeout exceeded",
@@ -273,7 +273,7 @@ class TestInfraTimeoutError:
         )
         assert error.model.context["operation"] == "execute_query"
         assert error.model.context["timeout_seconds"] == 30
-        assert error.model.context["service_name"] == "postgresql"
+        assert error.model.context["target_name"] == "postgresql"
 
     def test_error_code_mapping(self) -> None:
         """Test that error uses appropriate CoreErrorCode."""
@@ -306,7 +306,7 @@ class TestInfraAuthenticationError:
     def test_with_context_model(self) -> None:
         """Test error with context model and auth details."""
         context = ModelInfraErrorContext(
-            service_name="consul",
+            target_name="consul",
             operation="authenticate",
         )
         error = InfraAuthenticationError(
@@ -314,7 +314,7 @@ class TestInfraAuthenticationError:
             context=context,
             username="admin",
         )
-        assert error.model.context["service_name"] == "consul"
+        assert error.model.context["target_name"] == "consul"
         assert error.model.context["operation"] == "authenticate"
         assert error.model.context["username"] == "admin"
 
@@ -326,7 +326,7 @@ class TestInfraAuthenticationError:
     def test_error_chaining(self) -> None:
         """Test error chaining from auth exception."""
         context = ModelInfraErrorContext(
-            service_name="vault",
+            target_name="vault",
             operation="login",
         )
         auth_error = PermissionError("Access denied")
@@ -336,7 +336,7 @@ class TestInfraAuthenticationError:
             ) from auth_error
         except InfraAuthenticationError as e:
             assert e.__cause__ == auth_error
-            assert e.model.context["service_name"] == "vault"
+            assert e.model.context["target_name"] == "vault"
 
 
 class TestInfraResourceUnavailableError:
@@ -344,13 +344,13 @@ class TestInfraResourceUnavailableError:
 
     def test_basic_instantiation(self) -> None:
         """Test basic error instantiation."""
-        error = InfraResourceUnavailableError("Service unavailable")
-        assert "Service unavailable" in str(error)
+        error = InfraResourceUnavailableError("Resource unavailable")
+        assert "Resource unavailable" in str(error)
         assert isinstance(error, RuntimeHostError)
 
     def test_with_context_model(self) -> None:
-        """Test error with context model and service details."""
-        context = ModelInfraErrorContext(service_name="kafka")
+        """Test error with context model and details."""
+        context = ModelInfraErrorContext(target_name="kafka")
         error = InfraResourceUnavailableError(
             "Kafka broker unavailable",
             context=context,
@@ -358,30 +358,30 @@ class TestInfraResourceUnavailableError:
             port=9092,
             retry_count=3,
         )
-        assert error.model.context["service_name"] == "kafka"
+        assert error.model.context["target_name"] == "kafka"
         assert error.model.context["host"] == "kafka.example.com"
         assert error.model.context["port"] == 9092
         assert error.model.context["retry_count"] == 3
 
     def test_error_code_mapping(self) -> None:
         """Test that error uses appropriate CoreErrorCode."""
-        error = InfraResourceUnavailableError("Service error")
+        error = InfraResourceUnavailableError("Resource error")
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
     def test_error_chaining(self) -> None:
-        """Test error chaining from service exception."""
-        context = ModelInfraErrorContext(service_name="consul")
-        service_error = ConnectionRefusedError("Service not responding")
+        """Test error chaining from exception."""
+        context = ModelInfraErrorContext(target_name="consul")
+        resource_error = ConnectionRefusedError("Not responding")
         try:
             raise InfraResourceUnavailableError(
                 "Consul unavailable",
                 context=context,
                 host="consul.local",
                 port=8500,
-            ) from service_error
+            ) from resource_error
         except InfraResourceUnavailableError as e:
-            assert e.__cause__ == service_error
-            assert e.model.context["service_name"] == "consul"
+            assert e.__cause__ == resource_error
+            assert e.model.context["target_name"] == "consul"
             assert e.model.context["port"] == 8500
 
 
@@ -424,49 +424,57 @@ class TestStructuredFieldsComprehensive:
         for error in errors:
             assert error.model.correlation_id == correlation_id
 
-    def test_all_errors_support_service_type(self) -> None:
-        """Test that all errors support service_type via context model."""
-        service_types = [
-            EnumInfraServiceType.HTTP,
-            EnumInfraServiceType.VAULT,
-            EnumInfraServiceType.DATABASE,
-            EnumInfraServiceType.KAFKA,
-            EnumInfraServiceType.CONSUL,
-            EnumInfraServiceType.REDIS,
+    def test_all_errors_support_transport_type(self) -> None:
+        """Test that all errors support transport_type via context model."""
+        transport_types = [
+            EnumInfraTransportType.HTTP,
+            EnumInfraTransportType.VAULT,
+            EnumInfraTransportType.DATABASE,
+            EnumInfraTransportType.KAFKA,
+            EnumInfraTransportType.CONSUL,
+            EnumInfraTransportType.REDIS,
         ]
         errors = [
             ProtocolConfigurationError(
                 "test",
-                context=ModelInfraErrorContext(service_type=EnumInfraServiceType.HTTP),
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.HTTP
+                ),
             ),
             SecretResolutionError(
                 "test",
-                context=ModelInfraErrorContext(service_type=EnumInfraServiceType.VAULT),
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.VAULT
+                ),
             ),
             InfraConnectionError(
                 "test",
                 context=ModelInfraErrorContext(
-                    service_type=EnumInfraServiceType.DATABASE
+                    transport_type=EnumInfraTransportType.DATABASE
                 ),
             ),
             InfraTimeoutError(
                 "test",
-                context=ModelInfraErrorContext(service_type=EnumInfraServiceType.KAFKA),
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA
+                ),
             ),
             InfraAuthenticationError(
                 "test",
                 context=ModelInfraErrorContext(
-                    service_type=EnumInfraServiceType.CONSUL
+                    transport_type=EnumInfraTransportType.CONSUL
                 ),
             ),
             InfraResourceUnavailableError(
                 "test",
-                context=ModelInfraErrorContext(service_type=EnumInfraServiceType.REDIS),
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.REDIS
+                ),
             ),
         ]
 
-        for error, expected_type in zip(errors, service_types, strict=True):
-            assert error.model.context["service_type"] == expected_type
+        for error, expected_type in zip(errors, transport_types, strict=True):
+            assert error.model.context["transport_type"] == expected_type
 
     def test_all_errors_support_operation(self) -> None:
         """Test that all errors support operation via context model."""
@@ -502,29 +510,29 @@ class TestStructuredFieldsComprehensive:
         for error, operation in zip(errors, operations, strict=True):
             assert error.model.context["operation"] == operation
 
-    def test_all_errors_support_service_name(self) -> None:
-        """Test that all errors support service_name via context model."""
-        services = ["api", "vault", "postgresql", "kafka", "consul", "redis"]
+    def test_all_errors_support_target_name(self) -> None:
+        """Test that all errors support target_name via context model."""
+        targets = ["api", "vault", "postgresql", "kafka", "consul", "redis"]
         errors = [
             ProtocolConfigurationError(
-                "test", context=ModelInfraErrorContext(service_name="api")
+                "test", context=ModelInfraErrorContext(target_name="api")
             ),
             SecretResolutionError(
-                "test", context=ModelInfraErrorContext(service_name="vault")
+                "test", context=ModelInfraErrorContext(target_name="vault")
             ),
             InfraConnectionError(
-                "test", context=ModelInfraErrorContext(service_name="postgresql")
+                "test", context=ModelInfraErrorContext(target_name="postgresql")
             ),
             InfraTimeoutError(
-                "test", context=ModelInfraErrorContext(service_name="kafka")
+                "test", context=ModelInfraErrorContext(target_name="kafka")
             ),
             InfraAuthenticationError(
-                "test", context=ModelInfraErrorContext(service_name="consul")
+                "test", context=ModelInfraErrorContext(target_name="consul")
             ),
             InfraResourceUnavailableError(
-                "test", context=ModelInfraErrorContext(service_name="redis")
+                "test", context=ModelInfraErrorContext(target_name="redis")
             ),
         ]
 
-        for error, service in zip(errors, services, strict=True):
-            assert error.model.context["service_name"] == service
+        for error, target in zip(errors, targets, strict=True):
+            assert error.model.context["target_name"] == target

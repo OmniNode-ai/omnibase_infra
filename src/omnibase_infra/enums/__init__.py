@@ -2,13 +2,13 @@
 # Copyright (c) 2025 OmniNode Team
 """ONEX Infrastructure Enumerations Module.
 
-Provides infrastructure-specific enumerations for service types,
-service identification, and protocol classification.
+Provides infrastructure-specific enumerations for transport types,
+protocol identification, and classification.
 
 Exports:
-    EnumInfraServiceType: Infrastructure service type enumeration
+    EnumInfraTransportType: Infrastructure transport type enumeration
 """
 
-from omnibase_infra.enums.enum_infra_service_type import EnumInfraServiceType
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 
-__all__ = ["EnumInfraServiceType"]
+__all__ = ["EnumInfraTransportType"]

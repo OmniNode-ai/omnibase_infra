@@ -40,17 +40,17 @@ class RuntimeHostError(ModelOnexError):
     Provides common structured fields for infrastructure operations.
 
     Structured Fields (via ModelInfraErrorContext):
-        service_type: Type of service (http, db, kafka, etc.)
+        transport_type: Type of transport (http, db, kafka, etc.)
         operation: Operation being performed
         correlation_id: Request correlation ID for tracking
-        service_name: Service/resource name
+        target_name: Target resource/endpoint name
 
     Example:
-        >>> from omnibase_infra.enums import EnumInfraServiceType
+        >>> from omnibase_infra.enums import EnumInfraTransportType
         >>> context = ModelInfraErrorContext(
-        ...     service_type=EnumInfraServiceType.HTTP,
+        ...     transport_type=EnumInfraTransportType.HTTP,
         ...     operation="process_request",
-        ...     service_name="api-gateway",
+        ...     target_name="api-gateway",
         ... )
         >>> raise RuntimeHostError("Operation failed", context=context)
 
@@ -74,7 +74,7 @@ class RuntimeHostError(ModelOnexError):
         Args:
             message: Human-readable error message
             error_code: Error code (defaults to OPERATION_FAILED)
-            context: Bundled infrastructure context (service_type, operation, etc.)
+            context: Bundled infrastructure context (transport_type, operation, etc.)
             **extra_context: Additional context information
         """
         # Build structured context from model and extra kwargs
@@ -83,12 +83,12 @@ class RuntimeHostError(ModelOnexError):
         # Extract fields from context model if provided
         correlation_id = None
         if context is not None:
-            if context.service_type is not None:
-                structured_context["service_type"] = context.service_type
+            if context.transport_type is not None:
+                structured_context["transport_type"] = context.transport_type
             if context.operation is not None:
                 structured_context["operation"] = context.operation
-            if context.service_name is not None:
-                structured_context["service_name"] = context.service_name
+            if context.target_name is not None:
+                structured_context["target_name"] = context.target_name
             correlation_id = context.correlation_id
 
         # Initialize base error with default error code
@@ -107,9 +107,9 @@ class ProtocolConfigurationError(RuntimeHostError):
     invalid configuration values, or schema validation failures.
 
     Example:
-        >>> from omnibase_infra.enums import EnumInfraServiceType
+        >>> from omnibase_infra.enums import EnumInfraTransportType
         >>> context = ModelInfraErrorContext(
-        ...     service_type=EnumInfraServiceType.HTTP,
+        ...     transport_type=EnumInfraTransportType.HTTP,
         ...     operation="validate_config",
         ... )
         >>> raise ProtocolConfigurationError(
@@ -147,7 +147,7 @@ class SecretResolutionError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     service_name="vault",
+        ...     target_name="vault",
         ...     operation="get_secret",
         ... )
         >>> raise SecretResolutionError(
@@ -179,14 +179,14 @@ class SecretResolutionError(RuntimeHostError):
 
 
 class InfraConnectionError(RuntimeHostError):
-    """Raised when infrastructure service connection fails.
+    """Raised when infrastructure connection fails.
 
-    Used for database connection failures, service mesh connectivity issues,
+    Used for database connection failures, mesh connectivity issues,
     message broker connection problems, or network-related errors.
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     service_name="postgresql",
+        ...     target_name="postgresql",
         ...     operation="connect",
         ... )
         >>> raise InfraConnectionError(
@@ -222,12 +222,12 @@ class InfraTimeoutError(RuntimeHostError):
     """Raised when infrastructure operation exceeds timeout.
 
     Used for database query timeouts, HTTP request timeouts,
-    message broker operation timeouts, or service call deadlines.
+    message broker operation timeouts, or call deadlines.
 
     Example:
         >>> context = ModelInfraErrorContext(
         ...     operation="execute_query",
-        ...     service_name="postgresql",
+        ...     target_name="postgresql",
         ... )
         >>> raise InfraTimeoutError(
         ...     "Database query exceeded timeout",
@@ -261,11 +261,11 @@ class InfraAuthenticationError(RuntimeHostError):
     """Raised when infrastructure authentication or authorization fails.
 
     Used for invalid credentials, expired tokens, insufficient permissions,
-    or authentication service failures.
+    or authentication failures.
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     service_name="vault",
+        ...     target_name="vault",
         ...     operation="authenticate",
         ... )
         >>> raise InfraAuthenticationError(
@@ -304,7 +304,7 @@ class InfraResourceUnavailableError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     service_name="kafka",
+        ...     target_name="kafka",
         ...     operation="produce",
         ... )
         >>> raise InfraResourceUnavailableError(
