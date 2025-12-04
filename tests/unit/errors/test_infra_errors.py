@@ -269,10 +269,83 @@ class TestInfraConnectionError:
         assert error.model.context["host"] == "db.example.com"
         assert error.model.context["port"] == 5432
 
-    def test_error_code_mapping(self) -> None:
-        """Test that error uses appropriate CoreErrorCode."""
+    def test_error_code_mapping_without_context(self) -> None:
+        """Test that error uses SERVICE_UNAVAILABLE when no context provided."""
         error = InfraConnectionError("Connection error")
+        # Without context, defaults to SERVICE_UNAVAILABLE
+        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+
+    def test_error_code_mapping_database_transport(self) -> None:
+        """Test DATABASE transport uses DATABASE_CONNECTION_ERROR."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            target_name="postgresql",
+        )
+        error = InfraConnectionError("Database connection failed", context=context)
         assert error.model.error_code == EnumCoreErrorCode.DATABASE_CONNECTION_ERROR
+
+    def test_error_code_mapping_http_transport(self) -> None:
+        """Test HTTP transport uses NETWORK_ERROR."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            target_name="api-gateway",
+        )
+        error = InfraConnectionError("HTTP connection failed", context=context)
+        assert error.model.error_code == EnumCoreErrorCode.NETWORK_ERROR
+
+    def test_error_code_mapping_grpc_transport(self) -> None:
+        """Test GRPC transport uses NETWORK_ERROR."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.GRPC,
+            target_name="grpc-service",
+        )
+        error = InfraConnectionError("gRPC connection failed", context=context)
+        assert error.model.error_code == EnumCoreErrorCode.NETWORK_ERROR
+
+    def test_error_code_mapping_kafka_transport(self) -> None:
+        """Test KAFKA transport uses SERVICE_UNAVAILABLE."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            target_name="kafka-broker",
+        )
+        error = InfraConnectionError("Kafka connection failed", context=context)
+        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+
+    def test_error_code_mapping_consul_transport(self) -> None:
+        """Test CONSUL transport uses SERVICE_UNAVAILABLE."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.CONSUL,
+            target_name="consul-server",
+        )
+        error = InfraConnectionError("Consul connection failed", context=context)
+        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+
+    def test_error_code_mapping_vault_transport(self) -> None:
+        """Test VAULT transport uses SERVICE_UNAVAILABLE."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.VAULT,
+            target_name="vault-server",
+        )
+        error = InfraConnectionError("Vault connection failed", context=context)
+        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+
+    def test_error_code_mapping_redis_transport(self) -> None:
+        """Test REDIS transport uses SERVICE_UNAVAILABLE."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.REDIS,
+            target_name="redis-cluster",
+        )
+        error = InfraConnectionError("Redis connection failed", context=context)
+        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+
+    def test_error_code_mapping_context_without_transport(self) -> None:
+        """Test context with no transport_type uses SERVICE_UNAVAILABLE."""
+        context = ModelInfraErrorContext(
+            operation="connect",
+            target_name="unknown-service",
+        )
+        error = InfraConnectionError("Connection failed", context=context)
+        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
     def test_error_chaining(self) -> None:
         """Test error chaining from connection exception."""
@@ -286,6 +359,89 @@ class TestInfraConnectionError:
             assert e.__cause__ == conn_error
             assert e.model.context["target_name"] == "redis"
             assert e.model.context["port"] == 6379
+
+
+class TestInfraConnectionErrorTransportMapping:
+    """Comprehensive tests for InfraConnectionError transport-aware error code mapping.
+
+    Validates that InfraConnectionError selects the correct EnumCoreErrorCode
+    based on the transport_type in ModelInfraErrorContext.
+    """
+
+    def test_resolve_connection_error_code_with_none_context(self) -> None:
+        """Test _resolve_connection_error_code with None context."""
+        error_code = InfraConnectionError._resolve_connection_error_code(None)
+        assert error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+
+    def test_resolve_connection_error_code_database(self) -> None:
+        """Test _resolve_connection_error_code for DATABASE transport."""
+        context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.DATABASE)
+        error_code = InfraConnectionError._resolve_connection_error_code(context)
+        assert error_code == EnumCoreErrorCode.DATABASE_CONNECTION_ERROR
+
+    def test_resolve_connection_error_code_network_transports(self) -> None:
+        """Test _resolve_connection_error_code for network transports (HTTP, GRPC)."""
+        for transport in [EnumInfraTransportType.HTTP, EnumInfraTransportType.GRPC]:
+            context = ModelInfraErrorContext(transport_type=transport)
+            error_code = InfraConnectionError._resolve_connection_error_code(context)
+            assert (
+                error_code == EnumCoreErrorCode.NETWORK_ERROR
+            ), f"Expected NETWORK_ERROR for {transport}, got {error_code}"
+
+    def test_resolve_connection_error_code_service_transports(self) -> None:
+        """Test _resolve_connection_error_code for service transports."""
+        service_transports = [
+            EnumInfraTransportType.KAFKA,
+            EnumInfraTransportType.CONSUL,
+            EnumInfraTransportType.VAULT,
+            EnumInfraTransportType.REDIS,
+        ]
+        for transport in service_transports:
+            context = ModelInfraErrorContext(transport_type=transport)
+            error_code = InfraConnectionError._resolve_connection_error_code(context)
+            assert (
+                error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+            ), f"Expected SERVICE_UNAVAILABLE for {transport}, got {error_code}"
+
+    def test_all_transport_types_have_mapping(self) -> None:
+        """Test that all EnumInfraTransportType values have error code mappings."""
+        for transport in EnumInfraTransportType:
+            context = ModelInfraErrorContext(transport_type=transport)
+            # Should not raise and should return a valid error code
+            error_code = InfraConnectionError._resolve_connection_error_code(context)
+            assert isinstance(
+                error_code, EnumCoreErrorCode
+            ), f"Transport {transport} returned invalid error code type: {type(error_code)}"
+
+    def test_transport_error_code_map_completeness(self) -> None:
+        """Test that the transport error code map includes all transport types."""
+        for transport in EnumInfraTransportType:
+            assert (
+                transport in InfraConnectionError._TRANSPORT_ERROR_CODE_MAP
+            ), f"Transport {transport} missing from _TRANSPORT_ERROR_CODE_MAP"
+        # Also verify None is in the map
+        assert None in InfraConnectionError._TRANSPORT_ERROR_CODE_MAP
+
+    def test_error_code_preserved_in_model(self) -> None:
+        """Test that resolved error code is correctly stored in the error model."""
+        test_cases = [
+            (
+                EnumInfraTransportType.DATABASE,
+                EnumCoreErrorCode.DATABASE_CONNECTION_ERROR,
+            ),
+            (EnumInfraTransportType.HTTP, EnumCoreErrorCode.NETWORK_ERROR),
+            (EnumInfraTransportType.GRPC, EnumCoreErrorCode.NETWORK_ERROR),
+            (EnumInfraTransportType.KAFKA, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
+            (EnumInfraTransportType.CONSUL, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
+            (EnumInfraTransportType.VAULT, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
+            (EnumInfraTransportType.REDIS, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
+        ]
+        for transport, expected_code in test_cases:
+            context = ModelInfraErrorContext(transport_type=transport)
+            error = InfraConnectionError("Test error", context=context)
+            assert (
+                error.model.error_code == expected_code
+            ), f"Transport {transport}: expected {expected_code}, got {error.model.error_code}"
 
 
 class TestInfraTimeoutError:

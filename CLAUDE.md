@@ -212,10 +212,46 @@ ModelOnexError (from omnibase_core)
 |-------------|-------------------|-----------------|
 | `ProtocolConfigurationError` | `INVALID_CONFIGURATION` | 400 Bad Request |
 | `SecretResolutionError` | `RESOURCE_NOT_FOUND` | 404 Not Found |
-| `InfraConnectionError` | `DATABASE_CONNECTION_ERROR` | 503 Service Unavailable |
+| `InfraConnectionError` | **Transport-aware** (see below) | 503 Service Unavailable |
 | `InfraTimeoutError` | `TIMEOUT_ERROR` | 504 Gateway Timeout |
 | `InfraAuthenticationError` | `AUTHENTICATION_ERROR` | 401 Unauthorized |
 | `InfraUnavailableError` | `SERVICE_UNAVAILABLE` | 503 Service Unavailable |
+
+#### InfraConnectionError Transport-Aware Error Codes
+
+`InfraConnectionError` automatically selects the appropriate error code based on `context.transport_type`:
+
+| Transport Type | EnumCoreErrorCode | Rationale |
+|----------------|-------------------|-----------|
+| `DATABASE` | `DATABASE_CONNECTION_ERROR` | Specific database connection error |
+| `HTTP` | `NETWORK_ERROR` | Network-level transport failure |
+| `GRPC` | `NETWORK_ERROR` | Network-level transport failure |
+| `KAFKA` | `SERVICE_UNAVAILABLE` | Message broker service unavailable |
+| `CONSUL` | `SERVICE_UNAVAILABLE` | Service discovery unavailable |
+| `VAULT` | `SERVICE_UNAVAILABLE` | Secret management service unavailable |
+| `REDIS` | `SERVICE_UNAVAILABLE` | Cache service unavailable |
+| `None` (no context) | `SERVICE_UNAVAILABLE` | Generic fallback |
+
+```python
+# Example: Transport-aware error code selection
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+
+# Database connection -> DATABASE_CONNECTION_ERROR
+db_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.DATABASE)
+db_error = InfraConnectionError("DB failed", context=db_context)
+assert db_error.model.error_code.name == "DATABASE_CONNECTION_ERROR"
+
+# HTTP connection -> NETWORK_ERROR
+http_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.HTTP)
+http_error = InfraConnectionError("API failed", context=http_context)
+assert http_error.model.error_code.name == "NETWORK_ERROR"
+
+# Kafka connection -> SERVICE_UNAVAILABLE
+kafka_context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.KAFKA)
+kafka_error = InfraConnectionError("Kafka failed", context=kafka_context)
+assert kafka_error.model.error_code.name == "SERVICE_UNAVAILABLE"
+```
 
 ### Error Recovery Patterns
 

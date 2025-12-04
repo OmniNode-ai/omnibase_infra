@@ -184,7 +184,15 @@ class InfraConnectionError(RuntimeHostError):
     Used for database connection failures, mesh connectivity issues,
     message broker connection problems, or network-related errors.
 
+    The error code is automatically selected based on the transport type
+    in the context:
+        - DATABASE -> DATABASE_CONNECTION_ERROR
+        - HTTP, GRPC -> NETWORK_ERROR
+        - KAFKA, CONSUL, VAULT, REDIS -> SERVICE_UNAVAILABLE
+        - None (no context) -> SERVICE_UNAVAILABLE
+
     Example:
+        >>> # Database connection with transport-specific error code
         >>> context = ModelInfraErrorContext(
         ...     transport_type=EnumInfraTransportType.DATABASE,
         ...     operation="connect",
@@ -196,7 +204,59 @@ class InfraConnectionError(RuntimeHostError):
         ...     host="db.example.com",
         ...     port=5432,
         ... )
+
+        >>> # HTTP connection uses NETWORK_ERROR
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.HTTP,
+        ...     operation="request",
+        ...     target_name="api-gateway",
+        ... )
+        >>> raise InfraConnectionError("API connection failed", context=context)
+
+        >>> # Kafka connection uses SERVICE_UNAVAILABLE
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.KAFKA,
+        ...     operation="produce",
+        ...     target_name="kafka-broker",
+        ... )
+        >>> raise InfraConnectionError("Kafka connection failed", context=context)
     """
+
+    # Transport type to error code mapping
+    _TRANSPORT_ERROR_CODE_MAP: dict[
+        Optional[EnumInfraTransportType], EnumCoreErrorCode
+    ] = {
+        EnumInfraTransportType.DATABASE: EnumCoreErrorCode.DATABASE_CONNECTION_ERROR,
+        EnumInfraTransportType.HTTP: EnumCoreErrorCode.NETWORK_ERROR,
+        EnumInfraTransportType.GRPC: EnumCoreErrorCode.NETWORK_ERROR,
+        EnumInfraTransportType.KAFKA: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        EnumInfraTransportType.CONSUL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        EnumInfraTransportType.VAULT: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        EnumInfraTransportType.REDIS: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        None: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+    }
+
+    @classmethod
+    def _resolve_connection_error_code(
+        cls, context: Optional[ModelInfraErrorContext]
+    ) -> EnumCoreErrorCode:
+        """Resolve the appropriate error code based on transport type.
+
+        Args:
+            context: Infrastructure error context containing transport type
+
+        Returns:
+            Appropriate EnumCoreErrorCode for the transport type:
+                - DATABASE -> DATABASE_CONNECTION_ERROR
+                - HTTP, GRPC -> NETWORK_ERROR
+                - KAFKA, CONSUL, VAULT, REDIS, None -> SERVICE_UNAVAILABLE
+        """
+        if context is None:
+            return cls._TRANSPORT_ERROR_CODE_MAP[None]
+        return cls._TRANSPORT_ERROR_CODE_MAP.get(
+            context.transport_type,
+            EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        )
 
     def __init__(
         self,
@@ -204,16 +264,22 @@ class InfraConnectionError(RuntimeHostError):
         context: Optional[ModelInfraErrorContext] = None,
         **extra_context: object,
     ) -> None:
-        """Initialize InfraConnectionError.
+        """Initialize InfraConnectionError with transport-aware error code.
+
+        The error code is automatically selected based on context.transport_type:
+            - DATABASE -> DATABASE_CONNECTION_ERROR
+            - HTTP, GRPC -> NETWORK_ERROR
+            - KAFKA, CONSUL, VAULT, REDIS -> SERVICE_UNAVAILABLE
+            - None (no context) -> SERVICE_UNAVAILABLE
 
         Args:
             message: Human-readable error message
-            context: Bundled infrastructure context
+            context: Bundled infrastructure context (transport_type determines error code)
             **extra_context: Additional context information (e.g., host, port, retry_count)
         """
         super().__init__(
             message=message,
-            error_code=EnumCoreErrorCode.DATABASE_CONNECTION_ERROR,
+            error_code=self._resolve_connection_error_code(context),
             context=context,
             **extra_context,
         )
