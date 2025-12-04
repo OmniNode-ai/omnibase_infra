@@ -1,0 +1,143 @@
+# ONEX Infrastructure Pre-commit Configuration
+# Mirrors omnibase_core settings for consistency across ONEX ecosystem
+#
+# PERFORMANCE OPTIMIZATION NOTES:
+# - Order: black → isort → ruff → mypy (formatting before linting before type checking)
+# - Use `pre-commit run --all-files` to test all hooks before pushing
+
+repos:
+  # YAML formatting (standard across ecosystem)
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.17.2
+    hooks:
+      - id: yamlfmt
+        args: [--formatter, retain_line_breaks=true]
+        exclude: ^(archived/|tests/fixtures/)
+
+  # Essential file formatting (standard across ecosystem)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-yaml
+        args: [--unsafe] # Allow custom YAML tags in contracts
+      - id: detect-private-key
+
+  # ONEX Python Development Hooks (matches omnibase_core)
+  # Order: black → isort → ruff → mypy (formatting before linting before type checking)
+  - repo: local
+    hooks:
+      - id: black-format
+        name: black (auto-format)
+        entry: poetry run black
+        language: system
+        types: [python]
+        args: [--line-length, "88", --target-version, py312]
+        exclude: ^(archived/|tests/fixtures/).*$
+        stages: [commit]
+
+      - id: isort-format
+        name: isort (auto-sort imports)
+        entry: poetry run isort
+        language: system
+        types: [python]
+        args: [--filter-files, --profile, black, --line-length, "88"]
+        exclude: ^(archived/|tests/fixtures/)
+        stages: [commit]
+
+      - id: ruff-fix
+        name: ruff (auto-fix linting issues)
+        entry: poetry run ruff check --fix
+        language: system
+        types: [python]
+        exclude: ^(archived/|tests/fixtures/).*$
+        stages: [commit]
+
+      - id: mypy-type-check
+        name: mypy (type checking)
+        entry: poetry run mypy
+        language: system
+        types: [python]
+        args: [--show-error-codes, --no-error-summary]
+        files: ^src/omnibase_infra/.*\.py$
+        exclude: ^(tests/|archived/).*\.py$
+        stages: [commit]
+
+      # Cleanup: Clear tmp/ directory before commits
+      - id: clean-tmp-directory
+        name: Clean tmp directory
+        entry: bash -c "rm -rf tmp/* 2>/dev/null || true"
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [commit]
+
+  # ONEX Validation Hooks (infrastructure-specific)
+  - repo: local
+    hooks:
+      # Architecture validation - one model per file
+      - id: onex-validate-architecture
+        name: ONEX Architecture Validation
+        entry: poetry run python scripts/validate.py architecture
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+      # Contract validation - YAML contracts
+      - id: onex-validate-contracts
+        name: ONEX Contract Validation
+        entry: poetry run python scripts/validate.py contracts
+        language: system
+        files: '\.yaml$'
+        pass_filenames: false
+        stages: [commit]
+
+      # Pattern validation - naming conventions
+      - id: onex-validate-patterns
+        name: ONEX Pattern Validation
+        entry: poetry run python scripts/validate.py patterns
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+      # Union usage validation
+      - id: onex-validate-unions
+        name: ONEX Union Usage Validation
+        entry: poetry run python scripts/validate.py unions
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+      # Circular import check
+      - id: onex-validate-imports
+        name: ONEX Circular Import Check
+        entry: poetry run python scripts/validate.py imports
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [commit]
+
+# Configuration
+default_install_hook_types: [pre-commit]
+default_stages: [pre-commit]
+fail_fast: false
+
+# CI configuration
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes for omnibase_infra
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_schedule: weekly
+  submodules: false
+  # Skip ONEX validation hooks in CI (they require omnibase_core)
+  skip: [onex-validate-architecture, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports]
