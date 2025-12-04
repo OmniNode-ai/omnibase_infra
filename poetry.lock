@@ -3360,14 +3360,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.3.5"
+version = "0.3.6"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.3.5-py3-none-any.whl", hash = "sha256:d9c52f492080e56d834fee0427eb6270be93a1e3f21364667f20c8920d277a91"},
-    {file = "omnibase_core-0.3.5.tar.gz", hash = "sha256:715c3aa822172d9c949766efbd1dfb735c6531853389ab13669182f0acbee93a"},
+    {file = "omnibase_core-0.3.6-py3-none-any.whl", hash = "sha256:04944eb0aaf0f44cdd45eaa4831ece8b5b32ac6c6112db910b3d62597493832e"},
+    {file = "omnibase_core-0.3.6.tar.gz", hash = "sha256:df653b1c81457171fbe3fee928fd4c956fd01c601c5f8fb7c5b38e7fa8dabc9b"},
 ]
 
 [package.dependencies]
@@ -3377,7 +3377,6 @@ click = ">=8.1.0,<9.0.0"
 dependency-injector = ">=4.48.1,<5.0.0"
 fastapi = ">=0.120.1,<0.121.0"
 llama-index = ">=0.14.0,<0.15.0"
-omnibase-spi = ">=0.2.0,<0.3.0"
 psycopg2-binary = ">=2.9.10,<3.0.0"
 pydantic = ">=2.11.7,<3.0.0"
 pypdf = ">=6.1.0,<7.0.0"
@@ -6242,4 +6241,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "e793182cecd2a7bfe17f4f3d05c530047b4a53a368e6e6eded66e8c7d405ce48"
+content-hash = "3ac43b3022b3ea0197646d887283854bf443f0b7a9e7ff9f71f2aa8750f37196"
