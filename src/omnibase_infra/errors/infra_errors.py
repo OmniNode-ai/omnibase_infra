@@ -40,14 +40,15 @@ class RuntimeHostError(ModelOnexError):
     Provides common structured fields for infrastructure operations.
 
     Structured Fields (via ModelInfraErrorContext):
-        handler_type: Type of handler (http, db, kafka, etc.)
+        service_type: Type of service (http, db, kafka, etc.)
         operation: Operation being performed
         correlation_id: Request correlation ID for tracking
         service_name: Service/resource name
 
     Example:
+        >>> from omnibase_infra.enums import EnumInfraServiceType
         >>> context = ModelInfraErrorContext(
-        ...     handler_type="http",
+        ...     service_type=EnumInfraServiceType.HTTP,
         ...     operation="process_request",
         ...     service_name="api-gateway",
         ... )
@@ -73,7 +74,7 @@ class RuntimeHostError(ModelOnexError):
         Args:
             message: Human-readable error message
             error_code: Error code (defaults to OPERATION_FAILED)
-            context: Bundled infrastructure context (handler_type, operation, etc.)
+            context: Bundled infrastructure context (service_type, operation, etc.)
             **extra_context: Additional context information
         """
         # Build structured context from model and extra kwargs
@@ -82,8 +83,8 @@ class RuntimeHostError(ModelOnexError):
         # Extract fields from context model if provided
         correlation_id = None
         if context is not None:
-            if context.handler_type is not None:
-                structured_context["handler_type"] = context.handler_type
+            if context.service_type is not None:
+                structured_context["service_type"] = context.service_type
             if context.operation is not None:
                 structured_context["operation"] = context.operation
             if context.service_name is not None:
@@ -106,8 +107,9 @@ class ProtocolConfigurationError(RuntimeHostError):
     invalid configuration values, or schema validation failures.
 
     Example:
+        >>> from omnibase_infra.enums import EnumInfraServiceType
         >>> context = ModelInfraErrorContext(
-        ...     handler_type="http",
+        ...     service_type=EnumInfraServiceType.HTTP,
         ...     operation="validate_config",
         ... )
         >>> raise ProtocolConfigurationError(
