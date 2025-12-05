@@ -230,8 +230,10 @@ class TestInMemoryEventBusSubscribe:
         return InMemoryEventBus(environment="test", group="test-group")
 
     @pytest.mark.asyncio
-    async def test_basic_subscribe(self, event_bus: InMemoryEventBus) -> None:
-        """Test basic publish/subscribe flow."""
+    async def test_subscribe_receives_published_message(
+        self, event_bus: InMemoryEventBus
+    ) -> None:
+        """Test basic publish/subscribe flow - subscriber receives published message."""
         await event_bus.start()
 
         received: list[ModelEventMessage] = []

@@ -10,11 +10,6 @@ Exports:
     InMemoryEventBus: In-memory event bus for local testing and development
     ModelEventHeaders: Event headers model for message metadata
     ModelEventMessage: Event message model wrapping topic, key, value, and headers
-
-Note:
-    ModelEventHeaders and ModelEventMessage are defined in the
-    omnibase_infra.event_bus.models subpackage and re-exported here for
-    convenient access.
 """
 
 from __future__ import annotations
