@@ -466,25 +466,6 @@ class HttpRestAdapter:
             raise InfraConnectionError(
                 f"Failed to connect to {url}", context=ctx
             ) from e
-        except httpx.HTTPStatusError as e:
-            # For HTTP status errors, we still need to read the response body
-            # but with size limits for error responses
-            async with self._client.stream(
-                method,
-                url,
-                headers=headers,
-                content=request_content,
-                json=request_json,
-            ) as error_response:
-                self._validate_content_length_header(
-                    error_response, url, correlation_id
-                )
-                error_body_bytes = await self._read_response_body_with_limit(
-                    error_response, url, correlation_id
-                )
-                return self._build_response_from_bytes(
-                    error_response, error_body_bytes, correlation_id
-                )
         except httpx.HTTPError as e:
             raise InfraConnectionError(
                 f"HTTP error during {method} request: {type(e).__name__}", context=ctx
