@@ -10,16 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING
 
 import pytest
 
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 class TestInMemoryEventBusLifecycle:
@@ -428,6 +424,43 @@ class TestInMemoryEventBusHistory:
         history = await event_bus.get_event_history(limit=10, topic="topic1")
         assert len(history) == 2
         assert all(msg.topic == "topic1" for msg in history)
+
+        await event_bus.close()
+
+    @pytest.mark.asyncio
+    async def test_event_history_filter_applied_before_limit(
+        self, event_bus: InMemoryEventBus
+    ) -> None:
+        """Test that topic filter is applied BEFORE limit.
+
+        This verifies the fix for the bug where limit was applied before
+        the topic filter, causing users to get fewer results than expected.
+
+        Scenario: If we have 10 messages total (5 on topic1, 5 on topic2)
+        interleaved, and request limit=3 with topic="topic1", we should
+        get exactly 3 messages from topic1 (the most recent 3).
+        """
+        await event_bus.start()
+
+        # Publish interleaved messages: topic1 and topic2 alternating
+        # Order: t1_0, t2_0, t1_1, t2_1, t1_2, t2_2, t1_3, t2_3, t1_4, t2_4
+        for i in range(5):
+            await event_bus.publish("topic1", None, f"t1_msg{i}".encode())
+            await event_bus.publish("topic2", None, f"t2_msg{i}".encode())
+
+        # Request limit=3 with topic filter
+        # If filter is applied BEFORE limit: we get 3 topic1 messages (t1_2, t1_3, t1_4)
+        # If filter is applied AFTER limit: we might get 0-2 topic1 messages
+        history = await event_bus.get_event_history(limit=3, topic="topic1")
+
+        # Should get exactly 3 messages, all from topic1
+        assert len(history) == 3
+        assert all(msg.topic == "topic1" for msg in history)
+
+        # Should be the most recent 3 topic1 messages
+        assert history[0].value == b"t1_msg2"
+        assert history[1].value == b"t1_msg3"
+        assert history[2].value == b"t1_msg4"
 
         await event_bus.close()
 

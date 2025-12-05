@@ -63,9 +63,7 @@ class ModelEventHeaders(BaseModel):
     span_id: Optional[str] = Field(default=None)
     parent_span_id: Optional[str] = Field(default=None)
     operation_name: Optional[str] = Field(default=None)
-    priority: Optional[Literal["low", "normal", "high", "critical"]] = Field(
-        default="normal"
-    )
+    priority: Literal["low", "normal", "high", "critical"] = Field(default="normal")
     routing_key: Optional[str] = Field(default=None)
     partition_key: Optional[str] = Field(default=None)
     retry_count: int = Field(default=0)
