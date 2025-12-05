@@ -35,7 +35,13 @@ _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
 
 
 class HttpRestAdapter:
-    """HTTP REST protocol adapter using httpx async client (MVP: GET, POST only)."""
+    """HTTP REST protocol adapter using httpx async client (MVP: GET, POST only).
+
+    Security Features:
+        - Configurable request/response size limits to prevent DoS attacks
+        - Pre-read Content-Length validation to prevent memory exhaustion
+        - Streaming body validation for chunked transfer encoding
+    """
 
     def __init__(self) -> None:
         """Initialize HttpRestAdapter in uninitialized state."""

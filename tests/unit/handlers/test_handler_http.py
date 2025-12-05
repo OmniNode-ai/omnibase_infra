@@ -1625,6 +1625,127 @@ class TestHttpRestAdapterSizeLimits:
 
         await handler.shutdown()
 
+    @pytest.mark.asyncio
+    async def test_content_length_zero_succeeds(self, handler: HttpRestAdapter) -> None:
+        """Test Content-Length: 0 returns empty response successfully.
+
+        Content-Length of 0 is a valid HTTP response indicating an empty body.
+        This should succeed without errors.
+        """
+        config: dict[str, object] = {"max_response_size": 100}  # 100 bytes
+        await handler.initialize(config)
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={
+                "content-type": "application/json",
+                "content-length": "0",
+            },
+            body_bytes=b"",  # Empty body
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://example.com/empty-response"},
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result["status"] == "success"
+            # Empty body parsed as empty string (not JSON because empty string is invalid JSON)
+            assert result["payload"]["body"] == ""
+            assert result["payload"]["status_code"] == 200
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_content_length_with_whitespace_handled(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test Content-Length with leading/trailing whitespace is handled gracefully.
+
+        HTTP headers may have whitespace around values. The handler should either:
+        1. Parse the value correctly (stripping whitespace), or
+        2. Fall through to streaming validation if parsing fails
+
+        Either behavior is acceptable - the key is that it doesn't crash.
+        """
+        config: dict[str, object] = {"max_response_size": 100}  # 100 bytes
+        await handler.initialize(config)
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={
+                "content-type": "text/plain",
+                "content-length": " 50 ",  # Whitespace around value
+            },
+            body_bytes=b"x" * 50,  # 50 bytes - within limit
+            content_type="text/plain",
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://example.com/whitespace-header"},
+            }
+
+            # Should succeed - either by parsing " 50 " as 50 or falling through
+            # to streaming validation (which passes for 50 bytes)
+            result = await handler.execute(envelope)
+
+            assert result["status"] == "success"
+            assert result["payload"]["body"] == "x" * 50
+            assert result["payload"]["status_code"] == 200
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_multiple_content_length_headers_handled(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test multiple Content-Length headers are handled gracefully.
+
+        When multiple Content-Length values exist (undefined behavior per HTTP spec),
+        httpx typically returns them comma-separated or uses the first value.
+        The handler should not crash regardless of the format.
+        """
+        config: dict[str, object] = {"max_response_size": 100}  # 100 bytes
+        await handler.initialize(config)
+
+        # httpx may represent multiple headers as comma-separated values
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={
+                "content-type": "text/plain",
+                "content-length": "30, 30",  # Multiple values (invalid per strict HTTP)
+            },
+            body_bytes=b"x" * 30,  # 30 bytes - within limit
+            content_type="text/plain",
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://example.com/multiple-content-length"},
+            }
+
+            # Should succeed - the invalid "30, 30" cannot be parsed as int
+            # so it falls through to streaming validation which passes for 30 bytes
+            result = await handler.execute(envelope)
+
+            assert result["status"] == "success"
+            assert result["payload"]["body"] == "x" * 30
+            assert result["payload"]["status_code"] == 200
+
+        await handler.shutdown()
+
 
 __all__: list[str] = [
     "TestHttpRestAdapterInitialization",
