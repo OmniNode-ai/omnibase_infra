@@ -1,0 +1,1113 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# mypy: disable-error-code="index, operator, arg-type"
+"""Unit tests for DbAdapter.
+
+Comprehensive test suite covering initialization, query/execute operations,
+error handling, health checks, describe, and lifecycle management.
+"""
+
+from __future__ import annotations
+
+from typing import cast
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID, uuid4
+
+import asyncpg
+import pytest
+from omnibase_core.enums.enum_handler_type import EnumHandlerType
+
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    RuntimeHostError,
+)
+from omnibase_infra.handlers.handler_db import DbAdapter
+
+# Type alias for response dict with nested structure
+ResponseDict = dict[str, object]
+
+
+class TestDbAdapterInitialization:
+    """Test suite for DbAdapter initialization."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    def test_adapter_init_default_state(self, adapter: DbAdapter) -> None:
+        """Test adapter initializes in uninitialized state."""
+        assert adapter._initialized is False
+        assert adapter._pool is None
+        assert adapter._pool_size == 5
+        assert adapter._timeout == 30.0
+
+    def test_handler_type_returns_database(self, adapter: DbAdapter) -> None:
+        """Test handler_type property returns EnumHandlerType.DATABASE."""
+        assert adapter.handler_type == EnumHandlerType.DATABASE
+
+    @pytest.mark.asyncio
+    async def test_initialize_missing_dsn_raises_error(
+        self, adapter: DbAdapter
+    ) -> None:
+        """Test initialize without DSN raises RuntimeHostError."""
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await adapter.initialize({})
+
+        assert "dsn" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_initialize_empty_dsn_raises_error(self, adapter: DbAdapter) -> None:
+        """Test initialize with empty DSN raises RuntimeHostError."""
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await adapter.initialize({"dsn": ""})
+
+        assert "dsn" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_initialize_creates_pool(self, adapter: DbAdapter) -> None:
+        """Test initialize creates asyncpg connection pool."""
+        mock_pool = MagicMock(spec=asyncpg.Pool)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            config: dict[str, object] = {"dsn": "postgresql://user:pass@localhost/db"}
+            await adapter.initialize(config)
+
+            assert adapter._initialized is True
+            assert adapter._pool is mock_pool
+            mock_create.assert_called_once_with(
+                dsn="postgresql://user:pass@localhost/db",
+                min_size=1,
+                max_size=5,
+                command_timeout=30.0,
+            )
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_initialize_with_custom_timeout(self, adapter: DbAdapter) -> None:
+        """Test initialize respects custom timeout."""
+        mock_pool = MagicMock(spec=asyncpg.Pool)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            config: dict[str, object] = {
+                "dsn": "postgresql://localhost/db",
+                "timeout": 60.0,
+            }
+            await adapter.initialize(config)
+
+            assert adapter._timeout == 60.0
+            mock_create.assert_called_once()
+            call_kwargs = mock_create.call_args.kwargs
+            assert call_kwargs["command_timeout"] == 60.0
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_initialize_connection_error_raises_infra_error(
+        self, adapter: DbAdapter
+    ) -> None:
+        """Test connection error during initialize raises InfraConnectionError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.side_effect = OSError("Connection refused")
+
+            config: dict[str, object] = {"dsn": "postgresql://localhost/db"}
+
+            with pytest.raises(InfraConnectionError) as exc_info:
+                await adapter.initialize(config)
+
+            assert "connect" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_initialize_invalid_password_raises_error(
+        self, adapter: DbAdapter
+    ) -> None:
+        """Test invalid password raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.side_effect = asyncpg.InvalidPasswordError("Invalid password")
+
+            config: dict[str, object] = {"dsn": "postgresql://localhost/db"}
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.initialize(config)
+
+            assert "authentication" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_initialize_invalid_database_raises_error(
+        self, adapter: DbAdapter
+    ) -> None:
+        """Test invalid database name raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.side_effect = asyncpg.InvalidCatalogNameError(
+                "Database not found"
+            )
+
+            config: dict[str, object] = {"dsn": "postgresql://localhost/nonexistent"}
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.initialize(config)
+
+            assert "database" in str(exc_info.value).lower()
+
+
+class TestDbAdapterQueryOperations:
+    """Test suite for db.query operations."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    @pytest.fixture
+    def mock_pool(self) -> MagicMock:
+        """Create mock asyncpg pool fixture."""
+        return MagicMock(spec=asyncpg.Pool)
+
+    @pytest.mark.asyncio
+    async def test_query_successful_response(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test successful query returns correct response structure."""
+        # Setup mock connection and rows
+        mock_conn = AsyncMock()
+        mock_rows = [
+            {"id": 1, "name": "Alice"},
+            {"id": 2, "name": "Bob"},
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        # Setup pool context manager
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT id, name FROM users"},
+                "correlation_id": str(uuid4()),
+            }
+
+            result = cast(ResponseDict, await adapter.execute(envelope))
+
+            assert result["status"] == "success"
+            payload = cast(ResponseDict, result["payload"])
+            assert payload["row_count"] == 2
+            rows = cast(list[dict[str, object]], payload["rows"])
+            assert len(rows) == 2
+            assert rows[0] == {"id": 1, "name": "Alice"}
+            assert rows[1] == {"id": 2, "name": "Bob"}
+            assert "correlation_id" in result
+
+            mock_conn.fetch.assert_called_once_with("SELECT id, name FROM users")
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_query_with_parameters(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test query with parameterized SQL."""
+        mock_conn = AsyncMock()
+        mock_rows = [{"id": 1, "name": "Alice"}]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {
+                    "sql": "SELECT id, name FROM users WHERE id = $1",
+                    "parameters": [1],
+                },
+            }
+
+            result = await adapter.execute(envelope)
+
+            mock_conn.fetch.assert_called_once_with(
+                "SELECT id, name FROM users WHERE id = $1", 1
+            )
+
+            assert result["payload"]["row_count"] == 1
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_query_empty_result(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test query returning no rows."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT * FROM empty_table"},
+            }
+
+            result = await adapter.execute(envelope)
+
+            assert result["payload"]["row_count"] == 0
+            assert result["payload"]["rows"] == []
+
+            await adapter.shutdown()
+
+
+class TestDbAdapterExecuteOperations:
+    """Test suite for db.execute operations."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    @pytest.fixture
+    def mock_pool(self) -> MagicMock:
+        """Create mock asyncpg pool fixture."""
+        return MagicMock(spec=asyncpg.Pool)
+
+    @pytest.mark.asyncio
+    async def test_execute_insert_successful(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test successful INSERT returns correct row count."""
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "INSERT INTO users (name) VALUES ($1)",
+                    "parameters": ["Charlie"],
+                },
+            }
+
+            result = await adapter.execute(envelope)
+
+            assert result["status"] == "success"
+            assert result["payload"]["row_count"] == 1
+            assert result["payload"]["rows"] == []
+
+            mock_conn.execute.assert_called_once_with(
+                "INSERT INTO users (name) VALUES ($1)", "Charlie"
+            )
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_update_multiple_rows(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test UPDATE affecting multiple rows."""
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(return_value="UPDATE 5")
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "UPDATE users SET active = $1 WHERE status = $2",
+                    "parameters": [True, "pending"],
+                },
+            }
+
+            result = await adapter.execute(envelope)
+
+            assert result["payload"]["row_count"] == 5
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_delete(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test DELETE statement."""
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(return_value="DELETE 3")
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {"sql": "DELETE FROM users WHERE inactive = true"},
+            }
+
+            result = await adapter.execute(envelope)
+
+            assert result["payload"]["row_count"] == 3
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_execute_no_rows_affected(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test execute with no rows affected."""
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(return_value="UPDATE 0")
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "UPDATE users SET name = $1 WHERE id = $2",
+                    "parameters": ["Test", 99999],
+                },
+            }
+
+            result = await adapter.execute(envelope)
+
+            assert result["payload"]["row_count"] == 0
+
+            await adapter.shutdown()
+
+
+class TestDbAdapterErrorHandling:
+    """Test suite for error handling."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    @pytest.fixture
+    def mock_pool(self) -> MagicMock:
+        """Create mock asyncpg pool fixture."""
+        return MagicMock(spec=asyncpg.Pool)
+
+    @pytest.mark.asyncio
+    async def test_query_timeout_raises_infra_timeout(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test query timeout raises InfraTimeoutError."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.QueryCanceledError("query timeout")
+        )
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT * FROM slow_query"},
+            }
+
+            with pytest.raises(InfraTimeoutError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "timed out" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_connection_lost_raises_infra_connection(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test connection loss raises InfraConnectionError."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.PostgresConnectionError("connection lost")
+        )
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT 1"},
+            }
+
+            with pytest.raises(InfraConnectionError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "connection" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_syntax_error_raises_runtime_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test SQL syntax error raises RuntimeHostError."""
+        mock_conn = AsyncMock()
+        error = asyncpg.PostgresSyntaxError("syntax error")
+        error.message = "syntax error at or near 'SELEKT'"
+        mock_conn.fetch = AsyncMock(side_effect=error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELEKT * FROM users"},
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "syntax" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_undefined_table_raises_runtime_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test undefined table raises RuntimeHostError."""
+        mock_conn = AsyncMock()
+        error = asyncpg.UndefinedTableError("table not found")
+        error.message = 'relation "nonexistent" does not exist'
+        mock_conn.fetch = AsyncMock(side_effect=error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT * FROM nonexistent"},
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "table" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_unique_violation_raises_runtime_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test unique constraint violation raises RuntimeHostError."""
+        mock_conn = AsyncMock()
+        error = asyncpg.UniqueViolationError("unique violation")
+        error.message = "duplicate key value violates unique constraint"
+        mock_conn.execute = AsyncMock(side_effect=error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "INSERT INTO users (email) VALUES ($1)",
+                    "parameters": ["duplicate@example.com"],
+                },
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "unique" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_unsupported_operation_raises_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test unsupported operation raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.transaction",
+                "payload": {"sql": "BEGIN"},
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "db.transaction" in str(exc_info.value)
+            assert "not supported" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_missing_sql_raises_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test missing SQL field raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"parameters": [1, 2]},  # No SQL
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "sql" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_empty_sql_raises_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test empty SQL field raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "  "},  # Whitespace only
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "sql" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_invalid_parameters_type_raises_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test invalid parameters type raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {
+                    "sql": "SELECT * FROM users WHERE id = $1",
+                    "parameters": "not-a-list",  # Invalid type
+                },
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "parameters" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_missing_operation_raises_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test missing operation field raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "payload": {"sql": "SELECT 1"},
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "operation" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_missing_payload_raises_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test missing payload field raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "payload" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+
+class TestDbAdapterHealthCheck:
+    """Test suite for health check operations."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    @pytest.fixture
+    def mock_pool(self) -> MagicMock:
+        """Create mock asyncpg pool fixture."""
+        return MagicMock(spec=asyncpg.Pool)
+
+    @pytest.mark.asyncio
+    async def test_health_check_structure(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test health_check returns correct structure."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=1)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            health = await adapter.health_check()
+
+            assert "healthy" in health
+            assert "initialized" in health
+            assert "adapter_type" in health
+            assert "pool_size" in health
+            assert "timeout_seconds" in health
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_when_initialized(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test health_check shows healthy=True when initialized and DB responds."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=1)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            health = await adapter.health_check()
+
+            assert health["healthy"] is True
+            assert health["initialized"] is True
+            assert health["adapter_type"] == "database"
+            assert health["pool_size"] == 5
+            assert health["timeout_seconds"] == 30.0
+
+            mock_conn.fetchval.assert_called_once_with("SELECT 1")
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_health_check_unhealthy_when_not_initialized(
+        self, adapter: DbAdapter
+    ) -> None:
+        """Test health_check shows healthy=False when not initialized."""
+        health = await adapter.health_check()
+
+        assert health["healthy"] is False
+        assert health["initialized"] is False
+
+    @pytest.mark.asyncio
+    async def test_health_check_unhealthy_when_db_unreachable(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test health_check shows healthy=False when DB check fails."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(side_effect=Exception("Connection failed"))
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            health = await adapter.health_check()
+
+            assert health["healthy"] is False
+            assert health["initialized"] is True
+
+            await adapter.shutdown()
+
+
+class TestDbAdapterDescribe:
+    """Test suite for describe operations."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    def test_describe_returns_adapter_metadata(self, adapter: DbAdapter) -> None:
+        """Test describe returns correct adapter metadata."""
+        description = adapter.describe()
+
+        assert description["adapter_type"] == "database"
+        assert description["pool_size"] == 5
+        assert description["timeout_seconds"] == 30.0
+        assert description["version"] == "0.1.0-mvp"
+        assert description["initialized"] is False
+
+    def test_describe_lists_supported_operations(self, adapter: DbAdapter) -> None:
+        """Test describe lists supported operations."""
+        description = adapter.describe()
+
+        assert "supported_operations" in description
+        operations = description["supported_operations"]
+
+        assert "db.query" in operations
+        assert "db.execute" in operations
+        assert len(operations) == 2
+
+    @pytest.mark.asyncio
+    async def test_describe_reflects_initialized_state(
+        self, adapter: DbAdapter
+    ) -> None:
+        """Test describe shows correct initialized state."""
+        mock_pool = MagicMock(spec=asyncpg.Pool)
+
+        assert adapter.describe()["initialized"] is False
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+            assert adapter.describe()["initialized"] is True
+
+            await adapter.shutdown()
+            assert adapter.describe()["initialized"] is False
+
+
+class TestDbAdapterLifecycle:
+    """Test suite for lifecycle management."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    @pytest.fixture
+    def mock_pool(self) -> MagicMock:
+        """Create mock asyncpg pool fixture."""
+        pool = MagicMock(spec=asyncpg.Pool)
+        pool.close = AsyncMock()
+        return pool
+
+    @pytest.mark.asyncio
+    async def test_shutdown_closes_pool(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test shutdown closes the connection pool properly."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            await adapter.shutdown()
+
+            mock_pool.close.assert_called_once()
+            assert adapter._pool is None
+            assert adapter._initialized is False
+
+    @pytest.mark.asyncio
+    async def test_execute_after_shutdown_raises_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test execute after shutdown raises RuntimeHostError."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+            await adapter.shutdown()
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT 1"},
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "not initialized" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_execute_before_initialize_raises_error(
+        self, adapter: DbAdapter
+    ) -> None:
+        """Test execute before initialize raises RuntimeHostError."""
+        envelope: dict[str, object] = {
+            "operation": "db.query",
+            "payload": {"sql": "SELECT 1"},
+        }
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await adapter.execute(envelope)
+
+        assert "not initialized" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_multiple_shutdown_calls_safe(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test multiple shutdown calls are safe (idempotent)."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+            await adapter.shutdown()
+            await adapter.shutdown()  # Second call should not raise
+
+            assert adapter._initialized is False
+            assert adapter._pool is None
+
+    @pytest.mark.asyncio
+    async def test_reinitialize_after_shutdown(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test adapter can be reinitialized after shutdown."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+            await adapter.shutdown()
+
+            assert adapter._initialized is False
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            assert adapter._initialized is True
+            assert adapter._pool is not None
+
+            await adapter.shutdown()
+
+
+class TestDbAdapterCorrelationId:
+    """Test suite for correlation ID handling."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    @pytest.fixture
+    def mock_pool(self) -> MagicMock:
+        """Create mock asyncpg pool fixture."""
+        return MagicMock(spec=asyncpg.Pool)
+
+    @pytest.mark.asyncio
+    async def test_correlation_id_from_envelope_uuid(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test correlation ID extracted from envelope as UUID."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            correlation_id = uuid4()
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT 1"},
+                "correlation_id": correlation_id,
+            }
+
+            result = await adapter.execute(envelope)
+
+            assert result["correlation_id"] == str(correlation_id)
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_correlation_id_from_envelope_string(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test correlation ID extracted from envelope as string."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            correlation_id = str(uuid4())
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT 1"},
+                "correlation_id": correlation_id,
+            }
+
+            result = await adapter.execute(envelope)
+
+            assert result["correlation_id"] == correlation_id
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_correlation_id_generated_when_missing(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test correlation ID generated when not in envelope."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.query",
+                "payload": {"sql": "SELECT 1"},
+            }
+
+            result = await adapter.execute(envelope)
+
+            # Should have a generated UUID
+            assert "correlation_id" in result
+            # Verify it's a valid UUID string
+            UUID(str(result["correlation_id"]))
+
+            await adapter.shutdown()
+
+
+class TestDbAdapterRowCountParsing:
+    """Test suite for row count parsing."""
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    def test_parse_insert_row_count(self, adapter: DbAdapter) -> None:
+        """Test parsing INSERT row count."""
+        assert adapter._parse_row_count("INSERT 0 1") == 1
+        assert adapter._parse_row_count("INSERT 0 5") == 5
+        assert adapter._parse_row_count("INSERT 0 100") == 100
+
+    def test_parse_update_row_count(self, adapter: DbAdapter) -> None:
+        """Test parsing UPDATE row count."""
+        assert adapter._parse_row_count("UPDATE 1") == 1
+        assert adapter._parse_row_count("UPDATE 10") == 10
+        assert adapter._parse_row_count("UPDATE 0") == 0
+
+    def test_parse_delete_row_count(self, adapter: DbAdapter) -> None:
+        """Test parsing DELETE row count."""
+        assert adapter._parse_row_count("DELETE 3") == 3
+        assert adapter._parse_row_count("DELETE 0") == 0
+
+    def test_parse_invalid_returns_zero(self, adapter: DbAdapter) -> None:
+        """Test invalid result string returns 0."""
+        assert adapter._parse_row_count("") == 0
+        assert adapter._parse_row_count("INVALID") == 0
+        assert adapter._parse_row_count("INSERT") == 0
+
+
+__all__: list[str] = [
+    "TestDbAdapterInitialization",
+    "TestDbAdapterQueryOperations",
+    "TestDbAdapterExecuteOperations",
+    "TestDbAdapterErrorHandling",
+    "TestDbAdapterHealthCheck",
+    "TestDbAdapterDescribe",
+    "TestDbAdapterLifecycle",
+    "TestDbAdapterCorrelationId",
+    "TestDbAdapterRowCountParsing",
+]

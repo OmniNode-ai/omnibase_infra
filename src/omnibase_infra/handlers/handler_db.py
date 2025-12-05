@@ -1,0 +1,432 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""PostgreSQL Database Adapter - MVP implementation using asyncpg async client.
+
+Supports query and execute operations with fixed pool size (5).
+Transaction support deferred to Beta. Configurable pool size deferred to Beta.
+
+All queries MUST use parameterized statements for SQL injection protection.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Optional
+from uuid import UUID, uuid4
+
+import asyncpg
+from omnibase_core.enums.enum_handler_type import EnumHandlerType
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    ModelInfraErrorContext,
+    RuntimeHostError,
+)
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_POOL_SIZE: int = 5
+_DEFAULT_TIMEOUT_SECONDS: float = 30.0
+_SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
+
+
+class DbAdapter:
+    """PostgreSQL database adapter using asyncpg connection pool (MVP: query, execute only)."""
+
+    def __init__(self) -> None:
+        """Initialize DbAdapter in uninitialized state."""
+        self._pool: Optional[asyncpg.Pool] = None
+        self._pool_size: int = _DEFAULT_POOL_SIZE
+        self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
+        self._initialized: bool = False
+        self._dsn: str = ""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return EnumHandlerType.DATABASE."""
+        return EnumHandlerType.DATABASE
+
+    async def initialize(self, config: dict[str, object]) -> None:
+        """Initialize database connection pool with fixed size (5).
+
+        Args:
+            config: Configuration dict containing:
+                - dsn: PostgreSQL connection string (required)
+                - timeout: Optional timeout in seconds (default: 30.0)
+
+        Raises:
+            RuntimeHostError: If DSN is missing or pool creation fails.
+        """
+        dsn = config.get("dsn")
+        if not isinstance(dsn, str) or not dsn:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="initialize",
+                target_name="db_adapter",
+            )
+            raise RuntimeHostError(
+                "Missing or invalid 'dsn' in config - PostgreSQL connection string required",
+                context=ctx,
+            )
+
+        timeout_raw = config.get("timeout", _DEFAULT_TIMEOUT_SECONDS)
+        if isinstance(timeout_raw, (int, float)):
+            self._timeout = float(timeout_raw)
+
+        try:
+            self._pool = await asyncpg.create_pool(
+                dsn=dsn,
+                min_size=1,
+                max_size=self._pool_size,
+                command_timeout=self._timeout,
+            )
+            self._dsn = dsn
+            self._initialized = True
+            logger.info(
+                "DbAdapter initialized",
+                extra={
+                    "pool_size": self._pool_size,
+                    "timeout_seconds": self._timeout,
+                },
+            )
+        except asyncpg.InvalidPasswordError as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="initialize",
+                target_name="db_adapter",
+            )
+            raise RuntimeHostError(
+                "Database authentication failed - check credentials", context=ctx
+            ) from e
+        except asyncpg.InvalidCatalogNameError as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="initialize",
+                target_name="db_adapter",
+            )
+            raise RuntimeHostError(
+                "Database not found - check database name", context=ctx
+            ) from e
+        except OSError as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="initialize",
+                target_name="db_adapter",
+            )
+            raise InfraConnectionError(
+                "Failed to connect to database - check host and port", context=ctx
+            ) from e
+        except Exception as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="initialize",
+                target_name="db_adapter",
+            )
+            raise RuntimeHostError(
+                f"Failed to initialize database pool: {type(e).__name__}", context=ctx
+            ) from e
+
+    async def shutdown(self) -> None:
+        """Close database connection pool and release resources."""
+        if self._pool is not None:
+            await self._pool.close()
+            self._pool = None
+        self._initialized = False
+        logger.info("DbAdapter shutdown complete")
+
+    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+        """Execute database operation (db.query or db.execute) from envelope.
+
+        Args:
+            envelope: Request envelope containing:
+                - operation: "db.query" or "db.execute"
+                - payload: dict with "sql" (required) and "parameters" (optional list)
+                - correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            Response envelope with:
+                - status: "success"
+                - payload: {"rows": list[dict], "row_count": int}
+                - correlation_id: Correlation ID string
+
+        Raises:
+            RuntimeHostError: If adapter not initialized or invalid input.
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If query times out.
+        """
+        correlation_id = self._extract_correlation_id(envelope)
+
+        if not self._initialized or self._pool is None:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="execute",
+                target_name="db_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "DbAdapter not initialized. Call initialize() first.", context=ctx
+            )
+
+        operation = envelope.get("operation")
+        if not isinstance(operation, str):
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="execute",
+                target_name="db_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing or invalid 'operation' in envelope", context=ctx
+            )
+
+        if operation not in _SUPPORTED_OPERATIONS:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation=operation,
+                target_name="db_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Operation '{operation}' not supported in MVP. Available: {', '.join(sorted(_SUPPORTED_OPERATIONS))}",
+                context=ctx,
+            )
+
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict):
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation=operation,
+                target_name="db_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "Missing or invalid 'payload' in envelope", context=ctx
+            )
+
+        sql = payload.get("sql")
+        if not isinstance(sql, str) or not sql.strip():
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation=operation,
+                target_name="db_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError("Missing or invalid 'sql' in payload", context=ctx)
+
+        parameters = self._extract_parameters(payload, operation, correlation_id)
+
+        if operation == "db.query":
+            return await self._execute_query(sql, parameters, correlation_id)
+        else:  # db.execute
+            return await self._execute_statement(sql, parameters, correlation_id)
+
+    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
+        """Extract or generate correlation ID from envelope."""
+        raw = envelope.get("correlation_id")
+        if isinstance(raw, UUID):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return UUID(raw)
+            except ValueError:
+                pass
+        return uuid4()
+
+    def _extract_parameters(
+        self, payload: dict[str, object], operation: str, correlation_id: UUID
+    ) -> list[object]:
+        """Extract and validate parameters from payload."""
+        params_raw = payload.get("parameters")
+        if params_raw is None:
+            return []
+        if isinstance(params_raw, list):
+            return list(params_raw)
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation=operation,
+            target_name="db_adapter",
+            correlation_id=correlation_id,
+        )
+        raise RuntimeHostError(
+            "Invalid 'parameters' in payload - must be a list", context=ctx
+        )
+
+    async def _execute_query(
+        self,
+        sql: str,
+        parameters: list[object],
+        correlation_id: UUID,
+    ) -> dict[str, object]:
+        """Execute SELECT query and return rows."""
+        if self._pool is None:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="db.query",
+                target_name="db_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "DbAdapter not initialized - call initialize() first", context=ctx
+            )
+
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="db.query",
+            target_name="db_adapter",
+            correlation_id=correlation_id,
+        )
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(sql, *parameters)
+                return self._build_response(
+                    [dict(row) for row in rows], len(rows), correlation_id
+                )
+        except asyncpg.QueryCanceledError as e:
+            raise InfraTimeoutError(
+                f"Query timed out after {self._timeout}s",
+                context=ctx,
+                timeout_seconds=self._timeout,
+            ) from e
+        except asyncpg.PostgresConnectionError as e:
+            raise InfraConnectionError(
+                "Database connection lost during query", context=ctx
+            ) from e
+        except asyncpg.PostgresSyntaxError as e:
+            raise RuntimeHostError(f"SQL syntax error: {e.message}", context=ctx) from e
+        except asyncpg.UndefinedTableError as e:
+            raise RuntimeHostError(f"Table not found: {e.message}", context=ctx) from e
+        except asyncpg.UndefinedColumnError as e:
+            raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
+        except asyncpg.PostgresError as e:
+            raise RuntimeHostError(
+                f"Database error: {type(e).__name__}", context=ctx
+            ) from e
+
+    async def _execute_statement(
+        self,
+        sql: str,
+        parameters: list[object],
+        correlation_id: UUID,
+    ) -> dict[str, object]:
+        """Execute INSERT/UPDATE/DELETE statement and return affected row count."""
+        if self._pool is None:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="db.execute",
+                target_name="db_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "DbAdapter not initialized - call initialize() first", context=ctx
+            )
+
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="db.execute",
+            target_name="db_adapter",
+            correlation_id=correlation_id,
+        )
+
+        try:
+            async with self._pool.acquire() as conn:
+                result = await conn.execute(sql, *parameters)
+                # asyncpg returns string like "INSERT 0 1" or "UPDATE 5"
+                row_count = self._parse_row_count(result)
+                return self._build_response([], row_count, correlation_id)
+        except asyncpg.QueryCanceledError as e:
+            raise InfraTimeoutError(
+                f"Statement timed out after {self._timeout}s",
+                context=ctx,
+                timeout_seconds=self._timeout,
+            ) from e
+        except asyncpg.PostgresConnectionError as e:
+            raise InfraConnectionError(
+                "Database connection lost during statement execution", context=ctx
+            ) from e
+        except asyncpg.PostgresSyntaxError as e:
+            raise RuntimeHostError(f"SQL syntax error: {e.message}", context=ctx) from e
+        except asyncpg.UndefinedTableError as e:
+            raise RuntimeHostError(f"Table not found: {e.message}", context=ctx) from e
+        except asyncpg.UndefinedColumnError as e:
+            raise RuntimeHostError(f"Column not found: {e.message}", context=ctx) from e
+        except asyncpg.UniqueViolationError as e:
+            raise RuntimeHostError(
+                f"Unique constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.ForeignKeyViolationError as e:
+            raise RuntimeHostError(
+                f"Foreign key constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.NotNullViolationError as e:
+            raise RuntimeHostError(
+                f"Not null constraint violation: {e.message}", context=ctx
+            ) from e
+        except asyncpg.PostgresError as e:
+            raise RuntimeHostError(
+                f"Database error: {type(e).__name__}", context=ctx
+            ) from e
+
+    def _parse_row_count(self, result: str) -> int:
+        """Parse row count from asyncpg execute result string.
+
+        asyncpg returns strings like:
+        - "INSERT 0 1" -> 1 row inserted
+        - "UPDATE 5" -> 5 rows updated
+        - "DELETE 3" -> 3 rows deleted
+        """
+        try:
+            parts = result.split()
+            if len(parts) >= 2:
+                return int(parts[-1])
+        except (ValueError, IndexError):
+            pass
+        return 0
+
+    def _build_response(
+        self, rows: list[dict[str, object]], row_count: int, correlation_id: UUID
+    ) -> dict[str, object]:
+        """Build response envelope from query/execute result."""
+        return {
+            "status": "success",
+            "payload": {
+                "rows": rows,
+                "row_count": row_count,
+            },
+            "correlation_id": str(correlation_id),
+        }
+
+    async def health_check(self) -> dict[str, object]:
+        """Return adapter health status."""
+        healthy = False
+        if self._initialized and self._pool is not None:
+            try:
+                async with self._pool.acquire() as conn:
+                    await conn.fetchval("SELECT 1")
+                    healthy = True
+            except Exception:
+                healthy = False
+
+        return {
+            "healthy": healthy,
+            "initialized": self._initialized,
+            "adapter_type": self.handler_type.value,
+            "pool_size": self._pool_size,
+            "timeout_seconds": self._timeout,
+        }
+
+    def describe(self) -> dict[str, object]:
+        """Return adapter metadata and capabilities."""
+        return {
+            "adapter_type": self.handler_type.value,
+            "supported_operations": sorted(_SUPPORTED_OPERATIONS),
+            "pool_size": self._pool_size,
+            "timeout_seconds": self._timeout,
+            "initialized": self._initialized,
+            "version": "0.1.0-mvp",
+        }
+
+
+__all__: list[str] = ["DbAdapter"]
