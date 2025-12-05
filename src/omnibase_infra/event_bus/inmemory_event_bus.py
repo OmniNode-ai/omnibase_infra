@@ -2,9 +2,10 @@
 # Copyright (c) 2025 OmniNode Team
 """In-Memory Event Bus implementation for local development and testing.
 
-Implements ProtocolEventBus interface using asyncio.Queue per topic.
-This implementation is designed for local development and testing scenarios
-where a full message broker (Kafka) is not needed.
+Implements ProtocolEventBus interface using deque-based event history with
+direct subscriber callback invocation. This implementation is designed for
+local development and testing scenarios where a full message broker (Kafka)
+is not needed.
 
 Features:
     - Topic-based message routing with FIFO ordering
@@ -59,9 +60,10 @@ logger = logging.getLogger(__name__)
 class InMemoryEventBus:
     """In-memory event bus for local development and testing.
 
-    Implements ProtocolEventBus interface using asyncio.Queue per topic.
-    This implementation provides a lightweight, synchronous event bus
-    for testing and local development without external dependencies.
+    Implements ProtocolEventBus interface using deque-based event history
+    with direct subscriber callback invocation. Thread-safe operations are
+    ensured via asyncio.Lock. This implementation provides a lightweight
+    event bus for testing and local development without external dependencies.
 
     Features:
         - Topic-based message routing with FIFO ordering

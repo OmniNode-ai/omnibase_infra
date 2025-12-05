@@ -999,6 +999,27 @@ class TestInMemoryEventBusEdgeCases:
         await event_bus.close()
 
     @pytest.mark.asyncio
+    async def test_unicode_topic_name(self) -> None:
+        """Test topics with unicode characters (Japanese, Chinese, emoji)."""
+        event_bus = InMemoryEventBus()
+        await event_bus.start()
+
+        received: list[ModelEventMessage] = []
+
+        async def handler(msg: ModelEventMessage) -> None:
+            received.append(msg)
+
+        # Test with Japanese characters
+        unicode_topic = "topic-日本語-テスト"
+        await event_bus.subscribe(unicode_topic, "group1", handler)
+        await event_bus.publish(unicode_topic, None, b"test")
+
+        assert len(received) == 1
+        assert received[0].topic == unicode_topic
+
+        await event_bus.close()
+
+    @pytest.mark.asyncio
     async def test_special_characters_in_group_id(self) -> None:
         """Test group IDs with special characters."""
         event_bus = InMemoryEventBus()
