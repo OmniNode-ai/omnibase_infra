@@ -1091,6 +1091,282 @@ class TestHttpRestAdapterResponseParsing:
         await handler.shutdown()
 
 
+class TestHttpRestAdapterSizeLimits:
+    """Test suite for request/response size limits."""
+
+    @pytest.fixture
+    def handler(self) -> HttpRestAdapter:
+        """Create HttpRestAdapter fixture."""
+        return HttpRestAdapter()
+
+    def test_default_size_limits(self, handler: HttpRestAdapter) -> None:
+        """Test default size limits are set correctly."""
+        assert handler._max_request_size == 10 * 1024 * 1024  # 10 MB
+        assert handler._max_response_size == 50 * 1024 * 1024  # 50 MB
+
+    @pytest.mark.asyncio
+    async def test_configurable_size_limits(self, handler: HttpRestAdapter) -> None:
+        """Test size limits can be configured via initialize()."""
+        config: dict[str, object] = {
+            "max_request_size": 1024,  # 1 KB
+            "max_response_size": 2048,  # 2 KB
+        }
+        await handler.initialize(config)
+
+        assert handler._max_request_size == 1024
+        assert handler._max_response_size == 2048
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_request_size_validation_string_body(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test request size validation with string body."""
+        config: dict[str, object] = {"max_request_size": 10}  # 10 bytes
+        await handler.initialize(config)
+
+        # String body that exceeds limit
+        envelope: dict[str, object] = {
+            "operation": "http.post",
+            "payload": {
+                "url": "https://example.com",
+                "body": "This string is definitely longer than 10 bytes",
+            },
+        }
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await handler.execute(envelope)
+
+        assert "exceeds limit" in str(exc_info.value)
+        assert "10 bytes" in str(exc_info.value)
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_request_size_validation_dict_body(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test request size validation with dict body (JSON serialized)."""
+        config: dict[str, object] = {"max_request_size": 10}  # 10 bytes
+        await handler.initialize(config)
+
+        # Dict body that exceeds limit when serialized
+        envelope: dict[str, object] = {
+            "operation": "http.post",
+            "payload": {
+                "url": "https://example.com",
+                "body": {"key": "value", "another": "field"},
+            },
+        }
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await handler.execute(envelope)
+
+        assert "exceeds limit" in str(exc_info.value)
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_request_size_validation_bytes_body(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test request size validation with bytes body."""
+        config: dict[str, object] = {"max_request_size": 5}  # 5 bytes
+        await handler.initialize(config)
+
+        # Create a test that uses bytes body via list serialization
+        # Since bytes can't be passed directly through payload.get("body"),
+        # we test the internal method directly
+        correlation_id = uuid4()
+
+        # Test the internal validation method with bytes
+        with pytest.raises(RuntimeHostError) as exc_info:
+            handler._validate_request_size(b"123456", correlation_id)
+
+        assert "exceeds limit" in str(exc_info.value)
+        assert "5 bytes" in str(exc_info.value)
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_request_size_exceeds_limit_raises_error(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test that request exceeding size limit raises RuntimeHostError."""
+        config: dict[str, object] = {"max_request_size": 100}
+        await handler.initialize(config)
+
+        large_body = "x" * 200  # 200 bytes, exceeds 100 byte limit
+        envelope: dict[str, object] = {
+            "operation": "http.post",
+            "payload": {
+                "url": "https://example.com",
+                "body": large_body,
+            },
+        }
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await handler.execute(envelope)
+
+        error_msg = str(exc_info.value)
+        assert "200 bytes" in error_msg
+        assert "100 bytes" in error_msg
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_response_size_exceeds_limit_raises_error(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test that response exceeding size limit raises RuntimeHostError."""
+        config: dict[str, object] = {"max_response_size": 50}  # 50 bytes
+        await handler.initialize(config)
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/plain"}
+        mock_response.text = "x" * 100  # 100 bytes, exceeds 50 byte limit
+
+        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_response
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://example.com"},
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            error_msg = str(exc_info.value)
+            assert "exceeds limit" in error_msg
+            assert "50 bytes" in error_msg
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_none_body_skips_validation(self, handler: HttpRestAdapter) -> None:
+        """Test that None body skips size validation."""
+        config: dict[str, object] = {"max_request_size": 1}  # 1 byte - very small
+        await handler.initialize(config)
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 204
+        mock_response.headers = {"content-type": "text/plain"}
+        mock_response.text = ""
+
+        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            # POST with no body should not raise size limit error
+            envelope: dict[str, object] = {
+                "operation": "http.post",
+                "payload": {"url": "https://example.com"},  # No body
+            }
+
+            result = await handler.execute(envelope)
+            assert result["status"] == "success"
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_request_within_limit_succeeds(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test that request within size limit succeeds."""
+        config: dict[str, object] = {"max_request_size": 1000}  # 1000 bytes
+        await handler.initialize(config)
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.json.return_value = {"success": True}
+
+        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            small_body = "x" * 50  # 50 bytes, under 1000 byte limit
+            envelope: dict[str, object] = {
+                "operation": "http.post",
+                "payload": {
+                    "url": "https://example.com",
+                    "body": small_body,
+                },
+            }
+
+            result = await handler.execute(envelope)
+            assert result["status"] == "success"
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_response_within_limit_succeeds(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test that response within size limit succeeds."""
+        config: dict[str, object] = {"max_response_size": 1000}  # 1000 bytes
+        await handler.initialize(config)
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/plain"}
+        mock_response.text = "x" * 50  # 50 bytes, under 1000 byte limit
+
+        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_response
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://example.com"},
+            }
+
+            result = await handler.execute(envelope)
+            assert result["status"] == "success"
+            assert result["payload"]["body"] == "x" * 50
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_size_limits_in_health_check(self, handler: HttpRestAdapter) -> None:
+        """Test that size limits are included in health check response."""
+        config: dict[str, object] = {
+            "max_request_size": 5000,
+            "max_response_size": 10000,
+        }
+        await handler.initialize(config)
+
+        health = await handler.health_check()
+
+        assert health["max_request_size"] == 5000
+        assert health["max_response_size"] == 10000
+
+        await handler.shutdown()
+
+    def test_size_limits_in_describe(self, handler: HttpRestAdapter) -> None:
+        """Test that size limits are included in describe response."""
+        description = handler.describe()
+
+        # Default values
+        assert description["max_request_size"] == 10 * 1024 * 1024
+        assert description["max_response_size"] == 50 * 1024 * 1024
+
+    @pytest.mark.asyncio
+    async def test_invalid_config_uses_defaults(self, handler: HttpRestAdapter) -> None:
+        """Test that invalid config values use defaults."""
+        config: dict[str, object] = {
+            "max_request_size": -100,  # Invalid negative
+            "max_response_size": "not a number",  # Invalid type
+        }
+        await handler.initialize(config)
+
+        # Should use defaults for invalid values
+        assert handler._max_request_size == 10 * 1024 * 1024
+        assert handler._max_response_size == 50 * 1024 * 1024
+
+        await handler.shutdown()
+
+
 __all__: list[str] = [
     "TestHttpRestAdapterInitialization",
     "TestHttpRestAdapterGetOperations",
@@ -1101,4 +1377,5 @@ __all__: list[str] = [
     "TestHttpRestAdapterLifecycle",
     "TestHttpRestAdapterCorrelationId",
     "TestHttpRestAdapterResponseParsing",
+    "TestHttpRestAdapterSizeLimits",
 ]

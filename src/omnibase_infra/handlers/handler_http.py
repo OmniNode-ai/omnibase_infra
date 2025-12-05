@@ -27,6 +27,8 @@ from omnibase_infra.errors import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT_SECONDS: float = 30.0
+_DEFAULT_MAX_REQUEST_SIZE: int = 10 * 1024 * 1024  # 10 MB
+_DEFAULT_MAX_RESPONSE_SIZE: int = 50 * 1024 * 1024  # 50 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 
 
@@ -37,6 +39,8 @@ class HttpRestAdapter:
         """Initialize HttpRestAdapter in uninitialized state."""
         self._client: Optional[httpx.AsyncClient] = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
+        self._max_request_size: int = _DEFAULT_MAX_REQUEST_SIZE
+        self._max_response_size: int = _DEFAULT_MAX_RESPONSE_SIZE
         self._initialized: bool = False
 
     @property
@@ -45,16 +49,37 @@ class HttpRestAdapter:
         return EnumHandlerType.HTTP
 
     async def initialize(self, config: dict[str, object]) -> None:
-        """Initialize HTTP client with 30s fixed timeout (config unused in MVP)."""
+        """Initialize HTTP client with configurable timeout and size limits.
+
+        Args:
+            config: Configuration dict containing:
+                - max_request_size: Optional max request body size in bytes (default: 10 MB)
+                - max_response_size: Optional max response body size in bytes (default: 50 MB)
+        """
         try:
             self._timeout = _DEFAULT_TIMEOUT_SECONDS
+
+            # Extract configurable size limits
+            max_request_raw = config.get("max_request_size")
+            if isinstance(max_request_raw, int) and max_request_raw > 0:
+                self._max_request_size = max_request_raw
+
+            max_response_raw = config.get("max_response_size")
+            if isinstance(max_response_raw, int) and max_response_raw > 0:
+                self._max_response_size = max_response_raw
+
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout),
                 follow_redirects=True,
             )
             self._initialized = True
             logger.info(
-                "HttpRestAdapter initialized", extra={"timeout_seconds": self._timeout}
+                "HttpRestAdapter initialized",
+                extra={
+                    "timeout_seconds": self._timeout,
+                    "max_request_size": self._max_request_size,
+                    "max_response_size": self._max_response_size,
+                },
             )
         except Exception as e:
             ctx = ModelInfraErrorContext(
@@ -142,8 +167,11 @@ class HttpRestAdapter:
                 "GET", url, headers, None, correlation_id
             )
         else:  # http.post
+            body = payload.get("body")
+            # Validate request body size before sending
+            self._validate_request_size(body, correlation_id)
             return await self._execute_request(
-                "POST", url, headers, payload.get("body"), correlation_id
+                "POST", url, headers, body, correlation_id
             )
 
     def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
@@ -176,6 +204,94 @@ class HttpRestAdapter:
         raise RuntimeHostError(
             "Invalid 'headers' in payload - must be a dict", context=ctx
         )
+
+    def _validate_request_size(self, body: object, correlation_id: UUID) -> None:
+        """Validate request body size against configured limit.
+
+        Args:
+            body: Request body (str, dict, bytes, or None)
+            correlation_id: Correlation ID for error context
+
+        Raises:
+            RuntimeHostError: If body size exceeds max_request_size limit.
+        """
+        if body is None:
+            return
+
+        size: int = 0
+        if isinstance(body, str):
+            size = len(body.encode("utf-8"))
+        elif isinstance(body, dict):
+            try:
+                size = len(json.dumps(body).encode("utf-8"))
+            except (TypeError, ValueError):
+                # If we can't serialize, skip validation and let execute() handle it
+                return
+        elif isinstance(body, bytes):
+            size = len(body)
+        else:
+            # Unknown type - skip validation, let execute() handle serialization
+            return
+
+        if size > self._max_request_size:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="validate_request_size",
+                target_name="http_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Request body size ({size} bytes) exceeds limit ({self._max_request_size} bytes)",
+                context=ctx,
+            )
+
+    def _validate_response_size(self, body: object, correlation_id: UUID) -> None:
+        """Validate response body size against configured limit.
+
+        Args:
+            body: Response body (str, dict, bytes, or None)
+            correlation_id: Correlation ID for error context
+
+        Raises:
+            RuntimeHostError: If body size exceeds max_response_size limit.
+        """
+        if body is None:
+            return
+
+        size: int = 0
+        if isinstance(body, str):
+            size = len(body.encode("utf-8"))
+        elif isinstance(body, dict):
+            try:
+                size = len(json.dumps(body).encode("utf-8"))
+            except (TypeError, ValueError):
+                # If we can't serialize, skip validation
+                return
+        elif isinstance(body, bytes):
+            size = len(body)
+        else:
+            # Unknown type - skip validation
+            return
+
+        if size > self._max_response_size:
+            logger.warning(
+                "Response body size exceeds limit",
+                extra={
+                    "size": size,
+                    "limit": self._max_response_size,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="validate_response_size",
+                target_name="http_adapter",
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                f"Response body size ({size} bytes) exceeds limit ({self._max_response_size} bytes)",
+                context=ctx,
+            )
 
     async def _execute_request(
         self,
@@ -257,6 +373,9 @@ class HttpRestAdapter:
         else:
             body = response.text
 
+        # Validate response body size after receiving
+        self._validate_response_size(body, correlation_id)
+
         return {
             "status": "success",
             "payload": {
@@ -274,6 +393,8 @@ class HttpRestAdapter:
             "initialized": self._initialized,
             "adapter_type": self.handler_type.value,
             "timeout_seconds": self._timeout,
+            "max_request_size": self._max_request_size,
+            "max_response_size": self._max_response_size,
         }
 
     def describe(self) -> dict[str, object]:
@@ -282,6 +403,8 @@ class HttpRestAdapter:
             "adapter_type": self.handler_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
             "timeout_seconds": self._timeout,
+            "max_request_size": self._max_request_size,
+            "max_response_size": self._max_response_size,
             "initialized": self._initialized,
             "version": "0.1.0-mvp",
         }
