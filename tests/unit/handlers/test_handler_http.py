@@ -9,6 +9,8 @@ error handling, health checks, describe, and lifecycle management.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -26,6 +28,57 @@ from omnibase_infra.handlers.handler_http import HttpRestAdapter
 
 # Type alias for response dict with nested structure
 ResponseDict = dict[str, object]
+
+
+def create_mock_streaming_response(
+    status_code: int = 200,
+    headers: dict[str, str] | None = None,
+    body_bytes: bytes = b"",
+    content_type: str = "application/json",
+) -> MagicMock:
+    """Create a mock httpx.Response that supports streaming iteration.
+
+    Args:
+        status_code: HTTP status code
+        headers: Response headers (content-type will be added if not present)
+        body_bytes: The response body as bytes
+        content_type: Content-Type header value (used if headers doesn't have it)
+
+    Returns:
+        MagicMock configured to behave like httpx.Response with streaming support
+    """
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = status_code
+
+    # Build headers dict with content-type
+    response_headers = headers or {}
+    if "content-type" not in response_headers:
+        response_headers["content-type"] = content_type
+    mock_response.headers = response_headers
+
+    # Create an async iterator for aiter_bytes
+    async def aiter_bytes_impl(chunk_size: int = 8192) -> AsyncIterator[bytes]:
+        """Yield body_bytes in chunks."""
+        for i in range(0, len(body_bytes), chunk_size):
+            yield body_bytes[i : i + chunk_size]
+        # Handle empty body case - still need to yield nothing
+        if len(body_bytes) == 0:
+            return
+
+    mock_response.aiter_bytes = aiter_bytes_impl
+
+    return mock_response
+
+
+@asynccontextmanager
+async def mock_stream_context(
+    mock_response: MagicMock,
+) -> AsyncIterator[MagicMock]:
+    """Create an async context manager that yields the mock response.
+
+    This simulates httpx.AsyncClient.stream() behavior.
+    """
+    yield mock_response
 
 
 class TestHttpRestAdapterInitialization:
@@ -96,16 +149,19 @@ class TestHttpRestAdapterGetOperations:
         """Test successful GET request returns correct response structure."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {
-            "content-type": "application/json",
-            "x-custom": "value",
-        }
-        mock_response.json.return_value = {"data": "test_value"}
+        # Create mock response with streaming support
+        import json as json_module
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        body_data = {"data": "test_value"}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json", "x-custom": "value"},
+            body_bytes=body_bytes,
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -121,8 +177,12 @@ class TestHttpRestAdapterGetOperations:
             assert payload["body"] == {"data": "test_value"}
             assert "correlation_id" in result
 
-            mock_get.assert_called_once_with(
-                "https://api.example.com/resource", headers={}
+            mock_stream.assert_called_once_with(
+                "GET",
+                "https://api.example.com/resource",
+                headers={},
+                content=None,
+                json=None,
             )
 
         await handler.shutdown()
@@ -132,14 +192,15 @@ class TestHttpRestAdapterGetOperations:
         """Test GET request passes custom headers correctly."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = "OK"
-        mock_response.json.side_effect = Exception("Not JSON")
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "text/plain"},
+            body_bytes=b"OK",
+            content_type="text/plain",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -154,9 +215,12 @@ class TestHttpRestAdapterGetOperations:
 
             result = await handler.execute(envelope)
 
-            mock_get.assert_called_once_with(
+            mock_stream.assert_called_once_with(
+                "GET",
                 "https://api.example.com/status",
                 headers={"Authorization": "Bearer token123", "X-Request-ID": "req-456"},
+                content=None,
+                json=None,
             )
 
             assert result["payload"]["body"] == "OK"
@@ -168,13 +232,18 @@ class TestHttpRestAdapterGetOperations:
         """Test GET request with query parameters in URL."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {"items": [1, 2, 3]}
+        import json as json_module
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        body_data = {"items": [1, 2, 3]}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=body_bytes,
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -185,9 +254,12 @@ class TestHttpRestAdapterGetOperations:
 
             result = await handler.execute(envelope)
 
-            mock_get.assert_called_once_with(
+            mock_stream.assert_called_once_with(
+                "GET",
                 "https://api.example.com/items?page=1&limit=10&filter=active",
                 headers={},
+                content=None,
+                json=None,
             )
 
             assert result["payload"]["body"] == {"items": [1, 2, 3]}
@@ -199,13 +271,15 @@ class TestHttpRestAdapterGetOperations:
         """Test GET request with text/plain response."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "text/plain; charset=utf-8"}
-        mock_response.text = "Hello, World!"
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "text/plain; charset=utf-8"},
+            body_bytes=b"Hello, World!",
+            content_type="text/plain; charset=utf-8",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -233,13 +307,18 @@ class TestHttpRestAdapterPostOperations:
         """Test POST request with JSON body."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 201
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {"id": 123, "created": True}
+        import json as json_module
 
-        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+        body_data = {"id": 123, "created": True}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=201,
+            headers={"content-type": "application/json"},
+            body_bytes=body_bytes,
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.post",
@@ -251,9 +330,11 @@ class TestHttpRestAdapterPostOperations:
 
             result = await handler.execute(envelope)
 
-            mock_post.assert_called_once_with(
+            mock_stream.assert_called_once_with(
+                "POST",
                 "https://api.example.com/users",
                 headers={},
+                content=None,
                 json={"name": "John", "email": "john@example.com"},
             )
 
@@ -268,13 +349,15 @@ class TestHttpRestAdapterPostOperations:
         """Test POST request with string body."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = "Received"
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "text/plain"},
+            body_bytes=b"Received",
+            content_type="text/plain",
+        )
 
-        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.post",
@@ -286,10 +369,12 @@ class TestHttpRestAdapterPostOperations:
 
             result = await handler.execute(envelope)
 
-            mock_post.assert_called_once_with(
+            mock_stream.assert_called_once_with(
+                "POST",
                 "https://api.example.com/message",
                 headers={},
                 content="Hello from client",
+                json=None,
             )
 
             assert result["payload"]["body"] == "Received"
@@ -301,13 +386,15 @@ class TestHttpRestAdapterPostOperations:
         """Test POST request with no body."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 204
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = ""
+        mock_response = create_mock_streaming_response(
+            status_code=204,
+            headers={"content-type": "text/plain"},
+            body_bytes=b"",
+            content_type="text/plain",
+        )
 
-        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.post",
@@ -316,9 +403,12 @@ class TestHttpRestAdapterPostOperations:
 
             result = await handler.execute(envelope)
 
-            mock_post.assert_called_once_with(
+            mock_stream.assert_called_once_with(
+                "POST",
                 "https://api.example.com/trigger",
                 headers={},
+                content=None,
+                json=None,
             )
 
             assert result["payload"]["status_code"] == 204
@@ -330,13 +420,18 @@ class TestHttpRestAdapterPostOperations:
         """Test POST request with custom headers."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {"success": True}
+        import json as json_module
 
-        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+        body_data = {"success": True}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=body_bytes,
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.post",
@@ -352,12 +447,14 @@ class TestHttpRestAdapterPostOperations:
 
             result = await handler.execute(envelope)
 
-            mock_post.assert_called_once_with(
+            mock_stream.assert_called_once_with(
+                "POST",
                 "https://api.example.com/data",
                 headers={
                     "Content-Type": "application/json",
                     "X-API-Key": "secret-key-123",
                 },
+                content=None,
                 json={"value": 42},
             )
 
@@ -372,13 +469,18 @@ class TestHttpRestAdapterPostOperations:
         """Test POST with list body gets JSON serialized."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {"processed": 3}
+        import json as json_module
 
-        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+        body_data = {"processed": 3}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=body_bytes,
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.post",
@@ -391,8 +493,8 @@ class TestHttpRestAdapterPostOperations:
             result = await handler.execute(envelope)
 
             # List body uses content= with json.dumps()
-            mock_post.assert_called_once()
-            call_args = mock_post.call_args
+            mock_stream.assert_called_once()
+            call_args = mock_stream.call_args
             assert call_args.kwargs["content"] == "[1, 2, 3]"
 
             assert result["payload"]["body"] == {"processed": 3}
@@ -415,8 +517,13 @@ class TestHttpRestAdapterErrorHandling:
         """Test timeout error is converted to InfraTimeoutError."""
         await handler.initialize({})
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.side_effect = httpx.TimeoutException("Connection timed out")
+        @asynccontextmanager
+        async def raise_timeout() -> AsyncIterator[MagicMock]:
+            raise httpx.TimeoutException("Connection timed out")
+            yield MagicMock()  # Never reached, but makes type checker happy
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = raise_timeout()
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -438,8 +545,13 @@ class TestHttpRestAdapterErrorHandling:
         """Test connection error is converted to InfraConnectionError."""
         await handler.initialize({})
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.side_effect = httpx.ConnectError("Connection refused")
+        @asynccontextmanager
+        async def raise_connect_error() -> AsyncIterator[MagicMock]:
+            raise httpx.ConnectError("Connection refused")
+            yield MagicMock()  # Never reached, but makes type checker happy
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = raise_connect_error()
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -608,19 +720,26 @@ class TestHttpRestAdapterErrorHandling:
     async def test_http_status_error_returns_response(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test HTTPStatusError still returns the response (not an exception)."""
+        """Test non-2xx HTTP responses still return successfully (not an exception).
+
+        Note: With streaming, we don't get HTTPStatusError - instead we get
+        the response directly and check the status code. HTTP 4xx/5xx are not
+        exceptions, they're valid HTTP responses.
+        """
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 404
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {"error": "Not found"}
+        import json as json_module
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            http_error = httpx.HTTPStatusError(
-                "404 Not Found", request=MagicMock(), response=mock_response
-            )
-            mock_get.side_effect = http_error
+        body_data = {"error": "Not found"}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=404,
+            headers={"content-type": "application/json"},
+            body_bytes=body_bytes,
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -643,8 +762,13 @@ class TestHttpRestAdapterErrorHandling:
         """Test generic HTTPError raises InfraConnectionError."""
         await handler.initialize({})
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.side_effect = httpx.HTTPError("Unknown HTTP error")
+        @asynccontextmanager
+        async def raise_http_error() -> AsyncIterator[MagicMock]:
+            raise httpx.HTTPError("Unknown HTTP error")
+            yield MagicMock()  # Never reached
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = raise_http_error()
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -863,13 +987,14 @@ class TestHttpRestAdapterCorrelationId:
         await handler.initialize({})
 
         correlation_id = uuid4()
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {}
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b"{}",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -891,13 +1016,14 @@ class TestHttpRestAdapterCorrelationId:
         await handler.initialize({})
 
         correlation_id = str(uuid4())
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {}
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b"{}",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -918,13 +1044,14 @@ class TestHttpRestAdapterCorrelationId:
         """Test correlation ID generated when not in envelope."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {}
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b"{}",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -947,13 +1074,14 @@ class TestHttpRestAdapterCorrelationId:
         """Test invalid correlation ID string generates new UUID."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {}
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b"{}",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -986,13 +1114,18 @@ class TestHttpRestAdapterResponseParsing:
         """Test JSON response is parsed correctly."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json; charset=utf-8"}
-        mock_response.json.return_value = {"key": "value", "nested": {"a": 1}}
+        import json as json_module
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        body_data = {"key": "value", "nested": {"a": 1}}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json; charset=utf-8"},
+            body_bytes=body_bytes,
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -1008,20 +1141,17 @@ class TestHttpRestAdapterResponseParsing:
     @pytest.mark.asyncio
     async def test_invalid_json_returns_text(self, handler: HttpRestAdapter) -> None:
         """Test invalid JSON response falls back to text."""
-        import json as json_module
-
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.side_effect = json_module.JSONDecodeError(
-            "Invalid JSON", "doc", 0
+        # Create a response with content-type json but invalid JSON body
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b"Not valid JSON {",
         )
-        mock_response.text = "Not valid JSON {"
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -1041,13 +1171,15 @@ class TestHttpRestAdapterResponseParsing:
         """Test non-JSON content type returns text body."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_response.text = "<html><body>Hello</body></html>"
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            body_bytes=b"<html><body>Hello</body></html>",
+            content_type="text/html; charset=utf-8",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -1065,17 +1197,18 @@ class TestHttpRestAdapterResponseParsing:
         """Test response headers are included in result."""
         await handler.initialize({})
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {
-            "content-type": "application/json",
-            "x-request-id": "req-123",
-            "x-rate-limit-remaining": "99",
-        }
-        mock_response.json.return_value = {}
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={
+                "content-type": "application/json",
+                "x-request-id": "req-123",
+                "x-rate-limit-remaining": "99",
+            },
+            body_bytes=b"{}",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -1175,9 +1308,9 @@ class TestHttpRestAdapterSizeLimits:
         config: dict[str, object] = {"max_request_size": 5}  # 5 bytes
         await handler.initialize(config)
 
-        # Create a test that uses bytes body via list serialization
-        # Since bytes can't be passed directly through payload.get("body"),
-        # we test the internal method directly
+        # Bytes can be passed via payload, but for direct validation testing,
+        # we call the internal _validate_request_size method directly.
+        # This isolates the size validation logic from the full execute() flow.
         correlation_id = uuid4()
 
         # Test the internal validation method with bytes
@@ -1223,13 +1356,16 @@ class TestHttpRestAdapterSizeLimits:
         config: dict[str, object] = {"max_response_size": 50}  # 50 bytes
         await handler.initialize(config)
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = "x" * 100  # 100 bytes, exceeds 50 byte limit
+        # Create a streaming response with body > 50 bytes
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "text/plain"},
+            body_bytes=b"x" * 100,  # 100 bytes, exceeds 50 byte limit
+            content_type="text/plain",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -1240,7 +1376,7 @@ class TestHttpRestAdapterSizeLimits:
                 await handler.execute(envelope)
 
             error_msg = str(exc_info.value)
-            assert "exceeds limit" in error_msg
+            assert "exceeded limit" in error_msg or "exceeds limit" in error_msg
             assert "50 bytes" in error_msg
 
         await handler.shutdown()
@@ -1251,13 +1387,15 @@ class TestHttpRestAdapterSizeLimits:
         config: dict[str, object] = {"max_request_size": 1}  # 1 byte - very small
         await handler.initialize(config)
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 204
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = ""
+        mock_response = create_mock_streaming_response(
+            status_code=204,
+            headers={"content-type": "text/plain"},
+            body_bytes=b"",
+            content_type="text/plain",
+        )
 
-        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             # POST with no body should not raise size limit error
             envelope: dict[str, object] = {
@@ -1278,13 +1416,18 @@ class TestHttpRestAdapterSizeLimits:
         config: dict[str, object] = {"max_request_size": 1000}  # 1000 bytes
         await handler.initialize(config)
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {"success": True}
+        import json as json_module
 
-        with patch.object(handler._client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+        body_data = {"success": True}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=body_bytes,
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             small_body = "x" * 50  # 50 bytes, under 1000 byte limit
             envelope: dict[str, object] = {
@@ -1308,13 +1451,15 @@ class TestHttpRestAdapterSizeLimits:
         config: dict[str, object] = {"max_response_size": 1000}  # 1000 bytes
         await handler.initialize(config)
 
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = "x" * 50  # 50 bytes, under 1000 byte limit
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "text/plain"},
+            body_bytes=b"x" * 50,  # 50 bytes, under 1000 byte limit
+            content_type="text/plain",
+        )
 
-        with patch.object(handler._client, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
 
             envelope: dict[str, object] = {
                 "operation": "http.get",
@@ -1363,6 +1508,120 @@ class TestHttpRestAdapterSizeLimits:
         # Should use defaults for invalid values
         assert handler._max_request_size == 10 * 1024 * 1024
         assert handler._max_response_size == 50 * 1024 * 1024
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_content_length_header_validation_rejects_large_response(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test that Content-Length header is validated BEFORE reading response body.
+
+        This is the critical security fix - responses with Content-Length > limit
+        should be rejected immediately without reading the body into memory.
+        """
+        config: dict[str, object] = {"max_response_size": 100}  # 100 bytes
+        await handler.initialize(config)
+
+        # Create response with Content-Length header indicating size > limit
+        # The actual body doesn't matter because we should reject based on header
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={
+                "content-type": "text/plain",
+                "content-length": "1000000",  # 1 MB, way over 100 byte limit
+            },
+            body_bytes=b"x" * 10,  # Small actual body - shouldn't matter
+            content_type="text/plain",
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://example.com/large-file"},
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            error_msg = str(exc_info.value)
+            # Should mention Content-Length in the error
+            assert "Content-Length" in error_msg
+            assert "1000000" in error_msg
+            assert "100 bytes" in error_msg
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_content_length_header_validation_allows_small_response(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test that Content-Length header validation allows responses under limit."""
+        config: dict[str, object] = {"max_response_size": 1000}  # 1000 bytes
+        await handler.initialize(config)
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={
+                "content-type": "text/plain",
+                "content-length": "50",  # 50 bytes, under limit
+            },
+            body_bytes=b"x" * 50,
+            content_type="text/plain",
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://example.com/small-file"},
+            }
+
+            result = await handler.execute(envelope)
+
+            assert result["status"] == "success"
+            assert result["payload"]["body"] == "x" * 50
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_streaming_validation_for_chunked_responses(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test that responses without Content-Length are validated during streaming.
+
+        Chunked transfer encoding and other cases without Content-Length header
+        should be validated as the body is read, stopping early if limit exceeded.
+        """
+        config: dict[str, object] = {"max_response_size": 50}  # 50 bytes
+        await handler.initialize(config)
+
+        # No Content-Length header (simulating chunked transfer)
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "text/plain"},  # No content-length
+            body_bytes=b"x" * 100,  # 100 bytes, exceeds 50 byte limit
+            content_type="text/plain",
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://example.com/chunked-data"},
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            error_msg = str(exc_info.value)
+            # Should mention streaming read in the error
+            assert "streaming read" in error_msg or "exceeded limit" in error_msg
+            assert "50 bytes" in error_msg
 
         await handler.shutdown()
 

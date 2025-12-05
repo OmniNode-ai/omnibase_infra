@@ -30,6 +30,8 @@ _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _DEFAULT_MAX_REQUEST_SIZE: int = 10 * 1024 * 1024  # 10 MB
 _DEFAULT_MAX_RESPONSE_SIZE: int = 50 * 1024 * 1024  # 50 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
+# Streaming chunk size for responses without Content-Length header
+_STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
 
 
 class HttpRestAdapter:
@@ -61,12 +63,30 @@ class HttpRestAdapter:
 
             # Extract configurable size limits
             max_request_raw = config.get("max_request_size")
-            if isinstance(max_request_raw, int) and max_request_raw > 0:
-                self._max_request_size = max_request_raw
+            if max_request_raw is not None:
+                if isinstance(max_request_raw, int) and max_request_raw > 0:
+                    self._max_request_size = max_request_raw
+                else:
+                    logger.warning(
+                        "Invalid max_request_size config value ignored, using default",
+                        extra={
+                            "provided_value": max_request_raw,
+                            "default_value": self._max_request_size,
+                        },
+                    )
 
             max_response_raw = config.get("max_response_size")
-            if isinstance(max_response_raw, int) and max_response_raw > 0:
-                self._max_response_size = max_response_raw
+            if max_response_raw is not None:
+                if isinstance(max_response_raw, int) and max_response_raw > 0:
+                    self._max_response_size = max_response_raw
+                else:
+                    logger.warning(
+                        "Invalid max_response_size config value ignored, using default",
+                        extra={
+                            "provided_value": max_response_raw,
+                            "default_value": self._max_response_size,
+                        },
+                    )
 
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout),
@@ -245,53 +265,123 @@ class HttpRestAdapter:
                 context=ctx,
             )
 
-    def _validate_response_size(self, body: object, correlation_id: UUID) -> None:
-        """Validate response body size against configured limit.
+    def _validate_content_length_header(
+        self, response: httpx.Response, url: str, correlation_id: UUID
+    ) -> None:
+        """Validate Content-Length header BEFORE reading response body.
+
+        This prevents memory exhaustion by rejecting large responses before
+        they are loaded into memory. This is critical for security as it
+        prevents denial-of-service attacks via large response payloads.
 
         Args:
-            body: Response body (str, dict, bytes, or None)
+            response: The httpx Response object (body not yet read)
+            url: Target URL for error context
             correlation_id: Correlation ID for error context
 
         Raises:
-            RuntimeHostError: If body size exceeds max_response_size limit.
+            RuntimeHostError: If Content-Length exceeds max_response_size limit.
         """
-        if body is None:
+        content_length_header = response.headers.get("content-length")
+        if content_length_header is None:
+            # No Content-Length header - will use streaming validation
             return
 
-        size: int = 0
-        if isinstance(body, str):
-            size = len(body.encode("utf-8"))
-        elif isinstance(body, dict):
-            try:
-                size = len(json.dumps(body).encode("utf-8"))
-            except (TypeError, ValueError):
-                # If we can't serialize, skip validation
-                return
-        elif isinstance(body, bytes):
-            size = len(body)
-        else:
-            # Unknown type - skip validation
-            return
-
-        if size > self._max_response_size:
+        try:
+            content_length = int(content_length_header)
+        except ValueError:
+            # Invalid Content-Length header - log warning and proceed with body-based validation
             logger.warning(
-                "Response body size exceeds limit",
+                "Invalid Content-Length header value",
                 extra={
-                    "size": size,
+                    "content_length_header": content_length_header,
+                    "url": url,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return
+
+        if content_length > self._max_response_size:
+            logger.warning(
+                "Response Content-Length exceeds limit - rejecting before reading body",
+                extra={
+                    "content_length": content_length,
                     "limit": self._max_response_size,
+                    "url": url,
                     "correlation_id": str(correlation_id),
                 },
             )
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
-                operation="validate_response_size",
-                target_name="http_adapter",
+                operation="validate_content_length",
+                target_name=url,
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                f"Response body size ({size} bytes) exceeds limit ({self._max_response_size} bytes)",
+                f"Response Content-Length ({content_length} bytes) exceeds limit "
+                f"({self._max_response_size} bytes)",
                 context=ctx,
             )
+
+        logger.debug(
+            "Content-Length header validated",
+            extra={
+                "content_length": content_length,
+                "limit": self._max_response_size,
+                "url": url,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+    async def _read_response_body_with_limit(
+        self, response: httpx.Response, url: str, correlation_id: UUID
+    ) -> bytes:
+        """Read response body with streaming size limit enforcement.
+
+        For responses without Content-Length header (e.g., chunked transfer encoding),
+        this method reads the body in chunks and tracks the total size, stopping
+        and raising an error if the limit is exceeded.
+
+        Args:
+            response: The httpx Response object
+            url: Target URL for error context
+            correlation_id: Correlation ID for error context
+
+        Returns:
+            The complete response body as bytes
+
+        Raises:
+            RuntimeHostError: If body size exceeds max_response_size during streaming.
+        """
+        chunks: list[bytes] = []
+        total_size: int = 0
+
+        async for chunk in response.aiter_bytes(chunk_size=_STREAMING_CHUNK_SIZE):
+            total_size += len(chunk)
+            if total_size > self._max_response_size:
+                logger.warning(
+                    "Response body exceeded size limit during streaming read",
+                    extra={
+                        "bytes_read_so_far": total_size,
+                        "limit": self._max_response_size,
+                        "url": url,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="read_response_body",
+                    target_name=url,
+                    correlation_id=correlation_id,
+                )
+                raise RuntimeHostError(
+                    f"Response body size exceeded limit ({self._max_response_size} bytes) "
+                    f"during streaming read (read {total_size} bytes so far)",
+                    context=ctx,
+                )
+            chunks.append(chunk)
+
+        return b"".join(chunks)
 
     async def _execute_request(
         self,
@@ -301,7 +391,11 @@ class HttpRestAdapter:
         body: object,
         correlation_id: UUID,
     ) -> dict[str, object]:
-        """Execute HTTP request and handle errors."""
+        """Execute HTTP request with pre-read response size validation.
+
+        Uses httpx streaming to validate Content-Length header BEFORE reading
+        the response body into memory, preventing memory exhaustion attacks.
+        """
         if self._client is None:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
@@ -320,28 +414,47 @@ class HttpRestAdapter:
             correlation_id=correlation_id,
         )
 
-        try:
-            if method == "GET":
-                response = await self._client.get(url, headers=headers)
-            elif body is None:
-                response = await self._client.post(url, headers=headers)
-            elif isinstance(body, dict):
-                response = await self._client.post(url, headers=headers, json=body)
+        # Prepare request content for POST
+        request_content: bytes | str | None = None
+        request_json: dict[str, object] | None = None
+
+        if method == "POST" and body is not None:
+            if isinstance(body, dict):
+                request_json = body
             elif isinstance(body, str):
-                response = await self._client.post(url, headers=headers, content=body)
+                request_content = body
             else:
                 try:
-                    serialized_body = json.dumps(body)
+                    request_content = json.dumps(body)
                 except TypeError as e:
                     raise RuntimeHostError(
                         f"Body is not JSON-serializable: {type(body).__name__}",
                         context=ctx,
                     ) from e
-                response = await self._client.post(
-                    url, headers=headers, content=serialized_body
+
+        try:
+            # Use streaming request to get response headers before reading body
+            # This allows us to check Content-Length before loading body into memory
+            async with self._client.stream(
+                method,
+                url,
+                headers=headers,
+                content=request_content,
+                json=request_json,
+            ) as response:
+                # CRITICAL: Validate Content-Length header BEFORE reading body
+                # This prevents memory exhaustion from large responses
+                self._validate_content_length_header(response, url, correlation_id)
+
+                # Read body with streaming size limit enforcement
+                # For responses without Content-Length, this stops early if limit exceeded
+                response_body_bytes = await self._read_response_body_with_limit(
+                    response, url, correlation_id
                 )
 
-            return self._build_response(response, correlation_id)
+                return self._build_response_from_bytes(
+                    response, response_body_bytes, correlation_id
+                )
 
         except httpx.TimeoutException as e:
             raise InfraTimeoutError(
@@ -354,27 +467,66 @@ class HttpRestAdapter:
                 f"Failed to connect to {url}", context=ctx
             ) from e
         except httpx.HTTPStatusError as e:
-            return self._build_response(e.response, correlation_id)
+            # For HTTP status errors, we still need to read the response body
+            # but with size limits for error responses
+            async with self._client.stream(
+                method,
+                url,
+                headers=headers,
+                content=request_content,
+                json=request_json,
+            ) as error_response:
+                self._validate_content_length_header(
+                    error_response, url, correlation_id
+                )
+                error_body_bytes = await self._read_response_body_with_limit(
+                    error_response, url, correlation_id
+                )
+                return self._build_response_from_bytes(
+                    error_response, error_body_bytes, correlation_id
+                )
         except httpx.HTTPError as e:
             raise InfraConnectionError(
                 f"HTTP error during {method} request: {type(e).__name__}", context=ctx
             ) from e
 
-    def _build_response(
-        self, response: httpx.Response, correlation_id: UUID
+    def _build_response_from_bytes(
+        self,
+        response: httpx.Response,
+        body_bytes: bytes,
+        correlation_id: UUID,
     ) -> dict[str, object]:
-        """Build response envelope from httpx Response."""
+        """Build response envelope from httpx Response and pre-read body bytes.
+
+        This method is used with streaming responses where the body has already
+        been read with size limit enforcement.
+
+        Args:
+            response: The httpx Response object (headers already available)
+            body_bytes: The pre-read response body bytes
+            correlation_id: Correlation ID for tracing
+
+        Returns:
+            Response envelope dict with status, payload, and correlation_id
+        """
         content_type = response.headers.get("content-type", "")
+        body: object
+
+        # Decode bytes to string first
+        try:
+            body_text = body_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            # If UTF-8 decoding fails, try latin-1 as fallback
+            body_text = body_bytes.decode("latin-1")
+
+        # Try to parse as JSON if content type indicates JSON
         if "application/json" in content_type:
             try:
-                body: object = response.json()
+                body = json.loads(body_text)
             except json.JSONDecodeError:
-                body = response.text
+                body = body_text
         else:
-            body = response.text
-
-        # Validate response body size after receiving
-        self._validate_response_size(body, correlation_id)
+            body = body_text
 
         return {
             "status": "success",
