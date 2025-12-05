@@ -201,14 +201,19 @@ class InMemoryEventBus:
                 - group: Override group setting
                 - max_history: Override max_history setting
         """
-        if "environment" in config:
-            self._environment = str(config["environment"])
-        if "group" in config:
-            self._group = str(config["group"])
-        if "max_history" in config:
-            self._max_history = int(str(config["max_history"]))
-            # Recreate deque with new maxlen, preserving existing history
-            self._event_history = deque(self._event_history, maxlen=self._max_history)
+        # Protect configuration updates with lock to prevent race conditions
+        async with self._lock:
+            if "environment" in config:
+                self._environment = str(config["environment"])
+            if "group" in config:
+                self._group = str(config["group"])
+            if "max_history" in config:
+                self._max_history = int(str(config["max_history"]))
+                # Recreate deque with new maxlen, preserving existing history
+                self._event_history = deque(
+                    self._event_history, maxlen=self._max_history
+                )
+        # start() acquires its own lock, so call it outside the lock to avoid deadlock
         await self.start()
 
     async def shutdown(self) -> None:
@@ -285,17 +290,17 @@ class InMemoryEventBus:
         for group_id, callback in subscribers:
             failure_key = (topic, group_id)
 
-            # Check if circuit is open (too many consecutive failures)
-            if (
-                self._subscriber_failures.get(failure_key, 0)
-                >= self._max_consecutive_failures
-            ):
+            # Check if circuit is open (too many consecutive failures) - read under lock
+            async with self._lock:
+                failure_count = self._subscriber_failures.get(failure_key, 0)
+
+            if failure_count >= self._max_consecutive_failures:
                 logger.warning(
                     "Subscriber circuit breaker open - skipping callback",
                     extra={
                         "topic": topic,
                         "group_id": group_id,
-                        "consecutive_failures": self._subscriber_failures[failure_key],
+                        "consecutive_failures": failure_count,
                         "correlation_id": str(headers.correlation_id),
                     },
                 )
@@ -303,14 +308,17 @@ class InMemoryEventBus:
 
             try:
                 await callback(message)
-                # Reset failure count on success
-                if failure_key in self._subscriber_failures:
-                    del self._subscriber_failures[failure_key]
+                # Reset failure count on success - under lock
+                async with self._lock:
+                    if failure_key in self._subscriber_failures:
+                        del self._subscriber_failures[failure_key]
             except Exception as e:
-                # Increment failure count
-                self._subscriber_failures[failure_key] = (
-                    self._subscriber_failures.get(failure_key, 0) + 1
-                )
+                # Increment failure count - under lock
+                async with self._lock:
+                    self._subscriber_failures[failure_key] = (
+                        self._subscriber_failures.get(failure_key, 0) + 1
+                    )
+                    current_failure_count = self._subscriber_failures[failure_key]
                 # Log but don't fail other subscribers
                 logger.exception(
                     "Subscriber callback failed",
@@ -318,7 +326,7 @@ class InMemoryEventBus:
                         "topic": topic,
                         "group_id": group_id,
                         "error": str(e),
-                        "consecutive_failures": self._subscriber_failures[failure_key],
+                        "consecutive_failures": current_failure_count,
                         "correlation_id": str(headers.correlation_id),
                     },
                 )
@@ -550,13 +558,17 @@ class InMemoryEventBus:
             List of recent events (most recent last)
         """
         async with self._lock:
-            # Convert deque to list for slicing operations
+            # Convert deque to list for filtering operations
             history_list = list(self._event_history)
+
+            # Apply topic filter FIRST (if specified)
+            if topic:
+                history_list = [msg for msg in history_list if msg.topic == topic]
+
+            # Then apply limit (take the most recent N messages)
             history = (
                 history_list[-limit:] if limit < len(history_list) else history_list
             )
-            if topic:
-                history = [msg for msg in history if msg.topic == topic]
             return list(history)
 
     async def clear_event_history(self) -> None:

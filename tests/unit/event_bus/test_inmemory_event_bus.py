@@ -1208,10 +1208,10 @@ class TestInMemoryEventBusCircuitBreaker:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_restart_clears_circuit_breaker_state(
+    async def test_close_clears_circuit_breaker_state(
         self, event_bus: InMemoryEventBus
     ) -> None:
-        """Test that restarting the bus clears circuit breaker failure tracking."""
+        """Test that closing the bus clears circuit breaker failure tracking."""
         await event_bus.start()
 
         async def failing_handler(msg: ModelEventMessage) -> None:
