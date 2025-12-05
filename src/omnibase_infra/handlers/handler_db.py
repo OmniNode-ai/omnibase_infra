@@ -19,6 +19,7 @@ from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
@@ -27,13 +28,36 @@ from omnibase_infra.errors import (
 
 logger = logging.getLogger(__name__)
 
+# MVP pool size fixed at 5 connections.
+# Note: Recommended range is 10-20 for production workloads.
+# Configurable pool size deferred to Beta release.
 _DEFAULT_POOL_SIZE: int = 5
 _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 
 class DbAdapter:
-    """PostgreSQL database adapter using asyncpg connection pool (MVP: query, execute only)."""
+    """PostgreSQL database adapter using asyncpg connection pool (MVP: query, execute only).
+
+    Security Policy - DSN Handling:
+        The database connection string (DSN) contains sensitive credentials and is
+        treated as a secret throughout this adapter. The following security measures
+        are enforced:
+
+        1. DSN is stored internally in ``_dsn`` but NEVER logged or exposed in errors
+        2. All error messages use generic descriptions (e.g., "check host and port")
+           rather than exposing connection details
+        3. The ``_sanitize_dsn()`` method is available if DSN info ever needs to be
+           logged for debugging, but should only be used in development environments
+        4. Health check responses exclude connection string information
+        5. The ``describe()`` method returns capabilities without credentials
+
+        See CLAUDE.md "Error Sanitization Guidelines" for the full security policy
+        on what information is safe vs unsafe to include in errors and logs.
+
+    TODO(Beta): Consider implementing circuit breaker pattern for connection
+    resilience. See CLAUDE.md "Error Recovery Patterns" for implementation guidance.
+    """
 
     def __init__(self) -> None:
         """Initialize DbAdapter in uninitialized state."""
@@ -59,12 +83,16 @@ class DbAdapter:
         Raises:
             RuntimeHostError: If DSN is missing or pool creation fails.
         """
+        # Generate correlation_id for initialization tracing
+        init_correlation_id = uuid4()
+
         dsn = config.get("dsn")
         if not isinstance(dsn, str) or not dsn:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
                 target_name="db_adapter",
+                correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
                 "Missing or invalid 'dsn' in config - PostgreSQL connection string required",
@@ -83,6 +111,8 @@ class DbAdapter:
                 command_timeout=self._timeout,
             )
             self._dsn = dsn
+            # Note: DSN stored internally but never logged or exposed in errors.
+            # Use _sanitize_dsn() if DSN info ever needs to be logged.
             self._initialized = True
             logger.info(
                 "DbAdapter initialized",
@@ -96,8 +126,9 @@ class DbAdapter:
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
                 target_name="db_adapter",
+                correlation_id=init_correlation_id,
             )
-            raise RuntimeHostError(
+            raise InfraAuthenticationError(
                 "Database authentication failed - check credentials", context=ctx
             ) from e
         except asyncpg.InvalidCatalogNameError as e:
@@ -105,6 +136,7 @@ class DbAdapter:
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
                 target_name="db_adapter",
+                correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
                 "Database not found - check database name", context=ctx
@@ -114,6 +146,7 @@ class DbAdapter:
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
                 target_name="db_adapter",
+                correlation_id=init_correlation_id,
             )
             raise InfraConnectionError(
                 "Failed to connect to database - check host and port", context=ctx
@@ -123,6 +156,7 @@ class DbAdapter:
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="initialize",
                 target_name="db_adapter",
+                correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
                 f"Failed to initialize database pool: {type(e).__name__}", context=ctx
@@ -233,6 +267,36 @@ class DbAdapter:
             except ValueError:
                 pass
         return uuid4()
+
+    def _sanitize_dsn(self, dsn: str) -> str:
+        """Sanitize DSN by removing password for safe logging.
+
+        SECURITY: This method exists to support debugging scenarios where
+        connection information may be helpful, while ensuring credentials
+        are never exposed. The raw DSN should NEVER be logged directly.
+
+        Replaces the password portion of the DSN with asterisks. Handles
+        standard PostgreSQL DSN formats.
+
+        Args:
+            dsn: Raw PostgreSQL connection string containing credentials.
+
+        Returns:
+            Sanitized DSN with password replaced by '***'.
+
+        Example:
+            >>> adapter._sanitize_dsn("postgresql://user:secret@host:5432/db")
+            'postgresql://user:***@host:5432/db'
+
+        Note:
+            This method is intentionally NOT used in production error paths.
+            It exists as a utility for development/debugging only. See class
+            docstring "Security Policy - DSN Handling" for full policy.
+        """
+        import re
+
+        # Match password in DSN formats: user:password@ or :password@
+        return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
 
     def _extract_parameters(
         self, payload: dict[str, object], operation: str, correlation_id: UUID
@@ -364,6 +428,10 @@ class DbAdapter:
             raise RuntimeHostError(
                 f"Not null constraint violation: {e.message}", context=ctx
             ) from e
+        except asyncpg.CheckViolationError as e:
+            raise RuntimeHostError(
+                f"Check constraint violation: {e.message}", context=ctx
+            ) from e
         except asyncpg.PostgresError as e:
             raise RuntimeHostError(
                 f"Database error: {type(e).__name__}", context=ctx
@@ -406,7 +474,11 @@ class DbAdapter:
                 async with self._pool.acquire() as conn:
                     await conn.fetchval("SELECT 1")
                     healthy = True
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Health check failed",
+                    extra={"error_type": type(e).__name__, "error": str(e)},
+                )
                 healthy = False
 
         return {

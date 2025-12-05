@@ -18,6 +18,7 @@ import pytest
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
 from omnibase_infra.errors import (
+    InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
     RuntimeHostError,
@@ -127,13 +128,13 @@ class TestDbAdapterInitialization:
     async def test_initialize_invalid_password_raises_error(
         self, adapter: DbAdapter
     ) -> None:
-        """Test invalid password raises RuntimeHostError."""
+        """Test invalid password raises InfraAuthenticationError."""
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = asyncpg.InvalidPasswordError("Invalid password")
 
             config: dict[str, object] = {"dsn": "postgresql://localhost/db"}
 
-            with pytest.raises(RuntimeHostError) as exc_info:
+            with pytest.raises(InfraAuthenticationError) as exc_info:
                 await adapter.initialize(config)
 
             assert "authentication" in str(exc_info.value).lower()
@@ -576,6 +577,105 @@ class TestDbAdapterErrorHandling:
                 await adapter.execute(envelope)
 
             assert "unique" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_foreign_key_violation_raises_runtime_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test foreign key constraint violation raises RuntimeHostError."""
+        mock_conn = AsyncMock()
+        error = asyncpg.ForeignKeyViolationError("foreign key violation")
+        error.message = "insert or update on table violates foreign key constraint"
+        mock_conn.execute = AsyncMock(side_effect=error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "INSERT INTO orders (user_id) VALUES ($1)",
+                    "parameters": [99999],  # Non-existent user
+                },
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "foreign key" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_not_null_violation_raises_runtime_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test not null constraint violation raises RuntimeHostError."""
+        mock_conn = AsyncMock()
+        error = asyncpg.NotNullViolationError("not null violation")
+        error.message = "null value in column violates not-null constraint"
+        mock_conn.execute = AsyncMock(side_effect=error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "INSERT INTO users (name) VALUES ($1)",
+                    "parameters": [None],  # Null for required field
+                },
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "not null" in str(exc_info.value).lower()
+
+            await adapter.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_check_violation_raises_runtime_error(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test check constraint violation raises RuntimeHostError."""
+        mock_conn = AsyncMock()
+        error = asyncpg.CheckViolationError("check violation")
+        error.message = "new row violates check constraint"
+        mock_conn.execute = AsyncMock(side_effect=error)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            envelope: dict[str, object] = {
+                "operation": "db.execute",
+                "payload": {
+                    "sql": "INSERT INTO products (price) VALUES ($1)",
+                    "parameters": [-10],  # Negative price violates check constraint
+                },
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await adapter.execute(envelope)
+
+            assert "check" in str(exc_info.value).lower()
 
             await adapter.shutdown()
 
@@ -1068,6 +1168,127 @@ class TestDbAdapterCorrelationId:
             await adapter.shutdown()
 
 
+class TestDbAdapterDsnSecurity:
+    """Test suite for DSN security and sanitization.
+
+    Security Policy: DSN contains credentials and must NEVER be exposed in:
+    - Error messages
+    - Log output
+    - Health check responses
+    - describe() metadata
+
+    See DbAdapter class docstring "Security Policy - DSN Handling" for full policy.
+    """
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    def test_sanitize_dsn_removes_password(self, adapter: DbAdapter) -> None:
+        """Test _sanitize_dsn replaces password with asterisks."""
+        # Standard format with password
+        dsn = "postgresql://user:secret123@localhost:5432/mydb"
+        sanitized = adapter._sanitize_dsn(dsn)
+        assert "secret123" not in sanitized
+        assert "***" in sanitized
+        assert "user" in sanitized
+        assert "localhost" in sanitized
+
+    def test_sanitize_dsn_handles_special_characters(self, adapter: DbAdapter) -> None:
+        """Test _sanitize_dsn handles passwords with special characters."""
+        dsn = "postgresql://admin:p@ss!word#123@db.example.com:5432/prod"
+        sanitized = adapter._sanitize_dsn(dsn)
+        assert "p@ss!word#123" not in sanitized
+        assert "***" in sanitized
+
+    def test_sanitize_dsn_preserves_structure(self, adapter: DbAdapter) -> None:
+        """Test _sanitize_dsn preserves DSN structure for debugging."""
+        dsn = "postgresql://user:password@host:5432/database"
+        sanitized = adapter._sanitize_dsn(dsn)
+        # Should preserve user, host, port, database
+        assert sanitized == "postgresql://user:***@host:5432/database"
+
+    @pytest.mark.asyncio
+    async def test_connection_error_does_not_expose_dsn(
+        self, adapter: DbAdapter
+    ) -> None:
+        """Test that connection errors do NOT expose DSN credentials."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.side_effect = OSError("Connection refused")
+
+            secret_password = "my_super_secret_password_12345"
+            dsn = f"postgresql://user:{secret_password}@localhost/db"
+
+            with pytest.raises(InfraConnectionError) as exc_info:
+                await adapter.initialize({"dsn": dsn})
+
+            error_str = str(exc_info.value)
+            # Password must NOT appear in error message
+            assert secret_password not in error_str
+            # DSN must NOT appear in error message
+            assert dsn not in error_str
+            # Generic message should be present
+            assert "check host and port" in error_str.lower()
+
+    @pytest.mark.asyncio
+    async def test_auth_error_does_not_expose_dsn(self, adapter: DbAdapter) -> None:
+        """Test that authentication errors do NOT expose DSN credentials."""
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.side_effect = asyncpg.InvalidPasswordError("Invalid password")
+
+            secret_password = "my_super_secret_password_67890"
+            dsn = f"postgresql://user:{secret_password}@localhost/db"
+
+            with pytest.raises(InfraAuthenticationError) as exc_info:
+                await adapter.initialize({"dsn": dsn})
+
+            error_str = str(exc_info.value)
+            # Password must NOT appear in error message
+            assert secret_password not in error_str
+            # DSN must NOT appear in error message
+            assert dsn not in error_str
+            # Generic message should be present
+            assert "check credentials" in error_str.lower()
+
+    @pytest.mark.asyncio
+    async def test_health_check_does_not_expose_dsn(self, adapter: DbAdapter) -> None:
+        """Test that health check response does NOT include DSN."""
+        mock_pool = MagicMock(spec=asyncpg.Pool)
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=1)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            secret_password = "health_check_secret_password"
+            dsn = f"postgresql://user:{secret_password}@localhost/db"
+            await adapter.initialize({"dsn": dsn})
+
+            health = await adapter.health_check()
+
+            # DSN or password must NOT be in health response
+            health_str = str(health)
+            assert secret_password not in health_str
+            assert dsn not in health_str
+            assert "dsn" not in health_str.lower()
+
+            await adapter.shutdown()
+
+    def test_describe_does_not_expose_dsn(self, adapter: DbAdapter) -> None:
+        """Test that describe() does NOT include DSN."""
+        description = adapter.describe()
+
+        # DSN must NOT be in describe response
+        desc_str = str(description)
+        assert "dsn" not in desc_str.lower()
+        assert "password" not in desc_str.lower()
+        assert "postgresql://" not in desc_str
+
+
 class TestDbAdapterRowCountParsing:
     """Test suite for row count parsing."""
 
@@ -1109,5 +1330,6 @@ __all__: list[str] = [
     "TestDbAdapterDescribe",
     "TestDbAdapterLifecycle",
     "TestDbAdapterCorrelationId",
+    "TestDbAdapterDsnSecurity",
     "TestDbAdapterRowCountParsing",
 ]
