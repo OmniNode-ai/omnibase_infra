@@ -214,8 +214,15 @@ class HttpRestAdapter:
             elif isinstance(body, str):
                 response = await self._client.post(url, headers=headers, content=body)
             else:
+                try:
+                    serialized_body = json.dumps(body)
+                except TypeError as e:
+                    raise RuntimeHostError(
+                        f"Body is not JSON-serializable: {type(body).__name__}",
+                        context=ctx,
+                    ) from e
                 response = await self._client.post(
-                    url, headers=headers, content=json.dumps(body)
+                    url, headers=headers, content=serialized_body
                 )
 
             return self._build_response(response, correlation_id)
@@ -244,7 +251,7 @@ class HttpRestAdapter:
         content_type = response.headers.get("content-type", "")
         if "application/json" in content_type:
             try:
-                body: str | dict[str, object] = response.json()
+                body: object = response.json()
             except json.JSONDecodeError:
                 body = response.text
         else:
