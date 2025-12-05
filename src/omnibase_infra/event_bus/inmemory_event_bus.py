@@ -11,7 +11,7 @@ Features:
     - Topic-based message routing with FIFO ordering
     - Async publish/subscribe with callback handlers
     - Event history tracking for debugging and testing
-    - Thread-safe operations using asyncio.Lock
+    - Async-safe operations using asyncio.Lock
     - No external dependencies required
     - Support for environment/group-based routing
 
@@ -61,7 +61,7 @@ class InMemoryEventBus:
     """In-memory event bus for local development and testing.
 
     Implements ProtocolEventBus interface using deque-based event history
-    with direct subscriber callback invocation. Thread-safe operations are
+    with direct subscriber callback invocation. Async-safe operations are
     ensured via asyncio.Lock. This implementation provides a lightweight
     event bus for testing and local development without external dependencies.
 
@@ -69,7 +69,7 @@ class InMemoryEventBus:
         - Topic-based message routing with FIFO ordering
         - Multiple subscribers per topic with group-based filtering
         - Event history tracking with configurable retention
-        - Thread-safe operations using asyncio.Lock
+        - Async-safe operations using asyncio.Lock
         - Environment and group-based message routing
         - Debugging utilities for inspecting event flow
 
@@ -102,6 +102,7 @@ class InMemoryEventBus:
         environment: str = "local",
         group: str = "default",
         max_history: int = 1000,
+        circuit_breaker_threshold: int = 5,
     ) -> None:
         """Initialize the in-memory event bus.
 
@@ -109,6 +110,7 @@ class InMemoryEventBus:
             environment: Environment identifier for message routing
             group: Consumer group identifier for message routing
             max_history: Maximum number of events to retain in history
+            circuit_breaker_threshold: Number of consecutive failures before circuit opens
         """
         self._environment = environment
         self._group = group
@@ -137,9 +139,7 @@ class InMemoryEventBus:
         # Subscriber failure tracking for circuit breaker pattern
         # Maps (topic, group_id) to consecutive failure count
         self._subscriber_failures: dict[tuple[str, str], int] = {}
-        self._max_consecutive_failures: int = (
-            5  # Circuit opens after 5 consecutive failures
-        )
+        self._max_consecutive_failures: int = circuit_breaker_threshold
 
     @property
     def adapter(self) -> InMemoryEventBus:
@@ -237,7 +237,9 @@ class InMemoryEventBus:
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="publish",
                 target_name=f"event_bus.{self._environment}",
-                correlation_id=headers.correlation_id if headers else uuid4(),
+                correlation_id=(
+                    headers.correlation_id if headers is not None else uuid4()
+                ),
             )
             raise InfraUnavailableError(
                 "Event bus not started. Call start() first.",
@@ -330,6 +332,7 @@ class InMemoryEventBus:
         """
         # Serialize envelope to JSON bytes
         # Note: envelope is expected to have a model_dump() method (Pydantic)
+        envelope_dict: object
         if hasattr(envelope, "model_dump"):
             envelope_dict = envelope.model_dump(mode="json")  # type: ignore[union-attr]
         elif hasattr(envelope, "dict"):
@@ -337,8 +340,10 @@ class InMemoryEventBus:
         elif isinstance(envelope, dict):
             envelope_dict = envelope
         else:
-            # Fallback: attempt to serialize as-is (json.dumps will raise if not serializable)
-            envelope_dict = envelope  # type: ignore[assignment]
+            # Fallback for non-Pydantic, non-dict types (e.g., primitive JSON-serializable
+            # types like str, int, list). json.dumps() will raise TypeError if the object
+            # is not JSON-serializable, providing a clear error at serialization time.
+            envelope_dict = envelope
 
         value = json.dumps(envelope_dict).encode("utf-8")
 
