@@ -68,7 +68,10 @@
       "mcp__linear-server__get_team",
       "mcp__linear-server__create_issue",
       "mcp__linear-server__get_issue",
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(poetry run pytest:*)",
+      "Bash(poetry run python:*)",
+      "Bash(poetry add:*)"
     ],
     "deny": [],
     "ask": []

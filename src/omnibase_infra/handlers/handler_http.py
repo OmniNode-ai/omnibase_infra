@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""HTTP REST Handler - MVP implementation using httpx async client.
+"""HTTP REST Adapter - MVP implementation using httpx async client.
 
 Supports GET and POST operations with 30-second fixed timeout.
 PUT, DELETE, PATCH deferred to Beta. Retry logic and rate limiting deferred to Beta.
@@ -30,11 +30,11 @@ _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 
 
-class HandlerHttp:
-    """HTTP REST protocol handler using httpx async client (MVP: GET, POST only)."""
+class HttpRestAdapter:
+    """HTTP REST protocol adapter using httpx async client (MVP: GET, POST only)."""
 
     def __init__(self) -> None:
-        """Initialize HandlerHttp in uninitialized state."""
+        """Initialize HttpRestAdapter in uninitialized state."""
         self._client: Optional[httpx.AsyncClient] = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._initialized: bool = False
@@ -54,16 +54,16 @@ class HandlerHttp:
             )
             self._initialized = True
             logger.info(
-                "HandlerHttp initialized", extra={"timeout_seconds": self._timeout}
+                "HttpRestAdapter initialized", extra={"timeout_seconds": self._timeout}
             )
         except Exception as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize",
-                target_name="handler_http",
+                target_name="http_rest_adapter",
             )
             raise RuntimeHostError(
-                "Failed to initialize HTTP handler", context=ctx
+                "Failed to initialize HTTP adapter", context=ctx
             ) from e
 
     async def shutdown(self) -> None:
@@ -72,7 +72,7 @@ class HandlerHttp:
             await self._client.aclose()
             self._client = None
         self._initialized = False
-        logger.info("HandlerHttp shutdown complete")
+        logger.info("HttpRestAdapter shutdown complete")
 
     async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
         """Execute HTTP operation (http.get or http.post) from envelope."""
@@ -82,11 +82,11 @@ class HandlerHttp:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="handler_http",
+                target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HandlerHttp not initialized. Call initialize() first.", context=ctx
+                "HttpRestAdapter not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -94,7 +94,7 @@ class HandlerHttp:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="handler_http",
+                target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -105,7 +105,7 @@ class HandlerHttp:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="handler_http",
+                target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -118,7 +118,7 @@ class HandlerHttp:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="handler_http",
+                target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -130,7 +130,7 @@ class HandlerHttp:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="handler_http",
+                target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError("Missing or invalid 'url' in payload", context=ctx)
@@ -194,7 +194,7 @@ class HandlerHttp:
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HandlerHttp not initialized - call initialize() first", context=ctx
+                "HttpRestAdapter not initialized - call initialize() first", context=ctx
             )
 
         ctx = ModelInfraErrorContext(
@@ -261,18 +261,18 @@ class HandlerHttp:
         }
 
     async def health_check(self) -> dict[str, object]:
-        """Return handler health status."""
+        """Return adapter health status."""
         return {
             "healthy": self._initialized and self._client is not None,
             "initialized": self._initialized,
-            "handler_type": self.handler_type.value,
+            "adapter_type": self.handler_type.value,
             "timeout_seconds": self._timeout,
         }
 
     def describe(self) -> dict[str, object]:
-        """Return handler metadata and capabilities."""
+        """Return adapter metadata and capabilities."""
         return {
-            "handler_type": self.handler_type.value,
+            "adapter_type": self.handler_type.value,
             "supported_operations": sorted(_SUPPORTED_OPERATIONS),
             "timeout_seconds": self._timeout,
             "initialized": self._initialized,
@@ -280,4 +280,4 @@ class HandlerHttp:
         }
 
 
-__all__: list[str] = ["HandlerHttp"]
+__all__: list[str] = ["HttpRestAdapter"]
