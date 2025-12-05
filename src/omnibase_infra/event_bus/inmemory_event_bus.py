@@ -111,7 +111,14 @@ class InMemoryEventBus:
             group: Consumer group identifier for message routing
             max_history: Maximum number of events to retain in history
             circuit_breaker_threshold: Number of consecutive failures before circuit opens
+
+        Raises:
+            ValueError: If circuit_breaker_threshold is not a positive integer
         """
+        if circuit_breaker_threshold < 1:
+            raise ValueError(
+                f"circuit_breaker_threshold must be a positive integer, got {circuit_breaker_threshold}"
+            )
         self._environment = environment
         self._group = group
         self._max_history = max_history

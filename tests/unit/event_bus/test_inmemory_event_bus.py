@@ -1102,6 +1102,14 @@ class TestInMemoryEventBusCircuitBreaker:
         """Create event bus fixture."""
         return InMemoryEventBus(environment="test", group="test-group")
 
+    def test_circuit_breaker_threshold_validation(self) -> None:
+        """Test that invalid circuit_breaker_threshold raises ValueError."""
+        with pytest.raises(ValueError, match="positive integer"):
+            InMemoryEventBus(circuit_breaker_threshold=0)
+
+        with pytest.raises(ValueError, match="positive integer"):
+            InMemoryEventBus(circuit_breaker_threshold=-1)
+
     @pytest.mark.asyncio
     async def test_circuit_breaker_opens_after_failures(
         self, event_bus: InMemoryEventBus
