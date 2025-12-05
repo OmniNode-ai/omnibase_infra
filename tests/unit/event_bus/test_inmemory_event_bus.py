@@ -980,8 +980,8 @@ class TestInMemoryEventBusEdgeCases:
         await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_unicode_topic_name(self) -> None:
-        """Test topics with unicode characters."""
+    async def test_topic_name_with_special_characters(self) -> None:
+        """Test topics with special characters (hyphens)."""
         event_bus = InMemoryEventBus()
         await event_bus.start()
 
@@ -990,11 +990,11 @@ class TestInMemoryEventBusEdgeCases:
         async def handler(msg: ModelEventMessage) -> None:
             received.append(msg)
 
-        await event_bus.subscribe("topic-with-unicode-chars", "group1", handler)
-        await event_bus.publish("topic-with-unicode-chars", None, b"test")
+        await event_bus.subscribe("topic-with-special-chars", "group1", handler)
+        await event_bus.publish("topic-with-special-chars", None, b"test")
 
         assert len(received) == 1
-        assert received[0].topic == "topic-with-unicode-chars"
+        assert received[0].topic == "topic-with-special-chars"
 
         await event_bus.close()
 

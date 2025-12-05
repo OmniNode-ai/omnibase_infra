@@ -12,9 +12,9 @@ Exports:
     ModelEventMessage: Event message model wrapping topic, key, value, and headers
 
 Note:
-    ModelEventHeaders and ModelEventMessage are currently defined in the
-    inmemory_event_bus module. Once the models module is created, these will
-    be imported from omnibase_infra.event_bus.models instead.
+    ModelEventHeaders and ModelEventMessage are defined in the
+    omnibase_infra.event_bus.models subpackage and re-exported here for
+    convenient access.
 """
 
 from __future__ import annotations
