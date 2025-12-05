@@ -1308,9 +1308,13 @@ class TestHttpRestAdapterSizeLimits:
         config: dict[str, object] = {"max_request_size": 5}  # 5 bytes
         await handler.initialize(config)
 
-        # Bytes can be passed via payload, but for direct validation testing,
-        # we call the internal _validate_request_size method directly.
-        # This isolates the size validation logic from the full execute() flow.
+        # The execute() method primarily handles str and dict bodies. While bytes
+        # can technically be passed, direct testing of _validate_request_size()
+        # with bytes validates the size calculation logic in isolation without
+        # needing to mock the full HTTP request flow. This approach:
+        # 1. Isolates the size validation logic from httpx stream handling
+        # 2. Confirms bytes length calculation works correctly
+        # 3. Verifies the size limit error message format
         correlation_id = uuid4()
 
         # Test the internal validation method with bytes

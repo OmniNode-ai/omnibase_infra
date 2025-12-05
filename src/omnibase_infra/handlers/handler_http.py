@@ -248,6 +248,9 @@ class HttpRestAdapter:
         if isinstance(body, str):
             size = len(body.encode("utf-8"))
         elif isinstance(body, dict):
+            # NOTE: This double-serializes dict bodies (once here for validation,
+            # once in execute for the request). This tradeoff prioritizes security
+            # over performance - validating size before the request is made.
             try:
                 size = len(json.dumps(body).encode("utf-8"))
             except (TypeError, ValueError):
@@ -260,6 +263,14 @@ class HttpRestAdapter:
             return
 
         if size > self._max_request_size:
+            logger.warning(
+                "Request body size limit exceeded - potential DoS attempt",
+                extra={
+                    "actual_size": size,
+                    "limit": self._max_request_size,
+                    "correlation_id": str(correlation_id),
+                },
+            )
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_request_size",
@@ -308,15 +319,6 @@ class HttpRestAdapter:
             return
 
         if content_length > self._max_response_size:
-            logger.warning(
-                "Response Content-Length exceeds limit - rejecting before reading body",
-                extra={
-                    "content_length": content_length,
-                    "limit": self._max_response_size,
-                    "url": url,
-                    "correlation_id": str(correlation_id),
-                },
-            )
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_content_length",
@@ -498,6 +500,19 @@ class HttpRestAdapter:
         """
         content_type = response.headers.get("content-type", "")
         body: object
+
+        # TODO(Beta): When rate limiting is implemented, extract and log rate limit
+        # response headers: x-ratelimit-remaining, x-ratelimit-limit, x-ratelimit-reset
+
+        logger.debug(
+            "Response body received",
+            extra={
+                "body_size": len(body_bytes),
+                "content_type": content_type,
+                "status_code": response.status_code,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
         # Decode bytes to string first
         try:
