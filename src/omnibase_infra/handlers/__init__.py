@@ -10,12 +10,12 @@ Handlers are responsible for:
 - Error handling and logging
 
 Available Handlers:
-- HttpHandler: HTTP/REST protocol handler (MVP: GET, POST only)
+- HandlerHttp: HTTP/REST protocol handler (MVP: GET, POST only)
 """
 
-from omnibase_infra.handlers.http_handler import HttpHandler
+from omnibase_infra.handlers.handler_http import HandlerHttp
 
 __all__: list[str] = [
-    "HttpHandler",
-    # "DBHandler",  # Database operation handler (future)
+    "HandlerHttp",
+    # "HandlerDb",  # Database operation handler (future)
 ]

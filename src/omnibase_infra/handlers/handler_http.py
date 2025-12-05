@@ -30,11 +30,11 @@ _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 
 
-class HttpHandler:
+class HandlerHttp:
     """HTTP REST protocol handler using httpx async client (MVP: GET, POST only)."""
 
     def __init__(self) -> None:
-        """Initialize HttpHandler in uninitialized state."""
+        """Initialize HandlerHttp in uninitialized state."""
         self._client: Optional[httpx.AsyncClient] = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._initialized: bool = False
@@ -54,13 +54,13 @@ class HttpHandler:
             )
             self._initialized = True
             logger.info(
-                "HttpHandler initialized", extra={"timeout_seconds": self._timeout}
+                "HandlerHttp initialized", extra={"timeout_seconds": self._timeout}
             )
         except Exception as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize",
-                target_name="http_handler",
+                target_name="handler_http",
             )
             raise RuntimeHostError(
                 "Failed to initialize HTTP handler", context=ctx
@@ -72,7 +72,7 @@ class HttpHandler:
             await self._client.aclose()
             self._client = None
         self._initialized = False
-        logger.info("HttpHandler shutdown complete")
+        logger.info("HandlerHttp shutdown complete")
 
     async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
         """Execute HTTP operation (http.get or http.post) from envelope."""
@@ -82,11 +82,11 @@ class HttpHandler:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="http_handler",
+                target_name="handler_http",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "HttpHandler not initialized. Call initialize() first.", context=ctx
+                "HandlerHttp not initialized. Call initialize() first.", context=ctx
             )
 
         operation = envelope.get("operation")
@@ -94,7 +94,7 @@ class HttpHandler:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="execute",
-                target_name="http_handler",
+                target_name="handler_http",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -105,7 +105,7 @@ class HttpHandler:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_handler",
+                target_name="handler_http",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -118,7 +118,7 @@ class HttpHandler:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_handler",
+                target_name="handler_http",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -130,7 +130,7 @@ class HttpHandler:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation=operation,
-                target_name="http_handler",
+                target_name="handler_http",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError("Missing or invalid 'url' in payload", context=ctx)
@@ -186,7 +186,16 @@ class HttpHandler:
         correlation_id: UUID,
     ) -> dict[str, object]:
         """Execute HTTP request and handle errors."""
-        assert self._client is not None
+        if self._client is None:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation=f"http.{method.lower()}",
+                target_name=url,
+                correlation_id=correlation_id,
+            )
+            raise RuntimeHostError(
+                "HandlerHttp not initialized - call initialize() first", context=ctx
+            )
 
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.HTTP,
@@ -271,4 +280,4 @@ class HttpHandler:
         }
 
 
-__all__: list[str] = ["HttpHandler"]
+__all__: list[str] = ["HandlerHttp"]
