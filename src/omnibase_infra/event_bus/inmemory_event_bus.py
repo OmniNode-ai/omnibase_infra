@@ -242,6 +242,7 @@ class InMemoryEventBus:
             raise InfraUnavailableError(
                 "Event bus not started. Call start() first.",
                 context=context,
+                topic=topic,
             )
 
         # Create headers if not provided
@@ -336,7 +337,7 @@ class InMemoryEventBus:
         elif isinstance(envelope, dict):
             envelope_dict = envelope
         else:
-            # Fallback for other types - attempt to use as-is
+            # Fallback: attempt to serialize as-is (json.dumps will raise if not serializable)
             envelope_dict = envelope  # type: ignore[assignment]
 
         value = json.dumps(envelope_dict).encode("utf-8")
