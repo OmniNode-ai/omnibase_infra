@@ -11,11 +11,13 @@ Adapters are responsible for:
 
 Available Adapters:
 - HttpRestAdapter: HTTP/REST protocol adapter (MVP: GET, POST only)
+- DbAdapter: PostgreSQL database adapter (MVP: query, execute only)
 """
 
+from omnibase_infra.handlers.handler_db import DbAdapter
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
 
 __all__: list[str] = [
+    "DbAdapter",
     "HttpRestAdapter",
-    # "DbAdapter",  # Database operation adapter (future)
 ]
