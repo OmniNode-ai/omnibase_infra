@@ -4,7 +4,7 @@ ONEX Infrastructure CLI Commands.
 Provides CLI interface for infrastructure management and validation.
 """
 
-from typing import Any
+from typing import Optional
 
 import click
 from rich.console import Console
@@ -30,7 +30,7 @@ def validate() -> None:
     default=None,
     help="Maximum allowed violations (default: INFRA_MAX_VIOLATIONS)",
 )
-def validate_architecture_cmd(directory: str, max_violations: int | None) -> None:
+def validate_architecture_cmd(directory: str, max_violations: Optional[int]) -> None:
     """Validate architecture (one-model-per-file)."""
     from omnibase_infra.validation.infra_validators import (
         INFRA_MAX_VIOLATIONS,
@@ -66,7 +66,7 @@ def validate_contracts_cmd(directory: str) -> None:
     default=None,
     help="Enable strict mode (default: INFRA_PATTERNS_STRICT)",
 )
-def validate_patterns_cmd(directory: str, strict: bool | None) -> None:
+def validate_patterns_cmd(directory: str, strict: Optional[bool]) -> None:
     """Validate code patterns and naming conventions."""
     from omnibase_infra.validation.infra_validators import (
         INFRA_PATTERNS_STRICT,
@@ -94,7 +94,7 @@ def validate_patterns_cmd(directory: str, strict: bool | None) -> None:
     help="Enable strict mode (default: INFRA_UNIONS_STRICT)",
 )
 def validate_unions_cmd(
-    directory: str, max_unions: int | None, strict: bool | None
+    directory: str, max_unions: Optional[int], strict: Optional[bool]
 ) -> None:
     """Validate Union type usage."""
     from omnibase_infra.validation.infra_validators import (
@@ -187,7 +187,7 @@ def _is_result_valid(result: object) -> bool:
     return False
 
 
-def _get_error_count(result: Any) -> int:
+def _get_error_count(result: object) -> int:
     """Get the error count from a validation result."""
     if hasattr(result, "has_circular_imports"):
         if hasattr(result, "cycles"):
@@ -198,7 +198,7 @@ def _get_error_count(result: Any) -> int:
     return 0
 
 
-def _print_result(name: str, result: Any) -> None:
+def _print_result(name: str, result: object) -> None:
     """Print validation result with rich formatting."""
     if hasattr(result, "is_valid"):
         if result.is_valid:
