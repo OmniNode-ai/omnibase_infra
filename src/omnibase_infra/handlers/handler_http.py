@@ -20,7 +20,9 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 
@@ -32,6 +34,33 @@ _DEFAULT_MAX_RESPONSE_SIZE: int = 50 * 1024 * 1024  # 50 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
+
+# Size category thresholds for sanitized logging
+_SIZE_THRESHOLD_KB: int = 1024  # 1 KB
+_SIZE_THRESHOLD_MB: int = 1024 * 1024  # 1 MB
+_SIZE_THRESHOLD_10MB: int = 10 * 1024 * 1024  # 10 MB
+
+
+def _categorize_size(size: int) -> str:
+    """Categorize byte size into security-safe categories.
+
+    This prevents exact payload sizes from being exposed in error messages
+    and logs, which could help attackers probe size limits.
+
+    Args:
+        size: Size in bytes
+
+    Returns:
+        Size category: "small", "medium", "large", or "very_large"
+    """
+    if size < _SIZE_THRESHOLD_KB:
+        return "small"
+    elif size < _SIZE_THRESHOLD_MB:
+        return "medium"
+    elif size < _SIZE_THRESHOLD_10MB:
+        return "large"
+    else:
+        return "very_large"
 
 
 class HttpRestAdapter:
@@ -190,14 +219,16 @@ class HttpRestAdapter:
 
         if operation == "http.get":
             return await self._execute_request(
-                "GET", url, headers, None, correlation_id
+                "GET", url, headers, None, correlation_id, None
             )
         else:  # http.post
             body = payload.get("body")
-            # Validate request body size before sending
-            self._validate_request_size(body, correlation_id)
+            # Validate request body size and get pre-serialized bytes for dict bodies.
+            # This avoids double serialization - dict bodies are serialized once here
+            # and the cached bytes are passed to _execute_request().
+            pre_serialized = self._validate_request_size(body, correlation_id)
             return await self._execute_request(
-                "POST", url, headers, body, correlation_id
+                "POST", url, headers, body, correlation_id, pre_serialized
             )
 
     def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
@@ -231,42 +262,54 @@ class HttpRestAdapter:
             "Invalid 'headers' in payload - must be a dict", context=ctx
         )
 
-    def _validate_request_size(self, body: object, correlation_id: UUID) -> None:
-        """Validate request body size against configured limit.
+    def _validate_request_size(
+        self, body: object, correlation_id: UUID
+    ) -> Optional[bytes]:
+        """Validate request body size and cache serialized bytes for dict bodies.
+
+        For dict bodies, this method serializes the body once and returns the
+        serialized bytes. This avoids double serialization - the returned bytes
+        can be passed directly to _execute_request() instead of re-serializing.
 
         Args:
             body: Request body (str, dict, bytes, or None)
             correlation_id: Correlation ID for error context
 
+        Returns:
+            For dict bodies: The pre-serialized JSON bytes (cached for reuse)
+            For other body types: None (no caching needed)
+
         Raises:
-            RuntimeHostError: If body size exceeds max_request_size limit.
+            ProtocolConfigurationError: If body size exceeds max_request_size limit.
         """
         if body is None:
-            return
+            return None
 
         size: int = 0
+        serialized_bytes: Optional[bytes] = None
+
         if isinstance(body, str):
             size = len(body.encode("utf-8"))
         elif isinstance(body, dict):
-            # NOTE: This double-serializes dict bodies (once here for validation,
-            # once in execute for the request). This tradeoff prioritizes security
-            # over performance - validating size before the request is made.
+            # Serialize once and cache the result to avoid double serialization.
+            # The cached bytes are returned and can be passed to _execute_request().
             try:
-                size = len(json.dumps(body).encode("utf-8"))
+                serialized_bytes = json.dumps(body).encode("utf-8")
+                size = len(serialized_bytes)
             except (TypeError, ValueError):
                 # If we can't serialize, skip validation and let execute() handle it
-                return
+                return None
         elif isinstance(body, bytes):
             size = len(body)
         else:
             # Unknown type - skip validation, let execute() handle serialization
-            return
+            return None
 
         if size > self._max_request_size:
             logger.warning(
                 "Request body size limit exceeded - potential DoS attempt",
                 extra={
-                    "request_size": size,
+                    "size_category": _categorize_size(size),
                     "limit": self._max_request_size,
                     "correlation_id": str(correlation_id),
                 },
@@ -277,8 +320,8 @@ class HttpRestAdapter:
                 target_name="http_adapter",
                 correlation_id=correlation_id,
             )
-            raise RuntimeHostError(
-                f"Request body size ({size} bytes) exceeds limit ({self._max_request_size} bytes)",
+            raise ProtocolConfigurationError(
+                f"Request body size ({_categorize_size(size)}) exceeds configured limit",
                 context=ctx,
             )
 
@@ -290,6 +333,9 @@ class HttpRestAdapter:
                 "correlation_id": str(correlation_id),
             },
         )
+
+        # Return cached serialized bytes for dict bodies, None for other types
+        return serialized_bytes
 
     def _validate_content_length_header(
         self, response: httpx.Response, url: str, correlation_id: UUID
@@ -306,7 +352,7 @@ class HttpRestAdapter:
             correlation_id: Correlation ID for error context
 
         Raises:
-            RuntimeHostError: If Content-Length exceeds max_response_size limit.
+            InfraUnavailableError: If Content-Length exceeds max_response_size limit.
         """
         content_length_header = response.headers.get("content-length")
         if content_length_header is None:
@@ -331,7 +377,7 @@ class HttpRestAdapter:
             logger.warning(
                 "Response Content-Length exceeds limit - potential DoS attempt",
                 extra={
-                    "content_length": content_length,
+                    "size_category": _categorize_size(content_length),
                     "limit": self._max_response_size,
                     "url": url,
                     "correlation_id": str(correlation_id),
@@ -343,9 +389,8 @@ class HttpRestAdapter:
                 target_name=url,
                 correlation_id=correlation_id,
             )
-            raise RuntimeHostError(
-                f"Response Content-Length ({content_length} bytes) exceeds limit "
-                f"({self._max_response_size} bytes)",
+            raise InfraUnavailableError(
+                f"Response Content-Length ({_categorize_size(content_length)}) exceeds configured limit",
                 context=ctx,
             )
 
@@ -377,7 +422,7 @@ class HttpRestAdapter:
             The complete response body as bytes
 
         Raises:
-            RuntimeHostError: If body size exceeds max_response_size during streaming.
+            InfraUnavailableError: If body size exceeds max_response_size during streaming.
         """
         chunks: list[bytes] = []
         total_size: int = 0
@@ -388,7 +433,7 @@ class HttpRestAdapter:
                 logger.warning(
                     "Response body exceeded size limit during streaming read",
                     extra={
-                        "bytes_read_so_far": total_size,
+                        "size_category": _categorize_size(total_size),
                         "limit": self._max_response_size,
                         "url": url,
                         "correlation_id": str(correlation_id),
@@ -400,9 +445,8 @@ class HttpRestAdapter:
                     target_name=url,
                     correlation_id=correlation_id,
                 )
-                raise RuntimeHostError(
-                    f"Response body size exceeded limit ({self._max_response_size} bytes) "
-                    f"during streaming read (read {total_size} bytes so far)",
+                raise InfraUnavailableError(
+                    f"Response body size ({_categorize_size(total_size)}) exceeds configured limit during streaming read",
                     context=ctx,
                 )
             chunks.append(chunk)
@@ -416,11 +460,22 @@ class HttpRestAdapter:
         headers: dict[str, str],
         body: object,
         correlation_id: UUID,
+        pre_serialized: Optional[bytes] = None,
     ) -> dict[str, object]:
         """Execute HTTP request with pre-read response size validation.
 
         Uses httpx streaming to validate Content-Length header BEFORE reading
         the response body into memory, preventing memory exhaustion attacks.
+
+        Args:
+            method: HTTP method (GET, POST)
+            url: Target URL
+            headers: Request headers
+            body: Request body (used only if pre_serialized is None)
+            correlation_id: Correlation ID for tracing
+            pre_serialized: Pre-serialized JSON bytes for dict bodies (from
+                _validate_request_size). When provided, this is used directly
+                instead of re-serializing the body, avoiding double serialization.
         """
         if self._client is None:
             ctx = ModelInfraErrorContext(
@@ -442,10 +497,20 @@ class HttpRestAdapter:
 
         # Prepare request content for POST
         request_content: bytes | str | None = None
-        request_json: dict[str, object] | None = None
+        request_json: Optional[dict[str, object]] = None
+        request_headers = dict(headers)  # Copy to avoid mutating caller's headers
 
         if method == "POST" and body is not None:
-            if isinstance(body, dict):
+            if pre_serialized is not None:
+                # Use pre-serialized bytes from _validate_request_size to avoid
+                # double serialization. Set Content-Type header since we're using
+                # content= instead of json= parameter.
+                request_content = pre_serialized
+                if "content-type" not in {k.lower() for k in request_headers}:
+                    request_headers["Content-Type"] = "application/json"
+            elif isinstance(body, dict):
+                # Fallback for dict bodies without pre-serialized content
+                # (shouldn't happen in normal flow, but handles edge cases)
                 request_json = body
             elif isinstance(body, str):
                 request_content = body
@@ -464,7 +529,7 @@ class HttpRestAdapter:
             async with self._client.stream(
                 method,
                 url,
-                headers=headers,
+                headers=request_headers,
                 content=request_content,
                 json=request_json,
             ) as response:

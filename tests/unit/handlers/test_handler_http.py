@@ -22,6 +22,8 @@ from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
+    InfraUnavailableError,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
@@ -304,7 +306,12 @@ class TestHttpRestAdapterPostOperations:
 
     @pytest.mark.asyncio
     async def test_post_with_json_body(self, handler: HttpRestAdapter) -> None:
-        """Test POST request with JSON body."""
+        """Test POST request with JSON body.
+
+        Note: Dict bodies are pre-serialized during size validation to avoid
+        double serialization. The serialized bytes are passed via content=
+        instead of json=, with Content-Type header set explicitly.
+        """
         await handler.initialize({})
 
         import json as json_module
@@ -320,22 +327,26 @@ class TestHttpRestAdapterPostOperations:
         with patch.object(handler._client, "stream") as mock_stream:
             mock_stream.return_value = mock_stream_context(mock_response)
 
+            request_body = {"name": "John", "email": "john@example.com"}
             envelope: dict[str, object] = {
                 "operation": "http.post",
                 "payload": {
                     "url": "https://api.example.com/users",
-                    "body": {"name": "John", "email": "john@example.com"},
+                    "body": request_body,
                 },
             }
 
             result = await handler.execute(envelope)
 
+            # Dict bodies are pre-serialized to avoid double serialization.
+            # Expect content= with serialized bytes and Content-Type header.
+            expected_content = json_module.dumps(request_body).encode("utf-8")
             mock_stream.assert_called_once_with(
                 "POST",
                 "https://api.example.com/users",
-                headers={},
-                content=None,
-                json={"name": "John", "email": "john@example.com"},
+                headers={"Content-Type": "application/json"},
+                content=expected_content,
+                json=None,
             )
 
             assert result["status"] == "success"
@@ -417,7 +428,11 @@ class TestHttpRestAdapterPostOperations:
 
     @pytest.mark.asyncio
     async def test_post_with_custom_headers(self, handler: HttpRestAdapter) -> None:
-        """Test POST request with custom headers."""
+        """Test POST request with custom headers.
+
+        Note: Dict bodies are pre-serialized during size validation. When
+        Content-Type is already set in custom headers, it's preserved.
+        """
         await handler.initialize({})
 
         import json as json_module
@@ -433,6 +448,7 @@ class TestHttpRestAdapterPostOperations:
         with patch.object(handler._client, "stream") as mock_stream:
             mock_stream.return_value = mock_stream_context(mock_response)
 
+            request_body = {"value": 42}
             envelope: dict[str, object] = {
                 "operation": "http.post",
                 "payload": {
@@ -441,12 +457,15 @@ class TestHttpRestAdapterPostOperations:
                         "Content-Type": "application/json",
                         "X-API-Key": "secret-key-123",
                     },
-                    "body": {"value": 42},
+                    "body": request_body,
                 },
             }
 
             result = await handler.execute(envelope)
 
+            # Dict bodies are pre-serialized. Content-Type is preserved from
+            # custom headers since it's already set (case-insensitive check).
+            expected_content = json_module.dumps(request_body).encode("utf-8")
             mock_stream.assert_called_once_with(
                 "POST",
                 "https://api.example.com/data",
@@ -454,8 +473,8 @@ class TestHttpRestAdapterPostOperations:
                     "Content-Type": "application/json",
                     "X-API-Key": "secret-key-123",
                 },
-                content=None,
-                json={"value": 42},
+                content=expected_content,
+                json=None,
             )
 
             assert result["payload"]["body"] == {"success": True}
@@ -1268,11 +1287,11 @@ class TestHttpRestAdapterSizeLimits:
             },
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
-        assert "exceeds limit" in str(exc_info.value)
-        assert "10 bytes" in str(exc_info.value)
+        # Error message uses sanitized size categories instead of exact byte values
+        assert "exceeds configured limit" in str(exc_info.value)
 
         await handler.shutdown()
 
@@ -1293,10 +1312,11 @@ class TestHttpRestAdapterSizeLimits:
             },
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
-        assert "exceeds limit" in str(exc_info.value)
+        # Error message uses sanitized size categories instead of exact byte values
+        assert "exceeds configured limit" in str(exc_info.value)
 
         await handler.shutdown()
 
@@ -1313,11 +1333,11 @@ class TestHttpRestAdapterSizeLimits:
         correlation_id = uuid4()
 
         # Test the internal validation method with bytes
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             handler._validate_request_size(b"123456", correlation_id)
 
-        assert "exceeds limit" in str(exc_info.value)
-        assert "5 bytes" in str(exc_info.value)
+        # Error message uses sanitized size categories instead of exact byte values
+        assert "exceeds configured limit" in str(exc_info.value)
 
         await handler.shutdown()
 
@@ -1325,7 +1345,7 @@ class TestHttpRestAdapterSizeLimits:
     async def test_request_size_exceeds_limit_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test that request exceeding size limit raises RuntimeHostError."""
+        """Test that request exceeding size limit raises ProtocolConfigurationError."""
         config: dict[str, object] = {"max_request_size": 100}
         await handler.initialize(config)
 
@@ -1338,12 +1358,12 @@ class TestHttpRestAdapterSizeLimits:
             },
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         error_msg = str(exc_info.value)
-        assert "200 bytes" in error_msg
-        assert "100 bytes" in error_msg
+        # Error message uses sanitized size categories instead of exact byte values
+        assert "exceeds configured limit" in error_msg
 
         await handler.shutdown()
 
@@ -1351,7 +1371,7 @@ class TestHttpRestAdapterSizeLimits:
     async def test_response_size_exceeds_limit_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test that response exceeding size limit raises RuntimeHostError."""
+        """Test that response exceeding size limit raises InfraUnavailableError."""
         config: dict[str, object] = {"max_response_size": 50}  # 50 bytes
         await handler.initialize(config)
 
@@ -1371,12 +1391,12 @@ class TestHttpRestAdapterSizeLimits:
                 "payload": {"url": "https://example.com"},
             }
 
-            with pytest.raises(RuntimeHostError) as exc_info:
+            with pytest.raises(InfraUnavailableError) as exc_info:
                 await handler.execute(envelope)
 
             error_msg = str(exc_info.value)
-            assert "exceeded limit" in error_msg or "exceeds limit" in error_msg
-            assert "50 bytes" in error_msg
+            # Error message uses sanitized size categories instead of exact byte values
+            assert "exceeds configured limit" in error_msg
 
         await handler.shutdown()
 
@@ -1542,14 +1562,13 @@ class TestHttpRestAdapterSizeLimits:
                 "payload": {"url": "https://example.com/large-file"},
             }
 
-            with pytest.raises(RuntimeHostError) as exc_info:
+            with pytest.raises(InfraUnavailableError) as exc_info:
                 await handler.execute(envelope)
 
             error_msg = str(exc_info.value)
-            # Should mention Content-Length in the error
+            # Should mention Content-Length in the error with sanitized size category
             assert "Content-Length" in error_msg
-            assert "1000000" in error_msg
-            assert "100 bytes" in error_msg
+            assert "exceeds configured limit" in error_msg
 
         await handler.shutdown()
 
@@ -1614,13 +1633,13 @@ class TestHttpRestAdapterSizeLimits:
                 "payload": {"url": "https://example.com/chunked-data"},
             }
 
-            with pytest.raises(RuntimeHostError) as exc_info:
+            with pytest.raises(InfraUnavailableError) as exc_info:
                 await handler.execute(envelope)
 
             error_msg = str(exc_info.value)
-            # Should mention streaming read in the error
-            assert "streaming read" in error_msg or "exceeded limit" in error_msg
-            assert "50 bytes" in error_msg
+            # Should mention streaming read in the error with sanitized size category
+            assert "streaming read" in error_msg
+            assert "exceeds configured limit" in error_msg
 
         await handler.shutdown()
 
