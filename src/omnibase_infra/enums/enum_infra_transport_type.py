@@ -23,6 +23,7 @@ class EnumInfraTransportType(str, Enum):
         VAULT: HashiCorp Vault secret transport
         REDIS: Redis cache/message transport
         GRPC: gRPC protocol transport
+        RUNTIME: Runtime host process internal transport
     """
 
     HTTP = "http"
@@ -32,6 +33,7 @@ class EnumInfraTransportType(str, Enum):
     VAULT = "vault"
     REDIS = "redis"
     GRPC = "grpc"
+    RUNTIME = "runtime"
 
 
 __all__ = ["EnumInfraTransportType"]

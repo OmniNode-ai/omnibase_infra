@@ -40,6 +40,8 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.wiring import wire_default_handlers
 
@@ -271,18 +273,34 @@ class RuntimeHostProcess:
             envelope = json.loads(message.value.decode("utf-8"))
             await self._handle_envelope(envelope)
         except json.JSONDecodeError as e:
+            # Create infrastructure error context for tracing
+            correlation_id = uuid4()
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="decode_envelope",
+                target_name=message.topic,
+                correlation_id=correlation_id,
+            )
+            # Chain the error with infrastructure context
+            infra_error = RuntimeHostError(
+                f"Failed to decode JSON envelope from message: {e}",
+                context=context,
+            )
+            infra_error.__cause__ = e  # Proper error chaining
+
             logger.exception(
                 "Failed to decode envelope from message",
                 extra={
                     "error": str(e),
                     "topic": message.topic,
                     "offset": message.offset,
+                    "correlation_id": str(correlation_id),
                 },
             )
             # Publish error response for malformed messages
             error_response = self._create_error_response(
                 error=f"Invalid JSON in message: {e}",
-                correlation_id=None,
+                correlation_id=correlation_id,
             )
             await self._publish_envelope_safe(error_response, self._output_topic)
 
@@ -370,6 +388,20 @@ class RuntimeHostProcess:
             )
 
         except Exception as e:
+            # Create infrastructure error context for handler execution failure
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="handler_execution",
+                target_name=str(handler_type),
+                correlation_id=correlation_id,
+            )
+            # Chain the error with infrastructure context
+            infra_error = RuntimeHostError(
+                f"Handler execution failed for {handler_type}: {e}",
+                context=context,
+            )
+            infra_error.__cause__ = e  # Proper error chaining
+
             # Handler execution failed - produce failure envelope
             error_response = self._create_error_response(
                 error=str(e),
@@ -384,6 +416,7 @@ class RuntimeHostProcess:
                     "correlation_id": str(correlation_id),
                     "operation": operation,
                     "error": str(e),
+                    "infra_error": str(infra_error),
                 },
             )
 
@@ -476,12 +509,31 @@ class RuntimeHostProcess:
             event_bus_health = await self._event_bus.health_check()
             event_bus_healthy = bool(event_bus_health.get("healthy", False))
         except Exception as e:
+            # Create infrastructure error context for health check failure
+            correlation_id = uuid4()
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="health_check",
+                target_name="event_bus",
+                correlation_id=correlation_id,
+            )
+            # Chain the error with infrastructure context
+            infra_error = RuntimeHostError(
+                f"Event bus health check failed: {e}",
+                context=context,
+            )
+            infra_error.__cause__ = e  # Proper error chaining
+
             logger.warning(
                 "Event bus health check failed",
-                extra={"error": str(e)},
+                extra={
+                    "error": str(e),
+                    "correlation_id": str(correlation_id),
+                    "infra_error": str(infra_error),
+                },
                 exc_info=True,
             )
-            event_bus_health = {"error": str(e)}
+            event_bus_health = {"error": str(e), "correlation_id": str(correlation_id)}
             event_bus_healthy = False
 
         # Overall health is True only if running and event bus is healthy

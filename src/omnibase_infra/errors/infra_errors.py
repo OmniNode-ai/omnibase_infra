@@ -233,6 +233,7 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.CONSUL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.VAULT: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.REDIS: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        EnumInfraTransportType.RUNTIME: EnumCoreErrorCode.OPERATION_FAILED,
         None: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
     }
 
