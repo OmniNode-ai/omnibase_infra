@@ -476,6 +476,11 @@ class RuntimeHostProcess:
             event_bus_health = await self._event_bus.health_check()
             event_bus_healthy = bool(event_bus_health.get("healthy", False))
         except Exception as e:
+            logger.warning(
+                "Event bus health check failed",
+                extra={"error": str(e)},
+                exc_info=True,
+            )
             event_bus_health = {"error": str(e)}
             event_bus_healthy = False
 
