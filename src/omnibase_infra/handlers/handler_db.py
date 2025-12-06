@@ -463,7 +463,7 @@ class DbAdapter:
                 "rows": rows,
                 "row_count": row_count,
             },
-            "correlation_id": str(correlation_id),
+            "correlation_id": correlation_id,
         }
 
     async def health_check(self) -> dict[str, object]:

@@ -183,7 +183,7 @@ class TestHttpRestAdapterGetOperations:
             payload = cast(ResponseDict, result["payload"])
             assert payload["status_code"] == 200
             assert payload["body"] == {"data": "test_value"}
-            assert result["correlation_id"] == str(correlation_id)
+            assert result["correlation_id"] == correlation_id
 
             mock_stream.assert_called_once_with(
                 "GET",
@@ -1060,8 +1060,8 @@ class TestHttpRestAdapterCorrelationId:
 
             result = await handler.execute(envelope)
 
-            # Verify deterministic UUID is properly returned
-            assert result["correlation_id"] == str(correlation_id)
+            # Verify deterministic UUID is properly returned (as UUID, not string)
+            assert result["correlation_id"] == correlation_id
             # With seed=100, first UUID has int value 101
             assert correlation_id.int == 101
 
@@ -1092,7 +1092,8 @@ class TestHttpRestAdapterCorrelationId:
 
             result = await handler.execute(envelope)
 
-            assert result["correlation_id"] == correlation_id
+            # String correlation_id is converted to UUID by handler
+            assert result["correlation_id"] == UUID(correlation_id)
 
         await handler.shutdown()
 
@@ -1119,10 +1120,9 @@ class TestHttpRestAdapterCorrelationId:
 
             result = await handler.execute(envelope)
 
-            # Should have a generated UUID
+            # Should have a generated UUID (returned as UUID object)
             assert "correlation_id" in result
-            # Verify it's a valid UUID string
-            UUID(result["correlation_id"])
+            assert isinstance(result["correlation_id"], UUID)
 
         await handler.shutdown()
 
@@ -1153,9 +1153,8 @@ class TestHttpRestAdapterCorrelationId:
             # Should have a generated UUID (not the invalid string)
             assert "correlation_id" in result
             generated_id = result["correlation_id"]
-            assert generated_id != "not-a-valid-uuid"
-            # Verify it's a valid UUID string
-            UUID(generated_id)
+            assert isinstance(generated_id, UUID)
+            assert str(generated_id) != "not-a-valid-uuid"
 
         await handler.shutdown()
 
@@ -2017,8 +2016,8 @@ class TestHttpRestAdapterDeterministicIntegration:
 
             result = await handler.execute(envelope)
 
-            # Verify deterministic correlation ID flows through
-            assert result["correlation_id"] == str(correlation_id)
+            # Verify deterministic correlation ID flows through (as UUID)
+            assert result["correlation_id"] == correlation_id
             assert result["status"] == "success"
 
         await handler.shutdown()
@@ -2108,7 +2107,7 @@ class TestHttpRestAdapterDeterministicIntegration:
             }
 
             result_1 = await handler.execute(envelope_1)
-            assert result_1["correlation_id"] == str(correlation_id_1)
+            assert result_1["correlation_id"] == correlation_id_1
 
         # Simulate 30 second delay between requests
         clock.advance(30)
@@ -2124,7 +2123,7 @@ class TestHttpRestAdapterDeterministicIntegration:
             }
 
             result_2 = await handler.execute(envelope_2)
-            assert result_2["correlation_id"] == str(correlation_id_2)
+            assert result_2["correlation_id"] == correlation_id_2
 
         # Record end time and verify deterministic timing
         request_end = clock.now()

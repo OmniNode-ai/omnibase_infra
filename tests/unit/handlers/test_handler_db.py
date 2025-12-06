@@ -209,7 +209,7 @@ class TestDbAdapterQueryOperations:
             assert len(rows) == 2
             assert rows[0] == {"id": 1, "name": "Alice"}
             assert rows[1] == {"id": 2, "name": "Bob"}
-            assert result["correlation_id"] == str(correlation_id)
+            assert result["correlation_id"] == correlation_id
 
             mock_conn.fetch.assert_called_once_with("SELECT id, name FROM users")
 
@@ -1129,7 +1129,7 @@ class TestDbAdapterCorrelationId:
 
             result = await adapter.execute(envelope)
 
-            assert result["correlation_id"] == str(correlation_id)
+            assert result["correlation_id"] == correlation_id
 
             await adapter.shutdown()
 
@@ -1158,7 +1158,8 @@ class TestDbAdapterCorrelationId:
 
             result = await adapter.execute(envelope)
 
-            assert result["correlation_id"] == correlation_id
+            # String correlation_id is converted to UUID by handler
+            assert result["correlation_id"] == UUID(correlation_id)
 
             await adapter.shutdown()
 
@@ -1185,10 +1186,9 @@ class TestDbAdapterCorrelationId:
 
             result = await adapter.execute(envelope)
 
-            # Should have a generated UUID
+            # Should have a generated UUID (returned as UUID, not string)
             assert "correlation_id" in result
-            # Verify it's a valid UUID string
-            UUID(str(result["correlation_id"]))
+            assert isinstance(result["correlation_id"], UUID)
 
             await adapter.shutdown()
 
