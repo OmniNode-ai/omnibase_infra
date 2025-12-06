@@ -1687,13 +1687,12 @@ class TestHttpRestAdapterSizeLimits:
     async def test_content_length_with_whitespace_handled(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test Content-Length with leading/trailing whitespace is handled gracefully.
+        """Test Content-Length with leading/trailing whitespace parses correctly.
 
-        HTTP headers may have whitespace around values. The handler should either:
-        1. Parse the value correctly (stripping whitespace), or
-        2. Fall through to streaming validation if parsing fails
-
-        Either behavior is acceptable - the key is that it doesn't crash.
+        HTTP headers may have whitespace around values. Python's int() function
+        automatically strips leading/trailing whitespace, so " 50 " is parsed as 50.
+        This test verifies that whitespace in Content-Length headers doesn't cause
+        any issues and the size validation works correctly.
         """
         config: dict[str, object] = {"max_response_size": 100}  # 100 bytes
         await handler.initialize(config)

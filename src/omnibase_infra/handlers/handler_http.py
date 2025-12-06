@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+from typing import Optional, Union
 from uuid import UUID, uuid4
 
 import httpx
@@ -92,6 +92,15 @@ class HttpRestAdapter:
             config: Configuration dict containing:
                 - max_request_size: Optional max request body size in bytes (default: 10 MB)
                 - max_response_size: Optional max response body size in bytes (default: 50 MB)
+
+        Raises:
+            ProtocolConfigurationError: If client initialization fails.
+
+        Note:
+            Request/response size validation occurs during execute(). Size limit
+            violations raise InfraUnavailableError with sanitized size categories
+            (small/medium/large/very_large) for security - exact sizes are not
+            exposed in error messages.
         """
         try:
             self._timeout = _DEFAULT_TIMEOUT_SECONDS
@@ -382,6 +391,19 @@ class HttpRestAdapter:
             )
             return
 
+        if content_length < 0:
+            # Negative Content-Length is invalid per HTTP spec - log warning and proceed
+            # with body-based validation (streaming protection still applies)
+            logger.warning(
+                "Negative Content-Length header value ignored",
+                extra={
+                    "content_length_header": content_length_header,
+                    "url": url,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return
+
         if content_length > self._max_response_size:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
@@ -501,7 +523,7 @@ class HttpRestAdapter:
         )
 
         # Prepare request content for POST
-        request_content: bytes | str | None = None
+        request_content: Optional[Union[bytes, str]] = None
         request_json: Optional[dict[str, object]] = None
         request_headers = dict(headers)  # Copy to avoid mutating caller's headers
 
