@@ -266,7 +266,7 @@ class HttpRestAdapter:
             logger.warning(
                 "Request body size limit exceeded - potential DoS attempt",
                 extra={
-                    "actual_size": size,
+                    "request_size": size,
                     "limit": self._max_request_size,
                     "correlation_id": str(correlation_id),
                 },
@@ -281,6 +281,15 @@ class HttpRestAdapter:
                 f"Request body size ({size} bytes) exceeds limit ({self._max_request_size} bytes)",
                 context=ctx,
             )
+
+        logger.debug(
+            "Request size validated",
+            extra={
+                "request_size": size,
+                "limit": self._max_request_size,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
     def _validate_content_length_header(
         self, response: httpx.Response, url: str, correlation_id: UUID
@@ -319,6 +328,15 @@ class HttpRestAdapter:
             return
 
         if content_length > self._max_response_size:
+            logger.warning(
+                "Response Content-Length exceeds limit - potential DoS attempt",
+                extra={
+                    "content_length": content_length,
+                    "limit": self._max_response_size,
+                    "url": url,
+                    "correlation_id": str(correlation_id),
+                },
+            )
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_content_length",
