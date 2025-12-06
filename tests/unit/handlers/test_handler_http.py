@@ -1328,8 +1328,9 @@ class TestHttpRestAdapterSizeLimits:
         config: dict[str, object] = {"max_request_size": 5}  # 5 bytes
         await handler.initialize(config)
 
-        # Direct _validate_request_size() testing validates bytes size calculation
-        # efficiently without requiring full HTTP request mocking.
+        # Direct _validate_request_size() testing with bytes body validates size
+        # calculation efficiently without requiring full HTTP mocking. This tests
+        # the internal validation logic for bytes inputs specifically.
         correlation_id = uuid4()
 
         # Test the internal validation method with bytes

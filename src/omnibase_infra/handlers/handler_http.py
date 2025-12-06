@@ -413,6 +413,11 @@ class HttpRestAdapter:
         this method reads the body in chunks and tracks the total size, stopping
         and raising an error if the limit is exceeded.
 
+        Security Note: This method provides DoS protection for chunked transfer
+        encoding responses where Content-Length is not available for pre-read
+        validation. By enforcing limits during streaming, we prevent memory
+        exhaustion attacks from maliciously large chunked responses.
+
         Args:
             response: The httpx Response object
             url: Target URL for error context
@@ -586,6 +591,7 @@ class HttpRestAdapter:
 
         # TODO(Beta): When rate limiting is implemented, extract and log rate limit
         # response headers: x-ratelimit-remaining, x-ratelimit-limit, x-ratelimit-reset
+        # These headers will be added to the debug log metadata below for observability.
 
         logger.debug(
             "Response body received",
@@ -594,6 +600,10 @@ class HttpRestAdapter:
                 "content_type": content_type,
                 "status_code": response.status_code,
                 "correlation_id": str(correlation_id),
+                # TODO(Beta): Add rate limit metadata here when rate limiting is implemented:
+                # "ratelimit_remaining": response.headers.get("x-ratelimit-remaining"),
+                # "ratelimit_limit": response.headers.get("x-ratelimit-limit"),
+                # "ratelimit_reset": response.headers.get("x-ratelimit-reset"),
             },
         )
 
