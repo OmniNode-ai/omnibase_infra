@@ -141,6 +141,7 @@ class HttpRestAdapter:
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize",
                 target_name="http_rest_adapter",
+                correlation_id=uuid4(),
             )
             raise RuntimeHostError(
                 "Failed to initialize HTTP adapter", context=ctx
@@ -280,7 +281,7 @@ class HttpRestAdapter:
             For other body types: None (no caching needed)
 
         Raises:
-            ProtocolConfigurationError: If body size exceeds max_request_size limit.
+            InfraUnavailableError: If body size exceeds max_request_size limit.
         """
         if body is None:
             return None
@@ -320,7 +321,7 @@ class HttpRestAdapter:
                 target_name="http_adapter",
                 correlation_id=correlation_id,
             )
-            raise ProtocolConfigurationError(
+            raise InfraUnavailableError(
                 f"Request body size ({_categorize_size(size)}) exceeds configured limit",
                 context=ctx,
             )

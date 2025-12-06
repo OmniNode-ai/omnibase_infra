@@ -23,7 +23,6 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
-    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
@@ -1287,7 +1286,7 @@ class TestHttpRestAdapterSizeLimits:
             },
         }
 
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
+        with pytest.raises(InfraUnavailableError) as exc_info:
             await handler.execute(envelope)
 
         # Error message uses sanitized size categories instead of exact byte values
@@ -1312,7 +1311,7 @@ class TestHttpRestAdapterSizeLimits:
             },
         }
 
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
+        with pytest.raises(InfraUnavailableError) as exc_info:
             await handler.execute(envelope)
 
         # Error message uses sanitized size categories instead of exact byte values
@@ -1334,7 +1333,7 @@ class TestHttpRestAdapterSizeLimits:
         correlation_id = uuid4()
 
         # Test the internal validation method with bytes
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
+        with pytest.raises(InfraUnavailableError) as exc_info:
             handler._validate_request_size(b"123456", correlation_id)
 
         # Error message uses sanitized size categories instead of exact byte values
@@ -1346,7 +1345,7 @@ class TestHttpRestAdapterSizeLimits:
     async def test_request_size_exceeds_limit_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test that request exceeding size limit raises ProtocolConfigurationError."""
+        """Test that request exceeding size limit raises InfraUnavailableError."""
         config: dict[str, object] = {"max_request_size": 100}
         await handler.initialize(config)
 
@@ -1359,7 +1358,7 @@ class TestHttpRestAdapterSizeLimits:
             },
         }
 
-        with pytest.raises(ProtocolConfigurationError) as exc_info:
+        with pytest.raises(InfraUnavailableError) as exc_info:
             await handler.execute(envelope)
 
         error_msg = str(exc_info.value)
