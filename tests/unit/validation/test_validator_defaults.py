@@ -36,7 +36,7 @@ class TestInfraValidatorConstants:
 
     def test_infra_max_unions_constant(self) -> None:
         """Verify INFRA_MAX_UNIONS constant has expected value."""
-        assert INFRA_MAX_UNIONS == 20, "INFRA_MAX_UNIONS should be 20"
+        assert INFRA_MAX_UNIONS == 30, "INFRA_MAX_UNIONS should be 30"
 
     def test_infra_max_violations_constant(self) -> None:
         """Verify INFRA_MAX_VIOLATIONS constant has expected value."""
@@ -183,7 +183,7 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (20)
+            max_unions=INFRA_MAX_UNIONS,  # Default max (30)
             strict=INFRA_UNIONS_STRICT,  # Non-strict (False)
         )
 
