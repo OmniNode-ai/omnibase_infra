@@ -27,6 +27,11 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
+from tests.helpers import (
+    DeterministicClock,
+    DeterministicIdGenerator,
+    filter_handler_warnings,
+)
 
 # Type alias for response dict with nested structure
 ResponseDict = dict[str, object]
@@ -165,10 +170,11 @@ class TestHttpRestAdapterGetOperations:
         with patch.object(handler._client, "stream") as mock_stream:
             mock_stream.return_value = mock_stream_context(mock_response)
 
+            correlation_id = uuid4()
             envelope: dict[str, object] = {
                 "operation": "http.get",
                 "payload": {"url": "https://api.example.com/resource"},
-                "correlation_id": str(uuid4()),
+                "correlation_id": correlation_id,
             }
 
             result = cast(ResponseDict, await handler.execute(envelope))
@@ -177,7 +183,7 @@ class TestHttpRestAdapterGetOperations:
             payload = cast(ResponseDict, result["payload"])
             assert payload["status_code"] == 200
             assert payload["body"] == {"data": "test_value"}
-            assert "correlation_id" in result
+            assert result["correlation_id"] == correlation_id
 
             mock_stream.assert_called_once_with(
                 "GET",
@@ -989,6 +995,32 @@ class TestHttpRestAdapterLifecycle:
 
         await handler.shutdown()
 
+    @pytest.mark.asyncio
+    async def test_initialize_called_once_per_lifecycle(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test that initialize creates client exactly once.
+
+        Acceptance criteria for OMN-252: Asserts handler initialized exactly once.
+        Each call to initialize() should create a fresh client instance.
+        """
+        # First initialize
+        await handler.initialize({})
+        first_client = handler._client
+        assert first_client is not None
+
+        # Second initialize should create new client (reinitialize behavior)
+        await handler.initialize({})
+        second_client = handler._client
+        assert second_client is not None
+
+        # Verify we got a new client (not reusing old one)
+        # This confirms initialize() creates resources fresh each time
+        assert (
+            first_client is not second_client
+        ), "initialize() should create new client instance"
+        await handler.shutdown()
+
 
 class TestHttpRestAdapterCorrelationId:
     """Test suite for correlation ID handling."""
@@ -1002,10 +1034,15 @@ class TestHttpRestAdapterCorrelationId:
     async def test_correlation_id_from_envelope_uuid(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test correlation ID extracted from envelope as UUID."""
+        """Test correlation ID extracted from envelope as UUID.
+
+        Uses DeterministicIdGenerator for predictable, reproducible test behavior.
+        """
         await handler.initialize({})
 
-        correlation_id = uuid4()
+        # Use deterministic ID generator for predictable testing
+        id_gen = DeterministicIdGenerator(seed=100)
+        correlation_id = id_gen.next_uuid()
         mock_response = create_mock_streaming_response(
             status_code=200,
             headers={"content-type": "application/json"},
@@ -1023,7 +1060,10 @@ class TestHttpRestAdapterCorrelationId:
 
             result = await handler.execute(envelope)
 
-            assert result["correlation_id"] == str(correlation_id)
+            # Verify deterministic UUID is properly returned (as UUID, not string)
+            assert result["correlation_id"] == correlation_id
+            # With seed=100, first UUID has int value 101
+            assert correlation_id.int == 101
 
         await handler.shutdown()
 
@@ -1052,7 +1092,8 @@ class TestHttpRestAdapterCorrelationId:
 
             result = await handler.execute(envelope)
 
-            assert result["correlation_id"] == correlation_id
+            # String correlation_id is converted to UUID by handler
+            assert result["correlation_id"] == UUID(correlation_id)
 
         await handler.shutdown()
 
@@ -1079,10 +1120,9 @@ class TestHttpRestAdapterCorrelationId:
 
             result = await handler.execute(envelope)
 
-            # Should have a generated UUID
+            # Should have a generated UUID (returned as UUID object)
             assert "correlation_id" in result
-            # Verify it's a valid UUID string
-            UUID(result["correlation_id"])
+            assert isinstance(result["correlation_id"], UUID)
 
         await handler.shutdown()
 
@@ -1113,9 +1153,8 @@ class TestHttpRestAdapterCorrelationId:
             # Should have a generated UUID (not the invalid string)
             assert "correlation_id" in result
             generated_id = result["correlation_id"]
-            assert generated_id != "not-a-valid-uuid"
-            # Verify it's a valid UUID string
-            UUID(generated_id)
+            assert isinstance(generated_id, UUID)
+            assert str(generated_id) != "not-a-valid-uuid"
 
         await handler.shutdown()
 
@@ -1768,6 +1807,335 @@ class TestHttpRestAdapterSizeLimits:
         await handler.shutdown()
 
 
+class TestHttpRestAdapterLogWarnings:
+    """Test suite for log warning assertions (OMN-252 acceptance criteria).
+
+    These tests verify that:
+    1. Normal operations produce no unexpected warnings
+    2. Expected warnings are logged only in specific error conditions
+    """
+
+    HANDLER_MODULE = "omnibase_infra.handlers.handler_http"
+
+    @pytest.fixture
+    def handler(self) -> HttpRestAdapter:
+        """Create HttpRestAdapter fixture."""
+        return HttpRestAdapter()
+
+    @pytest.mark.asyncio
+    async def test_no_unexpected_warnings_during_normal_operation(
+        self, handler: HttpRestAdapter, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that normal operations produce no unexpected warnings.
+
+        This test verifies the OMN-252 acceptance criteria: "Asserts no unexpected
+        warnings in logs" during normal handler lifecycle and execution.
+        """
+        # Create mock response for GET operation
+        import json as json_module
+        import logging
+
+        body_data = {"data": "test_value"}
+        body_bytes = json_module.dumps(body_data).encode("utf-8")
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=body_bytes,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            # Initialize with valid config
+            await handler.initialize({})
+
+            # Perform normal GET operation
+            with patch.object(handler._client, "stream") as mock_stream:
+                mock_stream.return_value = mock_stream_context(mock_response)
+
+                correlation_id = uuid4()
+                envelope: dict[str, object] = {
+                    "operation": "http.get",
+                    "payload": {"url": "https://api.example.com/resource"},
+                    "correlation_id": correlation_id,
+                }
+
+                result = await handler.execute(envelope)
+                assert result["status"] == "success"
+
+            # Shutdown
+            await handler.shutdown()
+
+        # Filter for warnings from our handler module
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
+        assert (
+            len(handler_warnings) == 0
+        ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+
+    @pytest.mark.asyncio
+    async def test_expected_warning_on_invalid_max_request_size(
+        self, handler: HttpRestAdapter, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that invalid max_request_size config produces expected warning.
+
+        When an invalid max_request_size is provided (e.g., negative number or
+        wrong type), the handler should log a warning and use the default value.
+        """
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            # Initialize with invalid max_request_size (negative value)
+            config: dict[str, object] = {"max_request_size": -100}
+            await handler.initialize(config)
+
+            # Verify default was used
+            assert handler._max_request_size == 10 * 1024 * 1024
+
+            await handler.shutdown()
+
+        # Should have exactly one warning about invalid config
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
+        assert len(handler_warnings) == 1
+        assert "Invalid max_request_size" in handler_warnings[0].message
+
+    @pytest.mark.asyncio
+    async def test_expected_warning_on_invalid_max_response_size(
+        self, handler: HttpRestAdapter, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that invalid max_response_size config produces expected warning.
+
+        When an invalid max_response_size is provided (e.g., string instead of int),
+        the handler should log a warning and use the default value.
+        """
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            # Initialize with invalid max_response_size (wrong type)
+            config: dict[str, object] = {"max_response_size": "not a number"}
+            await handler.initialize(config)
+
+            # Verify default was used
+            assert handler._max_response_size == 50 * 1024 * 1024
+
+            await handler.shutdown()
+
+        # Should have exactly one warning about invalid config
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
+        assert len(handler_warnings) == 1
+        assert "Invalid max_response_size" in handler_warnings[0].message
+
+    @pytest.mark.asyncio
+    async def test_expected_warning_on_invalid_content_length_header(
+        self, handler: HttpRestAdapter, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that invalid Content-Length header produces expected warning.
+
+        When a response has an invalid Content-Length header (e.g., non-numeric),
+        the handler should log a warning and fall back to streaming validation.
+        """
+        import logging
+
+        config: dict[str, object] = {"max_response_size": 1000}
+        await handler.initialize(config)
+
+        # Create response with invalid Content-Length header
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={
+                "content-type": "text/plain",
+                "content-length": "invalid-number",
+            },
+            body_bytes=b"x" * 50,
+            content_type="text/plain",
+        )
+
+        with caplog.at_level(logging.WARNING):
+            with patch.object(handler._client, "stream") as mock_stream:
+                mock_stream.return_value = mock_stream_context(mock_response)
+
+                envelope: dict[str, object] = {
+                    "operation": "http.get",
+                    "payload": {"url": "https://example.com/resource"},
+                }
+
+                result = await handler.execute(envelope)
+                assert result["status"] == "success"
+
+        await handler.shutdown()
+
+        # Should have a warning about invalid Content-Length header
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
+        assert len(handler_warnings) == 1
+        assert "Invalid Content-Length" in handler_warnings[0].message
+
+
+class TestHttpRestAdapterDeterministicIntegration:
+    """Integration tests demonstrating deterministic test utilities (OMN-252).
+
+    These tests validate that the deterministic utilities from
+    tests.helpers.deterministic work correctly in handler tests.
+    """
+
+    @pytest.fixture
+    def handler(self) -> HttpRestAdapter:
+        """Create HttpRestAdapter fixture."""
+        return HttpRestAdapter()
+
+    @pytest.mark.asyncio
+    async def test_deterministic_correlation_id_in_full_flow(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test full HTTP flow with deterministic correlation ID.
+
+        Demonstrates DeterministicIdGenerator providing predictable UUIDs
+        for reproducible test assertions.
+        """
+        await handler.initialize({})
+
+        # Create deterministic ID generator with known seed
+        id_gen = DeterministicIdGenerator(seed=1000)
+
+        # Generate predictable correlation ID
+        correlation_id = id_gen.next_uuid()
+
+        # Verify it's deterministic (seed=1000, next_uuid returns UUID(int=1001))
+        assert correlation_id.int == 1001
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b'{"result": "ok"}',
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://api.example.com/test"},
+                "correlation_id": correlation_id,
+            }
+
+            result = await handler.execute(envelope)
+
+            # Verify deterministic correlation ID flows through (as UUID)
+            assert result["correlation_id"] == correlation_id
+            assert result["status"] == "success"
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_deterministic_clock_for_timing_assertions(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test DeterministicClock provides controllable time for timing tests.
+
+        Demonstrates DeterministicClock enabling predictable time-based
+        assertions in handler tests without relying on real wall-clock time.
+        """
+        await handler.initialize({})
+
+        # Create deterministic clock at a known start time
+        clock = DeterministicClock()
+        start_time = clock.now()
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b'{"timestamp": "2024-01-01T00:00:00Z"}',
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://api.example.com/time"},
+            }
+
+            result = await handler.execute(envelope)
+            assert result["status"] == "success"
+
+        # Advance clock to simulate elapsed time
+        clock.advance(60)  # 60 seconds
+        end_time = clock.now()
+
+        # Verify deterministic time advancement
+        elapsed = (end_time - start_time).total_seconds()
+        assert elapsed == 60.0, "Clock should advance exactly 60 seconds"
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_deterministic_utilities_combined_in_handler_flow(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test both deterministic utilities working together in full flow.
+
+        Demonstrates DeterministicIdGenerator and DeterministicClock used
+        together for comprehensive reproducible test assertions.
+        """
+        await handler.initialize({})
+
+        # Initialize both deterministic utilities
+        id_gen = DeterministicIdGenerator(seed=500)
+        clock = DeterministicClock()
+
+        # Generate multiple predictable correlation IDs
+        correlation_id_1 = id_gen.next_uuid()
+        correlation_id_2 = id_gen.next_uuid()
+
+        # Verify sequential determinism
+        assert correlation_id_1.int == 501
+        assert correlation_id_2.int == 502
+
+        # Record start time
+        request_start = clock.now()
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b'{"data": "test"}',
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            # First request with first correlation ID
+            envelope_1: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://api.example.com/resource/1"},
+                "correlation_id": correlation_id_1,
+            }
+
+            result_1 = await handler.execute(envelope_1)
+            assert result_1["correlation_id"] == correlation_id_1
+
+        # Simulate 30 second delay between requests
+        clock.advance(30)
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            # Second request with second correlation ID
+            envelope_2: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://api.example.com/resource/2"},
+                "correlation_id": correlation_id_2,
+            }
+
+            result_2 = await handler.execute(envelope_2)
+            assert result_2["correlation_id"] == correlation_id_2
+
+        # Record end time and verify deterministic timing
+        request_end = clock.now()
+        total_elapsed = (request_end - request_start).total_seconds()
+        assert total_elapsed == 30.0, "Total elapsed time should be exactly 30 seconds"
+
+        # Verify ID generator state is predictable
+        assert id_gen.current_counter == 502
+
+        await handler.shutdown()
+
+
 __all__: list[str] = [
     "TestHttpRestAdapterInitialization",
     "TestHttpRestAdapterGetOperations",
@@ -1779,4 +2147,6 @@ __all__: list[str] = [
     "TestHttpRestAdapterCorrelationId",
     "TestHttpRestAdapterResponseParsing",
     "TestHttpRestAdapterSizeLimits",
+    "TestHttpRestAdapterLogWarnings",
+    "TestHttpRestAdapterDeterministicIntegration",
 ]
