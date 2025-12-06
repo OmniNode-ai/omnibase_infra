@@ -24,6 +24,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_db import DbAdapter
+from tests.helpers import filter_handler_warnings
 
 # Type alias for response dict with nested structure
 ResponseDict = dict[str, object]
@@ -192,10 +193,11 @@ class TestDbAdapterQueryOperations:
 
             await adapter.initialize({"dsn": "postgresql://localhost/db"})
 
+            correlation_id = uuid4()
             envelope: dict[str, object] = {
                 "operation": "db.query",
                 "payload": {"sql": "SELECT id, name FROM users"},
-                "correlation_id": str(uuid4()),
+                "correlation_id": correlation_id,
             }
 
             result = cast(ResponseDict, await adapter.execute(envelope))
@@ -207,7 +209,7 @@ class TestDbAdapterQueryOperations:
             assert len(rows) == 2
             assert rows[0] == {"id": 1, "name": "Alice"}
             assert rows[1] == {"id": 2, "name": "Bob"}
-            assert "correlation_id" in result
+            assert result["correlation_id"] == str(correlation_id)
 
             mock_conn.fetch.assert_called_once_with("SELECT id, name FROM users")
 
@@ -1352,6 +1354,9 @@ class TestDbAdapterLogWarnings:
     2. Expected warnings are logged only in specific error conditions
     """
 
+    # Module name used for filtering log warnings
+    HANDLER_MODULE = "omnibase_infra.handlers.handler_db"
+
     @pytest.fixture
     def adapter(self) -> DbAdapter:
         """Create DbAdapter fixture."""
@@ -1391,10 +1396,11 @@ class TestDbAdapterLogWarnings:
                 await adapter.initialize({"dsn": "postgresql://localhost/db"})
 
                 # Perform normal query operation
+                correlation_id = uuid4()
                 envelope: dict[str, object] = {
                     "operation": "db.query",
                     "payload": {"sql": "SELECT id, name FROM users"},
-                    "correlation_id": str(uuid4()),
+                    "correlation_id": correlation_id,
                 }
 
                 result = await adapter.execute(envelope)
@@ -1403,13 +1409,8 @@ class TestDbAdapterLogWarnings:
                 # Shutdown
                 await adapter.shutdown()
 
-        # Filter for warnings from our handler module
-        handler_warnings = [
-            r
-            for r in caplog.records
-            if r.levelno >= logging.WARNING
-            and "omnibase_infra.handlers.handler_db" in r.name
-        ]
+        # Filter for warnings from our handler module using helper
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
         assert (
             len(handler_warnings) == 0
         ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"
@@ -1448,12 +1449,7 @@ class TestDbAdapterLogWarnings:
             await adapter.shutdown()
 
         # Should have exactly one warning about health check failure
-        handler_warnings = [
-            r
-            for r in caplog.records
-            if r.levelno >= logging.WARNING
-            and "omnibase_infra.handlers.handler_db" in r.name
-        ]
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
         assert len(handler_warnings) == 1
         assert "Health check failed" in handler_warnings[0].message
 
@@ -1490,12 +1486,7 @@ class TestDbAdapterLogWarnings:
             await adapter.shutdown()
 
         # Should have no warnings
-        handler_warnings = [
-            r
-            for r in caplog.records
-            if r.levelno >= logging.WARNING
-            and "omnibase_infra.handlers.handler_db" in r.name
-        ]
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
         assert (
             len(handler_warnings) == 0
         ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"

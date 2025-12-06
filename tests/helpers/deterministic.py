@@ -21,10 +21,10 @@ Example usage:
     >>> t1 = clock.now()
     >>> clock.advance(60)
     >>> t2 = clock.now()
-    >>> assert (t2 - t1).seconds == 60
+    >>> assert (t2 - t1).total_seconds() == 60
 """
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 
@@ -158,8 +158,8 @@ class DeterministicClock:
             >>> t1 = clock.now()
             >>> clock.advance(120)
             >>> t2 = clock.now()
-            >>> (t2 - t1).seconds
-            120
+            >>> (t2 - t1).total_seconds()
+            120.0
         """
         self._now += timedelta(seconds=seconds)
 

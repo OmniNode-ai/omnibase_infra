@@ -27,6 +27,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
+from tests.helpers import DeterministicClock, DeterministicIdGenerator
 
 # Type alias for response dict with nested structure
 ResponseDict = dict[str, object]
@@ -165,10 +166,11 @@ class TestHttpRestAdapterGetOperations:
         with patch.object(handler._client, "stream") as mock_stream:
             mock_stream.return_value = mock_stream_context(mock_response)
 
+            correlation_id = uuid4()
             envelope: dict[str, object] = {
                 "operation": "http.get",
                 "payload": {"url": "https://api.example.com/resource"},
-                "correlation_id": str(uuid4()),
+                "correlation_id": correlation_id,
             }
 
             result = cast(ResponseDict, await handler.execute(envelope))
@@ -177,7 +179,7 @@ class TestHttpRestAdapterGetOperations:
             payload = cast(ResponseDict, result["payload"])
             assert payload["status_code"] == 200
             assert payload["body"] == {"data": "test_value"}
-            assert "correlation_id" in result
+            assert result["correlation_id"] == str(correlation_id)
 
             mock_stream.assert_called_once_with(
                 "GET",
@@ -1010,6 +1012,9 @@ class TestHttpRestAdapterLifecycle:
 
         # Verify we got a new client (not reusing old one)
         # This confirms initialize() creates resources fresh each time
+        assert (
+            first_client is not second_client
+        ), "initialize() should create new client instance"
         await handler.shutdown()
 
 
@@ -1025,10 +1030,15 @@ class TestHttpRestAdapterCorrelationId:
     async def test_correlation_id_from_envelope_uuid(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test correlation ID extracted from envelope as UUID."""
+        """Test correlation ID extracted from envelope as UUID.
+
+        Uses DeterministicIdGenerator for predictable, reproducible test behavior.
+        """
         await handler.initialize({})
 
-        correlation_id = uuid4()
+        # Use deterministic ID generator for predictable testing
+        id_gen = DeterministicIdGenerator(seed=100)
+        correlation_id = id_gen.next_uuid()
         mock_response = create_mock_streaming_response(
             status_code=200,
             headers={"content-type": "application/json"},
@@ -1046,7 +1056,10 @@ class TestHttpRestAdapterCorrelationId:
 
             result = await handler.execute(envelope)
 
+            # Verify deterministic UUID is properly returned
             assert result["correlation_id"] == str(correlation_id)
+            # With seed=100, first UUID has int value 101
+            assert correlation_id.int == 101
 
         await handler.shutdown()
 
@@ -1833,10 +1846,11 @@ class TestHttpRestAdapterLogWarnings:
             with patch.object(handler._client, "stream") as mock_stream:
                 mock_stream.return_value = mock_stream_context(mock_response)
 
+                correlation_id = uuid4()
                 envelope: dict[str, object] = {
                     "operation": "http.get",
                     "payload": {"url": "https://api.example.com/resource"},
-                    "correlation_id": str(uuid4()),
+                    "correlation_id": correlation_id,
                 }
 
                 result = await handler.execute(envelope)
@@ -1968,6 +1982,175 @@ class TestHttpRestAdapterLogWarnings:
         assert "Invalid Content-Length" in handler_warnings[0].message
 
 
+class TestHttpRestAdapterDeterministicIntegration:
+    """Integration tests demonstrating deterministic test utilities (OMN-252).
+
+    These tests validate that the deterministic utilities from
+    tests.helpers.deterministic work correctly in handler tests.
+    """
+
+    @pytest.fixture
+    def handler(self) -> HttpRestAdapter:
+        """Create HttpRestAdapter fixture."""
+        return HttpRestAdapter()
+
+    @pytest.mark.asyncio
+    async def test_deterministic_correlation_id_in_full_flow(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test full HTTP flow with deterministic correlation ID.
+
+        Demonstrates DeterministicIdGenerator providing predictable UUIDs
+        for reproducible test assertions.
+        """
+        await handler.initialize({})
+
+        # Create deterministic ID generator with known seed
+        id_gen = DeterministicIdGenerator(seed=1000)
+
+        # Generate predictable correlation ID
+        correlation_id = id_gen.next_uuid()
+
+        # Verify it's deterministic (seed=1000, next_uuid returns UUID(int=1001))
+        assert correlation_id.int == 1001
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b'{"result": "ok"}',
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://api.example.com/test"},
+                "correlation_id": correlation_id,
+            }
+
+            result = await handler.execute(envelope)
+
+            # Verify deterministic correlation ID flows through
+            assert result["correlation_id"] == str(correlation_id)
+            assert result["status"] == "success"
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_deterministic_clock_for_timing_assertions(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test DeterministicClock provides controllable time for timing tests.
+
+        Demonstrates DeterministicClock enabling predictable time-based
+        assertions in handler tests without relying on real wall-clock time.
+        """
+        await handler.initialize({})
+
+        # Create deterministic clock at a known start time
+        clock = DeterministicClock()
+        start_time = clock.now()
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b'{"timestamp": "2024-01-01T00:00:00Z"}',
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            envelope: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://api.example.com/time"},
+            }
+
+            result = await handler.execute(envelope)
+            assert result["status"] == "success"
+
+        # Advance clock to simulate elapsed time
+        clock.advance(60)  # 60 seconds
+        end_time = clock.now()
+
+        # Verify deterministic time advancement
+        elapsed = (end_time - start_time).total_seconds()
+        assert elapsed == 60.0, "Clock should advance exactly 60 seconds"
+
+        await handler.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_deterministic_utilities_combined_in_handler_flow(
+        self, handler: HttpRestAdapter
+    ) -> None:
+        """Test both deterministic utilities working together in full flow.
+
+        Demonstrates DeterministicIdGenerator and DeterministicClock used
+        together for comprehensive reproducible test assertions.
+        """
+        await handler.initialize({})
+
+        # Initialize both deterministic utilities
+        id_gen = DeterministicIdGenerator(seed=500)
+        clock = DeterministicClock()
+
+        # Generate multiple predictable correlation IDs
+        correlation_id_1 = id_gen.next_uuid()
+        correlation_id_2 = id_gen.next_uuid()
+
+        # Verify sequential determinism
+        assert correlation_id_1.int == 501
+        assert correlation_id_2.int == 502
+
+        # Record start time
+        request_start = clock.now()
+
+        mock_response = create_mock_streaming_response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body_bytes=b'{"data": "test"}',
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            # First request with first correlation ID
+            envelope_1: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://api.example.com/resource/1"},
+                "correlation_id": correlation_id_1,
+            }
+
+            result_1 = await handler.execute(envelope_1)
+            assert result_1["correlation_id"] == str(correlation_id_1)
+
+        # Simulate 30 second delay between requests
+        clock.advance(30)
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+
+            # Second request with second correlation ID
+            envelope_2: dict[str, object] = {
+                "operation": "http.get",
+                "payload": {"url": "https://api.example.com/resource/2"},
+                "correlation_id": correlation_id_2,
+            }
+
+            result_2 = await handler.execute(envelope_2)
+            assert result_2["correlation_id"] == str(correlation_id_2)
+
+        # Record end time and verify deterministic timing
+        request_end = clock.now()
+        total_elapsed = (request_end - request_start).total_seconds()
+        assert total_elapsed == 30.0, "Total elapsed time should be exactly 30 seconds"
+
+        # Verify ID generator state is predictable
+        assert id_gen.current_counter == 502
+
+        await handler.shutdown()
+
+
 __all__: list[str] = [
     "TestHttpRestAdapterInitialization",
     "TestHttpRestAdapterGetOperations",
@@ -1980,4 +2163,5 @@ __all__: list[str] = [
     "TestHttpRestAdapterResponseParsing",
     "TestHttpRestAdapterSizeLimits",
     "TestHttpRestAdapterLogWarnings",
+    "TestHttpRestAdapterDeterministicIntegration",
 ]

@@ -7,8 +7,11 @@ handlers and services, enabling predictable and reproducible test behavior.
 """
 
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from tests.helpers.log_helpers import filter_handler_warnings, get_warning_messages
 
 __all__ = [
     "DeterministicClock",
     "DeterministicIdGenerator",
+    "filter_handler_warnings",
+    "get_warning_messages",
 ]
