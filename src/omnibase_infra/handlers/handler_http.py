@@ -92,15 +92,24 @@ class HttpRestAdapter:
             config: Configuration dict containing:
                 - max_request_size: Optional max request body size in bytes (default: 10 MB)
                 - max_response_size: Optional max response body size in bytes (default: 50 MB)
+                - correlation_id: Optional UUID or string for error tracing
 
         Raises:
             ProtocolConfigurationError: If client initialization fails.
 
+        Security:
+            Size limits provide DoS (Denial of Service) protection by preventing:
+            - Memory exhaustion from oversized request bodies
+            - Memory exhaustion from malicious/misconfigured server responses
+            - Resource starvation attacks via large payload processing
+
+            Content-Length headers are validated BEFORE reading response bodies,
+            and streaming validation protects against chunked transfer encoding attacks.
+
         Note:
-            Request/response size validation occurs during execute(). Size limit
-            violations raise InfraUnavailableError with sanitized size categories
-            (small/medium/large/very_large) for security - exact sizes are not
-            exposed in error messages.
+            Size limit violations raise InfraUnavailableError with sanitized size
+            categories (small/medium/large/very_large) - exact sizes are not exposed
+            in error messages to prevent attackers from probing limits.
         """
         try:
             self._timeout = _DEFAULT_TIMEOUT_SECONDS
@@ -358,7 +367,7 @@ class HttpRestAdapter:
         logger.debug(
             "Request size validated",
             extra={
-                "request_size": size,
+                "request_size_category": _categorize_size(size),
                 "limit": self._max_request_size,
                 "correlation_id": str(correlation_id),
             },
@@ -431,7 +440,7 @@ class HttpRestAdapter:
         logger.debug(
             "Content-Length header validated",
             extra={
-                "content_length": content_length,
+                "content_length_category": _categorize_size(content_length),
                 "limit": self._max_response_size,
                 "url": url,
                 "correlation_id": str(correlation_id),
