@@ -1065,6 +1065,29 @@ class TestDbAdapterLifecycle:
 
             await adapter.shutdown()
 
+    @pytest.mark.asyncio
+    async def test_initialize_called_once_per_lifecycle(
+        self, adapter: DbAdapter, mock_pool: MagicMock
+    ) -> None:
+        """Test that initialize creates pool exactly once per call.
+
+        Acceptance criteria for OMN-252: Asserts handler initialized exactly once.
+        Each call to initialize() should create a new pool via asyncpg.create_pool().
+        """
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            # First initialize
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+            assert mock_create.call_count == 1
+
+            # Shutdown and reinitialize
+            await adapter.shutdown()
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+            assert mock_create.call_count == 2  # Called again for reinit
+
+            await adapter.shutdown()
+
 
 class TestDbAdapterCorrelationId:
     """Test suite for correlation ID handling."""
@@ -1321,6 +1344,163 @@ class TestDbAdapterRowCountParsing:
         assert adapter._parse_row_count("INSERT") == 0
 
 
+class TestDbAdapterLogWarnings:
+    """Test suite for log warning assertions (OMN-252 acceptance criteria).
+
+    These tests verify that:
+    1. Normal operations produce no unexpected warnings
+    2. Expected warnings are logged only in specific error conditions
+    """
+
+    @pytest.fixture
+    def adapter(self) -> DbAdapter:
+        """Create DbAdapter fixture."""
+        return DbAdapter()
+
+    @pytest.fixture
+    def mock_pool(self) -> MagicMock:
+        """Create mock asyncpg pool fixture."""
+        pool = MagicMock(spec=asyncpg.Pool)
+        pool.close = AsyncMock()
+        return pool
+
+    @pytest.mark.asyncio
+    async def test_no_unexpected_warnings_during_normal_operation(
+        self, adapter: DbAdapter, mock_pool: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that normal operations produce no unexpected warnings.
+
+        This test verifies the OMN-252 acceptance criteria: "Asserts no unexpected
+        warnings in logs" during normal adapter lifecycle and execution.
+        """
+        import logging
+
+        # Setup mock connection and rows
+        mock_conn = AsyncMock()
+        mock_rows = [{"id": 1, "name": "Alice"}]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with caplog.at_level(logging.WARNING):
+            with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+                mock_create.return_value = mock_pool
+
+                # Initialize
+                await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+                # Perform normal query operation
+                envelope: dict[str, object] = {
+                    "operation": "db.query",
+                    "payload": {"sql": "SELECT id, name FROM users"},
+                    "correlation_id": str(uuid4()),
+                }
+
+                result = await adapter.execute(envelope)
+                assert result["status"] == "success"
+
+                # Shutdown
+                await adapter.shutdown()
+
+        # Filter for warnings from our handler module
+        handler_warnings = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.WARNING
+            and "omnibase_infra.handlers.handler_db" in r.name
+        ]
+        assert (
+            len(handler_warnings) == 0
+        ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+
+    @pytest.mark.asyncio
+    async def test_health_check_logs_warning_on_failure(
+        self, adapter: DbAdapter, mock_pool: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that health check failure produces expected warning.
+
+        When the health check query fails (e.g., connection lost), the adapter
+        should log a warning indicating the health check failed.
+        """
+        import logging
+
+        # Setup mock connection that fails on health check
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(side_effect=Exception("Connection lost"))
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            with caplog.at_level(logging.WARNING):
+                # Perform health check that will fail
+                health = await adapter.health_check()
+
+                # Health check should return unhealthy
+                assert health["healthy"] is False
+                assert health["initialized"] is True
+
+            await adapter.shutdown()
+
+        # Should have exactly one warning about health check failure
+        handler_warnings = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.WARNING
+            and "omnibase_infra.handlers.handler_db" in r.name
+        ]
+        assert len(handler_warnings) == 1
+        assert "Health check failed" in handler_warnings[0].message
+
+    @pytest.mark.asyncio
+    async def test_no_warnings_on_successful_health_check(
+        self, adapter: DbAdapter, mock_pool: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that successful health check produces no warnings.
+
+        A successful health check should not log any warnings.
+        """
+        import logging
+
+        # Setup mock connection that succeeds on health check
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=1)
+
+        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_pool
+
+            await adapter.initialize({"dsn": "postgresql://localhost/db"})
+
+            with caplog.at_level(logging.WARNING):
+                # Perform health check that will succeed
+                health = await adapter.health_check()
+
+                # Health check should return healthy
+                assert health["healthy"] is True
+                assert health["initialized"] is True
+
+            await adapter.shutdown()
+
+        # Should have no warnings
+        handler_warnings = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.WARNING
+            and "omnibase_infra.handlers.handler_db" in r.name
+        ]
+        assert (
+            len(handler_warnings) == 0
+        ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"
+
+
 __all__: list[str] = [
     "TestDbAdapterInitialization",
     "TestDbAdapterQueryOperations",
@@ -1332,4 +1512,5 @@ __all__: list[str] = [
     "TestDbAdapterCorrelationId",
     "TestDbAdapterDsnSecurity",
     "TestDbAdapterRowCountParsing",
+    "TestDbAdapterLogWarnings",
 ]
