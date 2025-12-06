@@ -27,7 +27,11 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
-from tests.helpers import DeterministicClock, DeterministicIdGenerator
+from tests.helpers import (
+    DeterministicClock,
+    DeterministicIdGenerator,
+    filter_handler_warnings,
+)
 
 # Type alias for response dict with nested structure
 ResponseDict = dict[str, object]
@@ -1812,6 +1816,8 @@ class TestHttpRestAdapterLogWarnings:
     2. Expected warnings are logged only in specific error conditions
     """
 
+    HANDLER_MODULE = "omnibase_infra.handlers.handler_http"
+
     @pytest.fixture
     def handler(self) -> HttpRestAdapter:
         """Create HttpRestAdapter fixture."""
@@ -1860,12 +1866,7 @@ class TestHttpRestAdapterLogWarnings:
             await handler.shutdown()
 
         # Filter for warnings from our handler module
-        handler_warnings = [
-            r
-            for r in caplog.records
-            if r.levelno >= logging.WARNING
-            and "omnibase_infra.handlers.handler_http" in r.name
-        ]
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
         assert (
             len(handler_warnings) == 0
         ), f"Unexpected warnings: {[w.message for w in handler_warnings]}"
@@ -1892,12 +1893,7 @@ class TestHttpRestAdapterLogWarnings:
             await handler.shutdown()
 
         # Should have exactly one warning about invalid config
-        handler_warnings = [
-            r
-            for r in caplog.records
-            if r.levelno >= logging.WARNING
-            and "omnibase_infra.handlers.handler_http" in r.name
-        ]
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
         assert len(handler_warnings) == 1
         assert "Invalid max_request_size" in handler_warnings[0].message
 
@@ -1923,12 +1919,7 @@ class TestHttpRestAdapterLogWarnings:
             await handler.shutdown()
 
         # Should have exactly one warning about invalid config
-        handler_warnings = [
-            r
-            for r in caplog.records
-            if r.levelno >= logging.WARNING
-            and "omnibase_infra.handlers.handler_http" in r.name
-        ]
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
         assert len(handler_warnings) == 1
         assert "Invalid max_response_size" in handler_warnings[0].message
 
@@ -1972,12 +1963,7 @@ class TestHttpRestAdapterLogWarnings:
         await handler.shutdown()
 
         # Should have a warning about invalid Content-Length header
-        handler_warnings = [
-            r
-            for r in caplog.records
-            if r.levelno >= logging.WARNING
-            and "omnibase_infra.handlers.handler_http" in r.name
-        ]
+        handler_warnings = filter_handler_warnings(caplog.records, self.HANDLER_MODULE)
         assert len(handler_warnings) == 1
         assert "Invalid Content-Length" in handler_warnings[0].message
 
