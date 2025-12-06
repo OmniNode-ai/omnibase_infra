@@ -143,7 +143,7 @@ class HttpRestAdapter:
                 target_name="http_rest_adapter",
                 correlation_id=uuid4(),
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 "Failed to initialize HTTP adapter", context=ctx
             ) from e
 
@@ -383,15 +383,6 @@ class HttpRestAdapter:
             return
 
         if content_length > self._max_response_size:
-            logger.warning(
-                "Response Content-Length exceeds limit - potential DoS attempt",
-                extra={
-                    "size_category": _categorize_size(content_length),
-                    "limit": self._max_response_size,
-                    "url": url,
-                    "correlation_id": str(correlation_id),
-                },
-            )
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_content_length",
