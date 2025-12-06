@@ -146,11 +146,23 @@ class HttpRestAdapter:
                 },
             )
         except Exception as e:
+            # Extract correlation_id from config if provided, otherwise generate new
+            raw_correlation_id = config.get("correlation_id")
+            if isinstance(raw_correlation_id, UUID):
+                error_correlation_id = raw_correlation_id
+            elif isinstance(raw_correlation_id, str):
+                try:
+                    error_correlation_id = UUID(raw_correlation_id)
+                except ValueError:
+                    error_correlation_id = uuid4()
+            else:
+                error_correlation_id = uuid4()
+
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="initialize",
                 target_name="http_rest_adapter",
-                correlation_id=uuid4(),
+                correlation_id=error_correlation_id,
             )
             raise ProtocolConfigurationError(
                 "Failed to initialize HTTP adapter", context=ctx
@@ -619,6 +631,9 @@ class HttpRestAdapter:
             "Response body received",
             extra={
                 "body_size": len(body_bytes),
+                "size_utilization_pct": round(
+                    (len(body_bytes) / self._max_response_size) * 100, 2
+                ),
                 "content_type": content_type,
                 "status_code": response.status_code,
                 "correlation_id": str(correlation_id),
