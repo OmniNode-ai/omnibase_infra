@@ -178,7 +178,7 @@ class HttpRestAdapter:
                 target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 "Missing or invalid 'operation' in envelope", context=ctx
             )
 
@@ -189,7 +189,7 @@ class HttpRestAdapter:
                 target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 f"Operation '{operation}' not supported in MVP. Available: {', '.join(sorted(_SUPPORTED_OPERATIONS))}",
                 context=ctx,
             )
@@ -202,7 +202,7 @@ class HttpRestAdapter:
                 target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 "Missing or invalid 'payload' in envelope", context=ctx
             )
 
@@ -214,7 +214,9 @@ class HttpRestAdapter:
                 target_name="http_rest_adapter",
                 correlation_id=correlation_id,
             )
-            raise RuntimeHostError("Missing or invalid 'url' in payload", context=ctx)
+            raise ProtocolConfigurationError(
+                "Missing or invalid 'url' in payload", context=ctx
+            )
 
         headers = self._extract_headers(payload, operation, url, correlation_id)
 
@@ -259,7 +261,7 @@ class HttpRestAdapter:
             target_name=url,
             correlation_id=correlation_id,
         )
-        raise RuntimeHostError(
+        raise ProtocolConfigurationError(
             "Invalid 'headers' in payload - must be a dict", context=ctx
         )
 
@@ -292,8 +294,22 @@ class HttpRestAdapter:
         if isinstance(body, str):
             size = len(body.encode("utf-8"))
         elif isinstance(body, dict):
-            # Serialize once and cache the result to avoid double serialization.
-            # The cached bytes are returned and can be passed to _execute_request().
+            # DESIGN TRADEOFF: Double-Serialization Avoidance
+            #
+            # We serialize dict bodies once here during validation and cache the bytes.
+            # The cached bytes are then passed to _execute_request() via the return value,
+            # avoiding re-serialization when building the HTTP request.
+            #
+            # Tradeoff considerations:
+            # - Memory: Serialized bytes are held in memory during validation and request
+            #   execution. For large payloads near the size limit, this adds ~10MB overhead.
+            # - Performance: Single serialization is faster than serializing twice (once
+            #   for size check, once for request body).
+            # - Alternative: We could serialize twice (once here for size, once in execute)
+            #   which would use less peak memory but double the CPU cost for serialization.
+            #
+            # Current approach prioritizes CPU efficiency over peak memory usage, which is
+            # appropriate since we enforce max_request_size limits anyway.
             try:
                 serialized_bytes = json.dumps(body).encode("utf-8")
                 size = len(serialized_bytes)
@@ -307,14 +323,6 @@ class HttpRestAdapter:
             return None
 
         if size > self._max_request_size:
-            logger.warning(
-                "Request body size limit exceeded - potential DoS attempt",
-                extra={
-                    "size_category": _categorize_size(size),
-                    "limit": self._max_request_size,
-                    "correlation_id": str(correlation_id),
-                },
-            )
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_request_size",
@@ -524,7 +532,7 @@ class HttpRestAdapter:
                 try:
                     request_content = json.dumps(body)
                 except TypeError as e:
-                    raise RuntimeHostError(
+                    raise ProtocolConfigurationError(
                         f"Body is not JSON-serializable: {type(body).__name__}",
                         context=ctx,
                     ) from e

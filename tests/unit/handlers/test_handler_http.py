@@ -23,6 +23,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
@@ -587,7 +588,7 @@ class TestHttpRestAdapterErrorHandling:
     async def test_unsupported_operation_put_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test http.put operation raises RuntimeHostError (not supported in MVP)."""
+        """Test http.put operation raises ProtocolConfigurationError (not supported)."""
         await handler.initialize({})
 
         envelope: dict[str, object] = {
@@ -595,7 +596,7 @@ class TestHttpRestAdapterErrorHandling:
             "payload": {"url": "https://api.example.com/resource/123"},
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         assert "http.put" in str(exc_info.value)
@@ -607,7 +608,7 @@ class TestHttpRestAdapterErrorHandling:
     async def test_unsupported_operation_delete_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test http.delete operation raises RuntimeHostError (not supported in MVP)."""
+        """Test http.delete operation raises ProtocolConfigurationError (not supported)."""
         await handler.initialize({})
 
         envelope: dict[str, object] = {
@@ -615,7 +616,7 @@ class TestHttpRestAdapterErrorHandling:
             "payload": {"url": "https://api.example.com/resource/123"},
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         assert "http.delete" in str(exc_info.value)
@@ -627,7 +628,7 @@ class TestHttpRestAdapterErrorHandling:
     async def test_unsupported_operation_patch_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test http.patch operation raises RuntimeHostError (not supported in MVP)."""
+        """Test http.patch operation raises ProtocolConfigurationError (not supported)."""
         await handler.initialize({})
 
         envelope: dict[str, object] = {
@@ -635,7 +636,7 @@ class TestHttpRestAdapterErrorHandling:
             "payload": {"url": "https://api.example.com/resource/123"},
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         assert "http.patch" in str(exc_info.value)
@@ -646,7 +647,7 @@ class TestHttpRestAdapterErrorHandling:
     async def test_missing_url_field_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test missing URL field raises RuntimeHostError."""
+        """Test missing URL field raises ProtocolConfigurationError."""
         await handler.initialize({})
 
         envelope: dict[str, object] = {
@@ -654,7 +655,7 @@ class TestHttpRestAdapterErrorHandling:
             "payload": {"headers": {"X-Test": "value"}},  # No URL
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         assert "url" in str(exc_info.value).lower()
@@ -663,7 +664,7 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_empty_url_field_raises_error(self, handler: HttpRestAdapter) -> None:
-        """Test empty URL field raises RuntimeHostError."""
+        """Test empty URL field raises ProtocolConfigurationError."""
         await handler.initialize({})
 
         envelope: dict[str, object] = {
@@ -671,7 +672,7 @@ class TestHttpRestAdapterErrorHandling:
             "payload": {"url": ""},
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         assert "url" in str(exc_info.value).lower()
@@ -682,14 +683,14 @@ class TestHttpRestAdapterErrorHandling:
     async def test_missing_operation_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test missing operation field raises RuntimeHostError."""
+        """Test missing operation field raises ProtocolConfigurationError."""
         await handler.initialize({})
 
         envelope: dict[str, object] = {
             "payload": {"url": "https://example.com"},
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         assert "operation" in str(exc_info.value).lower()
@@ -698,14 +699,14 @@ class TestHttpRestAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_payload_raises_error(self, handler: HttpRestAdapter) -> None:
-        """Test missing payload field raises RuntimeHostError."""
+        """Test missing payload field raises ProtocolConfigurationError."""
         await handler.initialize({})
 
         envelope: dict[str, object] = {
             "operation": "http.get",
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         assert "payload" in str(exc_info.value).lower()
@@ -716,7 +717,7 @@ class TestHttpRestAdapterErrorHandling:
     async def test_invalid_headers_type_raises_error(
         self, handler: HttpRestAdapter
     ) -> None:
-        """Test invalid headers type raises RuntimeHostError."""
+        """Test invalid headers type raises ProtocolConfigurationError."""
         await handler.initialize({})
 
         envelope: dict[str, object] = {
@@ -727,7 +728,7 @@ class TestHttpRestAdapterErrorHandling:
             },
         }
 
-        with pytest.raises(RuntimeHostError) as exc_info:
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             await handler.execute(envelope)
 
         assert "headers" in str(exc_info.value).lower()
@@ -1327,9 +1328,10 @@ class TestHttpRestAdapterSizeLimits:
         config: dict[str, object] = {"max_request_size": 5}  # 5 bytes
         await handler.initialize(config)
 
-        # Direct _validate_request_size() testing with bytes body validates size
-        # calculation efficiently without requiring full HTTP mocking. This tests
-        # the internal validation logic for bytes inputs specifically.
+        # Direct _validate_request_size() testing with bytes body validates the size
+        # calculation logic efficiently. While bytes can technically be passed via
+        # payload['body'] in execute(), testing the internal validation method directly
+        # avoids complex HTTP mocking and focuses on the core size validation behavior.
         correlation_id = uuid4()
 
         # Test the internal validation method with bytes
