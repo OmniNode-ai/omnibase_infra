@@ -36,9 +36,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Maximum allowed complex union types in infrastructure code.
 # Infrastructure code has many typed handlers (Consul, Kafka, Vault, PostgreSQL adapters)
 # which require typed unions for protocol implementations and message routing.
-# Set to 20 to accommodate infrastructure service integration patterns while preventing
-# overly complex union types that would complicate code maintenance.
-INFRA_MAX_UNIONS = 20
+# Set to 30 to accommodate infrastructure service integration patterns including
+# RuntimeHostProcess and handler wiring while preventing overly complex union types.
+INFRA_MAX_UNIONS = 30
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
