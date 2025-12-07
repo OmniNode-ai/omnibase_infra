@@ -15,6 +15,7 @@ Currently Used by kernel.py:
     - output_topic: Used for RuntimeHostProcess.output_topic
     - consumer_group (alias: group_id): Used for InMemoryEventBus.group
     - event_bus.environment: Used for InMemoryEventBus.environment
+    - shutdown.grace_period_seconds: Used for graceful shutdown timeout
 
 Reserved for Future Use:
     - contract_version, name, description: Metadata fields for contract versioning
@@ -24,7 +25,6 @@ Reserved for Future Use:
     - protocols.enabled (alias: handlers.enabled): Reserved for dynamic protocol loading
     - logging.level, logging.format: Reserved for contract-driven logging
       (currently kernel.py uses ONEX_LOG_LEVEL env var directly)
-    - shutdown.grace_period_seconds: Reserved for configurable shutdown timeout
 
 Environment Variable Overrides:
     ONEX_INPUT_TOPIC  - Overrides input_topic
@@ -73,7 +73,7 @@ class ModelRuntimeConfig(BaseModel):
         event_bus: Event bus configuration [PARTIAL - only environment field used]
         protocols: Enabled protocols configuration [RESERVED]
         logging: Logging configuration [RESERVED]
-        shutdown: Shutdown configuration [RESERVED]
+        shutdown: Shutdown configuration [ACTIVE - grace_period_seconds used]
 
     Field Status Legend:
         [ACTIVE]   - Currently used by kernel.py

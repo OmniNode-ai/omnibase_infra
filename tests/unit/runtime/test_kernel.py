@@ -63,8 +63,15 @@ class TestLoadRuntimeConfig:
         assert config.output_topic == "test-responses"
         assert config.consumer_group == "test-group"
 
-    def test_load_config_file_not_found_uses_defaults(self, tmp_path: Path) -> None:
+    def test_load_config_file_not_found_uses_defaults(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that missing config file returns ModelRuntimeConfig with defaults."""
+        # Clear env vars to ensure we test true defaults
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_GROUP_ID", raising=False)
+
         config = load_runtime_config(tmp_path)
 
         assert isinstance(config, ModelRuntimeConfig)
@@ -87,8 +94,15 @@ class TestLoadRuntimeConfig:
         assert config.output_topic == "env-responses"
         assert config.consumer_group == "env-group"
 
-    def test_load_config_empty_yaml(self, tmp_path: Path) -> None:
+    def test_load_config_empty_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test loading from empty YAML file returns ModelRuntimeConfig with defaults."""
+        # Clear env vars to ensure we test true defaults from ModelRuntimeConfig
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_GROUP_ID", raising=False)
+
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
         config_file = runtime_dir / "runtime_config.yaml"
@@ -257,6 +271,92 @@ class TestBootstrap:
                 mock_signal.assert_called_once()
                 call_args = mock_signal.call_args
                 assert call_args[0][0] == signal.SIGINT
+
+    async def test_bootstrap_shutdown_timeout_logs_warning(
+        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+    ) -> None:
+        """Test that shutdown timeout logs warning and continues gracefully."""
+        import asyncio
+
+        mock_instance = mock_runtime_host.return_value
+
+        # Make stop() hang indefinitely (simulating a stuck shutdown)
+        async def never_complete() -> None:
+            await asyncio.sleep(100)  # Will be cancelled by timeout
+
+        mock_instance.stop = AsyncMock(side_effect=never_complete)
+
+        # Create config with very short grace period for testing
+        from omnibase_infra.runtime.models import ModelRuntimeConfig
+
+        test_config = ModelRuntimeConfig(
+            shutdown={
+                "grace_period_seconds": 0
+            },  # 0 second timeout for instant timeout
+        )
+
+        with patch(
+            "omnibase_infra.runtime.kernel.load_runtime_config",
+            return_value=test_config,
+        ):
+            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+                event_instance = MagicMock()
+                event_instance.wait = AsyncMock(return_value=None)
+                mock_event.return_value = event_instance
+
+                with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+                    exit_code = await bootstrap()
+
+        # Should still exit successfully despite timeout
+        assert exit_code == 0
+        # Verify warning was logged about timeout
+        warning_calls = [
+            call
+            for call in mock_logger.warning.call_args_list
+            if "timed out" in str(call).lower()
+        ]
+        assert len(warning_calls) == 1
+        # The warning uses %s formatting, so check for the format string and arg
+        call_args = warning_calls[0][0]  # positional args tuple
+        assert "timed out" in call_args[0].lower()
+        assert call_args[1] == 0  # grace_period_seconds value
+
+    async def test_bootstrap_uses_config_grace_period(
+        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+    ) -> None:
+        """Test that bootstrap uses grace_period_seconds from config."""
+        import asyncio
+
+        mock_instance = mock_runtime_host.return_value
+        mock_instance.stop = AsyncMock()
+
+        # Create config with custom grace period
+        from omnibase_infra.runtime.models import ModelRuntimeConfig
+
+        test_config = ModelRuntimeConfig(
+            shutdown={"grace_period_seconds": 45},  # Custom timeout
+        )
+
+        with patch(
+            "omnibase_infra.runtime.kernel.load_runtime_config",
+            return_value=test_config,
+        ):
+            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+                event_instance = MagicMock()
+                event_instance.wait = AsyncMock(return_value=None)
+                mock_event.return_value = event_instance
+
+                with patch(
+                    "omnibase_infra.runtime.kernel.asyncio.wait_for",
+                    new_callable=AsyncMock,
+                ) as mock_wait_for:
+                    exit_code = await bootstrap()
+
+        assert exit_code == 0
+        # Verify wait_for was called with correct timeout
+        mock_wait_for.assert_called_once()
+        call_kwargs = mock_wait_for.call_args[1]
+        assert call_kwargs["timeout"] == 45
 
 
 class TestConfigureLogging:

@@ -210,9 +210,22 @@ async def bootstrap() -> int:
         else:
             # Windows: asyncio signal handlers not supported, use signal.signal()
             # for SIGINT (Ctrl+C). Note: SIGTERM not available on Windows.
+            #
+            # Thread-safety: On Windows, signal.signal() handlers execute in a
+            # different thread than the event loop. While asyncio.Event.set() is
+            # documented as thread-safe, we use loop.call_soon_threadsafe() to
+            # schedule the set() call on the event loop thread. This ensures
+            # proper cross-thread communication and avoids potential race
+            # conditions with any event loop state inspection.
             def windows_handler(signum: int, frame: object) -> None:
-                """Windows-compatible signal handler wrapper."""
-                handle_shutdown(signal.Signals(signum))
+                """Windows-compatible signal handler wrapper.
+
+                Uses call_soon_threadsafe to safely communicate with the event
+                loop from the signal handler thread.
+                """
+                sig = signal.Signals(signum)
+                logger.info("Received %s, initiating graceful shutdown...", sig.name)
+                loop.call_soon_threadsafe(shutdown_event.set)
 
             signal.signal(signal.SIGINT, windows_handler)
 
@@ -230,8 +243,18 @@ async def bootstrap() -> int:
         # Wait for shutdown signal
         await shutdown_event.wait()
 
-        logger.info("Shutdown signal received, stopping runtime...")
-        await runtime.stop()
+        grace_period = config.shutdown.grace_period_seconds
+        logger.info(
+            "Shutdown signal received, stopping runtime (timeout=%ss)...",
+            grace_period,
+        )
+        try:
+            await asyncio.wait_for(runtime.stop(), timeout=grace_period)
+        except TimeoutError:
+            logger.warning(
+                "Graceful shutdown timed out after %s seconds, forcing stop",
+                grace_period,
+            )
         runtime = None  # Mark as stopped to prevent double-stop in finally
 
         logger.info("ONEX runtime stopped successfully.")
