@@ -1032,21 +1032,30 @@ class TestRuntimeHostProcessLogWarnings:
         process = RuntimeHostProcess()
 
         with caplog.at_level(logging.WARNING):
-            with patch.object(process, "_handlers", {"http": mock_handler}):
-                await process.start()
+            # Patch _populate_handlers_from_registry to prevent it from trying to
+            # instantiate handlers from the singleton registry (which may have handlers
+            # registered from previous tests, and would fail without proper config)
+            async def noop_populate() -> None:
+                pass
 
-                try:
-                    # Normal operation - process an envelope
-                    await process._handle_envelope(
-                        {
-                            "operation": "http.get",
-                            "payload": {"url": "https://example.com"},
-                            "correlation_id": uuid4(),
-                            "handler_type": "http",
-                        }
-                    )
-                finally:
-                    await process.stop()
+            with patch.object(
+                process, "_populate_handlers_from_registry", noop_populate
+            ):
+                with patch.object(process, "_handlers", {"http": mock_handler}):
+                    await process.start()
+
+                    try:
+                        # Normal operation - process an envelope
+                        await process._handle_envelope(
+                            {
+                                "operation": "http.get",
+                                "payload": {"url": "https://example.com"},
+                                "correlation_id": uuid4(),
+                                "handler_type": "http",
+                            }
+                        )
+                    finally:
+                        await process.stop()
 
         # Filter for warnings from our module
         runtime_warnings = filter_handler_warnings(caplog.records, self.RUNTIME_MODULE)

@@ -35,6 +35,7 @@ Integration with Handlers:
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
@@ -43,9 +44,12 @@ from uuid import UUID, uuid4
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.runtime.handler_registry import get_handler_registry
 from omnibase_infra.runtime.wiring import wire_default_handlers
 
 if TYPE_CHECKING:
+    from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
+
     from omnibase_infra.event_bus.models import ModelEventMessage
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
@@ -123,8 +127,8 @@ class RuntimeHostProcess:
         self._subscription: Callable[[], Awaitable[None]] | None = None
 
         # Handler registry (handler_type -> handler instance)
-        # This will be populated by wire_handlers during start()
-        self._handlers: dict[str, object] = {}
+        # This will be populated from the singleton registry during start()
+        self._handlers: dict[str, ProtocolHandler] = {}
 
         logger.debug(
             "RuntimeHostProcess initialized",
@@ -185,8 +189,9 @@ class RuntimeHostProcess:
 
         Performs the following steps:
         1. Start event bus (if not already started)
-        2. Wire handlers via wiring module
-        3. Subscribe to input topic
+        2. Wire handlers via wiring module (registers handler classes to singleton)
+        3. Populate self._handlers from singleton registry (instantiate and initialize)
+        4. Subscribe to input topic
 
         This method is idempotent - calling start() on an already started
         process is safe and has no effect.
@@ -208,10 +213,18 @@ class RuntimeHostProcess:
         await self._event_bus.start()
 
         # Step 2: Wire handlers via wiring module
-        # This registers default handlers with the singleton registry
+        # This registers default handler CLASSES with the singleton registry
         wire_handlers()
 
-        # Step 3: Subscribe to input topic
+        # Step 3: Populate self._handlers from singleton registry
+        # The wiring module registers handler classes, so we need to:
+        # - Get each registered handler class from the singleton registry
+        # - Instantiate the handler class
+        # - Call initialize() on each handler instance with config
+        # - Store the handler instance in self._handlers for routing
+        await self._populate_handlers_from_registry()
+
+        # Step 4: Subscribe to input topic
         self._subscription = await self._event_bus.subscribe(
             topic=self._input_topic,
             group_id=self._group_id,
@@ -226,6 +239,7 @@ class RuntimeHostProcess:
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
                 "group_id": self._group_id,
+                "registered_handlers": list(self._handlers.keys()),
             },
         )
 
@@ -257,6 +271,107 @@ class RuntimeHostProcess:
 
         logger.info("RuntimeHostProcess stopped successfully")
 
+    async def _populate_handlers_from_registry(self) -> None:
+        """Populate self._handlers from the singleton handler registry.
+
+        This method bridges the gap between the wiring module (which registers
+        handler CLASSES to the singleton registry) and the RuntimeHostProcess
+        (which needs handler INSTANCES in self._handlers for routing).
+
+        For each registered handler type in the singleton registry:
+        1. Skip if handler type is already registered (e.g., by tests)
+        2. Get the handler class from the registry
+        3. Instantiate the handler class
+        4. Call initialize() on the handler instance with self._config
+        5. Store the handler instance in self._handlers
+
+        This ensures that after start() is called, self._handlers contains
+        fully initialized handler instances ready for envelope routing.
+
+        Note: Handlers already in self._handlers (e.g., injected by tests via
+        register_handler() or patch.object()) are preserved and not overwritten.
+        """
+        handler_registry = get_handler_registry()
+        registered_types = handler_registry.list_protocols()
+
+        logger.debug(
+            "Populating handlers from singleton registry",
+            extra={
+                "registered_types": registered_types,
+                "existing_handlers": list(self._handlers.keys()),
+            },
+        )
+
+        for handler_type in registered_types:
+            # Skip if handler is already registered (e.g., by tests or explicit registration)
+            if handler_type in self._handlers:
+                logger.debug(
+                    "Handler already registered, skipping",
+                    extra={
+                        "handler_type": handler_type,
+                        "existing_handler_class": type(
+                            self._handlers[handler_type]
+                        ).__name__,
+                    },
+                )
+                continue
+
+            try:
+                # Get handler class from singleton registry
+                handler_cls: type[ProtocolHandler] = handler_registry.get(handler_type)
+
+                # Instantiate the handler
+                handler_instance: ProtocolHandler = handler_cls()
+
+                # Call initialize() if the handler has this method
+                # Handlers may require async initialization with config
+                if hasattr(handler_instance, "initialize"):
+                    await handler_instance.initialize(self._config)
+
+                # Store the handler instance for routing
+                self._handlers[handler_type] = handler_instance
+
+                logger.debug(
+                    "Handler instantiated and initialized",
+                    extra={
+                        "handler_type": handler_type,
+                        "handler_class": handler_cls.__name__,
+                    },
+                )
+
+            except Exception as e:
+                # Log error but continue with other handlers
+                # This allows partial handler availability
+                correlation_id = uuid4()
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="populate_handlers",
+                    target_name=handler_type,
+                    correlation_id=correlation_id,
+                )
+                infra_error = RuntimeHostError(
+                    f"Failed to instantiate handler for type {handler_type}: {e}",
+                    context=context,
+                )
+                infra_error.__cause__ = e
+
+                logger.warning(
+                    "Failed to instantiate handler",
+                    extra={
+                        "handler_type": handler_type,
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+        logger.info(
+            "Handlers populated from registry",
+            extra={
+                "populated_handlers": list(self._handlers.keys()),
+                "total_count": len(self._handlers),
+            },
+        )
+
     async def _on_message(self, message: ModelEventMessage) -> None:
         """Handle incoming message from event bus subscription.
 
@@ -266,8 +381,6 @@ class RuntimeHostProcess:
         Args:
             message: The event message containing the envelope payload.
         """
-        import json
-
         try:
             # Deserialize envelope from message value
             envelope = json.loads(message.value.decode("utf-8"))
@@ -370,7 +483,7 @@ class RuntimeHostProcess:
         # Execute handler
         try:
             # Handler expected to have async execute(envelope) method
-            response = await handler.execute(envelope)  # type: ignore[attr-defined]
+            response = await handler.execute(envelope)
 
             # Ensure response has correlation_id
             if isinstance(response, dict) and "correlation_id" not in response:
@@ -469,27 +582,22 @@ class RuntimeHostProcess:
             # If mocked, this succeeds and tests see UUIDs
             # If not mocked, this may raise TypeError for UUIDs
             await self._event_bus.publish_envelope(envelope, topic)
-        except TypeError as e:
-            # JSON serialization failed (likely due to UUID)
-            # Serialize UUIDs to strings and retry
-            if "not JSON serializable" in str(e):
-                import json
+        except TypeError:
+            # TypeError during JSON serialization - attempt UUID conversion
+            # This handles UUIDs and other non-serializable types gracefully
+            def uuid_serializer(obj: object) -> object:
+                if isinstance(obj, UUID):
+                    return str(obj)
+                raise TypeError(
+                    f"Object of type {type(obj).__name__} is not JSON serializable"
+                )
 
-                def uuid_serializer(obj: object) -> object:
-                    if isinstance(obj, UUID):
-                        return str(obj)
-                    raise TypeError(
-                        f"Object of type {type(obj).__name__} is not JSON serializable"
-                    )
+            # Serialize the envelope to JSON-safe dict
+            json_str = json.dumps(envelope, default=uuid_serializer)
+            json_safe_envelope = json.loads(json_str)
 
-                # Serialize the envelope to JSON-safe dict
-                json_str = json.dumps(envelope, default=uuid_serializer)
-                json_safe_envelope = json.loads(json_str)
-
-                # Retry with JSON-safe envelope
-                await self._event_bus.publish_envelope(json_safe_envelope, topic)
-            else:
-                raise
+            # Retry with JSON-safe envelope
+            await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
     async def health_check(self) -> dict[str, object]:
         """Return health check status.
@@ -546,7 +654,7 @@ class RuntimeHostProcess:
             "event_bus_healthy": event_bus_healthy,
         }
 
-    def register_handler(self, handler_type: str, handler: object) -> None:
+    def register_handler(self, handler_type: str, handler: ProtocolHandler) -> None:
         """Register a handler for a specific type.
 
         Args:
@@ -562,7 +670,7 @@ class RuntimeHostProcess:
             },
         )
 
-    def get_handler(self, handler_type: str) -> object | None:
+    def get_handler(self, handler_type: str) -> ProtocolHandler | None:
         """Get handler for type, returns None if not registered.
 
         Args:
