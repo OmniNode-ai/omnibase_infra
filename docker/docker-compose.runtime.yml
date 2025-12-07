@@ -45,7 +45,7 @@ x-runtime-base: &runtime-base
     secrets:
       - github_token
   networks:
-    - omninode-network
+    - omnibase-infra-network
   # Bridge hosts for external infrastructure services
   extra_hosts:
     - "omninode-bridge-postgres:${REMOTE_HOST:-host-gateway}"
@@ -251,12 +251,12 @@ secrets:
 # ==========================================================================
 # Network Configuration
 # ==========================================================================
-# External network for communication with infrastructure services.
-# This network should be created by the infrastructure stack (omninode-bridge).
+# Internal network for omnibase-infra runtime services.
+# Created automatically by this compose file.
 networks:
-  omninode-network:
-    external: true
-    name: ${DOCKER_NETWORK:-omninode-bridge-network}
+  omnibase-infra-network:
+    name: omnibase-infra-network
+    driver: bridge
 
 # ==========================================================================
 # Volume Configuration

@@ -71,7 +71,10 @@
       "Bash(git init:*)",
       "Bash(poetry run pytest:*)",
       "Bash(poetry run python:*)",
-      "Bash(poetry add:*)"
+      "Bash(poetry add:*)",
+      "Bash(docker build:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker ps:*)"
     ],
     "deny": [],
     "ask": []
