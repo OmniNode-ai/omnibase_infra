@@ -18,6 +18,66 @@ Design Principles:
 - Validation: Unknown handler types raise clear errors
 - Idempotent: Re-wiring the same handler is safe (overwrites previous)
 
+Adding New Handlers:
+    To add a new handler to the system, follow these steps:
+
+    1. Create a handler class implementing the ProtocolHandler protocol:
+
+        ```python
+        from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
+
+        class MyCustomHandler:
+            '''Handler for custom protocol operations.'''
+
+            async def initialize(self, config: dict[str, object]) -> None:
+                '''Initialize handler with configuration.'''
+                self._config = config
+
+            async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+                '''Execute operation from envelope and return response.'''
+                # Handle the envelope and return response dict
+                return {"success": True, "data": ...}
+        ```
+
+    2. Add the handler to _KNOWN_HANDLERS dict with a type constant:
+
+        In handler_registry.py, add a constant:
+            HANDLER_TYPE_CUSTOM = "custom"
+
+        In this module, add to _KNOWN_HANDLERS:
+            HANDLER_TYPE_CUSTOM: (MyCustomHandler, "Custom protocol handler"),
+
+    3. For runtime registration without modifying _KNOWN_HANDLERS, use
+       wire_custom_handler():
+
+        ```python
+        from omnibase_infra.runtime.wiring import wire_custom_handler
+
+        wire_custom_handler("custom", MyCustomHandler)
+        ```
+
+Integration with RuntimeHostProcess:
+    The wiring module and RuntimeHostProcess work together in a two-phase
+    registration and instantiation flow:
+
+    Phase 1 - Class Registration (wiring module):
+        When wire_default_handlers() is called, handler CLASSES are registered
+        with the singleton ProtocolBindingRegistry. At this point, no handler
+        instances exist - only the class types are stored in the registry.
+
+    Phase 2 - Instance Creation (RuntimeHostProcess):
+        After wiring, RuntimeHostProcess._populate_handlers_from_registry():
+        1. Gets each handler CLASS from the singleton registry
+        2. Instantiates the handler class: handler_instance = handler_cls()
+        3. Calls initialize(config) on the instance with runtime configuration
+        4. Stores the instance in self._handlers for envelope routing
+
+    This two-phase approach allows:
+        - Centralized handler class registration via wiring
+        - Lazy instantiation controlled by RuntimeHostProcess
+        - Per-process configuration passed to handler.initialize()
+        - Test injection of mock handlers before start() is called
+
 Example Usage:
     ```python
     from omnibase_infra.runtime.wiring import (
@@ -40,11 +100,6 @@ Example Usage:
     }
     wire_handlers_from_contract(contract_config)
     ```
-
-Integration with RuntimeHostProcess:
-    The RuntimeHostProcess calls wire_default_handlers() or
-    wire_handlers_from_contract() during initialization to ensure
-    all required handlers are registered before processing requests.
 """
 
 from __future__ import annotations
@@ -72,8 +127,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Known handler types that can be wired
-# Maps handler type constant to (handler_class, description)
+# Known handler types that can be wired.
+#
+# Pattern: handler_type_constant -> (handler_class, description)
+#
+# - handler_type_constant: String constant defined in handler_registry.py
+#   (e.g., HANDLER_TYPE_HTTP = "http"). This is the key used to look up
+#   and route envelopes to the correct handler.
+#
+# - handler_class: The class implementing ProtocolHandler protocol.
+#   Must have async initialize(config) and async execute(envelope) methods.
+#   The wiring module registers the CLASS; RuntimeHostProcess instantiates it.
+#
+# - description: Human-readable description for logging and debugging.
+#   Appears in log messages when handlers are registered.
+#
+# To add a new handler:
+# 1. Define HANDLER_TYPE_XXX constant in handler_registry.py
+# 2. Import the handler class at the top of this module
+# 3. Add entry below: HANDLER_TYPE_XXX: (XxxHandler, "Description"),
 _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
     HANDLER_TYPE_HTTP: (HttpRestAdapter, "HTTP REST protocol adapter"),
     HANDLER_TYPE_DATABASE: (DbAdapter, "PostgreSQL database adapter"),

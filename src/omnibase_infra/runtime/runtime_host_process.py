@@ -509,8 +509,11 @@ class RuntimeHostProcess:
             response = await handler.execute(envelope)
 
             # Ensure response has correlation_id
-            if isinstance(response, dict) and "correlation_id" not in response:
-                response["correlation_id"] = correlation_id
+            # Make a copy to avoid mutating handler's internal state
+            if isinstance(response, dict):
+                response = dict(response)
+                if "correlation_id" not in response:
+                    response["correlation_id"] = correlation_id
 
             await self._publish_envelope_safe(response, self._output_topic)
 
@@ -623,12 +626,20 @@ class RuntimeHostProcess:
             Dictionary with health status information:
                 - healthy: Overall health status (True only if running,
                   event bus healthy, and no handlers failed to instantiate)
+                - degraded: True when process is running but some handlers
+                  failed to instantiate. Indicates partial functionality -
+                  the system is operational but not at full capacity.
                 - is_running: Whether the process is running
                 - event_bus: Event bus health status (if running)
                 - event_bus_healthy: Boolean indicating event bus health
                 - failed_handlers: Dict of handler_type -> error message for
                   handlers that failed to instantiate during start()
                 - registered_handlers: List of successfully registered handler types
+
+        Health State Matrix:
+            - healthy=True, degraded=False: Fully operational
+            - healthy=False, degraded=True: Running with reduced functionality
+            - healthy=False, degraded=False: Not running or event bus unhealthy
         """
         # Get event bus health if available
         event_bus_health: dict[str, object] = {}
@@ -668,12 +679,17 @@ class RuntimeHostProcess:
         # Check for failed handlers - any failures indicate degraded state
         has_failed_handlers = len(self._failed_handlers) > 0
 
+        # Degraded state: process is running but some handlers failed to instantiate
+        # This means the system is operational but with reduced functionality
+        degraded = self._is_running and has_failed_handlers
+
         # Overall health is True only if running, event bus is healthy,
         # and no handlers failed to instantiate
         healthy = self._is_running and event_bus_healthy and not has_failed_handlers
 
         return {
             "healthy": healthy,
+            "degraded": degraded,
             "is_running": self._is_running,
             "event_bus": event_bus_health,
             "event_bus_healthy": event_bus_healthy,

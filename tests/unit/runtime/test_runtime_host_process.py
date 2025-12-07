@@ -31,6 +31,7 @@ behavior for test-driven development.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -170,20 +171,20 @@ class MockEventBus:
     async def subscribe(
         self,
         topic: str,
-        group: str,
-        callback: Callable[..., object],
+        group_id: str,
+        on_message: Callable[..., object],
     ) -> AsyncMock:
         """Subscribe to a topic.
 
         Args:
             topic: Topic to subscribe to.
-            group: Consumer group ID.
-            callback: Async callback function.
+            group_id: Consumer group identifier for this subscription.
+            on_message: Async callback invoked for each message.
 
         Returns:
             Unsubscribe callback.
         """
-        self.subscriptions.append((topic, group, callback))
+        self.subscriptions.append((topic, group_id, on_message))
         unsubscribe = AsyncMock()
         self.unsubscribe_callbacks.append(unsubscribe)
         return unsubscribe
@@ -216,8 +217,6 @@ class MockEventBus:
             envelope: The envelope to publish.
             topic: Topic to publish to.
         """
-        import json
-
         if hasattr(envelope, "model_dump"):
             value = json.dumps(envelope.model_dump()).encode("utf-8")
         elif isinstance(envelope, dict):
@@ -284,8 +283,6 @@ def sample_envelope() -> dict[str, object]:
 @pytest.fixture
 def sample_event_message(sample_envelope: dict[str, object]) -> ModelEventMessage:
     """Create sample event message for testing."""
-    import json
-
     return ModelEventMessage(
         topic="test.input",
         key=None,
@@ -293,6 +290,7 @@ def sample_event_message(sample_envelope: dict[str, object]) -> ModelEventMessag
         headers=ModelEventHeaders(
             source="test",
             event_type="test.request",
+            correlation_id=uuid4(),
         ),
         offset="0",
         partition=0,
@@ -885,6 +883,91 @@ class TestRuntimeHostProcessHealthCheck:
             await process.stop()
             health = await process.health_check()
             assert health["is_running"] is False
+
+    @pytest.mark.asyncio
+    async def test_health_check_includes_degraded_field(self) -> None:
+        """Test that health_check includes degraded field.
+
+        The degraded field indicates partial functionality:
+        - degraded=False: Fully operational (no handler failures)
+        - degraded=True: Running with reduced functionality (some handlers failed)
+        """
+
+        process = RuntimeHostProcess()
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            await process.start()
+
+            try:
+                health = await process.health_check()
+
+                # Should include degraded field
+                assert "degraded" in health
+                # With no failed handlers, should not be degraded
+                assert health["degraded"] is False
+                assert health["healthy"] is True
+            finally:
+                await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_when_handlers_fail(self) -> None:
+        """Test that health_check shows degraded=True when handlers fail.
+
+        When handlers fail to instantiate during start(), the process
+        should report as degraded (running but with reduced functionality).
+        """
+
+        process = RuntimeHostProcess()
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            await process.start()
+
+            try:
+                # Simulate failed handlers by directly setting _failed_handlers
+                process._failed_handlers = {"test_handler": "Mock failure"}
+
+                health = await process.health_check()
+
+                # Should be degraded since handlers failed
+                assert health["degraded"] is True
+                # Should NOT be healthy since handlers failed
+                assert health["healthy"] is False
+                # Should still be running
+                assert health["is_running"] is True
+                # Failed handlers should be reported
+                assert "test_handler" in health["failed_handlers"]
+            finally:
+                await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_not_degraded_when_stopped(self) -> None:
+        """Test that health_check is not degraded when process is stopped.
+
+        Degraded state requires the process to be running. A stopped
+        process with failed handlers is not degraded, just not running.
+        """
+
+        process = RuntimeHostProcess()
+
+        # Simulate failed handlers even though not started
+        process._failed_handlers = {"test_handler": "Mock failure"}
+
+        health = await process.health_check()
+
+        # Should NOT be degraded since not running
+        assert health["degraded"] is False
+        # Should NOT be healthy since not running
+        assert health["healthy"] is False
+        # Should not be running
+        assert health["is_running"] is False
 
 
 # =============================================================================
