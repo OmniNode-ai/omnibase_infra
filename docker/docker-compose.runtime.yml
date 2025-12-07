@@ -73,12 +73,13 @@ x-runtime-env: &runtime-env
 
   # -------------------------------------------------------------------------
   # PostgreSQL Database Configuration
+  # SECURITY: POSTGRES_PASSWORD is required - no default for fail-fast behavior
   # -------------------------------------------------------------------------
   POSTGRES_HOST: ${POSTGRES_HOST:-omninode-bridge-postgres}
   POSTGRES_PORT: ${POSTGRES_PORT:-5432}
   POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 
   # -------------------------------------------------------------------------
   # Consul Service Discovery Configuration
@@ -89,16 +90,18 @@ x-runtime-env: &runtime-env
 
   # -------------------------------------------------------------------------
   # Vault Secret Management Configuration
+  # SECURITY: VAULT_TOKEN is required - no default for fail-fast behavior
   # -------------------------------------------------------------------------
   VAULT_ADDR: ${VAULT_ADDR:-http://omninode-bridge-vault:8200}
-  VAULT_TOKEN: ${VAULT_TOKEN:-}
+  VAULT_TOKEN: ${VAULT_TOKEN}
 
   # -------------------------------------------------------------------------
   # Redis/Valkey Cache Configuration
+  # SECURITY: REDIS_PASSWORD is required - no default for fail-fast behavior
   # -------------------------------------------------------------------------
   REDIS_HOST: ${REDIS_HOST:-omninode-bridge-redis}
   REDIS_PORT: ${REDIS_PORT:-6379}
-  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  REDIS_PASSWORD: ${REDIS_PASSWORD}
 
   # -------------------------------------------------------------------------
   # ONEX Runtime Configuration

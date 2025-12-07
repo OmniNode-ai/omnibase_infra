@@ -93,9 +93,9 @@ docs/_build/
 site/
 *.md
 !README.md
+!LICENSE
 CHANGELOG.md
 CONTRIBUTING.md
-LICENSE
 
 # =============================================================================
 # OS Files
