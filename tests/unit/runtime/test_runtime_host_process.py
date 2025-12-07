@@ -31,13 +31,12 @@ behavior for test-driven development.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from collections.abc import Callable
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from tests.helpers import DeterministicClock, DeterministicIdGenerator
@@ -77,18 +76,18 @@ class MockHandler:
             handler_type: The type identifier for this handler.
         """
         self.handler_type = handler_type
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[dict[str, object]] = []
         self.initialized: bool = False
         self.shutdown_called: bool = False
         self.execute_delay: float = 0.0
         self.execute_error: Exception | None = None
 
-    async def initialize(self, config: dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, object]) -> None:
         """Initialize the mock handler."""
         self.initialized = True
         self.config = config
 
-    async def execute(self, envelope: dict[str, Any]) -> dict[str, Any]:
+    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
         """Execute the mock handler with the given envelope.
 
         Records the call and returns a success response.
@@ -118,7 +117,7 @@ class MockHandler:
         self.shutdown_called = True
         self.initialized = False
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> dict[str, object]:
         """Return health check status."""
         return {
             "healthy": self.initialized,
@@ -138,7 +137,7 @@ class MockFailingHandler(MockHandler):
         super().__init__(handler_type="failing")
         self.error_message = error_message
 
-    async def execute(self, envelope: dict[str, Any]) -> dict[str, Any]:
+    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
         """Always raise an exception."""
         self.calls.append(envelope)
         raise RuntimeError(self.error_message)
@@ -151,7 +150,7 @@ class MockEventBus:
         """Initialize mock event bus."""
         self.started: bool = False
         self.closed: bool = False
-        self.subscriptions: list[tuple[str, str, Any]] = []
+        self.subscriptions: list[tuple[str, str, Callable[..., object]]] = []
         self.published: list[tuple[str, bytes | None, bytes]] = []
         self.unsubscribe_callbacks: list[AsyncMock] = []
 
@@ -172,7 +171,7 @@ class MockEventBus:
         self,
         topic: str,
         group: str,
-        callback: Any,
+        callback: Callable[..., object],
     ) -> AsyncMock:
         """Subscribe to a topic.
 
@@ -208,7 +207,7 @@ class MockEventBus:
 
     async def publish_envelope(
         self,
-        envelope: Any,
+        envelope: dict[str, object] | object,
         topic: str,
     ) -> None:
         """Publish an envelope to a topic.
@@ -227,7 +226,7 @@ class MockEventBus:
             value = str(envelope).encode("utf-8")
         self.published.append((topic, None, value))
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> dict[str, object]:
         """Return health check status."""
         return {
             "healthy": self.started and not self.closed,
@@ -272,7 +271,7 @@ def deterministic_clock() -> DeterministicClock:
 
 
 @pytest.fixture
-def sample_envelope() -> dict[str, Any]:
+def sample_envelope() -> dict[str, object]:
     """Create sample envelope for testing."""
     return {
         "operation": "http.get",
@@ -283,7 +282,7 @@ def sample_envelope() -> dict[str, Any]:
 
 
 @pytest.fixture
-def sample_event_message(sample_envelope: dict[str, Any]) -> ModelEventMessage:
+def sample_event_message(sample_envelope: dict[str, object]) -> ModelEventMessage:
     """Create sample event message for testing."""
     import json
 
@@ -343,7 +342,7 @@ class TestRuntimeHostProcessInitialization:
     async def test_initializes_with_custom_config(self) -> None:
         """Test that RuntimeHostProcess accepts custom configuration."""
 
-        config = {
+        config: dict[str, object] = {
             "input_topic": "custom.input",
             "output_topic": "custom.output",
             "group_id": "custom-group",
@@ -498,7 +497,7 @@ class TestRuntimeHostProcessEnvelopeRouting:
     async def test_routes_envelope_to_correct_handler(
         self,
         mock_handler: MockHandler,
-        sample_envelope: dict[str, Any],
+        sample_envelope: dict[str, object],
     ) -> None:
         """Test that envelopes are routed to the correct handler based on type.
 
@@ -523,7 +522,7 @@ class TestRuntimeHostProcessEnvelopeRouting:
     @pytest.mark.asyncio
     async def test_publishes_response_to_output_topic(
         self,
-        sample_envelope: dict[str, Any],
+        sample_envelope: dict[str, object],
     ) -> None:
         """Test that handler responses are published to the output topic."""
 
@@ -581,7 +580,11 @@ class TestRuntimeHostProcessEnvelopeRouting:
                 # All should be processed in order
                 assert len(mock_handler.calls) == 3
                 for i, call in enumerate(mock_handler.calls):
-                    assert f"api/{i}" in call["payload"]["url"]
+                    payload = call["payload"]
+                    assert isinstance(payload, dict)
+                    url = payload["url"]
+                    assert isinstance(url, str)
+                    assert f"api/{i}" in url
             finally:
                 await process.stop()
 
@@ -673,8 +676,8 @@ class TestRuntimeHostProcessErrorHandling:
                     else:
                         data = published_envelope
 
-                    # Should preserve correlation_id
-                    assert data.get("correlation_id") == correlation_id
+                    # Should preserve correlation_id (as string after serialization)
+                    assert data.get("correlation_id") == str(correlation_id)
                     # Should indicate failure
                     assert data.get("success") is False or data.get("status") == "error"
                     # Should include error information
@@ -791,8 +794,8 @@ class TestRuntimeHostProcessErrorHandling:
                 else:
                     data = published_envelope
 
-                # Correlation ID must be preserved
-                assert data.get("correlation_id") == correlation_id
+                # Correlation ID must be preserved (as string after serialization)
+                assert data.get("correlation_id") == str(correlation_id)
         finally:
             await process.stop()
 
@@ -831,19 +834,31 @@ class TestRuntimeHostProcessHealthCheck:
         """
 
         process = RuntimeHostProcess()
-        await process.start()
 
-        try:
-            health = await process.health_check()
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        # failures from affecting health status (singleton registry may have
+        # handlers from other tests that fail without proper config)
+        async def noop_populate() -> None:
+            pass
 
-            # Should include event_bus status
-            assert "event_bus" in health or "event_bus_healthy" in health
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            await process.start()
 
-            # When running, should be healthy
-            assert health["healthy"] is True
-            assert health["is_running"] is True
-        finally:
-            await process.stop()
+            try:
+                health = await process.health_check()
+
+                # Should include event_bus status
+                assert "event_bus" in health or "event_bus_healthy" in health
+
+                # Should include failed_handlers and registered_handlers
+                assert "failed_handlers" in health
+                assert "registered_handlers" in health
+
+                # When running with no failed handlers, should be healthy
+                assert health["healthy"] is True
+                assert health["is_running"] is True
+            finally:
+                await process.stop()
 
     @pytest.mark.asyncio
     async def test_health_check_reflects_stopped_state(self) -> None:
@@ -855,15 +870,21 @@ class TestRuntimeHostProcessHealthCheck:
         health = await process.health_check()
         assert health["is_running"] is False
 
-        # After starting
-        await process.start()
-        health = await process.health_check()
-        assert health["is_running"] is True
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        # failures from affecting health status
+        async def noop_populate() -> None:
+            pass
 
-        # After stopping
-        await process.stop()
-        health = await process.health_check()
-        assert health["is_running"] is False
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            # After starting
+            await process.start()
+            health = await process.health_check()
+            assert health["is_running"] is True
+
+            # After stopping
+            await process.stop()
+            health = await process.health_check()
+            assert health["is_running"] is False
 
 
 # =============================================================================

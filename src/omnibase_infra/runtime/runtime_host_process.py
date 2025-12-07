@@ -85,6 +85,10 @@ class RuntimeHostProcess:
         health = await process.health_check()
         await process.stop()
         ```
+
+    Note:
+        MVP Limitation: The stop() method performs immediate shutdown without
+        draining in-flight messages. See stop() docstring for details.
     """
 
     def __init__(
@@ -129,6 +133,10 @@ class RuntimeHostProcess:
         # Handler registry (handler_type -> handler instance)
         # This will be populated from the singleton registry during start()
         self._handlers: dict[str, ProtocolHandler] = {}
+
+        # Track failed handler instantiations (handler_type -> error message)
+        # Used by health_check() to report degraded state
+        self._failed_handlers: dict[str, str] = {}
 
         logger.debug(
             "RuntimeHostProcess initialized",
@@ -252,6 +260,18 @@ class RuntimeHostProcess:
 
         This method is idempotent - calling stop() on an already stopped
         process is safe and has no effect.
+
+        Note:
+            MVP Limitation: This implementation immediately unsubscribes without
+            draining in-flight envelopes. Any messages currently being processed
+            may be lost. For production use cases requiring graceful shutdown,
+            a drain period should be implemented.
+
+        TODO(OMN-XXX): Implement graceful shutdown with configurable drain period:
+            - Add drain_timeout_seconds parameter (default: 30)
+            - Wait for in-flight messages to complete before unsubscribing
+            - Track pending message count for shutdown readiness
+            - Add shutdown_ready() method to check drain status
         """
         if not self._is_running:
             logger.debug("RuntimeHostProcess already stopped, skipping")
@@ -340,6 +360,9 @@ class RuntimeHostProcess:
                 )
 
             except Exception as e:
+                # Track the failure for health_check() reporting
+                self._failed_handlers[handler_type] = str(e)
+
                 # Log error but continue with other handlers
                 # This allows partial handler availability
                 correlation_id = uuid4()
@@ -356,7 +379,7 @@ class RuntimeHostProcess:
                 infra_error.__cause__ = e
 
                 logger.warning(
-                    "Failed to instantiate handler",
+                    "Failed to instantiate handler, skipping",
                     extra={
                         "handler_type": handler_type,
                         "error": str(e),
@@ -556,58 +579,56 @@ class RuntimeHostProcess:
             "correlation_id": final_correlation_id,
         }
 
+    def _serialize_envelope(self, envelope: dict[str, object]) -> dict[str, object]:
+        """Recursively convert UUID objects to strings for JSON serialization.
+
+        Args:
+            envelope: Envelope dict that may contain UUID objects.
+
+        Returns:
+            New dict with all UUIDs converted to strings.
+        """
+
+        def convert_value(value: object) -> object:
+            if isinstance(value, UUID):
+                return str(value)
+            elif isinstance(value, dict):
+                return {k: convert_value(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [convert_value(item) for item in value]
+            return value
+
+        return {k: convert_value(v) for k, v in envelope.items()}
+
     async def _publish_envelope_safe(
         self, envelope: dict[str, object], topic: str
     ) -> None:
         """Publish envelope with UUID serialization support.
 
-        This method wraps the event bus publish_envelope to handle UUID
-        serialization safely. It preserves the original envelope structure
-        (including UUID objects) for mocked tests, but ensures JSON
-        serialization works for the actual event bus implementation.
-
-        For testing: When publish_envelope is mocked, the mock receives
-        the original envelope dict with UUIDs intact.
-
-        For production: When publish_envelope is not mocked, this catches
-        any JSON serialization errors and retries with UUIDs converted
-        to strings.
+        Converts any UUID objects to strings before publishing to ensure
+        JSON serialization works correctly.
 
         Args:
             envelope: Envelope dict (may contain UUID objects).
             topic: Target topic to publish to.
         """
-        try:
-            # First try publishing with UUIDs intact
-            # If mocked, this succeeds and tests see UUIDs
-            # If not mocked, this may raise TypeError for UUIDs
-            await self._event_bus.publish_envelope(envelope, topic)
-        except TypeError:
-            # TypeError during JSON serialization - attempt UUID conversion
-            # This handles UUIDs and other non-serializable types gracefully
-            def uuid_serializer(obj: object) -> object:
-                if isinstance(obj, UUID):
-                    return str(obj)
-                raise TypeError(
-                    f"Object of type {type(obj).__name__} is not JSON serializable"
-                )
-
-            # Serialize the envelope to JSON-safe dict
-            json_str = json.dumps(envelope, default=uuid_serializer)
-            json_safe_envelope = json.loads(json_str)
-
-            # Retry with JSON-safe envelope
-            await self._event_bus.publish_envelope(json_safe_envelope, topic)
+        # Always serialize UUIDs upfront - single code path
+        json_safe_envelope = self._serialize_envelope(envelope)
+        await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
     async def health_check(self) -> dict[str, object]:
         """Return health check status.
 
         Returns:
             Dictionary with health status information:
-                - healthy: Overall health status
+                - healthy: Overall health status (True only if running,
+                  event bus healthy, and no handlers failed to instantiate)
                 - is_running: Whether the process is running
                 - event_bus: Event bus health status (if running)
                 - event_bus_healthy: Boolean indicating event bus health
+                - failed_handlers: Dict of handler_type -> error message for
+                  handlers that failed to instantiate during start()
+                - registered_handlers: List of successfully registered handler types
         """
         # Get event bus health if available
         event_bus_health: dict[str, object] = {}
@@ -644,14 +665,20 @@ class RuntimeHostProcess:
             event_bus_health = {"error": str(e), "correlation_id": str(correlation_id)}
             event_bus_healthy = False
 
-        # Overall health is True only if running and event bus is healthy
-        healthy = self._is_running and event_bus_healthy
+        # Check for failed handlers - any failures indicate degraded state
+        has_failed_handlers = len(self._failed_handlers) > 0
+
+        # Overall health is True only if running, event bus is healthy,
+        # and no handlers failed to instantiate
+        healthy = self._is_running and event_bus_healthy and not has_failed_handlers
 
         return {
             "healthy": healthy,
             "is_running": self._is_running,
             "event_bus": event_bus_health,
             "event_bus_healthy": event_bus_healthy,
+            "failed_handlers": self._failed_handlers,
+            "registered_handlers": list(self._handlers.keys()),
         }
 
     def register_handler(self, handler_type: str, handler: ProtocolHandler) -> None:
