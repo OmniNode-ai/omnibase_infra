@@ -62,7 +62,7 @@ class TestLoadRuntimeConfig:
         assert isinstance(config, ModelRuntimeConfig)
         assert config.input_topic == "test-requests"
         assert config.output_topic == "test-responses"
-        assert config.group_id == "test-group"
+        assert config.consumer_group == "test-group"
 
     def test_load_config_file_not_found_uses_defaults(self, tmp_path: Path) -> None:
         """Test that missing config file returns ModelRuntimeConfig with defaults."""
@@ -71,7 +71,7 @@ class TestLoadRuntimeConfig:
         assert isinstance(config, ModelRuntimeConfig)
         assert config.input_topic == DEFAULT_INPUT_TOPIC
         assert config.output_topic == DEFAULT_OUTPUT_TOPIC
-        assert config.group_id == DEFAULT_GROUP_ID
+        assert config.consumer_group == DEFAULT_GROUP_ID
 
     def test_load_config_with_env_overrides(self, tmp_path: Path) -> None:
         """Test that environment variables override defaults when no config file."""
@@ -88,7 +88,7 @@ class TestLoadRuntimeConfig:
             assert isinstance(config, ModelRuntimeConfig)
             assert config.input_topic == "env-requests"
             assert config.output_topic == "env-responses"
-            assert config.group_id == "env-group"
+            assert config.consumer_group == "env-group"
 
     def test_load_config_empty_yaml(self, tmp_path: Path) -> None:
         """Test loading from empty YAML file returns ModelRuntimeConfig with defaults."""
@@ -105,7 +105,7 @@ class TestLoadRuntimeConfig:
         assert isinstance(config, ModelRuntimeConfig)
         assert config.input_topic == DEFAULT_INPUT_TOPIC
         assert config.output_topic == DEFAULT_OUTPUT_TOPIC
-        assert config.group_id == DEFAULT_GROUP_ID
+        assert config.consumer_group == DEFAULT_GROUP_ID
 
     def test_load_config_invalid_yaml_raises_error(self, tmp_path: Path) -> None:
         """Test that invalid YAML raises ProtocolConfigurationError."""

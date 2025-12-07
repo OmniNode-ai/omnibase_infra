@@ -179,14 +179,13 @@ async def bootstrap() -> int:
         environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
         event_bus = InMemoryEventBus(
             environment=environment,
-            group=config.group_id,
+            group=config.consumer_group,
         )
 
         # 4. Create runtime host process with config
-        # Pass config as dict for backwards compatibility with RuntimeHostProcess
-        # Cast model_dump() result to dict[str, object] to avoid implicit Any typing
-        # (Pydantic's model_dump() returns dict[str, Any] but all our model fields
-        # are strongly typed, so the cast is safe)
+        # RuntimeHostProcess accepts config as dict; cast model_dump() result to
+        # dict[str, object] to avoid implicit Any typing (Pydantic's model_dump()
+        # returns dict[str, Any] but all our model fields are strongly typed)
         runtime = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic=config.input_topic,

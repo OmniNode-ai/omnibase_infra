@@ -147,10 +147,5 @@ class ModelRuntimeConfig(BaseModel):
         description="Shutdown configuration",
     )
 
-    @property
-    def group_id(self) -> str:
-        """Return consumer_group as group_id for backwards compatibility."""
-        return self.consumer_group
-
 
 __all__: list[str] = ["ModelRuntimeConfig"]
