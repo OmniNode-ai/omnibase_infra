@@ -202,10 +202,19 @@ async def bootstrap() -> int:
             logger.info("Received %s, initiating graceful shutdown...", sig.name)
             shutdown_event.set()
 
-        # Register signal handlers (Unix-only)
+        # Register signal handlers for graceful shutdown
         if sys.platform != "win32":
+            # Unix: Use asyncio's signal handler for proper event loop integration
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(sig, handle_shutdown, sig)
+        else:
+            # Windows: asyncio signal handlers not supported, use signal.signal()
+            # for SIGINT (Ctrl+C). Note: SIGTERM not available on Windows.
+            def windows_handler(signum: int, frame: object) -> None:
+                """Windows-compatible signal handler wrapper."""
+                handle_shutdown(signal.Signals(signum))
+
+            signal.signal(signal.SIGINT, windows_handler)
 
         # 6. Start and run
         logger.info("Starting ONEX runtime...")
@@ -239,12 +248,14 @@ async def bootstrap() -> int:
         return 1
 
     except Exception as e:
-        # Wrap unexpected errors in RuntimeHostError with proper context and chaining
-        logger.exception("ONEX runtime failed with unexpected error: %s", e)
-        raise RuntimeHostError(
-            f"Unexpected error during runtime bootstrap: {e}",
-            context=bootstrap_context,
-        ) from e
+        # Unexpected errors: log with full context and return error code
+        # (consistent with ProtocolConfigurationError and RuntimeHostError handlers)
+        logger.exception(
+            "ONEX runtime failed with unexpected error: %s (correlation_id=%s)",
+            e,
+            correlation_id,
+        )
+        return 1
 
     finally:
         # Guard cleanup - only attempt if runtime was initialized and not already stopped

@@ -12,7 +12,6 @@ Tests the contract-driven bootstrap entrypoint including:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -21,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 
-from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.kernel import (
     DEFAULT_GROUP_ID,
     DEFAULT_INPUT_TOPIC,
@@ -73,22 +72,20 @@ class TestLoadRuntimeConfig:
         assert config.output_topic == DEFAULT_OUTPUT_TOPIC
         assert config.consumer_group == DEFAULT_GROUP_ID
 
-    def test_load_config_with_env_overrides(self, tmp_path: Path) -> None:
+    def test_load_config_with_env_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that environment variables override defaults when no config file."""
-        with patch.dict(
-            os.environ,
-            {
-                "ONEX_INPUT_TOPIC": "env-requests",
-                "ONEX_OUTPUT_TOPIC": "env-responses",
-                "ONEX_GROUP_ID": "env-group",
-            },
-        ):
-            config = load_runtime_config(tmp_path)
+        monkeypatch.setenv("ONEX_INPUT_TOPIC", "env-requests")
+        monkeypatch.setenv("ONEX_OUTPUT_TOPIC", "env-responses")
+        monkeypatch.setenv("ONEX_GROUP_ID", "env-group")
 
-            assert isinstance(config, ModelRuntimeConfig)
-            assert config.input_topic == "env-requests"
-            assert config.output_topic == "env-responses"
-            assert config.consumer_group == "env-group"
+        config = load_runtime_config(tmp_path)
+
+        assert isinstance(config, ModelRuntimeConfig)
+        assert config.input_topic == "env-requests"
+        assert config.output_topic == "env-responses"
+        assert config.consumer_group == "env-group"
 
     def test_load_config_empty_yaml(self, tmp_path: Path) -> None:
         """Test loading from empty YAML file returns ModelRuntimeConfig with defaults."""
@@ -168,10 +165,10 @@ class TestBootstrap:
         mock_instance.start.assert_called_once()
         mock_instance.stop.assert_called_once()
 
-    async def test_bootstrap_raises_runtime_host_error_on_exception(
+    async def test_bootstrap_returns_error_on_unexpected_exception(
         self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
     ) -> None:
-        """Test that bootstrap raises RuntimeHostError on unexpected exception."""
+        """Test that bootstrap returns 1 on unexpected exception."""
         mock_instance = mock_runtime_host.return_value
         mock_instance.start = AsyncMock(side_effect=Exception("Test error"))
 
@@ -181,11 +178,9 @@ class TestBootstrap:
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
 
-            with pytest.raises(RuntimeHostError) as exc_info:
-                await bootstrap()
+            exit_code = await bootstrap()
 
-        assert "Unexpected error during runtime bootstrap" in str(exc_info.value)
-        assert exc_info.value.__cause__ is not None
+        assert exit_code == 1
         # Cleanup attempted via finally block
         mock_instance.stop.assert_called_once()
 
@@ -205,16 +200,19 @@ class TestBootstrap:
         mock_runtime_host.return_value.stop.assert_not_called()
 
     async def test_bootstrap_creates_event_bus_with_environment(
-        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that bootstrap creates event bus with correct environment."""
-        with patch.dict(os.environ, {"ONEX_ENVIRONMENT": "test-env"}):
-            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
-                event_instance = MagicMock()
-                event_instance.wait = AsyncMock(return_value=None)
-                mock_event.return_value = event_instance
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
 
-                await bootstrap()
+            await bootstrap()
 
         # Verify event bus was created with environment
         mock_event_bus.assert_called_once()
@@ -222,11 +220,31 @@ class TestBootstrap:
         assert call_kwargs["environment"] == "test-env"
 
     async def test_bootstrap_uses_contracts_dir_from_env(
-        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that bootstrap uses CONTRACTS_DIR from environment."""
         with TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"CONTRACTS_DIR": tmpdir}):
+            monkeypatch.setenv("CONTRACTS_DIR", tmpdir)
+            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+                event_instance = MagicMock()
+                event_instance.wait = AsyncMock(return_value=None)
+                mock_event.return_value = event_instance
+
+                exit_code = await bootstrap()
+
+        assert exit_code == 0
+
+    async def test_bootstrap_handles_windows_signal_setup(
+        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+    ) -> None:
+        """Test that bootstrap sets up signal handlers on Windows."""
+        import signal
+
+        with patch("omnibase_infra.runtime.kernel.sys.platform", "win32"):
+            with patch("omnibase_infra.runtime.kernel.signal.signal") as mock_signal:
                 with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
                     event_instance = MagicMock()
                     event_instance.wait = AsyncMock(return_value=None)
@@ -234,7 +252,11 @@ class TestBootstrap:
 
                     exit_code = await bootstrap()
 
-        assert exit_code == 0
+                assert exit_code == 0
+                # Verify signal.signal was called for SIGINT on Windows
+                mock_signal.assert_called_once()
+                call_args = mock_signal.call_args
+                assert call_args[0][0] == signal.SIGINT
 
 
 class TestConfigureLogging:
@@ -252,15 +274,15 @@ class TestConfigureLogging:
             call_kwargs = mock_config.call_args[1]
             assert call_kwargs["level"] == 20  # logging.INFO
 
-    def test_configure_logging_from_env(self) -> None:
+    def test_configure_logging_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that log level can be set via environment."""
+        monkeypatch.setenv("ONEX_LOG_LEVEL", "DEBUG")
         with patch("logging.basicConfig") as mock_config:
-            with patch.dict(os.environ, {"ONEX_LOG_LEVEL": "DEBUG"}):
-                configure_logging()
+            configure_logging()
 
-            mock_config.assert_called_once()
-            call_kwargs = mock_config.call_args[1]
-            assert call_kwargs["level"] == 10  # logging.DEBUG
+        mock_config.assert_called_once()
+        call_kwargs = mock_config.call_args[1]
+        assert call_kwargs["level"] == 10  # logging.DEBUG
 
 
 class TestMain:
@@ -292,19 +314,21 @@ class TestMain:
 class TestIntegration:
     """Integration tests for kernel with real components."""
 
-    async def test_full_bootstrap_with_real_event_bus(self) -> None:
+    async def test_full_bootstrap_with_real_event_bus(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test bootstrap with real InMemoryEventBus but mocked wait."""
         # This test uses real components except for the shutdown wait
         with TemporaryDirectory() as tmpdir:
             contracts_dir = Path(tmpdir)
+            monkeypatch.setenv("CONTRACTS_DIR", str(contracts_dir))
 
-            with patch.dict(os.environ, {"CONTRACTS_DIR": str(contracts_dir)}):
-                with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
-                    event_instance = MagicMock()
-                    event_instance.wait = AsyncMock(return_value=None)
-                    event_instance.set = MagicMock()
-                    mock_event.return_value = event_instance
+            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+                event_instance = MagicMock()
+                event_instance.wait = AsyncMock(return_value=None)
+                event_instance.set = MagicMock()
+                mock_event.return_value = event_instance
 
-                    exit_code = await bootstrap()
+                exit_code = await bootstrap()
 
         assert exit_code == 0
