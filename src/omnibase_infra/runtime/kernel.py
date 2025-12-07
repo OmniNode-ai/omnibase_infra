@@ -10,8 +10,9 @@ The kernel is responsible for:
     2. Creating and starting the InMemoryEventBus
     3. Building the dependency container (event_bus, config)
     4. Instantiating RuntimeHostProcess with contract-driven configuration
-    5. Setting up graceful shutdown signal handlers
-    6. Running the runtime until shutdown is requested
+    5. Starting the HTTP health server for Docker/K8s probes
+    6. Setting up graceful shutdown signal handlers
+    7. Running the runtime until shutdown is requested
 
 Usage:
     # Run with default contracts directory (./contracts)
@@ -22,6 +23,12 @@ Usage:
 
     # Or via the installed entrypoint
     onex-runtime
+
+Environment Variables:
+    CONTRACTS_DIR: Path to contracts directory (default: ./contracts)
+    ONEX_HTTP_PORT: Port for health check HTTP server (default: 8085)
+    ONEX_LOG_LEVEL: Logging level (default: INFO)
+    ONEX_ENVIRONMENT: Runtime environment name (default: local)
 
 Note:
     This kernel uses the existing RuntimeHostProcess as the core runtime engine.
@@ -52,6 +59,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
@@ -143,14 +151,16 @@ async def bootstrap() -> int:
     2. Loads runtime configuration from contracts or defaults
     3. Creates and starts InMemoryEventBus
     4. Creates RuntimeHostProcess with configuration
-    5. Sets up signal handlers for graceful shutdown
-    6. Runs until shutdown signal received
+    5. Starts HTTP health server for Docker/K8s probes
+    6. Sets up signal handlers for graceful shutdown
+    7. Runs until shutdown signal received
 
     Returns:
         Exit code (0 for success, non-zero for errors).
     """
-    # Initialize runtime to None for cleanup guard
+    # Initialize runtime and health server to None for cleanup guard
     runtime: RuntimeHostProcess | None = None
+    health_server: HealthServer | None = None
     correlation_id = uuid4()
 
     # Create error context for bootstrap operations
@@ -229,15 +239,37 @@ async def bootstrap() -> int:
 
             signal.signal(signal.SIGINT, windows_handler)
 
-        # 6. Start and run
+        # 6. Start runtime and health server
         logger.info("Starting ONEX runtime...")
         await runtime.start()
 
+        # 7. Start HTTP health server for Docker/K8s probes
+        # Port can be configured via ONEX_HTTP_PORT environment variable
+        http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
+        try:
+            http_port = int(http_port_str)
+        except ValueError:
+            logger.warning(
+                "Invalid ONEX_HTTP_PORT value '%s', using default %d",
+                http_port_str,
+                DEFAULT_HTTP_PORT,
+            )
+            http_port = DEFAULT_HTTP_PORT
+
+        health_server = HealthServer(
+            runtime=runtime,
+            port=http_port,
+            version=KERNEL_VERSION,
+        )
+        await health_server.start()
+
         logger.info(
             "ONEX runtime started successfully. "
-            "Listening on topic '%s', publishing to '%s'",
+            "Listening on topic '%s', publishing to '%s'. "
+            "Health endpoint: http://0.0.0.0:%d/health",
             runtime.input_topic,
             runtime.output_topic,
+            http_port,
         )
 
         # Wait for shutdown signal
@@ -248,6 +280,20 @@ async def bootstrap() -> int:
             "Shutdown signal received, stopping runtime (timeout=%ss)...",
             grace_period,
         )
+
+        # Stop health server first (fast, non-blocking)
+        if health_server is not None:
+            try:
+                await health_server.stop()
+            except Exception as health_stop_error:
+                logger.warning(
+                    "Failed to stop health server: %s (correlation_id=%s)",
+                    health_stop_error,
+                    correlation_id,
+                )
+            health_server = None
+
+        # Stop runtime with timeout
         try:
             await asyncio.wait_for(runtime.stop(), timeout=grace_period)
         except TimeoutError:
@@ -281,7 +327,17 @@ async def bootstrap() -> int:
         return 1
 
     finally:
-        # Guard cleanup - only attempt if runtime was initialized and not already stopped
+        # Guard cleanup - stop health server and runtime if not already stopped
+        if health_server is not None:
+            try:
+                await health_server.stop()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to stop health server during cleanup: %s (correlation_id=%s)",
+                    cleanup_error,
+                    correlation_id,
+                )
+
         if runtime is not None:
             try:
                 await runtime.stop()

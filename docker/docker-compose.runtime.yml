@@ -28,8 +28,8 @@
 #   - all: All services including workers
 #
 # Network:
-#   Connects to external omninode-bridge-network for infrastructure access.
-#   Create network if needed: docker network create omninode-bridge-network
+#   Uses internal omnibase-infra-network (created automatically by this compose file).
+#   For external infrastructure services, use extra_hosts with REMOTE_HOST env var.
 
 name: omnibase-infra-runtime
 

@@ -36,6 +36,11 @@ from omnibase_infra.runtime.handler_registry import (
     get_handler_registry,
     register_handlers_from_config,
 )
+from omnibase_infra.runtime.health_server import (
+    DEFAULT_HTTP_HOST,
+    DEFAULT_HTTP_PORT,
+    HealthServer,
+)
 from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
@@ -56,6 +61,10 @@ __all__: list[str] = [
     "load_runtime_config",
     # Runtime host
     "RuntimeHostProcess",
+    # Health server
+    "HealthServer",
+    "DEFAULT_HTTP_PORT",
+    "DEFAULT_HTTP_HOST",
     # Handler type constants
     "HANDLER_TYPE_HTTP",
     "HANDLER_TYPE_DATABASE",

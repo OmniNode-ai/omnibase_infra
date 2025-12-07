@@ -156,11 +156,26 @@ class TestBootstrap:
             mock_cls.return_value = mock_instance
             yield mock_cls
 
+    @pytest.fixture
+    def mock_health_server(self) -> Generator[MagicMock, None, None]:
+        """Create a mock HealthServer."""
+        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.start = AsyncMock()
+            mock_instance.stop = AsyncMock()
+            mock_instance.is_running = True
+            mock_cls.return_value = mock_instance
+            yield mock_cls
+
     async def test_bootstrap_starts_and_stops_runtime(
-        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
     ) -> None:
         """Test that bootstrap starts runtime and handles shutdown."""
         mock_instance = mock_runtime_host.return_value
+        mock_health_instance = mock_health_server.return_value
 
         # Create a task that will set shutdown after a short delay
         async def delayed_shutdown() -> int:
@@ -178,9 +193,14 @@ class TestBootstrap:
         assert exit_code == 0
         mock_instance.start.assert_called_once()
         mock_instance.stop.assert_called_once()
+        mock_health_instance.start.assert_called_once()
+        mock_health_instance.stop.assert_called_once()
 
     async def test_bootstrap_returns_error_on_unexpected_exception(
-        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
     ) -> None:
         """Test that bootstrap returns 1 on unexpected exception."""
         mock_instance = mock_runtime_host.return_value
@@ -199,7 +219,10 @@ class TestBootstrap:
         mock_instance.stop.assert_called_once()
 
     async def test_bootstrap_returns_error_on_config_error(
-        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
     ) -> None:
         """Test that bootstrap returns 1 on ProtocolConfigurationError."""
         # Force config load to raise ProtocolConfigurationError
@@ -217,6 +240,7 @@ class TestBootstrap:
         self,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that bootstrap creates event bus with correct environment."""
@@ -237,6 +261,7 @@ class TestBootstrap:
         self,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that bootstrap uses CONTRACTS_DIR from environment."""
@@ -252,7 +277,10 @@ class TestBootstrap:
         assert exit_code == 0
 
     async def test_bootstrap_handles_windows_signal_setup(
-        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
     ) -> None:
         """Test that bootstrap sets up signal handlers on Windows."""
         import signal
@@ -273,7 +301,10 @@ class TestBootstrap:
                 assert call_args[0][0] == signal.SIGINT
 
     async def test_bootstrap_shutdown_timeout_logs_warning(
-        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
     ) -> None:
         """Test that shutdown timeout logs warning and continues gracefully."""
         import asyncio
@@ -322,7 +353,10 @@ class TestBootstrap:
         assert call_args[1] == 0  # grace_period_seconds value
 
     async def test_bootstrap_uses_config_grace_period(
-        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
     ) -> None:
         """Test that bootstrap uses grace_period_seconds from config."""
         import asyncio
@@ -417,18 +451,25 @@ class TestIntegration:
     async def test_full_bootstrap_with_real_event_bus(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test bootstrap with real InMemoryEventBus but mocked wait."""
-        # This test uses real components except for the shutdown wait
+        """Test bootstrap with real InMemoryEventBus but mocked wait and health server."""
+        # This test uses real components except for the shutdown wait and health server
+        # Health server is mocked to avoid port conflicts in parallel tests
         with TemporaryDirectory() as tmpdir:
             contracts_dir = Path(tmpdir)
             monkeypatch.setenv("CONTRACTS_DIR", str(contracts_dir))
 
-            with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
-                event_instance = MagicMock()
-                event_instance.wait = AsyncMock(return_value=None)
-                event_instance.set = MagicMock()
-                mock_event.return_value = event_instance
+            with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_health:
+                mock_health_instance = MagicMock()
+                mock_health_instance.start = AsyncMock()
+                mock_health_instance.stop = AsyncMock()
+                mock_health.return_value = mock_health_instance
 
-                exit_code = await bootstrap()
+                with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+                    event_instance = MagicMock()
+                    event_instance.wait = AsyncMock(return_value=None)
+                    event_instance.set = MagicMock()
+                    mock_event.return_value = event_instance
+
+                    exit_code = await bootstrap()
 
         assert exit_code == 0
