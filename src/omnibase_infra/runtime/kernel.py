@@ -37,7 +37,9 @@ import logging
 import os
 import signal
 import sys
+from importlib.metadata import version as get_package_version
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import yaml
@@ -55,8 +57,13 @@ from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)
 
-# Kernel version - read from contract or fallback to package version
-KERNEL_VERSION = "1.0.0"  # Matches contract_version in runtime_config.yaml
+# Kernel version - read from installed package metadata to avoid version drift
+# between code and pyproject.toml. Falls back to "unknown" if package is not
+# installed (e.g., during development without editable install).
+try:
+    KERNEL_VERSION = get_package_version("omnibase_infra")
+except Exception:
+    KERNEL_VERSION = "unknown"
 
 # Default configuration
 DEFAULT_CONTRACTS_DIR = "./contracts"
@@ -164,7 +171,11 @@ async def bootstrap() -> int:
         logger.debug("Runtime config: %s", config.model_dump())
 
         # 3. Create event bus
-        # Environment override takes precedence over config
+        # MVP limitation: Always creates InMemoryEventBus regardless of config.event_bus.type.
+        # The config model supports "kafka" as a type value for future compatibility,
+        # but Kafka event bus implementation is not yet available. When Kafka support
+        # is added, this section should dispatch based on config.event_bus.type.
+        # Environment override takes precedence over config for environment field.
         environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
         event_bus = InMemoryEventBus(
             environment=environment,
@@ -173,11 +184,14 @@ async def bootstrap() -> int:
 
         # 4. Create runtime host process with config
         # Pass config as dict for backwards compatibility with RuntimeHostProcess
+        # Cast model_dump() result to dict[str, object] to avoid implicit Any typing
+        # (Pydantic's model_dump() returns dict[str, Any] but all our model fields
+        # are strongly typed, so the cast is safe)
         runtime = RuntimeHostProcess(
             event_bus=event_bus,
             input_topic=config.input_topic,
             output_topic=config.output_topic,
-            config=config.model_dump(),
+            config=cast(dict[str, object], config.model_dump()),
         )
 
         # 5. Setup graceful shutdown
@@ -252,6 +266,15 @@ def configure_logging() -> None:
 
     Sets up structured logging with appropriate log level from
     environment variable ONEX_LOG_LEVEL (default: INFO).
+
+    Note on bootstrap order (intentional design):
+        This function is called BEFORE runtime config is loaded because we need
+        logging available during config loading itself (to log errors, warnings,
+        and info about config discovery). Therefore, logging configuration uses
+        environment variables rather than contract-based config values like
+        config.logging.level or config.logging.format. This is a deliberate
+        chicken-and-egg solution: env vars control early bootstrap logging,
+        while contract config controls runtime behavior after bootstrap.
     """
     log_level = os.getenv("ONEX_LOG_LEVEL", "INFO").upper()
     logging.basicConfig(

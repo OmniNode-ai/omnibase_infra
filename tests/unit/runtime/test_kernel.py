@@ -240,16 +240,15 @@ class TestBootstrap:
 class TestConfigureLogging:
     """Tests for configure_logging function."""
 
-    def test_configure_logging_default_level(self) -> None:
+    def test_configure_logging_default_level(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that default log level is INFO."""
+        monkeypatch.delenv("ONEX_LOG_LEVEL", raising=False)
         with patch("logging.basicConfig") as mock_config:
-            with patch.dict(os.environ, {}, clear=True):
-                # Remove ONEX_LOG_LEVEL if present
-                os.environ.pop("ONEX_LOG_LEVEL", None)
-                configure_logging()
+            configure_logging()
 
             mock_config.assert_called_once()
-            # Check that level is INFO (20)
             call_kwargs = mock_config.call_args[1]
             assert call_kwargs["level"] == 20  # logging.INFO
 

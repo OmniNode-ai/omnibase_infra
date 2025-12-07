@@ -24,7 +24,7 @@ class ModelLoggingConfig(BaseModel):
 
     model_config = ConfigDict(
         strict=True,
-        frozen=False,
+        frozen=True,
         extra="forbid",
     )
 
