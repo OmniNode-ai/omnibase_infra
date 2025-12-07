@@ -38,14 +38,25 @@ import os
 import signal
 import sys
 from pathlib import Path
-from typing import Any
+from uuid import uuid4
 
 import yaml
+from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+    RuntimeHostError,
+)
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 logger = logging.getLogger(__name__)
+
+# Kernel version - read from contract or fallback to package version
+KERNEL_VERSION = "1.0.0"  # Matches contract_version in runtime_config.yaml
 
 # Default configuration
 DEFAULT_CONTRACTS_DIR = "./contracts"
@@ -55,7 +66,7 @@ DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
 
 
-def load_runtime_config(contracts_dir: Path) -> dict[str, Any]:
+def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
     """Load runtime configuration from contract file or return defaults.
 
     Attempts to load runtime_config.yaml from the contracts directory.
@@ -66,25 +77,55 @@ def load_runtime_config(contracts_dir: Path) -> dict[str, Any]:
         contracts_dir: Path to the contracts directory.
 
     Returns:
-        Configuration dictionary with runtime settings.
+        ModelRuntimeConfig: Typed configuration model with runtime settings.
+
+    Raises:
+        ProtocolConfigurationError: If config file exists but cannot be parsed
+            or fails validation.
     """
     config_path = contracts_dir / DEFAULT_RUNTIME_CONFIG
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="load_config",
+        target_name=str(config_path),
+        correlation_id=uuid4(),
+    )
 
     if config_path.exists():
         logger.info("Loading runtime config from %s", config_path)
-        with open(config_path) as f:
-            config = yaml.safe_load(f) or {}
-        return config
+        try:
+            with open(config_path) as f:
+                raw_config = yaml.safe_load(f) or {}
+            return ModelRuntimeConfig.model_validate(raw_config)
+        except yaml.YAMLError as e:
+            raise ProtocolConfigurationError(
+                f"Failed to parse runtime config YAML at {config_path}",
+                context=context,
+                config_path=str(config_path),
+            ) from e
+        except ValidationError as e:
+            raise ProtocolConfigurationError(
+                f"Runtime config validation failed at {config_path}: {e.error_count()} error(s)",
+                context=context,
+                config_path=str(config_path),
+                validation_errors=str(e),
+            ) from e
+        except OSError as e:
+            raise ProtocolConfigurationError(
+                f"Failed to read runtime config at {config_path}",
+                context=context,
+                config_path=str(config_path),
+            ) from e
 
     # No config file - use environment variables and defaults
     logger.info(
         "No runtime config found at %s, using environment/defaults", config_path
     )
-    return {
-        "input_topic": os.getenv("ONEX_INPUT_TOPIC", DEFAULT_INPUT_TOPIC),
-        "output_topic": os.getenv("ONEX_OUTPUT_TOPIC", DEFAULT_OUTPUT_TOPIC),
-        "group_id": os.getenv("ONEX_GROUP_ID", DEFAULT_GROUP_ID),
-    }
+    return ModelRuntimeConfig(
+        input_topic=os.getenv("ONEX_INPUT_TOPIC", DEFAULT_INPUT_TOPIC),
+        output_topic=os.getenv("ONEX_OUTPUT_TOPIC", DEFAULT_OUTPUT_TOPIC),
+        consumer_group=os.getenv("ONEX_GROUP_ID", DEFAULT_GROUP_ID),
+    )
 
 
 async def bootstrap() -> int:
@@ -101,44 +142,59 @@ async def bootstrap() -> int:
     Returns:
         Exit code (0 for success, non-zero for errors).
     """
-    # 1. Determine contracts directory
-    contracts_dir = Path(os.getenv("CONTRACTS_DIR", DEFAULT_CONTRACTS_DIR))
-    logger.info("ONEX Kernel starting with contracts_dir=%s", contracts_dir)
+    # Initialize runtime to None for cleanup guard
+    runtime: RuntimeHostProcess | None = None
+    correlation_id = uuid4()
 
-    # 2. Load runtime configuration
-    config = load_runtime_config(contracts_dir)
-    logger.debug("Runtime config: %s", config)
-
-    # 3. Create event bus
-    event_bus = InMemoryEventBus(
-        environment=os.getenv("ONEX_ENVIRONMENT", "local"),
-        group=config.get("group_id", DEFAULT_GROUP_ID),
+    # Create error context for bootstrap operations
+    bootstrap_context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="bootstrap",
+        target_name="onex-kernel",
+        correlation_id=correlation_id,
     )
 
-    # 4. Create runtime host process with config
-    runtime = RuntimeHostProcess(
-        event_bus=event_bus,
-        input_topic=config.get("input_topic", DEFAULT_INPUT_TOPIC),
-        output_topic=config.get("output_topic", DEFAULT_OUTPUT_TOPIC),
-        config=config,
-    )
-
-    # 5. Setup graceful shutdown
-    shutdown_event = asyncio.Event()
-    loop = asyncio.get_running_loop()
-
-    def handle_shutdown(sig: signal.Signals) -> None:
-        """Handle shutdown signal."""
-        logger.info("Received %s, initiating graceful shutdown...", sig.name)
-        shutdown_event.set()
-
-    # Register signal handlers (Unix-only)
-    if sys.platform != "win32":
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, handle_shutdown, sig)
-
-    # 6. Start and run
     try:
+        # 1. Determine contracts directory
+        contracts_dir = Path(os.getenv("CONTRACTS_DIR", DEFAULT_CONTRACTS_DIR))
+        logger.info("ONEX Kernel starting with contracts_dir=%s", contracts_dir)
+
+        # 2. Load runtime configuration (may raise ProtocolConfigurationError)
+        config = load_runtime_config(contracts_dir)
+        logger.debug("Runtime config: %s", config.model_dump())
+
+        # 3. Create event bus
+        # Environment override takes precedence over config
+        environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
+        event_bus = InMemoryEventBus(
+            environment=environment,
+            group=config.group_id,
+        )
+
+        # 4. Create runtime host process with config
+        # Pass config as dict for backwards compatibility with RuntimeHostProcess
+        runtime = RuntimeHostProcess(
+            event_bus=event_bus,
+            input_topic=config.input_topic,
+            output_topic=config.output_topic,
+            config=config.model_dump(),
+        )
+
+        # 5. Setup graceful shutdown
+        shutdown_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def handle_shutdown(sig: signal.Signals) -> None:
+            """Handle shutdown signal."""
+            logger.info("Received %s, initiating graceful shutdown...", sig.name)
+            shutdown_event.set()
+
+        # Register signal handlers (Unix-only)
+        if sys.platform != "win32":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, handle_shutdown, sig)
+
+        # 6. Start and run
         logger.info("Starting ONEX runtime...")
         await runtime.start()
 
@@ -154,18 +210,41 @@ async def bootstrap() -> int:
 
         logger.info("Shutdown signal received, stopping runtime...")
         await runtime.stop()
+        runtime = None  # Mark as stopped to prevent double-stop in finally
 
         logger.info("ONEX runtime stopped successfully.")
         return 0
 
-    except Exception as e:
-        logger.exception("ONEX runtime failed: %s", e)
-        # Ensure cleanup on error
-        try:
-            await runtime.stop()
-        except Exception:
-            pass  # Best effort cleanup
+    except ProtocolConfigurationError:
+        # Configuration errors already have proper context and chaining
+        logger.exception("ONEX runtime configuration failed")
         return 1
+
+    except RuntimeHostError:
+        # Runtime host errors already have proper structure
+        logger.exception("ONEX runtime host error")
+        return 1
+
+    except Exception as e:
+        # Wrap unexpected errors in RuntimeHostError with proper context and chaining
+        logger.exception("ONEX runtime failed with unexpected error: %s", e)
+        raise RuntimeHostError(
+            f"Unexpected error during runtime bootstrap: {e}",
+            context=bootstrap_context,
+        ) from e
+
+    finally:
+        # Guard cleanup - only attempt if runtime was initialized and not already stopped
+        if runtime is not None:
+            try:
+                await runtime.stop()
+            except Exception as cleanup_error:
+                # Log cleanup failures with context instead of suppressing them
+                logger.warning(
+                    "Failed to stop runtime during cleanup: %s (correlation_id=%s)",
+                    cleanup_error,
+                    correlation_id,
+                )
 
 
 def configure_logging() -> None:
@@ -188,7 +267,7 @@ def main() -> None:
     Configures logging and runs the async bootstrap function.
     """
     configure_logging()
-    logger.info("ONEX Kernel v0.1.0")
+    logger.info("ONEX Kernel v%s", KERNEL_VERSION)
     exit_code = asyncio.run(bootstrap())
     sys.exit(exit_code)
 

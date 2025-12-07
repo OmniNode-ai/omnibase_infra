@@ -12,7 +12,6 @@ Tests the contract-driven bootstrap entrypoint including:
 
 from __future__ import annotations
 
-import asyncio
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -22,8 +21,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 
+from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_infra.runtime.kernel import (
-    DEFAULT_CONTRACTS_DIR,
     DEFAULT_GROUP_ID,
     DEFAULT_INPUT_TOPIC,
     DEFAULT_OUTPUT_TOPIC,
@@ -32,6 +31,7 @@ from omnibase_infra.runtime.kernel import (
     load_runtime_config,
     main,
 )
+from omnibase_infra.runtime.models import ModelRuntimeConfig
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -59,20 +59,22 @@ class TestLoadRuntimeConfig:
         # Load config
         config = load_runtime_config(tmp_path)
 
-        assert config["input_topic"] == "test-requests"
-        assert config["output_topic"] == "test-responses"
-        assert config["group_id"] == "test-group"
+        assert isinstance(config, ModelRuntimeConfig)
+        assert config.input_topic == "test-requests"
+        assert config.output_topic == "test-responses"
+        assert config.group_id == "test-group"
 
     def test_load_config_file_not_found_uses_defaults(self, tmp_path: Path) -> None:
-        """Test that missing config file returns defaults."""
+        """Test that missing config file returns ModelRuntimeConfig with defaults."""
         config = load_runtime_config(tmp_path)
 
-        assert config["input_topic"] == DEFAULT_INPUT_TOPIC
-        assert config["output_topic"] == DEFAULT_OUTPUT_TOPIC
-        assert config["group_id"] == DEFAULT_GROUP_ID
+        assert isinstance(config, ModelRuntimeConfig)
+        assert config.input_topic == DEFAULT_INPUT_TOPIC
+        assert config.output_topic == DEFAULT_OUTPUT_TOPIC
+        assert config.group_id == DEFAULT_GROUP_ID
 
     def test_load_config_with_env_overrides(self, tmp_path: Path) -> None:
-        """Test that environment variables override defaults."""
+        """Test that environment variables override defaults when no config file."""
         with patch.dict(
             os.environ,
             {
@@ -83,12 +85,13 @@ class TestLoadRuntimeConfig:
         ):
             config = load_runtime_config(tmp_path)
 
-            assert config["input_topic"] == "env-requests"
-            assert config["output_topic"] == "env-responses"
-            assert config["group_id"] == "env-group"
+            assert isinstance(config, ModelRuntimeConfig)
+            assert config.input_topic == "env-requests"
+            assert config.output_topic == "env-responses"
+            assert config.group_id == "env-group"
 
     def test_load_config_empty_yaml(self, tmp_path: Path) -> None:
-        """Test loading from empty YAML file returns empty dict."""
+        """Test loading from empty YAML file returns ModelRuntimeConfig with defaults."""
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
         config_file = runtime_dir / "runtime_config.yaml"
@@ -98,8 +101,25 @@ class TestLoadRuntimeConfig:
 
         config = load_runtime_config(tmp_path)
 
-        # Empty YAML parses as None, should return empty dict
-        assert config == {}
+        # Empty YAML parses as None (empty dict), ModelRuntimeConfig uses defaults
+        assert isinstance(config, ModelRuntimeConfig)
+        assert config.input_topic == DEFAULT_INPUT_TOPIC
+        assert config.output_topic == DEFAULT_OUTPUT_TOPIC
+        assert config.group_id == DEFAULT_GROUP_ID
+
+    def test_load_config_invalid_yaml_raises_error(self, tmp_path: Path) -> None:
+        """Test that invalid YAML raises ProtocolConfigurationError."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_file = runtime_dir / "runtime_config.yaml"
+
+        # Write invalid YAML
+        config_file.write_text("invalid: yaml: content: [")
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(tmp_path)
+
+        assert "Failed to parse runtime config YAML" in str(exc_info.value)
 
 
 class TestBootstrap:
@@ -148,10 +168,10 @@ class TestBootstrap:
         mock_instance.start.assert_called_once()
         mock_instance.stop.assert_called_once()
 
-    async def test_bootstrap_returns_error_on_exception(
+    async def test_bootstrap_raises_runtime_host_error_on_exception(
         self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
     ) -> None:
-        """Test that bootstrap returns error code on exception."""
+        """Test that bootstrap raises RuntimeHostError on unexpected exception."""
         mock_instance = mock_runtime_host.return_value
         mock_instance.start = AsyncMock(side_effect=Exception("Test error"))
 
@@ -161,10 +181,28 @@ class TestBootstrap:
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
 
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await bootstrap()
+
+        assert "Unexpected error during runtime bootstrap" in str(exc_info.value)
+        assert exc_info.value.__cause__ is not None
+        # Cleanup attempted via finally block
+        mock_instance.stop.assert_called_once()
+
+    async def test_bootstrap_returns_error_on_config_error(
+        self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
+    ) -> None:
+        """Test that bootstrap returns 1 on ProtocolConfigurationError."""
+        # Force config load to raise ProtocolConfigurationError
+        with patch(
+            "omnibase_infra.runtime.kernel.load_runtime_config",
+            side_effect=ProtocolConfigurationError("Config error"),
+        ):
             exit_code = await bootstrap()
 
         assert exit_code == 1
-        mock_instance.stop.assert_called_once()  # Cleanup attempted
+        # Runtime was never created, so stop should not be called
+        mock_runtime_host.return_value.stop.assert_not_called()
 
     async def test_bootstrap_creates_event_bus_with_environment(
         self, mock_runtime_host: MagicMock, mock_event_bus: MagicMock
