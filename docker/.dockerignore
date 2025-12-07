@@ -67,6 +67,11 @@ env/
 # =============================================================================
 # Testing and Coverage
 # =============================================================================
+tests/
+test/
+*_test.py
+test_*.py
+conftest.py
 .coverage
 .coverage.*
 htmlcov/
@@ -139,6 +144,16 @@ Makefile
 scripts/
 *.sh
 !scripts/entrypoint.sh
+
+# =============================================================================
+# Node.js (if any JS tooling present)
+# =============================================================================
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm/
+.yarn/
 
 # =============================================================================
 # Claude/AI Assistant
