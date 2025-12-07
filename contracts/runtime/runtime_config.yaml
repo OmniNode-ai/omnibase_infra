@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Runtime Configuration Contract
+#
+# This file configures the ONEX runtime kernel. It is loaded by kernel.py
+# during bootstrap to configure the RuntimeHostProcess.
+#
+# =============================================================================
+# CONFIGURATION PRIORITY (highest to lowest):
+# =============================================================================
+#   1. Environment variables (ONEX_* prefixed) - always take precedence
+#   2. Contract values (this file)
+#   3. Model defaults (in ModelRuntimeConfig)
+#
+# =============================================================================
+# ENVIRONMENT VARIABLE OVERRIDES:
+# =============================================================================
+#   ONEX_INPUT_TOPIC  - Override input_topic
+#   ONEX_OUTPUT_TOPIC - Override output_topic
+#   ONEX_GROUP_ID     - Override group_id
+#   ONEX_ENVIRONMENT  - Override event_bus.environment
+#   ONEX_LOG_LEVEL    - Override logging level (used directly by kernel,
+#                       not through this contract)
+#
+# =============================================================================
+# FIELD STATUS LEGEND:
+# =============================================================================
+#   [ACTIVE]   - Currently used by kernel.py
+#   [RESERVED] - Defined for forward compatibility, not yet implemented
+#
+# =============================================================================
+
+# Contract metadata [RESERVED - for versioning and discovery]
+contract_version: "1.0.0"
+name: "runtime_config"
+description: "Configuration for ONEX runtime kernel"
+
+# Topic configuration [ACTIVE - used by RuntimeHostProcess]
+input_topic: "requests"
+output_topic: "responses"
+group_id: "onex-runtime"
+
+# Event bus configuration
+event_bus:
+  # [RESERVED] type is not currently used - kernel always creates InMemoryEventBus
+  # Future: Will be used to select Kafka or other event bus implementations
+  type: "inmemory" # inmemory | kafka
+
+  # [ACTIVE] environment is used by InMemoryEventBus constructor
+  # Can be overridden by ONEX_ENVIRONMENT env var
+  environment: "local"
+
+  # [RESERVED] max_history is not currently used
+  # Future: Will configure event history buffer size
+  max_history: 1000
+
+  # [RESERVED] circuit_breaker_threshold is not currently used
+  # Future: Will configure fault tolerance behavior
+  circuit_breaker_threshold: 5
+
+# Handler configuration [RESERVED - not currently used]
+# Future: Will be used for dynamic protocol loading and configuration
+handlers:
+  # Handlers are wired via the wiring module
+  # This section can be extended for handler-specific config
+  enabled:
+    - http
+    - database
+
+# Logging configuration [RESERVED - not currently used]
+# Note: kernel.py currently uses ONEX_LOG_LEVEL env var directly
+# Future: Will support contract-driven logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+# Shutdown configuration [RESERVED - not currently used]
+# Future: Will configure graceful shutdown timeout
+shutdown:
+  grace_period_seconds: 30
