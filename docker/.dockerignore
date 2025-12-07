@@ -36,9 +36,34 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
+*.manifest
+*.spec
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.pyo
+*.pyd
+
+# C extensions
+*.c
+*.cpp
+*.h
+!src/**/*.c
+!src/**/*.cpp
+!src/**/*.h
+
+# Distribution / packaging
+.Python
+develop-eggs/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
 
 # =============================================================================
 # Virtual Environments
@@ -57,12 +82,18 @@ env/
 .vscode/
 *.swp
 *.swo
+*.swn
 *~
 .project
 .pydevproject
 .settings/
 *.sublime-project
 *.sublime-workspace
+.editorconfig
+.history/
+*.code-workspace
+.fleet/
+*.iml
 
 # =============================================================================
 # Testing and Coverage
@@ -85,6 +116,16 @@ coverage.xml
 pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyre/
+.pyright/
+nosetests.xml
+test-results/
+*.test
+*.spec.ts
+*.spec.js
 
 # =============================================================================
 # Documentation
@@ -118,6 +159,15 @@ temp/
 *.log
 *.bak
 *.orig
+*.cache
+.cache/
+*.pid
+*.seed
+*.pid.lock
+*.lock
+!poetry.lock
+!package-lock.json
+*.out
 
 # =============================================================================
 # Docker
@@ -194,6 +244,35 @@ credentials/
 *.sqlite
 *.sqlite3
 data/
+
+# =============================================================================
+# Performance and Profiling
+# =============================================================================
+*.prof
+*.lprof
+*.pyprof
+.benchmarks/
+benchmark_results/
+profiling/
+*.pstats
+
+# =============================================================================
+# Pre-commit and Git Hooks
+# =============================================================================
+.pre-commit-config.yaml
+.git-blame-ignore-revs
+.gitlint
+
+# =============================================================================
+# Dependency Management (exclude lock files except poetry.lock)
+# =============================================================================
+Pipfile
+Pipfile.lock
+requirements.txt
+requirements-dev.txt
+setup.py
+setup.cfg
+MANIFEST.in
 
 # =============================================================================
 # Poetry Lock (include in build)

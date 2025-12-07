@@ -124,17 +124,63 @@ class HealthServer:
         return self._port
 
     async def start(self) -> None:
-        """Start the HTTP health server.
+        """Start the HTTP health server for Docker/Kubernetes probes.
 
-        Creates an aiohttp web application with health endpoints and starts
-        listening on the configured host and port.
+        Creates an aiohttp web application with health check endpoints and starts
+        listening on the configured host and port. The server exposes standardized
+        health check endpoints that integrate with container orchestration platforms.
 
-        This method is idempotent - calling start() on an already started
-        server is safe and has no effect.
+        Startup Process:
+            1. Check if server is already running (idempotent safety check)
+            2. Create aiohttp Application instance
+            3. Register health check routes (/health, /ready)
+            4. Initialize AppRunner and perform async setup
+            5. Create TCPSite bound to configured host and port
+            6. Start listening for incoming health check requests
+            7. Mark server as running and log startup with correlation tracking
+
+        Health Endpoints:
+            - GET /health: Primary health check endpoint
+            - GET /ready: Readiness probe (alias for /health)
+
+        Both endpoints return JSON with:
+            - status: "healthy" | "degraded" | "unhealthy"
+            - version: Runtime kernel version
+            - details: Full health check details from RuntimeHostProcess
+
+        HTTP Status Codes:
+            - 200: Healthy or degraded (container operational)
+            - 503: Unhealthy (container should be restarted)
+
+        This method is idempotent - calling start() on an already running
+        server is safe and has no effect. This prevents double-start errors
+        during rapid restart scenarios.
 
         Raises:
-            RuntimeHostError: If server fails to start due to port binding
-                or other network errors.
+            RuntimeHostError: If server fails to start. Common causes include:
+                - Port already in use (OSError with EADDRINUSE)
+                - Permission denied on privileged port (OSError with EACCES)
+                - Network interface unavailable
+                - Unexpected aiohttp initialization errors
+
+            All errors include:
+                - correlation_id: UUID for distributed tracing
+                - context: ModelInfraErrorContext with transport type, operation
+                - Original exception chaining: via "from e" for root cause analysis
+
+        Example:
+            >>> server = HealthServer(runtime=runtime, port=8085)
+            >>> await server.start()
+            >>> # Server now listening at http://0.0.0.0:8085/health
+            >>> # Docker can probe: curl http://localhost:8085/health
+
+        Example Error (Port In Use):
+            RuntimeHostError: Failed to start health server on 0.0.0.0:8085: [Errno 48] Address already in use
+            (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
+
+        Docker Integration:
+            HEALTHCHECK --interval=30s --timeout=3s \\
+                CMD curl -f http://localhost:8085/health || exit 1
         """
         if self._is_running:
             logger.debug("HealthServer already started, skipping")
@@ -171,75 +217,219 @@ class HealthServer:
             self._is_running = True
 
             logger.info(
-                "HealthServer started",
+                "HealthServer started (correlation_id=%s)",
+                correlation_id,
                 extra={
                     "host": self._host,
                     "port": self._port,
                     "endpoints": ["/health", "/ready"],
+                    "version": self._version,
                 },
             )
 
         except OSError as e:
-            # Port binding failure (e.g., address already in use)
+            # Port binding failure (e.g., address already in use, permission denied)
+            error_msg = (
+                f"Failed to start health server on {self._host}:{self._port}: {e}"
+            )
+            logger.exception(
+                "%s (correlation_id=%s)",
+                error_msg,
+                correlation_id,
+                extra={
+                    "error_type": type(e).__name__,
+                    "errno": e.errno if hasattr(e, "errno") else None,
+                },
+            )
             raise RuntimeHostError(
-                f"Failed to start health server on {self._host}:{self._port}: {e}",
+                error_msg,
                 context=context,
             ) from e
 
         except Exception as e:
             # Unexpected error during server startup
+            error_msg = f"Unexpected error starting health server: {e}"
+            logger.exception(
+                "%s (correlation_id=%s)",
+                error_msg,
+                correlation_id,
+                extra={
+                    "error_type": type(e).__name__,
+                },
+            )
             raise RuntimeHostError(
-                f"Unexpected error starting health server: {e}",
+                error_msg,
                 context=context,
             ) from e
 
     async def stop(self) -> None:
-        """Stop the HTTP health server.
+        """Stop the HTTP health server gracefully.
 
-        Gracefully shuts down the aiohttp web server and releases resources.
+        Gracefully shuts down the aiohttp web server and releases all resources.
+        The shutdown process ensures proper cleanup of network resources, active
+        connections, and internal state.
+
+        Shutdown Process:
+            1. Check if server is already stopped (idempotent safety check)
+            2. Stop TCPSite to reject new connections
+            3. Clean up AppRunner to release resources
+            4. Clear Application reference
+            5. Mark server as not running
+            6. Log successful shutdown with correlation tracking
+
+        Resource Cleanup Order:
+            The cleanup follows reverse initialization order to ensure proper
+            resource release and prevent resource leaks:
+            - TCPSite (network binding)
+            - AppRunner (request handlers)
+            - Application (route definitions)
 
         This method is idempotent - calling stop() on an already stopped
-        server is safe and has no effect.
+        server is safe and has no effect. This prevents double-stop errors
+        during graceful shutdown scenarios.
+
+        Cleanup Guarantees:
+            - All network sockets are closed
+            - Active HTTP connections are terminated gracefully
+            - Event loop resources are released
+            - Server state is reset for potential restart
+
+        Example:
+            >>> server = HealthServer(runtime=runtime, port=8085)
+            >>> await server.start()
+            >>> # ... runtime operation ...
+            >>> await server.stop()
+            >>> # Server no longer listening, resources released
+
+        Exception Handling:
+            This method does not raise exceptions. Any errors during cleanup
+            are logged but do not prevent the shutdown sequence from completing.
+            This ensures that stop() always succeeds and the server state is
+            consistently marked as stopped.
         """
         if not self._is_running:
             logger.debug("HealthServer already stopped, skipping")
             return
 
-        logger.info("Stopping HealthServer")
+        correlation_id = uuid4()
+        logger.info(
+            "Stopping HealthServer (correlation_id=%s)",
+            correlation_id,
+        )
 
         # Cleanup in reverse order of creation
+        # Stop TCPSite first to reject new connections
         if self._site is not None:
-            await self._site.stop()
+            try:
+                await self._site.stop()
+            except Exception as e:
+                logger.warning(
+                    "Error stopping TCPSite during shutdown (correlation_id=%s)",
+                    correlation_id,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "error": str(e),
+                    },
+                )
             self._site = None
 
+        # Clean up AppRunner to release resources
         if self._runner is not None:
-            await self._runner.cleanup()
+            try:
+                await self._runner.cleanup()
+            except Exception as e:
+                logger.warning(
+                    "Error cleaning up AppRunner during shutdown (correlation_id=%s)",
+                    correlation_id,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "error": str(e),
+                    },
+                )
             self._runner = None
 
+        # Clear application reference
         self._app = None
         self._is_running = False
 
-        logger.info("HealthServer stopped successfully")
+        logger.info(
+            "HealthServer stopped successfully (correlation_id=%s)",
+            correlation_id,
+        )
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Handle GET /health and GET /ready requests.
 
-        Delegates to RuntimeHostProcess.health_check() for actual health status
-        and returns a JSON response with status information.
+        This is the main health check endpoint handler for Docker/Kubernetes
+        health probes. It delegates to RuntimeHostProcess.health_check() for
+        actual health status determination and returns a standardized JSON
+        response with status information and diagnostics.
+
+        Health Status Logic:
+            1. Query RuntimeHostProcess for current health state
+            2. Analyze health details to determine overall status
+            3. Map status to appropriate HTTP status code
+            4. Construct JSON response with version and diagnostics
+            5. Return response to health probe client
+
+        Status Determination:
+            - healthy: All components operational, return HTTP 200
+            - degraded: Core running but some handlers failed, return HTTP 200
+              (Container remains operational but with reduced functionality)
+            - unhealthy: Critical failure, return HTTP 503
+              (Container should be restarted by orchestrator)
 
         Args:
-            request: The incoming HTTP request.
+            request: The incoming aiohttp HTTP request. This parameter is required
+                by the aiohttp handler signature but is intentionally unused in this
+                implementation as health checks do not require request data.
 
         Returns:
-            JSON response with health status. HTTP 200 if healthy,
-            HTTP 503 if unhealthy or degraded.
+            JSON response with health status information. The HTTP status code
+            indicates container health to orchestration platforms:
+                - HTTP 200: Container is healthy or degraded (operational)
+                - HTTP 503: Container is unhealthy (restart recommended)
 
-        Response Format:
+        Response Format (Success):
             {
                 "status": "healthy" | "degraded" | "unhealthy",
                 "version": "x.y.z",
-                "details": { ... }  // Full health check details
+                "details": {
+                    "healthy": bool,
+                    "degraded": bool,
+                    "runtime_active": bool,
+                    "handlers": {...},
+                    // Additional health check details
+                }
             }
+
+        Response Format (Error):
+            {
+                "status": "unhealthy",
+                "version": "x.y.z",
+                "error": "Exception message",
+                "correlation_id": "uuid-for-tracing"
+            }
+
+        Docker Integration Example:
+            HEALTHCHECK --interval=30s --timeout=3s --retries=3 \\
+                CMD curl -f http://localhost:8085/health || exit 1
+
+        Kubernetes Integration Example:
+            livenessProbe:
+              httpGet:
+                path: /health
+                port: 8085
+              initialDelaySeconds: 30
+              periodSeconds: 10
+
+        Exception Handling:
+            If health_check() raises an exception, the handler:
+            1. Logs the full exception with correlation_id for tracing
+            2. Returns HTTP 503 with error details
+            3. Includes correlation_id in response for debugging
+            This ensures health probes always receive a response even during
+            runtime failures, preventing indefinite probe hangs.
         """
         # Suppress unused argument warning - aiohttp handler signature requires request
         _ = request
@@ -248,7 +438,7 @@ class HealthServer:
             # Get health status from runtime
             health_details = await self._runtime.health_check()
 
-            # Determine overall status
+            # Determine overall status based on health check results
             is_healthy = bool(health_details.get("healthy", False))
             is_degraded = bool(health_details.get("degraded", False))
 
@@ -259,6 +449,8 @@ class HealthServer:
                 # Degraded means core is running but some handlers failed.
                 # Return 200 so Docker/K8s considers container healthy.
                 # The "degraded" status in response body indicates partial functionality.
+                # This allows the container to remain operational while administrators
+                # investigate handler failures without triggering automatic restarts.
                 status = "degraded"
                 http_status = 200
             else:
@@ -278,13 +470,14 @@ class HealthServer:
             )
 
         except Exception as e:
-            # Health check itself failed
+            # Health check itself failed - generate correlation_id for tracing
             correlation_id = uuid4()
             logger.exception(
-                "Health check failed with exception",
+                "Health check failed with exception (correlation_id=%s)",
+                correlation_id,
                 extra={
                     "error": str(e),
-                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
                 },
             )
 
@@ -292,6 +485,7 @@ class HealthServer:
                 "status": "unhealthy",
                 "version": self._version,
                 "error": str(e),
+                "error_type": type(e).__name__,
                 "correlation_id": str(correlation_id),
             }
 
