@@ -5,6 +5,7 @@
 This module provides the runtime infrastructure for the ONEX infrastructure layer,
 including:
 
+- Kernel: Contract-driven bootstrap entrypoint for the ONEX runtime
 - ProtocolBindingRegistry: SINGLE SOURCE OF TRUTH for protocol handler registration
 - EventBusBindingRegistry: Registry for event bus implementations
 - RuntimeHostProcess: The infrastructure-specific runtime host process implementation
@@ -35,6 +36,9 @@ from omnibase_infra.runtime.handler_registry import (
     get_handler_registry,
     register_handlers_from_config,
 )
+from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
+from omnibase_infra.runtime.kernel import load_runtime_config
+from omnibase_infra.runtime.kernel import main as kernel_main
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.wiring import (
     get_known_event_bus_kinds,
@@ -46,6 +50,10 @@ from omnibase_infra.runtime.wiring import (
 )
 
 __all__: list[str] = [
+    # Kernel entrypoint
+    "kernel_bootstrap",
+    "kernel_main",
+    "load_runtime_config",
     # Runtime host
     "RuntimeHostProcess",
     # Handler type constants

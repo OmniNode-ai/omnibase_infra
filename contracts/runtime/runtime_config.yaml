@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Runtime Configuration Contract
+#
+# This file configures the ONEX runtime kernel. It is loaded by kernel.py
+# during bootstrap to configure the RuntimeHostProcess.
+#
+# Environment variable overrides:
+#   ONEX_INPUT_TOPIC  - Override input_topic
+#   ONEX_OUTPUT_TOPIC - Override output_topic
+#   ONEX_GROUP_ID     - Override group_id
+#   ONEX_ENVIRONMENT  - Override environment
+#   ONEX_LOG_LEVEL    - Override logging level
+
+# Contract metadata
+contract_version: "1.0.0"
+name: "runtime_config"
+description: "Configuration for ONEX runtime kernel"
+
+# Topic configuration
+input_topic: "requests"
+output_topic: "responses"
+group_id: "onex-runtime"
+
+# Event bus configuration
+event_bus:
+  type: "inmemory" # inmemory | kafka
+  environment: "local"
+  max_history: 1000
+  circuit_breaker_threshold: 5
+
+# Handler configuration
+handlers:
+  # Handlers are wired via the wiring module
+  # This section can be extended for handler-specific config
+  enabled:
+    - http
+    - database
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+# Shutdown configuration
+shutdown:
+  grace_period_seconds: 30
