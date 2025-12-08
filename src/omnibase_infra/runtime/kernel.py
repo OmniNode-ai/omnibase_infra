@@ -48,7 +48,6 @@ import time
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import cast
-from uuid import uuid4
 
 import yaml
 from pydantic import ValidationError
@@ -63,6 +62,8 @@ from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.validation import validate_runtime_config
+from omnibase_infra.utils.correlation import generate_correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
         (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
     """
     config_path = contracts_dir / DEFAULT_RUNTIME_CONFIG
-    correlation_id = uuid4()
+    correlation_id = generate_correlation_id()
     context = ModelInfraErrorContext(
         transport_type=EnumInfraTransportType.RUNTIME,
         operation="load_config",
@@ -146,6 +147,26 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
         try:
             with open(config_path) as f:
                 raw_config = yaml.safe_load(f) or {}
+
+            # Contract validation: validate against schema before Pydantic
+            # This provides early, actionable error messages for pattern/range violations
+            contract_errors = validate_runtime_config(raw_config)
+            if contract_errors:
+                error_count = len(contract_errors)
+                error_summary = "; ".join(contract_errors[:3])
+                raise ProtocolConfigurationError(
+                    f"Contract validation failed at {config_path}: {error_count} error(s). "
+                    f"First errors: {error_summary}",
+                    context=context,
+                    config_path=str(config_path),
+                    validation_errors=contract_errors,
+                    error_count=error_count,
+                )
+            logger.debug(
+                "Contract validation passed (correlation_id=%s)",
+                correlation_id,
+            )
+
             config = ModelRuntimeConfig.model_validate(raw_config)
             logger.debug(
                 "Runtime config loaded successfully (correlation_id=%s)",
@@ -275,7 +296,7 @@ async def bootstrap() -> int:
     # Initialize runtime and health server to None for cleanup guard
     runtime: RuntimeHostProcess | None = None
     health_server: HealthServer | None = None
-    correlation_id = uuid4()
+    correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
     # Create error context for bootstrap operations

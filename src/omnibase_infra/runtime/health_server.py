@@ -34,12 +34,12 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from aiohttp import web
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
@@ -186,7 +186,7 @@ class HealthServer:
             logger.debug("HealthServer already started, skipping")
             return
 
-        correlation_id = uuid4()
+        correlation_id = generate_correlation_id()
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.HTTP,
             operation="start_health_server",
@@ -311,7 +311,7 @@ class HealthServer:
             logger.debug("HealthServer already stopped, skipping")
             return
 
-        correlation_id = uuid4()
+        correlation_id = generate_correlation_id()
         logger.info(
             "Stopping HealthServer (correlation_id=%s)",
             correlation_id,
@@ -471,7 +471,7 @@ class HealthServer:
 
         except Exception as e:
             # Health check itself failed - generate correlation_id for tracing
-            correlation_id = uuid4()
+            correlation_id = generate_correlation_id()
             logger.exception(
                 "Health check failed with exception (correlation_id=%s)",
                 correlation_id,

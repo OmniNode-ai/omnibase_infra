@@ -132,6 +132,49 @@ class TestLoadRuntimeConfig:
 
         assert "Failed to parse runtime config YAML" in str(exc_info.value)
 
+    def test_load_config_contract_validation_fails(self, tmp_path: Path) -> None:
+        """Test that contract validation errors raise ProtocolConfigurationError."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_file = runtime_dir / "runtime_config.yaml"
+
+        # Write config with invalid topic name (spaces not allowed)
+        test_config = {
+            "input_topic": "invalid topic with spaces",
+        }
+        with open(config_file, "w") as f:
+            yaml.dump(test_config, f)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(tmp_path)
+
+        assert "Contract validation failed" in str(exc_info.value)
+        assert "input_topic" in str(exc_info.value)
+
+    def test_load_config_contract_validation_multiple_errors(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that multiple contract validation errors are reported."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_file = runtime_dir / "runtime_config.yaml"
+
+        # Write config with multiple invalid fields
+        test_config = {
+            "input_topic": "invalid topic",
+            "output_topic": "also invalid",
+            "event_bus": {"type": "unknown-type"},
+        }
+        with open(config_file, "w") as f:
+            yaml.dump(test_config, f)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(tmp_path)
+
+        assert "Contract validation failed" in str(exc_info.value)
+        # Should report error count
+        assert "3 error(s)" in str(exc_info.value)
+
 
 class TestBootstrap:
     """Tests for the bootstrap function."""
