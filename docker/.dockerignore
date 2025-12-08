@@ -197,8 +197,13 @@ scripts/
 # =============================================================================
 # Node.js (if any JS tooling present)
 # =============================================================================
-# This is a Python project - exclude all Node.js artifacts.
-# If JS tooling is needed in the future, selectively include required files.
+# This is a Python project - all Node.js artifacts are excluded from the build
+# context. This includes package.json, package-lock.json, and lock files from
+# other package managers (yarn.lock, pnpm-lock.yaml).
+#
+# Rationale: These files are not needed for the Python runtime image and would
+# only increase build context size. If JS tooling becomes required in the
+# future, selectively include the specific files needed.
 node_modules/
 package.json
 package-lock.json

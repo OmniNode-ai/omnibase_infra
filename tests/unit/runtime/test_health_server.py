@@ -11,12 +11,10 @@ Tests the HTTP health server including:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import web
-from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.runtime.health_server import (
@@ -24,9 +22,6 @@ from omnibase_infra.runtime.health_server import (
     DEFAULT_HTTP_PORT,
     HealthServer,
 )
-
-if TYPE_CHECKING:
-    from aiohttp.test_utils import TestClient
 
 
 class TestHealthServerInit:

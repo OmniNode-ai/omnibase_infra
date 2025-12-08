@@ -15,12 +15,12 @@ tests for the Docker infrastructure implementation.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
-# Docker configuration files location
-DOCKER_DIR = Path(__file__).parent.parent.parent.parent / "docker"
+# Import shared constant from conftest for backward compatibility.
+# New tests should prefer using the docker_dir fixture instead.
+from tests.unit.docker.conftest import DOCKER_DIR
 
 
 class TestEnvExampleSecurity:
@@ -213,6 +213,10 @@ class TestDockerfileSecurity:
         """Verify Dockerfile does not explicitly run as root user.
 
         The final USER directive should not be 'USER root'.
+
+        SECURITY: This test MUST fail if no USER directive exists, because
+        Docker containers run as root by default when no USER is specified.
+        A missing USER directive is a security vulnerability.
         """
         dockerfile = DOCKER_DIR / "Dockerfile.runtime"
         content = dockerfile.read_text()
@@ -221,15 +225,21 @@ class TestDockerfileSecurity:
         lines = content.split("\n")
         user_lines = [line for line in lines if re.match(r"^\s*USER\s+", line)]
 
-        # Ensure at least one USER directive exists (no USER = runs as root)
-        assert (
-            user_lines
-        ), "Dockerfile must have at least one USER directive to avoid running as root"
+        # SECURITY CHECK: Ensure at least one USER directive exists.
+        # Without a USER directive, Docker runs containers as root by default,
+        # which is a serious security vulnerability. This test MUST fail if
+        # no USER directive is found - it should never silently pass.
+        assert user_lines, (
+            "SECURITY FAILURE: Dockerfile has no USER directive. "
+            "Containers will run as root by default, which is a security risk. "
+            "Add 'USER <non-root-user>' directive to the Dockerfile."
+        )
 
         last_user_directive = user_lines[-1]
-        assert (
-            "root" not in last_user_directive.lower()
-        ), "Final USER directive should not be root"
+        assert "root" not in last_user_directive.lower(), (
+            f"SECURITY FAILURE: Final USER directive sets root user: "
+            f"'{last_user_directive.strip()}'. Container must not run as root."
+        )
 
     def test_no_hardcoded_passwords(self) -> None:
         """Verify Dockerfile does not contain hardcoded passwords.

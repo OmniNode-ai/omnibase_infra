@@ -11,12 +11,12 @@ These tests verify Docker configuration follows performance best practices:
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-import pytest
 import yaml
 
-DOCKER_DIR = Path(__file__).parent.parent.parent.parent / "docker"
+# Import shared constant from conftest for backward compatibility.
+# New tests should prefer using the docker_dir fixture instead.
+from tests.unit.docker.conftest import DOCKER_DIR
 
 
 class TestDockerfilePerformance:

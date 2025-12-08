@@ -459,8 +459,6 @@ class TestBootstrap:
         mock_health_server: MagicMock,
     ) -> None:
         """Test that bootstrap uses grace_period_seconds from config."""
-        import asyncio
-
         mock_instance = mock_runtime_host.return_value
         mock_instance.stop = AsyncMock()
 

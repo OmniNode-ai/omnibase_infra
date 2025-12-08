@@ -250,7 +250,11 @@ class TestDockerBuild:
         # Image should be under 1GB (reasonable for Python + dependencies)
         assert size_mb < 1024, f"Image size {size_mb:.0f}MB exceeds 1GB limit"
 
-        # Warn if over 500MB (optimization opportunity)
+        # Emit advisory warning for large images (does not fail test).
+        # NOTE: This uses warnings.warn() to emit a runtime warning, NOT pytest.warns().
+        # The intent is to surface optimization opportunities without failing the test,
+        # as images between 500MB-1GB are acceptable but could potentially be smaller.
+        # To capture this warning in test output, run pytest with -W default::UserWarning.
         if size_mb > 500:
             warnings.warn(
                 f"Image size {size_mb:.0f}MB exceeds 500MB - consider optimization",

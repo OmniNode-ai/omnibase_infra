@@ -161,6 +161,26 @@ services:
       - runtime_data:/app/data
       # Contract files (read-only mount from host)
       - ../contracts:/app/contracts:ro
+    # -------------------------------------------------------------------------
+    # Health Check Configuration
+    # -------------------------------------------------------------------------
+    # This health check serves as both LIVENESS and READINESS probe in Docker.
+    #
+    # Understanding Liveness vs Readiness:
+    #   - LIVENESS: "Should the container be restarted?"
+    #     If the check fails, Docker will restart the container.
+    #     The /health endpoint checks if the runtime process is responsive.
+    #
+    #   - READINESS: "Should traffic be routed to this container?"
+    #     In Docker Compose, health checks also determine service_healthy
+    #     condition for depends_on, controlling startup ordering.
+    #
+    # For Kubernetes or sophisticated deployments, consider separate endpoints:
+    #   - /health for liveness (process alive, basic checks)
+    #   - /ready for readiness (dependencies connected, ready to serve)
+    #
+    # The runtime provides both endpoints - see docker/README.md Health Checks.
+    # -------------------------------------------------------------------------
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s

@@ -311,14 +311,6 @@ async def bootstrap() -> int:
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
-    # Create error context for bootstrap operations
-    bootstrap_context = ModelInfraErrorContext(
-        transport_type=EnumInfraTransportType.RUNTIME,
-        operation="bootstrap",
-        target_name="onex-kernel",
-        correlation_id=correlation_id,
-    )
-
     try:
         # 1. Determine contracts directory
         contracts_dir = Path(os.getenv("CONTRACTS_DIR", DEFAULT_CONTRACTS_DIR))

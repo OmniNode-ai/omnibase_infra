@@ -85,6 +85,11 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # Generate build timestamp for accurate BUILD_DATE
+      - name: Generate build timestamp
+        id: timestamp
+        run: echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
       - name: Build runtime image
         id: build
         uses: docker/build-push-action@v5
@@ -92,9 +97,11 @@ jobs:
           context: .
           file: docker/Dockerfile.runtime
           platforms: linux/amd64
-          # Push only on main branch
+          # Conditional push/load behavior:
+          # - On main branch: push=true pushes image to GHCR for deployment
+          # - On PRs/other branches: load=true loads image locally for testing
+          # Note: push and load are mutually exclusive - only one can be true
           push: ${{ github.ref == 'refs/heads/main' }}
-          # Load locally for testing on PRs
           load: ${{ github.ref != 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -104,7 +111,7 @@ jobs:
             github_token=${{ secrets.GITHUB_TOKEN }}
           build-args: |
             RUNTIME_VERSION=${{ github.ref_name }}
-            BUILD_DATE=${{ github.event.repository.updated_at }}
+            BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
             VCS_REF=${{ github.sha }}
 
       # Validate built image with quick import test
@@ -234,6 +241,12 @@ jobs:
           category: 'trivy-runtime'
 
   # Image size analysis
+  # Monitors runtime image size to prevent bloat and ensure efficient deployments.
+  # Size threshold rationale: 500MB is a reasonable limit for a Python runtime image
+  # that includes dependencies. Images exceeding this threshold may indicate:
+  # - Unnecessary dependencies included
+  # - Build artifacts not cleaned up
+  # - Base image bloat that should be investigated
   image-analysis:
     name: Image Size Analysis
     runs-on: ubuntu-latest
@@ -253,6 +266,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Image size threshold: 500MB
+      # This threshold was chosen based on typical Python runtime images with
+      # production dependencies. Exceeding this may indicate optimization opportunities.
       - name: Analyze image size
         run: |
           docker pull ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -263,10 +279,11 @@ jobs:
           echo "# Image Size Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Runtime Image: ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
+          # Threshold: 500MB - see job comment for rationale
           if [ ${SIZE_MB} -gt 500 ]; then
-            echo "- Warning: Image larger than 500MB" >> $GITHUB_STEP_SUMMARY
+            echo "- Warning: Image larger than 500MB threshold - consider optimization" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- Image size is acceptable" >> $GITHUB_STEP_SUMMARY
+            echo "- Image size is acceptable (under 500MB threshold)" >> $GITHUB_STEP_SUMMARY
           fi
 
   # Build summary

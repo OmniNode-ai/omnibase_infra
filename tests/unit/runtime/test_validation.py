@@ -13,7 +13,6 @@ Tests the contract validation functions including:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -34,7 +33,7 @@ class TestValidateRuntimeConfig:
 
     def test_valid_config_returns_empty_errors(self) -> None:
         """Test that a fully valid config returns no errors."""
-        config: dict[str, Any] = {
+        config: dict[str, object] = {
             "input_topic": "requests",
             "output_topic": "responses",
             "consumer_group": "onex-runtime",
@@ -58,7 +57,7 @@ class TestValidateRuntimeConfig:
 
     def test_minimal_config_returns_no_errors(self) -> None:
         """Test that a minimal valid config returns no errors."""
-        config: dict[str, Any] = {
+        config: dict[str, object] = {
             "input_topic": "my-topic",
         }
         errors = validate_runtime_config(config)
@@ -86,7 +85,7 @@ class TestTopicNameValidation:
     )
     def test_valid_topic_names(self, topic_name: str) -> None:
         """Test that valid topic names pass validation."""
-        config: dict[str, Any] = {"input_topic": topic_name}
+        config: dict[str, object] = {"input_topic": topic_name}
         errors = validate_runtime_config(config)
         assert errors == []
 
@@ -106,7 +105,7 @@ class TestTopicNameValidation:
         self, topic_name: str, expected_error_substring: str
     ) -> None:
         """Test that invalid topic names fail validation with descriptive error."""
-        config: dict[str, Any] = {"input_topic": topic_name}
+        config: dict[str, object] = {"input_topic": topic_name}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert expected_error_substring in errors[0]
@@ -114,7 +113,7 @@ class TestTopicNameValidation:
 
     def test_topic_name_wrong_type(self) -> None:
         """Test that non-string topic names fail validation."""
-        config: dict[str, Any] = {"input_topic": 123}
+        config: dict[str, object] = {"input_topic": 123}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "must be a string" in errors[0]
@@ -122,7 +121,7 @@ class TestTopicNameValidation:
 
     def test_output_topic_validation(self) -> None:
         """Test that output_topic is also validated."""
-        config: dict[str, Any] = {"output_topic": "invalid topic name"}
+        config: dict[str, object] = {"output_topic": "invalid topic name"}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "output_topic" in errors[0]
@@ -133,26 +132,26 @@ class TestConsumerGroupValidation:
 
     def test_valid_consumer_group(self) -> None:
         """Test that valid consumer_group passes validation."""
-        config: dict[str, Any] = {"consumer_group": "onex-runtime"}
+        config: dict[str, object] = {"consumer_group": "onex-runtime"}
         errors = validate_runtime_config(config)
         assert errors == []
 
     def test_valid_group_id_alias(self) -> None:
         """Test that group_id alias is also validated."""
-        config: dict[str, Any] = {"group_id": "onex-runtime"}
+        config: dict[str, object] = {"group_id": "onex-runtime"}
         errors = validate_runtime_config(config)
         assert errors == []
 
     def test_invalid_consumer_group(self) -> None:
         """Test that invalid consumer_group fails validation."""
-        config: dict[str, Any] = {"consumer_group": "invalid group name"}
+        config: dict[str, object] = {"consumer_group": "invalid group name"}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "consumer_group" in errors[0]
 
     def test_consumer_group_wrong_type(self) -> None:
         """Test that non-string consumer_group fails validation."""
-        config: dict[str, Any] = {"consumer_group": ["list", "not", "string"]}
+        config: dict[str, object] = {"consumer_group": ["list", "not", "string"]}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "must be a string" in errors[0]
@@ -163,19 +162,19 @@ class TestEventBusValidation:
 
     def test_valid_event_bus_inmemory(self) -> None:
         """Test that inmemory event bus type is valid."""
-        config: dict[str, Any] = {"event_bus": {"type": "inmemory"}}
+        config: dict[str, object] = {"event_bus": {"type": "inmemory"}}
         errors = validate_runtime_config(config)
         assert errors == []
 
     def test_valid_event_bus_kafka(self) -> None:
         """Test that kafka event bus type is valid."""
-        config: dict[str, Any] = {"event_bus": {"type": "kafka"}}
+        config: dict[str, object] = {"event_bus": {"type": "kafka"}}
         errors = validate_runtime_config(config)
         assert errors == []
 
     def test_invalid_event_bus_type(self) -> None:
         """Test that invalid event bus type fails validation."""
-        config: dict[str, Any] = {"event_bus": {"type": "redis"}}
+        config: dict[str, object] = {"event_bus": {"type": "redis"}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "event_bus.type" in errors[0]
@@ -184,56 +183,56 @@ class TestEventBusValidation:
 
     def test_event_bus_type_wrong_type(self) -> None:
         """Test that non-string event bus type fails validation."""
-        config: dict[str, Any] = {"event_bus": {"type": 123}}
+        config: dict[str, object] = {"event_bus": {"type": 123}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "must be a string" in errors[0]
 
     def test_event_bus_not_dict(self) -> None:
         """Test that non-dict event_bus fails validation."""
-        config: dict[str, Any] = {"event_bus": "not-a-dict"}
+        config: dict[str, object] = {"event_bus": "not-a-dict"}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "event_bus must be an object" in errors[0]
 
     def test_event_bus_environment_wrong_type(self) -> None:
         """Test that non-string environment fails validation."""
-        config: dict[str, Any] = {"event_bus": {"environment": 123}}
+        config: dict[str, object] = {"event_bus": {"environment": 123}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "event_bus.environment" in errors[0]
 
     def test_event_bus_max_history_negative(self) -> None:
         """Test that negative max_history fails validation."""
-        config: dict[str, Any] = {"event_bus": {"max_history": -1}}
+        config: dict[str, object] = {"event_bus": {"max_history": -1}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "max_history must be >= 0" in errors[0]
 
     def test_event_bus_max_history_wrong_type(self) -> None:
         """Test that non-integer max_history fails validation."""
-        config: dict[str, Any] = {"event_bus": {"max_history": "not-an-int"}}
+        config: dict[str, object] = {"event_bus": {"max_history": "not-an-int"}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "must be an integer" in errors[0]
 
     def test_event_bus_max_history_boolean_rejected(self) -> None:
         """Test that boolean max_history is rejected (Python bool is subclass of int)."""
-        config: dict[str, Any] = {"event_bus": {"max_history": True}}
+        config: dict[str, object] = {"event_bus": {"max_history": True}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "must be an integer" in errors[0]
 
     def test_event_bus_circuit_breaker_zero(self) -> None:
         """Test that zero circuit_breaker_threshold fails validation."""
-        config: dict[str, Any] = {"event_bus": {"circuit_breaker_threshold": 0}}
+        config: dict[str, object] = {"event_bus": {"circuit_breaker_threshold": 0}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "circuit_breaker_threshold must be >= 1" in errors[0]
 
     def test_event_bus_circuit_breaker_wrong_type(self) -> None:
         """Test that non-integer circuit_breaker_threshold fails validation."""
-        config: dict[str, Any] = {"event_bus": {"circuit_breaker_threshold": 5.5}}
+        config: dict[str, object] = {"event_bus": {"circuit_breaker_threshold": 5.5}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "must be an integer" in errors[0]
@@ -244,19 +243,19 @@ class TestShutdownValidation:
 
     def test_valid_shutdown_config(self) -> None:
         """Test that valid shutdown config passes validation."""
-        config: dict[str, Any] = {"shutdown": {"grace_period_seconds": 30}}
+        config: dict[str, object] = {"shutdown": {"grace_period_seconds": 30}}
         errors = validate_runtime_config(config)
         assert errors == []
 
     def test_shutdown_grace_period_zero(self) -> None:
         """Test that zero grace_period_seconds is valid."""
-        config: dict[str, Any] = {"shutdown": {"grace_period_seconds": 0}}
+        config: dict[str, object] = {"shutdown": {"grace_period_seconds": 0}}
         errors = validate_runtime_config(config)
         assert errors == []
 
     def test_shutdown_grace_period_max(self) -> None:
         """Test that max grace_period_seconds is valid."""
-        config: dict[str, Any] = {
+        config: dict[str, object] = {
             "shutdown": {"grace_period_seconds": MAX_GRACE_PERIOD_SECONDS}
         }
         errors = validate_runtime_config(config)
@@ -264,14 +263,14 @@ class TestShutdownValidation:
 
     def test_shutdown_grace_period_negative(self) -> None:
         """Test that negative grace_period_seconds fails validation."""
-        config: dict[str, Any] = {"shutdown": {"grace_period_seconds": -1}}
+        config: dict[str, object] = {"shutdown": {"grace_period_seconds": -1}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert f"must be >= {MIN_GRACE_PERIOD_SECONDS}" in errors[0]
 
     def test_shutdown_grace_period_too_large(self) -> None:
         """Test that grace_period_seconds exceeding max fails validation."""
-        config: dict[str, Any] = {
+        config: dict[str, object] = {
             "shutdown": {"grace_period_seconds": MAX_GRACE_PERIOD_SECONDS + 1}
         }
         errors = validate_runtime_config(config)
@@ -280,14 +279,14 @@ class TestShutdownValidation:
 
     def test_shutdown_grace_period_wrong_type(self) -> None:
         """Test that non-integer grace_period_seconds fails validation."""
-        config: dict[str, Any] = {"shutdown": {"grace_period_seconds": "thirty"}}
+        config: dict[str, object] = {"shutdown": {"grace_period_seconds": "thirty"}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "must be an integer" in errors[0]
 
     def test_shutdown_not_dict(self) -> None:
         """Test that non-dict shutdown fails validation."""
-        config: dict[str, Any] = {"shutdown": "not-a-dict"}
+        config: dict[str, object] = {"shutdown": "not-a-dict"}
         errors = validate_runtime_config(config)
         assert len(errors) == 1
         assert "shutdown must be an object" in errors[0]
@@ -298,7 +297,7 @@ class TestMultipleErrors:
 
     def test_multiple_errors_all_reported(self) -> None:
         """Test that multiple validation errors are all reported."""
-        config: dict[str, Any] = {
+        config: dict[str, object] = {
             "input_topic": "invalid topic",
             "output_topic": "also invalid",
             "event_bus": {"type": "unknown"},

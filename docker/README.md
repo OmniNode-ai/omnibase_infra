@@ -4,6 +4,7 @@ This directory contains Docker configuration for deploying the ONEX Infrastructu
 
 ## Table of Contents
 
+- [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Profiles](#profiles)
@@ -15,6 +16,46 @@ This directory contains Docker configuration for deploying the ONEX Infrastructu
 - [Troubleshooting](#troubleshooting)
 - [CI/CD Integration](#cicd-integration)
 - [Development Workflow](#development-workflow)
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+| Requirement        | Minimum Version | Verification Command             |
+|--------------------|-----------------|----------------------------------|
+| Docker             | 20.10+          | `docker --version`               |
+| Docker Compose     | 2.0+ (V2)       | `docker compose version`         |
+| BuildKit           | Enabled         | `docker buildx version`          |
+| GITHUB_TOKEN       | With repo scope | `echo $GITHUB_TOKEN`             |
+
+### Docker BuildKit
+
+BuildKit is required for:
+- Multi-stage build optimization
+- Build-time secret mounts (for GITHUB_TOKEN)
+- Cache mount optimizations
+
+BuildKit is enabled by default in Docker 23.0+. For older versions:
+
+```bash
+# Option 1: Enable for current session
+export DOCKER_BUILDKIT=1
+
+# Option 2: Enable permanently in Docker daemon config
+# Add to /etc/docker/daemon.json: {"features": {"buildkit": true}}
+```
+
+### GitHub Token
+
+A GitHub Personal Access Token (PAT) with `repo` scope is required to install private packages:
+
+```bash
+# Set the token for builds
+export GITHUB_TOKEN=ghp_your_token_here
+
+# Verify token is set
+echo $GITHUB_TOKEN | head -c 10
+```
 
 ## Quick Start
 
@@ -250,12 +291,46 @@ export RUNTIME_BIND_HOST=0.0.0.0
 
 The runtime exposes HTTP health endpoints for container orchestration platforms.
 
+### Understanding Liveness vs Readiness
+
+Container orchestration platforms distinguish between two types of health checks:
+
+| Probe Type  | Question Answered                      | On Failure Action           |
+|-------------|----------------------------------------|-----------------------------|
+| **Liveness**  | "Is the container alive?"              | Restart the container       |
+| **Readiness** | "Should traffic be routed here?"       | Stop routing traffic        |
+
+**Liveness Probe** (`/health`):
+- Checks if the runtime process is responsive
+- Returns 200 if the server can respond to requests
+- Failure triggers container restart (Docker: via restart policy)
+
+**Readiness Probe** (`/ready`):
+- Checks if all dependencies are connected (database, message bus, etc.)
+- Returns 200 only when ready to handle production traffic
+- Failure removes container from load balancer rotation (no restart)
+
+**In Docker Compose**: The health check serves dual purpose - it determines both container
+health status AND the `service_healthy` condition used in `depends_on`.
+
+**For Kubernetes**: Consider using separate probes:
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8085
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8085
+```
+
 ### Endpoints
 
-| Endpoint  | Method | Description          | Success | Failure |
-|-----------|--------|----------------------|---------|---------|
-| `/health` | GET    | Liveness probe       | 200     | 503     |
-| `/ready`  | GET    | Readiness probe      | 200     | 503     |
+| Endpoint  | Method | Description                                         | Success | Failure |
+|-----------|--------|-----------------------------------------------------|---------|---------|
+| `/health` | GET    | Liveness probe - is the process alive?              | 200     | 503     |
+| `/ready`  | GET    | Readiness probe - are dependencies ready?           | 200     | 503     |
 
 ### Health Check Commands
 
