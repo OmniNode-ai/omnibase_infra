@@ -818,3 +818,62 @@ class TestHttpPortValidation:
             if "invalid" in str(call).lower() and "onex_http_port" in str(call).lower()
         ]
         assert len(warning_calls) == 1
+
+    @pytest.mark.parametrize(
+        ("invalid_port_value", "description"),
+        [
+            ("abc", "alphabetic string"),
+            ("", "empty string"),
+            ("   ", "whitespace only"),
+            ("12abc", "mixed numeric and alphabetic"),
+            ("8080.5", "decimal number string"),
+            ("port", "word string"),
+        ],
+    )
+    async def test_bootstrap_rejects_non_numeric_port_edge_cases(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        invalid_port_value: str,
+        description: str,
+    ) -> None:
+        """Test that various non-numeric port strings are rejected and fall back to default.
+
+        Tests edge cases including:
+        - Alphabetic strings ("abc")
+        - Empty strings ("")
+        - Whitespace strings ("   ")
+        - Mixed numeric/alphabetic ("12abc")
+        - Decimal strings ("8080.5")
+        """
+        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+
+        monkeypatch.setenv("ONEX_HTTP_PORT", invalid_port_value)
+
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+                exit_code = await bootstrap()
+
+        assert exit_code == 0, f"Expected success for {description}"
+        # Verify HealthServer was created with default port
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args[1]
+        assert (
+            call_kwargs["port"] == DEFAULT_HTTP_PORT
+        ), f"Expected default port for {description}"
+
+        # Verify warning was logged about invalid port value
+        warning_calls = [
+            call
+            for call in mock_logger.warning.call_args_list
+            if "invalid" in str(call).lower() and "onex_http_port" in str(call).lower()
+        ]
+        assert (
+            len(warning_calls) == 1
+        ), f"Expected exactly one warning logged for {description}"
