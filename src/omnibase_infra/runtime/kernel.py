@@ -82,6 +82,10 @@ DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "onex-runtime"
 
+# Port validation constants
+MIN_PORT = 1
+MAX_PORT = 65535
+
 
 def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
     """Load runtime configuration from contract file or return defaults.
@@ -153,12 +157,16 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
             contract_errors = validate_runtime_config(raw_config)
             if contract_errors:
                 error_count = len(contract_errors)
+                # Create concise summary for log message (first 3 errors)
                 error_summary = "; ".join(contract_errors[:3])
+                if error_count > 3:
+                    error_summary += f" (and {error_count - 3} more...)"
                 raise ProtocolConfigurationError(
                     f"Contract validation failed at {config_path}: {error_count} error(s). "
                     f"First errors: {error_summary}",
                     context=context,
                     config_path=str(config_path),
+                    # Full error list for structured debugging (not truncated)
                     validation_errors=contract_errors,
                     error_count=error_count,
                 )
@@ -443,6 +451,16 @@ async def bootstrap() -> int:
         http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
         try:
             http_port = int(http_port_str)
+            if not MIN_PORT <= http_port <= MAX_PORT:
+                logger.warning(
+                    "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
+                    http_port,
+                    MIN_PORT,
+                    MAX_PORT,
+                    DEFAULT_HTTP_PORT,
+                    correlation_id,
+                )
+                http_port = DEFAULT_HTTP_PORT
         except ValueError:
             logger.warning(
                 "Invalid ONEX_HTTP_PORT value '%s', using default %d (correlation_id=%s)",

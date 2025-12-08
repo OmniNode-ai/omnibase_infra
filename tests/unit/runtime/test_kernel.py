@@ -25,6 +25,8 @@ from omnibase_infra.runtime.kernel import (
     DEFAULT_GROUP_ID,
     DEFAULT_INPUT_TOPIC,
     DEFAULT_OUTPUT_TOPIC,
+    MAX_PORT,
+    MIN_PORT,
     bootstrap,
     configure_logging,
     load_runtime_config,
@@ -154,7 +156,7 @@ class TestLoadRuntimeConfig:
     def test_load_config_contract_validation_multiple_errors(
         self, tmp_path: Path
     ) -> None:
-        """Test that multiple contract validation errors are reported."""
+        """Test that multiple contract validation errors are reported with full error list."""
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
         config_file = runtime_dir / "runtime_config.yaml"
@@ -171,9 +173,64 @@ class TestLoadRuntimeConfig:
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             load_runtime_config(tmp_path)
 
-        assert "Contract validation failed" in str(exc_info.value)
+        error = exc_info.value
+        assert "Contract validation failed" in str(error)
         # Should report error count
-        assert "3 error(s)" in str(exc_info.value)
+        assert "3 error(s)" in str(error)
+
+        # Verify structured error context is available via model.context
+        # The error includes validation_errors and error_count in kwargs
+        assert hasattr(error, "model")
+        error_context = error.model.context
+        assert error_context is not None
+        # validation_errors contains full list (not truncated)
+        assert "validation_errors" in error_context
+        assert isinstance(error_context["validation_errors"], list)
+        assert len(error_context["validation_errors"]) == 3
+        # error_count is available for structured access
+        assert "error_count" in error_context
+        assert error_context["error_count"] == 3
+
+    def test_load_config_contract_validation_more_than_three_errors(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that 4+ errors show 'and N more...' in message but full list in context."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_file = runtime_dir / "runtime_config.yaml"
+
+        # Write config with 4+ invalid fields to trigger "(and N more...)"
+        test_config = {
+            "input_topic": "invalid topic",
+            "output_topic": "also invalid",
+            "consumer_group": "bad group name",
+            "event_bus": {"type": "unknown-type"},
+        }
+        with open(config_file, "w") as f:
+            yaml.dump(test_config, f)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(tmp_path)
+
+        error = exc_info.value
+        error_message = str(error)
+
+        # Should have 4 errors total
+        assert "4 error(s)" in error_message
+        # Message should include "(and 1 more...)" since only first 3 are shown
+        assert "(and 1 more...)" in error_message
+
+        # Verify full error list is in structured context
+        assert hasattr(error, "model")
+        error_context = error.model.context
+        assert error_context is not None
+        # validation_errors contains ALL errors, not truncated
+        assert "validation_errors" in error_context
+        assert isinstance(error_context["validation_errors"], list)
+        assert len(error_context["validation_errors"]) == 4
+        # error_count matches full count
+        assert "error_count" in error_context
+        assert error_context["error_count"] == 4
 
 
 class TestBootstrap:
@@ -516,3 +573,216 @@ class TestIntegration:
                     exit_code = await bootstrap()
 
         assert exit_code == 0
+
+
+class TestHttpPortValidation:
+    """Tests for HTTP port validation in bootstrap."""
+
+    @pytest.fixture
+    def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
+        """Create a mock RuntimeHostProcess."""
+        with patch("omnibase_infra.runtime.kernel.RuntimeHostProcess") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.start = AsyncMock()
+            mock_instance.stop = AsyncMock()
+            mock_instance.input_topic = "requests"
+            mock_instance.output_topic = "responses"
+            mock_cls.return_value = mock_instance
+            yield mock_cls
+
+    @pytest.fixture
+    def mock_event_bus(self) -> Generator[MagicMock, None, None]:
+        """Create a mock InMemoryEventBus."""
+        with patch("omnibase_infra.runtime.kernel.InMemoryEventBus") as mock_cls:
+            mock_instance = MagicMock()
+            mock_cls.return_value = mock_instance
+            yield mock_cls
+
+    @pytest.fixture
+    def mock_health_server(self) -> Generator[MagicMock, None, None]:
+        """Create a mock HealthServer."""
+        with patch("omnibase_infra.runtime.kernel.HealthServer") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.start = AsyncMock()
+            mock_instance.stop = AsyncMock()
+            mock_instance.is_running = True
+            mock_cls.return_value = mock_instance
+            yield mock_cls
+
+    def test_port_constants_are_valid(self) -> None:
+        """Test that port validation constants are correctly defined."""
+        assert MIN_PORT == 1
+        assert MAX_PORT == 65535
+
+    async def test_bootstrap_rejects_port_zero(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that port 0 is rejected and falls back to default."""
+        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+
+        monkeypatch.setenv("ONEX_HTTP_PORT", "0")
+
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+                exit_code = await bootstrap()
+
+        assert exit_code == 0
+        # Verify HealthServer was created with default port
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args[1]
+        assert call_kwargs["port"] == DEFAULT_HTTP_PORT
+
+        # Verify warning was logged about port out of range
+        warning_calls = [
+            call
+            for call in mock_logger.warning.call_args_list
+            if "outside valid range" in str(call).lower()
+        ]
+        assert len(warning_calls) == 1
+
+    async def test_bootstrap_rejects_port_above_max(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that port 65536 is rejected and falls back to default."""
+        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+
+        monkeypatch.setenv("ONEX_HTTP_PORT", "65536")
+
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+                exit_code = await bootstrap()
+
+        assert exit_code == 0
+        # Verify HealthServer was created with default port
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args[1]
+        assert call_kwargs["port"] == DEFAULT_HTTP_PORT
+
+        # Verify warning was logged about port out of range
+        warning_calls = [
+            call
+            for call in mock_logger.warning.call_args_list
+            if "outside valid range" in str(call).lower()
+        ]
+        assert len(warning_calls) == 1
+
+    async def test_bootstrap_accepts_min_port(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that port 1 (MIN_PORT) is accepted."""
+        monkeypatch.setenv("ONEX_HTTP_PORT", "1")
+
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+        # Verify HealthServer was created with port 1
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args[1]
+        assert call_kwargs["port"] == 1
+
+    async def test_bootstrap_accepts_max_port(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that port 65535 (MAX_PORT) is accepted."""
+        monkeypatch.setenv("ONEX_HTTP_PORT", "65535")
+
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+        # Verify HealthServer was created with port 65535
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args[1]
+        assert call_kwargs["port"] == 65535
+
+    async def test_bootstrap_rejects_negative_port(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that negative port is rejected and falls back to default."""
+        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+
+        monkeypatch.setenv("ONEX_HTTP_PORT", "-1")
+
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            with patch("omnibase_infra.runtime.kernel.logger") as mock_logger:
+                exit_code = await bootstrap()
+
+        assert exit_code == 0
+        # Verify HealthServer was created with default port
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args[1]
+        assert call_kwargs["port"] == DEFAULT_HTTP_PORT
+
+        # Verify warning was logged about port out of range
+        warning_calls = [
+            call
+            for call in mock_logger.warning.call_args_list
+            if "outside valid range" in str(call).lower()
+        ]
+        assert len(warning_calls) == 1
+
+    async def test_bootstrap_rejects_very_large_port(
+        self,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that very large port number is rejected."""
+        from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT
+
+        monkeypatch.setenv("ONEX_HTTP_PORT", "100000")
+
+        with patch("omnibase_infra.runtime.kernel.asyncio.Event") as mock_event:
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+        # Verify HealthServer was created with default port
+        mock_health_server.assert_called_once()
+        call_kwargs = mock_health_server.call_args[1]
+        assert call_kwargs["port"] == DEFAULT_HTTP_PORT

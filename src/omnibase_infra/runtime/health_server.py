@@ -375,9 +375,30 @@ class HealthServer:
         Status Determination:
             - healthy: All components operational, return HTTP 200
             - degraded: Core running but some handlers failed, return HTTP 200
-              (Container remains operational but with reduced functionality)
             - unhealthy: Critical failure, return HTTP 503
-              (Container should be restarted by orchestrator)
+
+        Degraded State HTTP 200 Design Decision:
+            Degraded containers intentionally return HTTP 200 to keep them in service
+            rotation. This is a deliberate design choice that prioritizes investigation
+            over automatic restarts.
+
+            Rationale:
+                1. Automatic restarts may mask recurring issues that need investigation
+                2. Reduced functionality is often preferable to no functionality
+                3. Cascading failures can occur if multiple containers restart simultaneously
+                4. Operators can monitor degraded status via metrics/alerts and investigate
+
+            Alternative Considered:
+                Returning HTTP 503 would remove degraded containers from load balancer
+                rotation while keeping liveness probes passing. This was rejected because
+                it reduces capacity during partial outages when some functionality may
+                still be valuable to users.
+
+            Customization:
+                If your deployment requires removing degraded containers from rotation,
+                you can override this behavior by subclassing HealthServer and modifying
+                the _handle_health method, or configure your load balancer to inspect
+                the response body "status" field instead of relying solely on HTTP codes.
 
         Args:
             request: The incoming aiohttp HTTP request. This parameter is required
@@ -446,11 +467,28 @@ class HealthServer:
                 status = "healthy"
                 http_status = 200
             elif is_degraded:
-                # Degraded means core is running but some handlers failed.
-                # Return 200 so Docker/K8s considers container healthy.
-                # The "degraded" status in response body indicates partial functionality.
-                # This allows the container to remain operational while administrators
-                # investigate handler failures without triggering automatic restarts.
+                # DESIGN DECISION: Degraded status returns HTTP 200 (not 503)
+                #
+                # Rationale: Degraded containers remain in service rotation to allow
+                # operators to investigate issues without triggering automatic restarts.
+                # The "degraded" status in the response body indicates reduced functionality
+                # while keeping the container operational for Docker/Kubernetes probes.
+                #
+                # Why HTTP 200 instead of 503:
+                #   1. Prevents cascading failures if multiple containers degrade together
+                #   2. Reduced functionality is often better than no functionality
+                #   3. Automatic restarts may mask recurring issues needing investigation
+                #   4. Operators can monitor "degraded" status via metrics/alerts
+                #
+                # Alternative considered: HTTP 503 would remove degraded containers from
+                # load balancer rotation while keeping liveness probes passing. Rejected
+                # because it reduces capacity during partial outages when degraded
+                # containers may still serve valuable traffic.
+                #
+                # Customization: To remove degraded containers from rotation, either:
+                #   - Subclass HealthServer and override _handle_health()
+                #   - Configure load balancer to inspect response body "status" field
+                #   - Change http_status below to 503 if restart-on-degrade is preferred
                 status = "degraded"
                 http_status = 200
             else:
