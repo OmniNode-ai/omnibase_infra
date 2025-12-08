@@ -210,6 +210,42 @@ docker inspect omnibase-infra-runtime-main --format='{{json .Config.Env}}' | gre
 4. **Enable audit logging** - Track credential access
 5. **Network isolation** - Use internal Docker networks
 
+### Network Security Considerations
+
+#### Port Exposure
+
+By default, ports are bound to all interfaces (`0.0.0.0`). For production deployments:
+
+```yaml
+# Default (accessible from any network interface):
+ports:
+  - "8085:8085"
+
+# Production (localhost only, use with reverse proxy):
+ports:
+  - "127.0.0.1:8085:8085"
+```
+
+#### Network Isolation Guidelines
+
+1. **Use internal networks** - The `omnibase-infra-network` is bridge-mode by default
+2. **External service access** - Use `extra_hosts` with `REMOTE_HOST` for controlled external access
+3. **Reverse proxy** - In production, place containers behind nginx/traefik with TLS termination
+4. **Firewall rules** - Restrict access to Docker ports at the host firewall level
+5. **Docker socket** - Never expose Docker socket to containers
+
+#### Environment-Specific Binding
+
+For non-Docker deployments (local development), configure bind host:
+
+```bash
+# Local development - bind to localhost only
+export RUNTIME_BIND_HOST=127.0.0.1
+
+# Container deployment - bind to all interfaces (for Docker networking)
+export RUNTIME_BIND_HOST=0.0.0.0
+```
+
 ## Health Checks
 
 The runtime exposes HTTP health endpoints for container orchestration platforms.

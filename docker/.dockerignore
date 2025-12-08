@@ -238,6 +238,9 @@ credentials/
 # =============================================================================
 *.csv
 *.json
+# NOTE: Contracts directory is INCLUDED in build context (not ignored)
+# because Dockerfile.runtime copies it: COPY contracts/ /app/contracts/
+# This enables contract-driven runtime configuration.
 !contracts/**/*.json
 *.sql
 *.db

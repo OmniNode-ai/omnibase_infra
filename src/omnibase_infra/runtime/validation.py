@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 from uuid import uuid4
 
 import yaml
@@ -53,7 +53,7 @@ MAX_GRACE_PERIOD_SECONDS = 300
 
 
 def validate_runtime_config(
-    config: dict[str, Any],
+    config: dict[str, object],
     contract_path: Optional[Path] = None,
 ) -> list[str]:
     """Validate runtime configuration against contract schema.
@@ -209,7 +209,7 @@ def validate_runtime_config(
 def load_and_validate_config(
     config_path: Path,
     contract_path: Optional[Path] = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Load and validate runtime configuration from a YAML file.
 
     Loads a YAML configuration file and performs contract validation.

@@ -15,6 +15,7 @@ on:
       - 'Dockerfile*'
       - '.github/workflows/docker-build.yml'
       - 'tests/integration/docker/**'
+      - 'src/omnibase_infra/runtime/**'
   pull_request:
     branches: [main, develop]
     paths:
@@ -22,6 +23,7 @@ on:
       - 'Dockerfile*'
       - '.github/workflows/docker-build.yml'
       - 'tests/integration/docker/**'
+      - 'src/omnibase_infra/runtime/**'
   workflow_dispatch:
     inputs:
       run_full_tests:
@@ -222,8 +224,10 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
 
+      # Pin to specific version for reproducible builds
+      # See: https://github.com/github/codeql-action/releases
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v3.28.0
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'

@@ -197,15 +197,19 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
         except ValidationError as e:
             # Extract validation error details for actionable error messages
             error_count = e.error_count()
-            error_summary = "; ".join(
-                f"{err['loc']}: {err['msg']}" for err in e.errors()[:3]
-            )
+            # Convert Pydantic errors to list[str] for consistency with contract validation
+            # Both validation_errors fields should have the same type: list[str]
+            pydantic_errors = [
+                f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
+                for err in e.errors()
+            ]
+            error_summary = "; ".join(pydantic_errors[:3])
             raise ProtocolConfigurationError(
                 f"Runtime config validation failed at {config_path}: {error_count} error(s). "
                 f"First errors: {error_summary}",
                 context=context,
                 config_path=str(config_path),
-                validation_errors=e.errors(),
+                validation_errors=pydantic_errors,
                 error_count=error_count,
             ) from e
         except OSError as e:
