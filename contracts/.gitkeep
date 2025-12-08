@@ -1,0 +1,5 @@
+# This file ensures the contracts directory is tracked by git.
+# The contracts directory contains runtime configuration files:
+#   - runtime/runtime_config.yaml - Runtime kernel configuration
+#
+# See docker/README.md for how contracts are used in Docker deployment.

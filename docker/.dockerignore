@@ -1,0 +1,290 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# Docker build context exclusions for omnibase_infra
+#
+# This file prevents unnecessary files from being sent to the Docker daemon
+# during build, reducing build time and image size.
+#
+# =============================================================================
+
+# =============================================================================
+# Version Control
+# =============================================================================
+.git
+.gitignore
+.gitattributes
+.github
+
+# =============================================================================
+# Python Artifacts
+# =============================================================================
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.pyo
+*.pyd
+
+# C extensions
+*.c
+*.cpp
+*.h
+!src/**/*.c
+!src/**/*.cpp
+!src/**/*.h
+
+# Distribution / packaging
+.Python
+develop-eggs/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# =============================================================================
+# Virtual Environments
+# =============================================================================
+.venv
+venv/
+ENV/
+env/
+.env
+.env.*
+
+# =============================================================================
+# IDE and Editor
+# =============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.editorconfig
+.history/
+*.code-workspace
+.fleet/
+*.iml
+
+# =============================================================================
+# Testing and Coverage
+# =============================================================================
+tests/
+test/
+*_test.py
+test_*.py
+conftest.py
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.coverage
+.hypothesis/
+.pytest_cache/
+pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyre/
+.pyright/
+nosetests.xml
+test-results/
+*.test
+*.spec.ts
+*.spec.js
+
+# =============================================================================
+# Documentation
+# =============================================================================
+docs/_build/
+site/
+*.md
+!README.md
+!LICENSE
+CHANGELOG.md
+CONTRIBUTING.md
+
+# =============================================================================
+# OS Files
+# =============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =============================================================================
+# Build and Temporary
+# =============================================================================
+tmp/
+temp/
+*.tmp
+*.temp
+*.log
+*.bak
+*.orig
+*.cache
+.cache/
+*.pid
+*.seed
+*.pid.lock
+*.lock
+!poetry.lock
+*.out
+
+# =============================================================================
+# Docker
+# =============================================================================
+docker-compose*.yml
+docker-compose*.yaml
+Dockerfile*
+!Dockerfile.runtime
+.dockerignore
+
+# =============================================================================
+# CI/CD
+# =============================================================================
+.circleci/
+.travis.yml
+.gitlab-ci.yml
+Jenkinsfile
+azure-pipelines.yml
+
+# =============================================================================
+# Development
+# =============================================================================
+Makefile
+scripts/
+*.sh
+!scripts/entrypoint.sh
+
+# =============================================================================
+# Node.js (if any JS tooling present)
+# =============================================================================
+# This is a Python project - all Node.js artifacts are excluded from the build
+# context. This includes package.json, package-lock.json, and lock files from
+# other package managers (yarn.lock, pnpm-lock.yaml).
+#
+# Rationale: These files are not needed for the Python runtime image and would
+# only increase build context size. If JS tooling becomes required in the
+# future, selectively include the specific files needed.
+node_modules/
+package.json
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm/
+.yarn/
+
+# =============================================================================
+# Claude/AI Assistant
+# =============================================================================
+.claude/
+CLAUDE.md
+
+# =============================================================================
+# Archives and Backups
+# =============================================================================
+archived/
+archive/
+*.tar
+*.tar.gz
+*.zip
+*.rar
+
+# =============================================================================
+# Secrets (should never be in build context)
+# =============================================================================
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+credentials/
+.secrets
+*.secret
+
+# =============================================================================
+# Large Data Files
+# =============================================================================
+*.csv
+*.json
+# NOTE: Contracts directory is INCLUDED in build context (not ignored)
+# because Dockerfile.runtime copies it: COPY contracts/ /app/contracts/
+# This enables contract-driven runtime configuration.
+!contracts/**/*.json
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# =============================================================================
+# Performance and Profiling
+# =============================================================================
+*.prof
+*.lprof
+*.pyprof
+.benchmarks/
+benchmark_results/
+profiling/
+*.pstats
+
+# =============================================================================
+# Pre-commit and Git Hooks
+# =============================================================================
+.pre-commit-config.yaml
+.git-blame-ignore-revs
+.gitlint
+
+# =============================================================================
+# Dependency Management (exclude lock files except poetry.lock)
+# =============================================================================
+Pipfile
+Pipfile.lock
+requirements.txt
+requirements-dev.txt
+setup.py
+setup.cfg
+MANIFEST.in
+
+# =============================================================================
+# Poetry Lock (include in build)
+# Note: poetry.lock is NOT ignored - it ensures reproducible builds
+# =============================================================================

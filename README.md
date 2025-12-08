@@ -34,6 +34,31 @@ poetry install
 poetry run python -c "import omnibase_infra; print('Ready')"
 ```
 
+## Docker Deployment
+
+For containerized deployment, see the [Docker documentation](docker/README.md).
+
+### Quick Start
+
+```bash
+cd docker
+cp .env.example .env
+# Edit .env and replace ALL __REPLACE_WITH_*__ placeholders
+docker compose -f docker-compose.runtime.yml --profile main up -d --build
+curl http://localhost:8085/health
+```
+
+### Available Profiles
+
+| Profile   | Services                    | Use Case                          |
+|-----------|-----------------------------|-----------------------------------|
+| `main`    | runtime-main                | Core kernel only                  |
+| `effects` | runtime-main + effects      | Main + external service I/O       |
+| `workers` | runtime-main + workers ×2   | Main + parallel compute           |
+| `all`     | All services                | Full deployment                   |
+
+See [docker/README.md](docker/README.md) for detailed configuration, security, and troubleshooting.
+
 ## Documentation
 
 See `docs/` for planning documents:
