@@ -18,19 +18,18 @@ integration tests for Docker infrastructure implementation.
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import signal
 import subprocess
 import time
+import urllib.error
+import urllib.request
+import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
-
+import yaml
 
 # =============================================================================
 # Test Markers and Constants
@@ -49,6 +48,39 @@ BUILD_TIMEOUT = 600  # 10 minutes for full build
 CONTAINER_START_TIMEOUT = 60
 HEALTH_CHECK_TIMEOUT = 90
 SHUTDOWN_TIMEOUT = 30
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def extract_profiles_from_compose(compose_path: Path) -> set[str]:
+    """Extract all profile names from a docker-compose file using YAML parsing.
+
+    This function properly parses YAML to extract profiles, avoiding fragile
+    string matching that could break with different YAML formatting styles.
+
+    Args:
+        compose_path: Path to the docker-compose YAML file.
+
+    Returns:
+        Set of profile names found in the compose file.
+    """
+    content = compose_path.read_text()
+    compose_data = yaml.safe_load(content)
+
+    profiles: set[str] = set()
+
+    # Extract profiles from services section
+    services = compose_data.get("services", {})
+    for service_config in services.values():
+        if isinstance(service_config, dict):
+            service_profiles = service_config.get("profiles", [])
+            if isinstance(service_profiles, list):
+                profiles.update(service_profiles)
+
+    return profiles
 
 
 # =============================================================================
@@ -168,8 +200,7 @@ class TestDockerBuild:
 
             assert first_result.returncode == 0, "First build failed"
 
-            # Verify cache mount usage in build output
-            build_output = first_result.stdout + first_result.stderr
+            # Verify cache mount usage in Dockerfile
             assert (
                 "mount=type=cache" in dockerfile_path.read_text()
             ), "Dockerfile should use BuildKit cache mounts"
@@ -221,9 +252,10 @@ class TestDockerBuild:
 
         # Warn if over 500MB (optimization opportunity)
         if size_mb > 500:
-            pytest.warns(
+            warnings.warn(
+                f"Image size {size_mb:.0f}MB exceeds 500MB - consider optimization",
                 UserWarning,
-                match=f"Image size {size_mb:.0f}MB could be optimized",
+                stacklevel=2,
             )
 
 
@@ -557,7 +589,6 @@ class TestDockerRuntime:
             time.sleep(3)  # Allow initialization
 
             # Send SIGTERM via docker stop
-            start_time = time.time()
             result = subprocess.run(
                 ["docker", "stop", "-t", "10", container_name],
                 capture_output=True,
@@ -565,7 +596,6 @@ class TestDockerRuntime:
                 timeout=30,
                 check=False,
             )
-            stop_duration = time.time() - start_time
 
             # Should stop gracefully within timeout (not killed)
             assert result.returncode == 0, "docker stop failed"
@@ -653,9 +683,6 @@ class TestDockerHealthCheck:
             time.sleep(10)
 
             # Try to access health endpoint
-            import urllib.error
-            import urllib.request
-
             max_retries = 5
             for attempt in range(max_retries):
                 try:
@@ -871,55 +898,57 @@ class TestDockerResourceLimits:
 
 
 class TestDockerComposeProfiles:
-    """Tests for docker-compose profile configurations."""
+    """Tests for docker-compose profile configurations.
+
+    These tests use proper YAML parsing via extract_profiles_from_compose()
+    to validate profile definitions. This approach is more robust than string
+    matching because it correctly handles different YAML quoting styles and
+    formatting variations.
+    """
 
     def test_main_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
         """Verify main profile is defined in docker-compose."""
-        content = compose_file_path.read_text()
-
-        # Should have main profile
-        assert (
-            '"main"' in content or "'main'" in content
-        ), "docker-compose should define 'main' profile"
+        profiles = extract_profiles_from_compose(compose_file_path)
+        assert "main" in profiles, (
+            f"docker-compose should define 'main' profile. "
+            f"Found profiles: {sorted(profiles)}"
+        )
 
     def test_effects_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
         """Verify effects profile is defined in docker-compose."""
-        content = compose_file_path.read_text()
-
-        # Should have effects profile
-        assert (
-            '"effects"' in content or "'effects'" in content
-        ), "docker-compose should define 'effects' profile"
+        profiles = extract_profiles_from_compose(compose_file_path)
+        assert "effects" in profiles, (
+            f"docker-compose should define 'effects' profile. "
+            f"Found profiles: {sorted(profiles)}"
+        )
 
     def test_workers_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
         """Verify workers profile is defined in docker-compose."""
-        content = compose_file_path.read_text()
-
-        # Should have workers profile
-        assert (
-            '"workers"' in content or "'workers'" in content
-        ), "docker-compose should define 'workers' profile"
+        profiles = extract_profiles_from_compose(compose_file_path)
+        assert "workers" in profiles, (
+            f"docker-compose should define 'workers' profile. "
+            f"Found profiles: {sorted(profiles)}"
+        )
 
     def test_all_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
         """Verify all profile is defined in docker-compose."""
-        content = compose_file_path.read_text()
-
-        # Should have all profile
-        assert (
-            '"all"' in content or "'all'" in content
-        ), "docker-compose should define 'all' profile"
+        profiles = extract_profiles_from_compose(compose_file_path)
+        assert "all" in profiles, (
+            f"docker-compose should define 'all' profile. "
+            f"Found profiles: {sorted(profiles)}"
+        )
 
     @pytest.mark.slow
     def test_compose_config_valid(
@@ -997,8 +1026,6 @@ class TestDockerImageLabels:
         )
 
         assert result.returncode == 0, "Failed to inspect image labels"
-
-        import json
 
         labels = json.loads(result.stdout.strip())
 

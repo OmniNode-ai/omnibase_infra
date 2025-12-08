@@ -228,8 +228,7 @@ COPY --chown=omniinfra:omniinfra src/ /app/src/
 # Include license file for compliance
 COPY --chown=omniinfra:omniinfra LICENSE /app/LICENSE
 
-# Copy contracts directory if it exists
-# Use conditional copy pattern - creates empty dir if source doesn't exist
+# Copy contracts directory (must exist in build context)
 COPY --chown=omniinfra:omniinfra contracts/ /app/contracts/
 
 # Create runtime directories with proper permissions

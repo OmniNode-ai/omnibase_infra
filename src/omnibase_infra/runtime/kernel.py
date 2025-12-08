@@ -205,7 +205,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
                 f"First errors: {error_summary}",
                 context=context,
                 config_path=str(config_path),
-                validation_errors=str(e),
+                validation_errors=e.errors(),
                 error_count=error_count,
             ) from e
         except OSError as e:

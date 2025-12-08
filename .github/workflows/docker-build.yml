@@ -113,7 +113,7 @@ jobs:
           docker run --rm \
             -e ONEX_LOG_LEVEL=DEBUG \
             ${{ steps.build.outputs.imageid }} \
-            python -c "from omnibase_infra.runtime.kernel import InfrastructureKernel; print('Import successful')"
+            python -c "from omnibase_infra.runtime.kernel import bootstrap, main, load_runtime_config; print('Import successful')"
 
       - name: Generate build summary
         if: always()
@@ -212,8 +212,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Pin to specific version for reproducible builds (avoid @master for stability)
+      # See: https://github.com/aquasecurity/trivy-action/releases
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           image-ref: ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'sarif'

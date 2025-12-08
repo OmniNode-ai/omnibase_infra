@@ -221,11 +221,15 @@ class TestDockerfileSecurity:
         lines = content.split("\n")
         user_lines = [line for line in lines if re.match(r"^\s*USER\s+", line)]
 
-        if user_lines:
-            last_user_directive = user_lines[-1]
-            assert (
-                "root" not in last_user_directive.lower()
-            ), "Final USER directive should not be root"
+        # Ensure at least one USER directive exists (no USER = runs as root)
+        assert (
+            user_lines
+        ), "Dockerfile must have at least one USER directive to avoid running as root"
+
+        last_user_directive = user_lines[-1]
+        assert (
+            "root" not in last_user_directive.lower()
+        ), "Final USER directive should not be root"
 
     def test_no_hardcoded_passwords(self) -> None:
         """Verify Dockerfile does not contain hardcoded passwords.

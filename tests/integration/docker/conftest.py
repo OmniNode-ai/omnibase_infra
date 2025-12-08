@@ -9,6 +9,33 @@ This module provides shared fixtures for Docker integration tests including:
 - Port allocation utilities
 
 All fixtures handle proper cleanup to prevent orphan containers/images.
+
+Fixture Scoping Strategy
+------------------------
+Fixtures are organized by scope to optimize test execution:
+
+Session-scoped (run once per test session):
+    - docker_available: Docker daemon availability check
+    - buildkit_available: BuildKit support detection
+    - project_root, docker_dir: Path fixtures (immutable)
+    - dockerfile_path, compose_file_path: File path fixtures
+
+Module-scoped (shared within test module):
+    - test_image_name: Unique image name per module
+    - built_test_image: Expensive image build, reused across module tests
+
+Function-scoped (per-test isolation):
+    - available_port: Dynamic port allocation (prevents conflicts)
+    - container_runner: Container lifecycle context manager
+    - wait_for_healthy_fixture: Health check polling
+    - wait_for_log_message_fixture: Log message detection
+
+Module-Level Utilities
+----------------------
+Helper functions available for direct import:
+    - run_container(): Context manager for container lifecycle
+    - wait_for_healthy(): Poll container health status
+    - wait_for_log_message(): Wait for log output
 """
 
 from __future__ import annotations
@@ -18,9 +45,8 @@ import socket
 import subprocess
 import time
 from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -332,7 +358,7 @@ def run_container(
 
 
 @pytest.fixture
-def container_runner() -> Callable[..., Any]:
+def container_runner() -> Callable[..., AbstractContextManager[str]]:
     """Provide the run_container context manager.
 
     Returns:

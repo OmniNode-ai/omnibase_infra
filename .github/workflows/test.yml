@@ -123,7 +123,7 @@ jobs:
         run: |
           poetry run pytest tests/ \
             --ignore=tests/integration/docker \
-            -n auto \
+            -n 20 \
             --timeout=60 \
             --timeout-method=thread \
             --tb=short \
