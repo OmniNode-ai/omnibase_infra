@@ -1,0 +1,293 @@
+# Docker Build and Test Workflow for ONEX Infrastructure
+# Dedicated workflow for Docker builds and integration tests
+#
+# This workflow runs Docker-specific tests separately from the main test suite,
+# following the pattern from omninode_bridge to ensure proper Docker/BuildKit
+# setup and avoid pytest-xdist worker crashes.
+
+name: Docker Build
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'docker/**'
+      - 'Dockerfile*'
+      - '.github/workflows/docker-build.yml'
+      - 'tests/integration/docker/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'docker/**'
+      - 'Dockerfile*'
+      - '.github/workflows/docker-build.yml'
+      - 'tests/integration/docker/**'
+  workflow_dispatch:
+    inputs:
+      run_full_tests:
+        description: 'Run full Docker integration test suite'
+        required: false
+        default: 'true'
+        type: boolean
+
+env:
+  POETRY_VERSION: "2.2.1"
+  PYTHON_VERSION: "3.12"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: omnibase-infra-runtime
+
+jobs:
+  # Build and validate Docker image
+  docker-build:
+    name: Build Runtime Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 20
+
+    outputs:
+      image_id: ${{ steps.build.outputs.imageid }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      # Set up Docker Buildx for BuildKit features (cache mounts, secrets)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      # Authenticate for registry access (pulls and pushes)
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build runtime image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.runtime
+          platforms: linux/amd64
+          # Push only on main branch
+          push: ${{ github.ref == 'refs/heads/main' }}
+          # Load locally for testing on PRs
+          load: ${{ github.ref != 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
+          build-args: |
+            RUNTIME_VERSION=${{ github.ref_name }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+
+      # Validate built image with quick import test
+      - name: Test image import
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Testing runtime image imports..."
+          docker run --rm \
+            -e ONEX_LOG_LEVEL=DEBUG \
+            ${{ steps.build.outputs.imageid }} \
+            python -c "from omnibase_infra.runtime.kernel import InfrastructureKernel; print('Import successful')"
+
+      - name: Generate build summary
+        if: always()
+        run: |
+          echo "# Docker Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Info:" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: \`${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Tags: ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Platform: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- SHA: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  # Run Docker integration tests
+  docker-integration-tests:
+    name: Docker Integration Tests
+    runs-on: ubuntu-latest
+    needs: docker-build
+    timeout-minutes: 30
+    if: github.event.inputs.run_full_tests != 'false'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==${{ env.POETRY_VERSION }}
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}-docker
+          restore-keys: |
+            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      - name: Install project
+        run: poetry install --no-interaction
+
+      # Run Docker integration tests WITHOUT pytest-xdist (no -n auto)
+      # This prevents worker crashes during Docker builds
+      - name: Run Docker integration tests
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: |
+          poetry run pytest tests/integration/docker/ \
+            --timeout=600 \
+            --timeout-method=thread \
+            --tb=short \
+            --junitxml=docker-tests.xml \
+            -v
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-test-results
+          path: docker-tests.xml
+          retention-days: 7
+
+  # Security scanning
+  security-scan:
+    name: Security Scan (Trivy)
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy-runtime'
+
+  # Image size analysis
+  image-analysis:
+    name: Image Size Analysis
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+
+    steps:
+      - name: Set lowercase repository owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Analyze image size
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          SIZE=$(docker image inspect ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }} --format='{{.Size}}')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "IMAGE_SIZE_MB=$SIZE_MB" >> $GITHUB_ENV
+
+          echo "# Image Size Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Runtime Image: ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
+          if [ ${SIZE_MB} -gt 500 ]; then
+            echo "- Warning: Image larger than 500MB" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Image size is acceptable" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Build summary
+  build-summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [docker-build, docker-integration-tests]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# Docker Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Results:" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: ${{ needs.docker-build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Integration Tests: ${{ needs.docker-integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check overall status
+        run: |
+          if [ "${{ needs.docker-build.result }}" != "success" ]; then
+            echo "Docker build failed"
+            exit 1
+          fi
+          if [ "${{ needs.docker-integration-tests.result }}" != "success" ] && \
+             [ "${{ needs.docker-integration-tests.result }}" != "skipped" ]; then
+            echo "Docker integration tests failed"
+            exit 1
+          fi
+          echo "All Docker workflow steps completed successfully"
