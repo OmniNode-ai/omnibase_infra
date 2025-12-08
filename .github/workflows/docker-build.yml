@@ -217,17 +217,17 @@ jobs:
       # Pin to specific version for reproducible builds (avoid @master for stability)
       # See: https://github.com/aquasecurity/trivy-action/releases
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
 
-      # Pin to specific version for reproducible builds
+      # Pin to major version for stability while receiving security updates
       # See: https://github.com/github/codeql-action/releases
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3.28.0
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'

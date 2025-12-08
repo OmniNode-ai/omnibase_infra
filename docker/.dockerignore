@@ -166,7 +166,6 @@ temp/
 *.pid.lock
 *.lock
 !poetry.lock
-!package-lock.json
 *.out
 
 # =============================================================================
@@ -198,7 +197,10 @@ scripts/
 # =============================================================================
 # Node.js (if any JS tooling present)
 # =============================================================================
+# This is a Python project - exclude all Node.js artifacts.
+# If JS tooling is needed in the future, selectively include required files.
 node_modules/
+package.json
 package-lock.json
 yarn.lock
 pnpm-lock.yaml

@@ -138,9 +138,20 @@ services:
       ONEX_INPUT_TOPIC: ${ONEX_INPUT_TOPIC:-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_OUTPUT_TOPIC:-responses}
       ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
-    # SECURITY: Ports are bound to all interfaces (0.0.0.0) by default.
-    # In production behind a load balancer, consider binding to localhost only:
-    #   - "127.0.0.1:${RUNTIME_MAIN_PORT:-8085}:8085"
+    # -------------------------------------------------------------------------
+    # SECURITY NOTE: Port Exposure
+    # -------------------------------------------------------------------------
+    # By default, Docker binds ports to all interfaces (0.0.0.0), making the
+    # service accessible from any network interface on the host.
+    #
+    # For production deployments, consider one of these alternatives:
+    #   1. Bind to localhost only (service accessible only from host):
+    #      - "127.0.0.1:${RUNTIME_MAIN_PORT:-8085}:8085"
+    #   2. Use a reverse proxy (nginx, traefik, caddy) to handle external
+    #      traffic and keep this service on an internal network only.
+    #   3. Use Docker network isolation with no port exposure, accessing
+    #      the service only through other containers on the same network.
+    # -------------------------------------------------------------------------
     ports:
       - "${RUNTIME_MAIN_PORT:-8085}:8085"
     volumes:
@@ -177,7 +188,8 @@ services:
       ONEX_INPUT_TOPIC: ${ONEX_EFFECTS_INPUT_TOPIC:-effect-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_EFFECTS_OUTPUT_TOPIC:-effect-responses}
       ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
-    # SECURITY: See runtime-main service for port binding security notes
+    # SECURITY: See runtime-main service for port binding security notes.
+    # Consider binding to localhost: "127.0.0.1:${RUNTIME_EFFECTS_PORT:-8086}:8085"
     ports:
       - "${RUNTIME_EFFECTS_PORT:-8086}:8085"
     volumes:
