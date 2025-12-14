@@ -29,7 +29,7 @@ Example Usage:
 
 Integration with Handlers:
     Handlers are registered during start() via the wiring module. Each handler
-    processes envelopes for a specific protocol type (e.g., "http", "database").
+    processes envelopes for a specific protocol type (e.g., "http", "db").
     The handler_type field in envelopes determines routing.
 """
 
@@ -701,7 +701,7 @@ class RuntimeHostProcess:
         """Register a handler for a specific type.
 
         Args:
-            handler_type: Protocol type identifier (e.g., "http", "database").
+            handler_type: Protocol type identifier (e.g., "http", "db").
             handler: Handler instance implementing the ProtocolHandler protocol.
         """
         self._handlers[handler_type] = handler

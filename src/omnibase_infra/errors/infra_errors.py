@@ -232,7 +232,7 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.KAFKA: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.CONSUL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.VAULT: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
-        EnumInfraTransportType.REDIS: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+        EnumInfraTransportType.VALKEY: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.RUNTIME: EnumCoreErrorCode.OPERATION_FAILED,
         None: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
     }

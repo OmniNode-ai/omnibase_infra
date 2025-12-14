@@ -85,8 +85,11 @@ if TYPE_CHECKING:
 HANDLER_TYPE_HTTP: str = "http"
 """HTTP/REST API protocol handler type."""
 
-HANDLER_TYPE_DATABASE: str = "database"
-"""Database (PostgreSQL, etc.) protocol handler type."""
+HANDLER_TYPE_DATABASE: str = "db"
+"""Database (PostgreSQL, etc.) protocol handler type.
+
+Note: Value is "db" to match operation prefixes (db.query, db.execute).
+Operations are routed by extracting the prefix before the first dot."""
 
 HANDLER_TYPE_KAFKA: str = "kafka"
 """Kafka message broker protocol handler type."""
@@ -97,8 +100,11 @@ HANDLER_TYPE_VAULT: str = "vault"
 HANDLER_TYPE_CONSUL: str = "consul"
 """HashiCorp Consul service discovery protocol handler type."""
 
-HANDLER_TYPE_REDIS: str = "redis"
-"""Redis cache/message protocol handler type."""
+HANDLER_TYPE_VALKEY: str = "valkey"
+"""Valkey (Redis-compatible) cache/message protocol handler type.
+
+Note: Value is "valkey" to match operation prefixes (valkey.get, valkey.set).
+Valkey is a Redis-compatible fork; we use valkey-py (redis-py compatible)."""
 
 HANDLER_TYPE_GRPC: str = "grpc"
 """gRPC protocol handler type."""
@@ -176,7 +182,7 @@ class ProtocolBindingRegistry:
     protocol from omnibase_spi.
 
     The registry maintains a mapping from protocol type identifiers (strings like
-    "http", "database", "kafka") to handler classes that implement the ProtocolHandler
+    "http", "db", "kafka") to handler classes that implement the ProtocolHandler
     protocol.
 
     Thread Safety:
@@ -190,10 +196,10 @@ class ProtocolBindingRegistry:
     Example:
         >>> registry = ProtocolBindingRegistry()
         >>> registry.register("http", HttpHandler)
-        >>> registry.register("database", PostgresHandler)
+        >>> registry.register("db", PostgresHandler)
         >>> handler_cls = registry.get("http")
         >>> print(registry.list_protocols())
-        ['database', 'http']
+        ['db', 'http']
     """
 
     def __init__(self) -> None:
@@ -212,7 +218,7 @@ class ProtocolBindingRegistry:
         type is already registered, the existing registration is overwritten.
 
         Args:
-            protocol_type: Protocol type identifier (e.g., 'http', 'database', 'kafka').
+            protocol_type: Protocol type identifier (e.g., 'http', 'db', 'kafka').
                           Should be one of the HANDLER_TYPE_* constants.
             handler_cls: Handler class implementing the ProtocolHandler protocol.
 
@@ -270,9 +276,9 @@ class ProtocolBindingRegistry:
         Example:
             >>> registry = ProtocolBindingRegistry()
             >>> registry.register("http", HttpHandler)
-            >>> registry.register("database", PostgresHandler)
+            >>> registry.register("db", PostgresHandler)
             >>> print(registry.list_protocols())
-            ['database', 'http']
+            ['db', 'http']
         """
         with self._lock:
             return sorted(self._registry.keys())
@@ -639,7 +645,7 @@ def register_handlers_from_config(
     Example:
         >>> handler_configs = [
         ...     {"type": "http", "class": "HttpHandler", "enabled": True},
-        ...     {"type": "database", "class": "PostgresHandler", "enabled": True},
+        ...     {"type": "db", "class": "PostgresHandler", "enabled": True},
         ... ]
         >>> register_handlers_from_config(runtime, handler_configs)
 
@@ -674,7 +680,7 @@ __all__: list[str] = [
     "HANDLER_TYPE_KAFKA",
     "HANDLER_TYPE_VAULT",
     "HANDLER_TYPE_CONSUL",
-    "HANDLER_TYPE_REDIS",
+    "HANDLER_TYPE_VALKEY",
     "HANDLER_TYPE_GRPC",
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",

@@ -30,7 +30,7 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_GRPC,
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_KAFKA,
-    HANDLER_TYPE_REDIS,
+    HANDLER_TYPE_VALKEY,
     HANDLER_TYPE_VAULT,
     EventBusBindingRegistry,
     ProtocolBindingRegistry,
@@ -67,8 +67,8 @@ class MockConsulHandler:
     """Mock Consul handler for testing."""
 
 
-class MockRedisHandler:
-    """Mock Redis handler for testing."""
+class MockValkeyHandler:
+    """Mock Valkey handler for testing."""
 
 
 class MockGrpcHandler:
@@ -416,7 +416,7 @@ class TestHandlerRegistryThreadSafety:
             (HANDLER_TYPE_KAFKA, MockKafkaHandler),
             (HANDLER_TYPE_VAULT, MockVaultHandler),
             (HANDLER_TYPE_CONSUL, MockConsulHandler),
-            (HANDLER_TYPE_REDIS, MockRedisHandler),
+            (HANDLER_TYPE_VALKEY, MockValkeyHandler),
             (HANDLER_TYPE_GRPC, MockGrpcHandler),
         ]
 
@@ -788,7 +788,7 @@ class TestRegisterHandlersFromConfig:
         """Test that handlers with enabled=True are processed."""
         configs: list[dict[str, object]] = [
             {"type": "http", "class": "HttpHandler", "enabled": True},
-            {"type": "database", "class": "PostgresHandler"},  # Default enabled
+            {"type": "db", "class": "PostgresHandler"},  # Default enabled
         ]
         # This should not raise - placeholder implementation just validates structure
         register_handlers_from_config(runtime=None, handler_configs=configs)
@@ -831,7 +831,7 @@ class TestRegistryError:
         error = RegistryError(
             "Handler not found",
             protocol_type="http",
-            registered_protocols=["database", "kafka"],
+            registered_protocols=["db", "kafka"],
         )
         assert "Handler not found" in str(error)
 
@@ -857,7 +857,7 @@ class TestHandlerTypeConstants:
             HANDLER_TYPE_KAFKA,
             HANDLER_TYPE_VAULT,
             HANDLER_TYPE_CONSUL,
-            HANDLER_TYPE_REDIS,
+            HANDLER_TYPE_VALKEY,
             HANDLER_TYPE_GRPC,
         ]
         for const in constants:
@@ -871,7 +871,7 @@ class TestHandlerTypeConstants:
             HANDLER_TYPE_KAFKA,
             HANDLER_TYPE_VAULT,
             HANDLER_TYPE_CONSUL,
-            HANDLER_TYPE_REDIS,
+            HANDLER_TYPE_VALKEY,
             HANDLER_TYPE_GRPC,
         ]
         assert len(constants) == len(set(constants))
@@ -933,7 +933,7 @@ class TestHandlerRegistryIntegration:
             (HANDLER_TYPE_KAFKA, MockKafkaHandler),
             (HANDLER_TYPE_VAULT, MockVaultHandler),
             (HANDLER_TYPE_CONSUL, MockConsulHandler),
-            (HANDLER_TYPE_REDIS, MockRedisHandler),
+            (HANDLER_TYPE_VALKEY, MockValkeyHandler),
             (HANDLER_TYPE_GRPC, MockGrpcHandler),
         ]
         for proto, cls in handlers:

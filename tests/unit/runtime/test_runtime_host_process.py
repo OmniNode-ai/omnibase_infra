@@ -1027,11 +1027,11 @@ class TestRuntimeHostProcessIntegration:
         process = RuntimeHostProcess()
 
         http_handler = MockHandler(handler_type="http")
-        db_handler = MockHandler(handler_type="database")
+        db_handler = MockHandler(handler_type="db")
 
         handlers = {
             "http": http_handler,
-            "database": db_handler,
+            "db": db_handler,
         }
 
         with patch.object(process, "_handlers", handlers):
@@ -1054,7 +1054,7 @@ class TestRuntimeHostProcessIntegration:
                         "operation": "db.query",
                         "payload": {},
                         "correlation_id": uuid4(),
-                        "handler_type": "database",
+                        "handler_type": "db",
                     }
                 )
 

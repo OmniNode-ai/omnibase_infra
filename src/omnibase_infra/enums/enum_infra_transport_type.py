@@ -21,7 +21,7 @@ class EnumInfraTransportType(str, Enum):
         KAFKA: Kafka message broker transport
         CONSUL: Consul discovery transport
         VAULT: HashiCorp Vault secret transport
-        REDIS: Redis cache/message transport
+        VALKEY: Valkey (Redis-compatible) cache/message transport
         GRPC: gRPC protocol transport
         RUNTIME: Runtime host process internal transport
     """
@@ -31,7 +31,7 @@ class EnumInfraTransportType(str, Enum):
     KAFKA = "kafka"
     CONSUL = "consul"
     VAULT = "vault"
-    REDIS = "redis"
+    VALKEY = "valkey"
     GRPC = "grpc"
     RUNTIME = "runtime"
 

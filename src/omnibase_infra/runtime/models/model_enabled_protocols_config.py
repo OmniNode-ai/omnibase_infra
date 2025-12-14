@@ -14,13 +14,15 @@ from pydantic import BaseModel, ConfigDict, Field
 # Literal type for valid protocol names
 # These correspond to handler_registry constants:
 # HANDLER_TYPE_HTTP, HANDLER_TYPE_DATABASE, HANDLER_TYPE_KAFKA, etc.
+# NOTE: Values must match the operation prefixes used in handler implementations
+# (e.g., "db" matches "db.query", "valkey" matches "valkey.get")
 ProtocolName = Literal[
     "http",
-    "database",
+    "db",
     "kafka",
     "vault",
     "consul",
-    "redis",
+    "valkey",
     "grpc",
 ]
 
@@ -31,7 +33,7 @@ class ModelEnabledProtocolsConfig(BaseModel):
     Defines which protocol types are enabled for the runtime.
 
     Attributes:
-        enabled: List of enabled protocol type names (e.g., ['http', 'database'])
+        enabled: List of enabled protocol type names (e.g., ['http', 'db'])
     """
 
     model_config = ConfigDict(
@@ -41,7 +43,7 @@ class ModelEnabledProtocolsConfig(BaseModel):
     )
 
     enabled: list[ProtocolName] = Field(
-        default_factory=lambda: cast(list[ProtocolName], ["http", "database"]),
+        default_factory=lambda: cast(list[ProtocolName], ["http", "db"]),
         description="List of enabled protocol type names",
     )
 
