@@ -9,7 +9,6 @@ error handling, health checks, describe, and lifecycle management.
 
 from __future__ import annotations
 
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -24,10 +23,12 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.handler_db import DbAdapter
+from omnibase_infra.handlers.models import (
+    ModelDbDescribeResponse,
+    ModelDbHealthResponse,
+    ModelDbQueryResponse,
+)
 from tests.helpers import filter_handler_warnings
-
-# Type alias for response dict with nested structure
-ResponseDict = dict[str, object]
 
 
 class TestDbAdapterInitialization:
@@ -200,16 +201,14 @@ class TestDbAdapterQueryOperations:
                 "correlation_id": correlation_id,
             }
 
-            result = cast(ResponseDict, await adapter.execute(envelope))
+            result = await adapter.execute(envelope)
 
-            assert result["status"] == "success"
-            payload = cast(ResponseDict, result["payload"])
-            assert payload["row_count"] == 2
-            rows = cast(list[dict[str, object]], payload["rows"])
-            assert len(rows) == 2
-            assert rows[0] == {"id": 1, "name": "Alice"}
-            assert rows[1] == {"id": 2, "name": "Bob"}
-            assert result["correlation_id"] == correlation_id
+            assert result.status == "success"
+            assert result.payload.row_count == 2
+            assert len(result.payload.rows) == 2
+            assert result.payload.rows[0] == {"id": 1, "name": "Alice"}
+            assert result.payload.rows[1] == {"id": 2, "name": "Bob"}
+            assert result.correlation_id == correlation_id
 
             mock_conn.fetch.assert_called_once_with("SELECT id, name FROM users")
 
@@ -246,7 +245,7 @@ class TestDbAdapterQueryOperations:
                 "SELECT id, name FROM users WHERE id = $1", 1
             )
 
-            assert result["payload"]["row_count"] == 1
+            assert result.payload.row_count == 1
 
             await adapter.shutdown()
 
@@ -273,8 +272,8 @@ class TestDbAdapterQueryOperations:
 
             result = await adapter.execute(envelope)
 
-            assert result["payload"]["row_count"] == 0
-            assert result["payload"]["rows"] == []
+            assert result.payload.row_count == 0
+            assert result.payload.rows == []
 
             await adapter.shutdown()
 
@@ -318,9 +317,9 @@ class TestDbAdapterExecuteOperations:
 
             result = await adapter.execute(envelope)
 
-            assert result["status"] == "success"
-            assert result["payload"]["row_count"] == 1
-            assert result["payload"]["rows"] == []
+            assert result.status == "success"
+            assert result.payload.row_count == 1
+            assert result.payload.rows == []
 
             mock_conn.execute.assert_called_once_with(
                 "INSERT INTO users (name) VALUES ($1)", "Charlie"
@@ -354,7 +353,7 @@ class TestDbAdapterExecuteOperations:
 
             result = await adapter.execute(envelope)
 
-            assert result["payload"]["row_count"] == 5
+            assert result.payload.row_count == 5
 
             await adapter.shutdown()
 
@@ -381,7 +380,7 @@ class TestDbAdapterExecuteOperations:
 
             result = await adapter.execute(envelope)
 
-            assert result["payload"]["row_count"] == 3
+            assert result.payload.row_count == 3
 
             await adapter.shutdown()
 
@@ -411,7 +410,7 @@ class TestDbAdapterExecuteOperations:
 
             result = await adapter.execute(envelope)
 
-            assert result["payload"]["row_count"] == 0
+            assert result.payload.row_count == 0
 
             await adapter.shutdown()
 
@@ -847,11 +846,13 @@ class TestDbAdapterHealthCheck:
 
             health = await adapter.health_check()
 
-            assert "healthy" in health
-            assert "initialized" in health
-            assert "adapter_type" in health
-            assert "pool_size" in health
-            assert "timeout_seconds" in health
+            # Verify health response has all required fields
+            assert isinstance(health, ModelDbHealthResponse)
+            assert hasattr(health, "healthy")
+            assert hasattr(health, "initialized")
+            assert hasattr(health, "adapter_type")
+            assert hasattr(health, "pool_size")
+            assert hasattr(health, "timeout_seconds")
 
             await adapter.shutdown()
 
@@ -873,11 +874,11 @@ class TestDbAdapterHealthCheck:
 
             health = await adapter.health_check()
 
-            assert health["healthy"] is True
-            assert health["initialized"] is True
-            assert health["adapter_type"] == "database"
-            assert health["pool_size"] == 5
-            assert health["timeout_seconds"] == 30.0
+            assert health.healthy is True
+            assert health.initialized is True
+            assert health.adapter_type == "database"
+            assert health.pool_size == 5
+            assert health.timeout_seconds == 30.0
 
             mock_conn.fetchval.assert_called_once_with("SELECT 1")
 
@@ -890,8 +891,8 @@ class TestDbAdapterHealthCheck:
         """Test health_check shows healthy=False when not initialized."""
         health = await adapter.health_check()
 
-        assert health["healthy"] is False
-        assert health["initialized"] is False
+        assert health.healthy is False
+        assert health.initialized is False
 
     @pytest.mark.asyncio
     async def test_health_check_unhealthy_when_db_unreachable(
@@ -911,8 +912,8 @@ class TestDbAdapterHealthCheck:
 
             health = await adapter.health_check()
 
-            assert health["healthy"] is False
-            assert health["initialized"] is True
+            assert health.healthy is False
+            assert health.initialized is True
 
             await adapter.shutdown()
 
@@ -929,22 +930,19 @@ class TestDbAdapterDescribe:
         """Test describe returns correct adapter metadata."""
         description = adapter.describe()
 
-        assert description["adapter_type"] == "database"
-        assert description["pool_size"] == 5
-        assert description["timeout_seconds"] == 30.0
-        assert description["version"] == "0.1.0-mvp"
-        assert description["initialized"] is False
+        assert description.adapter_type == "database"
+        assert description.pool_size == 5
+        assert description.timeout_seconds == 30.0
+        assert description.version == "0.1.0-mvp"
+        assert description.initialized is False
 
     def test_describe_lists_supported_operations(self, adapter: DbAdapter) -> None:
         """Test describe lists supported operations."""
         description = adapter.describe()
 
-        assert "supported_operations" in description
-        operations = description["supported_operations"]
-
-        assert "db.query" in operations
-        assert "db.execute" in operations
-        assert len(operations) == 2
+        assert "db.query" in description.supported_operations
+        assert "db.execute" in description.supported_operations
+        assert len(description.supported_operations) == 2
 
     @pytest.mark.asyncio
     async def test_describe_reflects_initialized_state(
@@ -953,16 +951,16 @@ class TestDbAdapterDescribe:
         """Test describe shows correct initialized state."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
 
-        assert adapter.describe()["initialized"] is False
+        assert adapter.describe().initialized is False
 
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_pool
 
             await adapter.initialize({"dsn": "postgresql://localhost/db"})
-            assert adapter.describe()["initialized"] is True
+            assert adapter.describe().initialized is True
 
             await adapter.shutdown()
-            assert adapter.describe()["initialized"] is False
+            assert adapter.describe().initialized is False
 
 
 class TestDbAdapterLifecycle:
@@ -1129,7 +1127,7 @@ class TestDbAdapterCorrelationId:
 
             result = await adapter.execute(envelope)
 
-            assert result["correlation_id"] == correlation_id
+            assert result.correlation_id == correlation_id
 
             await adapter.shutdown()
 
@@ -1159,7 +1157,7 @@ class TestDbAdapterCorrelationId:
             result = await adapter.execute(envelope)
 
             # String correlation_id is converted to UUID by handler
-            assert result["correlation_id"] == UUID(correlation_id)
+            assert result.correlation_id == UUID(correlation_id)
 
             await adapter.shutdown()
 
@@ -1186,9 +1184,8 @@ class TestDbAdapterCorrelationId:
 
             result = await adapter.execute(envelope)
 
-            # Should have a generated UUID (returned as UUID, not string)
-            assert "correlation_id" in result
-            assert isinstance(result["correlation_id"], UUID)
+            # Should have a generated UUID
+            assert isinstance(result.correlation_id, UUID)
 
             await adapter.shutdown()
 
@@ -1404,7 +1401,7 @@ class TestDbAdapterLogWarnings:
                 }
 
                 result = await adapter.execute(envelope)
-                assert result["status"] == "success"
+                assert result.status == "success"
 
                 # Shutdown
                 await adapter.shutdown()
@@ -1443,8 +1440,8 @@ class TestDbAdapterLogWarnings:
                 health = await adapter.health_check()
 
                 # Health check should return unhealthy
-                assert health["healthy"] is False
-                assert health["initialized"] is True
+                assert health.healthy is False
+                assert health.initialized is True
 
             await adapter.shutdown()
 
@@ -1480,8 +1477,8 @@ class TestDbAdapterLogWarnings:
                 health = await adapter.health_check()
 
                 # Health check should return healthy
-                assert health["healthy"] is True
-                assert health["initialized"] is True
+                assert health.healthy is True
+                assert health.initialized is True
 
             await adapter.shutdown()
 

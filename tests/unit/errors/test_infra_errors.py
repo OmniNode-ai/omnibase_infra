@@ -329,13 +329,13 @@ class TestInfraConnectionError:
         error = InfraConnectionError("Vault connection failed", context=context)
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
-    def test_error_code_mapping_redis_transport(self) -> None:
-        """Test REDIS transport uses SERVICE_UNAVAILABLE."""
+    def test_error_code_mapping_valkey_transport(self) -> None:
+        """Test VALKEY transport uses SERVICE_UNAVAILABLE."""
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.VALKEY,
-            target_name="redis-cluster",
+            target_name="valkey-cluster",
         )
-        error = InfraConnectionError("Redis connection failed", context=context)
+        error = InfraConnectionError("Valkey connection failed", context=context)
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
     def test_error_code_mapping_context_without_transport(self) -> None:
@@ -349,7 +349,7 @@ class TestInfraConnectionError:
 
     def test_error_chaining(self) -> None:
         """Test error chaining from connection exception."""
-        context = ModelInfraErrorContext(target_name="redis")
+        context = ModelInfraErrorContext(target_name="valkey")
         conn_error = OSError("Connection refused")
         try:
             raise InfraConnectionError(
@@ -357,7 +357,7 @@ class TestInfraConnectionError:
             ) from conn_error
         except InfraConnectionError as e:
             assert e.__cause__ == conn_error
-            assert e.model.context["target_name"] == "redis"
+            assert e.model.context["target_name"] == "valkey"
             assert e.model.context["port"] == 6379
 
 
@@ -705,7 +705,7 @@ class TestStructuredFieldsComprehensive:
 
     def test_all_errors_support_target_name(self) -> None:
         """Test that all errors support target_name via context model."""
-        targets = ["api", "vault", "postgresql", "kafka", "consul", "redis"]
+        targets = ["api", "vault", "postgresql", "kafka", "consul", "valkey"]
         errors = [
             ProtocolConfigurationError(
                 "test", context=ModelInfraErrorContext(target_name="api")
@@ -723,7 +723,7 @@ class TestStructuredFieldsComprehensive:
                 "test", context=ModelInfraErrorContext(target_name="consul")
             ),
             InfraUnavailableError(
-                "test", context=ModelInfraErrorContext(target_name="redis")
+                "test", context=ModelInfraErrorContext(target_name="valkey")
             ),
         ]
 

@@ -366,16 +366,17 @@ class TestDockerComposeSecurity:
             "VAULT_TOKEN:-" not in content
         ), "VAULT_TOKEN should NOT have default value (security risk)"
 
-    def test_redis_password_requires_explicit_value(self) -> None:
-        """Verify REDIS_PASSWORD requires explicit value without default.
+    def test_valkey_password_requires_explicit_value(self) -> None:
+        """Verify Valkey password (REDIS_PASSWORD env var) requires explicit value without default.
 
         The compose file should use ${REDIS_PASSWORD} without a default value,
-        forcing users to set it explicitly.
+        forcing users to set it explicitly. Note: The env var name REDIS_PASSWORD
+        is retained for backwards compatibility with existing infrastructure.
         """
         compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
         content = compose_file.read_text()
 
-        # Should have REDIS_PASSWORD
+        # Should have REDIS_PASSWORD (env var name retained for compatibility)
         assert "REDIS_PASSWORD" in content, "Missing REDIS_PASSWORD configuration"
 
         # Should use ${REDIS_PASSWORD} pattern (explicit, no default)

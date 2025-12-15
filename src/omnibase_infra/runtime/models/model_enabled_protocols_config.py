@@ -7,7 +7,7 @@ This module provides the Pydantic model for enabled protocol configuration.
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,6 +27,15 @@ ProtocolName = Literal[
 ]
 
 
+def _default_enabled_protocols() -> list[ProtocolName]:
+    """Create default list of enabled protocols.
+
+    Returns a properly typed list of default protocol names.
+    Using a factory function avoids cast() in default_factory for type safety.
+    """
+    return ["http", "db"]
+
+
 class ModelEnabledProtocolsConfig(BaseModel):
     """Enabled protocols configuration model.
 
@@ -43,7 +52,7 @@ class ModelEnabledProtocolsConfig(BaseModel):
     )
 
     enabled: list[ProtocolName] = Field(
-        default_factory=lambda: cast(list[ProtocolName], ["http", "db"]),
+        default_factory=_default_enabled_protocols,
         description="List of enabled protocol type names",
     )
 

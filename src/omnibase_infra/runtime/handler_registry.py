@@ -71,6 +71,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
@@ -627,42 +628,42 @@ def get_event_bus_class(bus_kind: str) -> type[ProtocolEventBus]:
 
 def register_handlers_from_config(
     runtime: object,  # Will be BaseRuntimeHostProcess
-    handler_configs: list[dict[str, object]],
+    protocol_configs: list[ModelProtocolRegistrationConfig],
 ) -> None:
-    """Register handlers from configuration.
+    """Register protocol handlers from configuration.
 
     Called by BaseRuntimeHostProcess to wire up handlers based on contract config.
-    This function validates and processes handler configuration dictionaries,
+    This function validates and processes protocol registration configurations,
     registering the appropriate handlers with the runtime.
 
     Args:
         runtime: The runtime host process instance (BaseRuntimeHostProcess).
             Typed as object temporarily until BaseRuntimeHostProcess is implemented.
-        handler_configs: List of handler configuration dicts from contract.
-            Each dict should have 'type' (handler type string) and optionally
-            'class' (handler class name), 'enabled' (bool), and other config.
+        protocol_configs: List of ModelProtocolRegistrationConfig instances from contract.
+            Each config specifies type, protocol_class, enabled flag, and options.
 
     Example:
-        >>> handler_configs = [
-        ...     {"type": "http", "class": "HttpHandler", "enabled": True},
-        ...     {"type": "db", "class": "PostgresHandler", "enabled": True},
+        >>> from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
+        >>> protocol_configs = [
+        ...     ModelProtocolRegistrationConfig(
+        ...         type="http", protocol_class="HttpHandler", enabled=True
+        ...     ),
+        ...     ModelProtocolRegistrationConfig(
+        ...         type="db", protocol_class="PostgresHandler", enabled=True
+        ...     ),
         ... ]
-        >>> register_handlers_from_config(runtime, handler_configs)
+        >>> register_handlers_from_config(runtime, protocol_configs)
 
     Note:
-        This is a placeholder implementation. Full handler class resolution
+        This is a placeholder implementation. Full protocol class resolution
         will be implemented when BaseRuntimeHostProcess is available.
     """
     registry = get_handler_registry()
-    for config in handler_configs:
-        handler_type = config.get("type")
-        handler_cls_name = config.get("class")
-        enabled = config.get("enabled", True)
-
-        if not enabled:
+    for config in protocol_configs:
+        if not config.enabled:
             continue
 
-        if handler_type and handler_cls_name:
+        if config.type and config.protocol_class:
             # TODO: Resolve handler class from name using importlib
             # For now, just validate config structure is correct
             # The actual handler instantiation will be done by RuntimeHostProcess

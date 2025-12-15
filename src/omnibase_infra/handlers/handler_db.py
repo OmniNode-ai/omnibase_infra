@@ -25,6 +25,12 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     RuntimeHostError,
 )
+from omnibase_infra.handlers.models import (
+    ModelDbDescribeResponse,
+    ModelDbHealthResponse,
+    ModelDbQueryPayload,
+    ModelDbQueryResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +176,7 @@ class DbAdapter:
         self._initialized = False
         logger.info("DbAdapter shutdown complete")
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+    async def execute(self, envelope: dict[str, object]) -> ModelDbQueryResponse:
         """Execute database operation (db.query or db.execute) from envelope.
 
         Args:
@@ -180,10 +186,10 @@ class DbAdapter:
                 - correlation_id: Optional correlation ID for tracing
 
         Returns:
-            Response envelope with:
+            ModelDbQueryResponse containing:
                 - status: "success"
-                - payload: {"rows": list[dict], "row_count": int}
-                - correlation_id: Correlation ID string
+                - payload: ModelDbQueryPayload with rows and row_count
+                - correlation_id: UUID for request/response correlation
 
         Raises:
             RuntimeHostError: If adapter not initialized or invalid input.
@@ -322,7 +328,7 @@ class DbAdapter:
         sql: str,
         parameters: list[object],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> ModelDbQueryResponse:
         """Execute SELECT query and return rows."""
         if self._pool is None:
             ctx = ModelInfraErrorContext(
@@ -374,7 +380,7 @@ class DbAdapter:
         sql: str,
         parameters: list[object],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> ModelDbQueryResponse:
         """Execute INSERT/UPDATE/DELETE statement and return affected row count."""
         if self._pool is None:
             ctx = ModelInfraErrorContext(
@@ -455,18 +461,15 @@ class DbAdapter:
 
     def _build_response(
         self, rows: list[dict[str, object]], row_count: int, correlation_id: UUID
-    ) -> dict[str, object]:
+    ) -> ModelDbQueryResponse:
         """Build response envelope from query/execute result."""
-        return {
-            "status": "success",
-            "payload": {
-                "rows": rows,
-                "row_count": row_count,
-            },
-            "correlation_id": correlation_id,
-        }
+        return ModelDbQueryResponse(
+            status="success",
+            payload=ModelDbQueryPayload(rows=rows, row_count=row_count),
+            correlation_id=correlation_id,
+        )
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(self) -> ModelDbHealthResponse:
         """Return adapter health status."""
         healthy = False
         if self._initialized and self._pool is not None:
@@ -481,24 +484,24 @@ class DbAdapter:
                 )
                 healthy = False
 
-        return {
-            "healthy": healthy,
-            "initialized": self._initialized,
-            "adapter_type": self.handler_type.value,
-            "pool_size": self._pool_size,
-            "timeout_seconds": self._timeout,
-        }
+        return ModelDbHealthResponse(
+            healthy=healthy,
+            initialized=self._initialized,
+            adapter_type=self.handler_type.value,
+            pool_size=self._pool_size,
+            timeout_seconds=self._timeout,
+        )
 
-    def describe(self) -> dict[str, object]:
+    def describe(self) -> ModelDbDescribeResponse:
         """Return adapter metadata and capabilities."""
-        return {
-            "adapter_type": self.handler_type.value,
-            "supported_operations": sorted(_SUPPORTED_OPERATIONS),
-            "pool_size": self._pool_size,
-            "timeout_seconds": self._timeout,
-            "initialized": self._initialized,
-            "version": "0.1.0-mvp",
-        }
+        return ModelDbDescribeResponse(
+            adapter_type=self.handler_type.value,
+            supported_operations=sorted(_SUPPORTED_OPERATIONS),
+            pool_size=self._pool_size,
+            timeout_seconds=self._timeout,
+            initialized=self._initialized,
+            version="0.1.0-mvp",
+        )
 
 
 __all__: list[str] = ["DbAdapter"]

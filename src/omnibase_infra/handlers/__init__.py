@@ -12,12 +12,28 @@ Adapters are responsible for:
 Available Adapters:
 - HttpRestAdapter: HTTP/REST protocol adapter (MVP: GET, POST only)
 - DbAdapter: PostgreSQL database adapter (MVP: query, execute only)
+
+Response Models:
+- ModelDbQueryPayload: Database query result payload
+- ModelDbQueryResponse: Database query response envelope
+- ModelDbHealthResponse: Database health check response
+- ModelDbDescribeResponse: Database adapter metadata
 """
 
 from omnibase_infra.handlers.handler_db import DbAdapter
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
+from omnibase_infra.handlers.models import (
+    ModelDbDescribeResponse,
+    ModelDbHealthResponse,
+    ModelDbQueryPayload,
+    ModelDbQueryResponse,
+)
 
 __all__: list[str] = [
     "DbAdapter",
     "HttpRestAdapter",
+    "ModelDbQueryPayload",
+    "ModelDbQueryResponse",
+    "ModelDbHealthResponse",
+    "ModelDbDescribeResponse",
 ]

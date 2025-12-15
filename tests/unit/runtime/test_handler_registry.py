@@ -41,6 +41,7 @@ from omnibase_infra.runtime.handler_registry import (
     get_handler_registry,
     register_handlers_from_config,
 )
+from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
 
 # =============================================================================
 # Mock Classes for Testing
@@ -773,35 +774,40 @@ class TestRegisterHandlersFromConfig:
 
     def test_empty_config_does_not_raise(self) -> None:
         """Test that empty config list doesn't raise."""
-        register_handlers_from_config(runtime=None, handler_configs=[])
+        register_handlers_from_config(runtime=None, protocol_configs=[])
         # Should not raise
 
     def test_disabled_handlers_skipped(self) -> None:
         """Test that handlers with enabled=False are skipped."""
         configs = [
-            {"type": "http", "class": "HttpHandler", "enabled": False},
+            ModelProtocolRegistrationConfig(
+                type="http", protocol_class="HttpHandler", enabled=False
+            ),
         ]
         # This should not raise even though the handler isn't actually registered
-        register_handlers_from_config(runtime=None, handler_configs=configs)
+        register_handlers_from_config(runtime=None, protocol_configs=configs)
 
     def test_enabled_handlers_processed(self) -> None:
         """Test that handlers with enabled=True are processed."""
-        configs: list[dict[str, object]] = [
-            {"type": "http", "class": "HttpHandler", "enabled": True},
-            {"type": "db", "class": "PostgresHandler"},  # Default enabled
+        configs = [
+            ModelProtocolRegistrationConfig(
+                type="http", protocol_class="HttpHandler", enabled=True
+            ),
+            ModelProtocolRegistrationConfig(
+                type="db", protocol_class="PostgresHandler"
+            ),  # Default enabled
         ]
         # This should not raise - placeholder implementation just validates structure
-        register_handlers_from_config(runtime=None, handler_configs=configs)
+        register_handlers_from_config(runtime=None, protocol_configs=configs)
 
     def test_missing_type_or_class_skipped(self) -> None:
         """Test that configs missing type or class are safely handled."""
-        configs: list[dict[str, object]] = [
-            {"enabled": True},  # Missing type and class
-            {"type": "http"},  # Missing class
-            {"class": "Handler"},  # Missing type
+        configs = [
+            ModelProtocolRegistrationConfig(type="http", enabled=True),  # Missing class
+            ModelProtocolRegistrationConfig(type="db"),  # Missing class (None)
         ]
         # Should not raise
-        register_handlers_from_config(runtime=None, handler_configs=configs)
+        register_handlers_from_config(runtime=None, protocol_configs=configs)
 
 
 # =============================================================================
