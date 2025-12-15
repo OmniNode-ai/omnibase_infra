@@ -49,12 +49,16 @@ from tests.helpers import DeterministicClock, DeterministicIdGenerator
 # Try to import RuntimeHostProcess to determine if implementation exists
 _RUNTIME_HOST_IMPLEMENTED = False
 try:
+    from omnibase_infra.runtime.protocol_lifecycle_executor import (
+        ProtocolLifecycleExecutor,
+    )
     from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
     _RUNTIME_HOST_IMPLEMENTED = True
 except ImportError:
     # RuntimeHostProcess not implemented yet - define a placeholder for type checking
     RuntimeHostProcess = None  # type: ignore[misc, assignment]
+    ProtocolLifecycleExecutor = None  # type: ignore[misc, assignment]
 
 # Skip marker for all tests when implementation doesn't exist
 pytestmark = pytest.mark.skipif(
@@ -1703,21 +1707,21 @@ class TestRuntimeHostProcessShutdownPriority:
     async def test_get_shutdown_priority_returns_default_for_handler_without_method(
         self,
     ) -> None:
-        """Test that _get_shutdown_priority returns 0 for handlers without the method."""
-        process = RuntimeHostProcess()
+        """Test that get_shutdown_priority returns 0 for handlers without the method."""
         handler = MockHandler(handler_type="no_priority")
 
-        priority = process._get_shutdown_priority(handler)  # type: ignore[arg-type]
+        # Use ProtocolLifecycleExecutor static method directly
+        priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)  # type: ignore[arg-type]
 
         assert priority == 0
 
     @pytest.mark.asyncio
     async def test_get_shutdown_priority_returns_handler_priority(self) -> None:
-        """Test that _get_shutdown_priority returns the handler's priority value."""
-        process = RuntimeHostProcess()
+        """Test that get_shutdown_priority returns the handler's priority value."""
         handler = MockHandlerWithPriority(handler_type="with_priority", priority=100)
 
-        priority = process._get_shutdown_priority(handler)  # type: ignore[arg-type]
+        # Use ProtocolLifecycleExecutor static method directly
+        priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)  # type: ignore[arg-type]
 
         assert priority == 100
 
@@ -1726,14 +1730,14 @@ class TestRuntimeHostProcessShutdownPriority:
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that _get_shutdown_priority returns 0 when handler returns non-int."""
+        """Test that get_shutdown_priority returns 0 when handler returns non-int."""
         import logging
 
-        process = RuntimeHostProcess()
         handler = MockHandlerWithInvalidPriority()
 
         with caplog.at_level(logging.WARNING):
-            priority = process._get_shutdown_priority(handler)  # type: ignore[arg-type]
+            # Use ProtocolLifecycleExecutor static method directly
+            priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)  # type: ignore[arg-type]
 
         assert priority == 0
         assert any(
@@ -1745,14 +1749,14 @@ class TestRuntimeHostProcessShutdownPriority:
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that _get_shutdown_priority returns 0 when handler raises exception."""
+        """Test that get_shutdown_priority returns 0 when handler raises exception."""
         import logging
 
-        process = RuntimeHostProcess()
         handler = MockHandlerWithFailingPriority()
 
         with caplog.at_level(logging.WARNING):
-            priority = process._get_shutdown_priority(handler)  # type: ignore[arg-type]
+            # Use ProtocolLifecycleExecutor static method directly
+            priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)  # type: ignore[arg-type]
 
         assert priority == 0
         assert any(

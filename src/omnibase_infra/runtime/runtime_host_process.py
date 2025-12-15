@@ -39,7 +39,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -50,6 +50,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.handler_registry import get_handler_registry
+from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.wiring import wire_default_handlers
 
 if TYPE_CHECKING:
@@ -179,6 +180,11 @@ class RuntimeHostProcess:
             )
 
         self._health_check_timeout_seconds: float = timeout_value
+
+        # Handler executor for lifecycle operations (shutdown, health check)
+        self._lifecycle_executor = ProtocolLifecycleExecutor(
+            health_check_timeout_seconds=self._health_check_timeout_seconds
+        )
 
         # Store full config for handler initialization
         self._config: dict[str, object] = config
@@ -311,56 +317,6 @@ class RuntimeHostProcess:
             },
         )
 
-    def _get_shutdown_priority(self, handler: ProtocolHandler) -> int:
-        """Get shutdown priority for a handler.
-
-        Returns the shutdown priority for the given handler. Handlers with higher
-        priority values are shutdown before handlers with lower priority values.
-
-        This method uses duck typing to check if the handler implements
-        shutdown_priority(). If not, returns default priority of 0.
-
-        Shutdown Priority Guidelines:
-            - Higher values = shutdown first
-            - Consumers should have higher priority than producers (e.g., 100 vs 50)
-            - Connections should have higher priority than connection pools (e.g., 80 vs 40)
-            - Downstream resources should shutdown before upstream resources
-
-        Example Priority Scheme:
-            - 100: Consumers (Kafka consumers, event subscribers)
-            - 80: Active connections (HTTP clients, DB connections)
-            - 50: Producers (Kafka producers, event publishers)
-            - 40: Connection pools (DB pools, HTTP connection pools)
-            - 0: Default (handlers without shutdown_priority)
-
-        Args:
-            handler: The handler instance to get priority for.
-
-        Returns:
-            int: Shutdown priority. Higher values shutdown first. Default is 0.
-        """
-        if hasattr(handler, "shutdown_priority"):
-            try:
-                priority = handler.shutdown_priority()
-                if isinstance(priority, int):
-                    return priority
-                logger.warning(
-                    "Handler shutdown_priority() returned non-int, using default",
-                    extra={
-                        "handler_class": type(handler).__name__,
-                        "returned_type": type(priority).__name__,
-                    },
-                )
-            except Exception as e:
-                logger.warning(
-                    "Error calling handler shutdown_priority(), using default",
-                    extra={
-                        "handler_class": type(handler).__name__,
-                        "error": str(e),
-                    },
-                )
-        return 0
-
     async def stop(self) -> None:
         """Stop the runtime host.
 
@@ -417,70 +373,25 @@ class RuntimeHostProcess:
             self._subscription = None
 
         # Step 2: Shutdown all handlers by priority (release resources like DB/Kafka connections)
-        # Handlers are grouped by priority and shutdown in groups:
-        # - Higher priority groups shutdown first (ensures dependency ordering)
-        # - Within a priority group, handlers shutdown in parallel (performance)
+        # Delegates to ProtocolLifecycleExecutor which handles:
+        # - Grouping handlers by priority (higher priority first)
+        # - Parallel shutdown within priority groups for performance
         if self._handlers:
-            # Group handlers by priority
-            priority_groups: dict[int, list[tuple[str, ProtocolHandler]]] = {}
-            for handler_type, handler in self._handlers.items():
-                priority = self._get_shutdown_priority(handler)
-                if priority not in priority_groups:
-                    priority_groups[priority] = []
-                priority_groups[priority].append((handler_type, handler))
-
-            # Sort priorities in descending order (higher priority first)
-            sorted_priorities = sorted(priority_groups.keys(), reverse=True)
-
-            # Track overall results
-            all_succeeded: list[str] = []
-            all_failed: list[tuple[str, Optional[str]]] = []
-
-            # Shutdown each priority group sequentially, handlers within group in parallel
-            for priority in sorted_priorities:
-                handlers_in_group = priority_groups[priority]
-
-                logger.debug(
-                    "Shutting down handler priority group",
-                    extra={
-                        "priority": priority,
-                        "handlers": [h[0] for h in handlers_in_group],
-                    },
+            all_succeeded, all_failed = (
+                await self._lifecycle_executor.shutdown_handlers_by_priority(
+                    self._handlers
                 )
+            )
 
-                shutdown_tasks = [
-                    self._shutdown_handler(handler_type, handler)
-                    for handler_type, handler in handlers_in_group
-                ]
-                results = await asyncio.gather(*shutdown_tasks)
-
-                # Collect results
-                for handler_type, success, error_msg in results:
-                    if success:
-                        all_succeeded.append(handler_type)
-                    else:
-                        all_failed.append((handler_type, error_msg))
-
-            # Log errors and summary
-            if all_failed:
-                for handler_type, error_msg in all_failed:
-                    logger.error(
-                        "Handler shutdown failed",
-                        extra={"handler_type": handler_type, "error": error_msg},
-                    )
-
+            # Log summary (ProtocolLifecycleExecutor already logs detailed info)
             logger.info(
-                "Priority-based handler shutdown completed",
+                "Handler shutdown completed",
                 extra={
                     "succeeded_handlers": all_succeeded,
                     "failed_handlers": [f[0] for f in all_failed],
                     "total_handlers": len(all_succeeded) + len(all_failed),
                     "success_count": len(all_succeeded),
                     "failure_count": len(all_failed),
-                    "priority_groups": {
-                        p: [h[0] for h in handlers_in_group]
-                        for p, handlers_in_group in priority_groups.items()
-                    },
                 },
             )
 
@@ -838,116 +749,6 @@ class RuntimeHostProcess:
         json_safe_envelope = self._serialize_envelope(envelope)
         await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
-    async def _check_handler_health(
-        self,
-        handler_type: str,
-        handler: ProtocolHandler,
-        timeout_seconds: float = -1.0,
-    ) -> tuple[str, dict[str, object]]:
-        """Check health of a single handler with timeout.
-
-        This method performs an individual handler health check with a configurable
-        timeout to prevent slow handlers from blocking the overall health check.
-
-        Args:
-            handler_type: The handler type identifier.
-            handler: The handler instance to check.
-            timeout_seconds: Override timeout for this specific check. If negative
-                (default: -1.0), uses the configured health_check_timeout_seconds
-                from config dict (default: 5.0 seconds).
-
-        Returns:
-            Tuple of (handler_type, health_result_dict) where health_result_dict
-            contains at minimum a "healthy" boolean key.
-        """
-        # Use provided timeout or fall back to configured instance timeout
-        # Negative value signals "use default from config"
-        effective_timeout = (
-            timeout_seconds
-            if timeout_seconds > 0
-            else self._health_check_timeout_seconds
-        )
-
-        try:
-            if hasattr(handler, "health_check"):
-                handler_health = await asyncio.wait_for(
-                    handler.health_check(),
-                    timeout=effective_timeout,
-                )
-                return handler_type, handler_health
-            else:
-                # Handler doesn't implement health_check - assume healthy
-                return handler_type, {
-                    "healthy": True,
-                    "note": "no health_check method",
-                }
-        except TimeoutError:
-            logger.warning(
-                "Handler health check timed out",
-                extra={
-                    "handler_type": handler_type,
-                    "timeout_seconds": effective_timeout,
-                },
-            )
-            return handler_type, {
-                "healthy": False,
-                "error": f"health check timeout after {effective_timeout}s",
-            }
-        except Exception as e:
-            logger.warning(
-                "Handler health check failed",
-                extra={"handler_type": handler_type, "error": str(e)},
-            )
-            return handler_type, {
-                "healthy": False,
-                "error": str(e),
-            }
-
-    async def _shutdown_handler(
-        self,
-        handler_type: str,
-        handler: ProtocolHandler,
-    ) -> tuple[str, bool, Optional[str]]:
-        """Shutdown a single handler with error handling.
-
-        This method performs individual handler shutdown with comprehensive error
-        handling to ensure all handlers get a chance to cleanup even if one fails.
-        Used by stop() for parallel handler shutdown via asyncio.gather().
-
-        Args:
-            handler_type: The handler type identifier.
-            handler: The handler instance to shutdown.
-
-        Returns:
-            Tuple of (handler_type, success, error_message) where:
-                - handler_type: The handler type identifier for result tracking
-                - success: True if shutdown completed successfully, False otherwise
-                - error_message: None if successful, error description if failed
-        """
-        try:
-            if hasattr(handler, "shutdown"):
-                await handler.shutdown()
-                logger.debug(
-                    "Handler shutdown completed",
-                    extra={"handler_type": handler_type},
-                )
-                return handler_type, True, None
-            else:
-                # Handler doesn't implement shutdown - considered successful
-                logger.debug(
-                    "Handler has no shutdown method, skipping",
-                    extra={"handler_type": handler_type},
-                )
-                return handler_type, True, None
-        except Exception as e:
-            # Log exception but return failure status instead of raising
-            # This ensures all handlers get a chance to cleanup even if one fails
-            logger.exception(
-                "Error shutting down handler",
-                extra={"handler_type": handler_type, "error": str(e)},
-            )
-            return handler_type, False, str(e)
-
     async def health_check(self) -> dict[str, object]:
         """Return health check status.
 
@@ -1014,14 +815,14 @@ class RuntimeHostProcess:
             event_bus_healthy = False
 
         # Check handler health for all registered handlers concurrently
-        # Each handler health check has a 5-second timeout to prevent blocking
+        # Delegates to ProtocolLifecycleExecutor with configured timeout to prevent blocking
         handler_health_results: dict[str, dict[str, object]] = {}
         handlers_all_healthy = True
 
         if self._handlers:
             # Run all handler health checks concurrently using asyncio.gather()
             health_check_tasks = [
-                self._check_handler_health(handler_type, handler)
+                self._lifecycle_executor.check_handler_health(handler_type, handler)
                 for handler_type, handler in self._handlers.items()
             ]
             results = await asyncio.gather(*health_check_tasks)
