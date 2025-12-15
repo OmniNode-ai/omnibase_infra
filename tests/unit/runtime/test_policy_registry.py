@@ -406,8 +406,8 @@ class TestPolicyRegistryList:
     """Tests for list() method."""
 
     def test_list_all_policies(self, populated_policy_registry: PolicyRegistry) -> None:
-        """Test that list returns (id, type, version) tuples."""
-        policies = populated_policy_registry.list()
+        """Test that list_keys returns (id, type, version) tuples."""
+        policies = populated_policy_registry.list_keys()
         assert len(policies) == 2
         # Each entry should be a tuple of (policy_id, policy_type, version)
         for entry in policies:
@@ -421,16 +421,16 @@ class TestPolicyRegistryList:
     def test_list_by_policy_type(
         self, populated_policy_registry: PolicyRegistry
     ) -> None:
-        """Test filtering list by policy type."""
+        """Test filtering list_keys by policy type."""
         # List only orchestrator policies
-        orchestrator_policies = populated_policy_registry.list(
+        orchestrator_policies = populated_policy_registry.list_keys(
             policy_type=EnumPolicyType.ORCHESTRATOR
         )
         assert len(orchestrator_policies) == 1
         assert orchestrator_policies[0][1] == "orchestrator"
 
         # List only reducer policies
-        reducer_policies = populated_policy_registry.list(
+        reducer_policies = populated_policy_registry.list_keys(
             policy_type=EnumPolicyType.REDUCER
         )
         assert len(reducer_policies) == 1
@@ -438,7 +438,7 @@ class TestPolicyRegistryList:
 
     def test_list_empty_registry(self, policy_registry: PolicyRegistry) -> None:
         """Test that empty registry returns empty list."""
-        policies = policy_registry.list()
+        policies = policy_registry.list_keys()
         assert policies == []
 
 
@@ -729,7 +729,7 @@ class TestPolicyRegistryClear:
         assert len(populated_policy_registry) > 0
         populated_policy_registry.clear()
         assert len(populated_policy_registry) == 0
-        assert populated_policy_registry.list() == []
+        assert populated_policy_registry.list_keys() == []
 
 
 # =============================================================================
@@ -1208,7 +1208,7 @@ class TestPolicyRegistryIntegration:
         assert policy_cls is MockSyncPolicy
 
         # List
-        policies = policy_registry.list()
+        policies = policy_registry.list_keys()
         assert len(policies) == 1
         assert policies[0][0] == "workflow-test"
 
@@ -1238,8 +1238,10 @@ class TestPolicyRegistryIntegration:
         assert policy_registry.is_registered("reducer")
 
         # Filter by type
-        orchestrators = policy_registry.list(policy_type=EnumPolicyType.ORCHESTRATOR)
-        reducers = policy_registry.list(policy_type=EnumPolicyType.REDUCER)
+        orchestrators = policy_registry.list_keys(
+            policy_type=EnumPolicyType.ORCHESTRATOR
+        )
+        reducers = policy_registry.list_keys(policy_type=EnumPolicyType.REDUCER)
         assert len(orchestrators) == 1
         assert len(reducers) == 1
 

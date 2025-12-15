@@ -17,6 +17,7 @@ Exports:
     ModelOptionalCorrelationId: Wrapper for optional correlation ID values
     ModelPolicyTypeFilter: Wrapper for policy type filter values
     ModelPolicyRegistration: Policy registration parameters model
+    ModelPolicyKey: Strongly-typed policy registry key model
 """
 
 from omnibase_infra.runtime.models.model_enabled_protocols_config import (
@@ -29,6 +30,7 @@ from omnibase_infra.runtime.models.model_optional_correlation_id import (
 )
 from omnibase_infra.runtime.models.model_optional_string import ModelOptionalString
 from omnibase_infra.runtime.models.model_optional_uuid import ModelOptionalUUID
+from omnibase_infra.runtime.models.model_policy_key import ModelPolicyKey
 from omnibase_infra.runtime.models.model_policy_registration import (
     ModelPolicyRegistration,
 )
@@ -51,4 +53,5 @@ __all__: list[str] = [
     "ModelOptionalCorrelationId",
     "ModelPolicyTypeFilter",
     "ModelPolicyRegistration",
+    "ModelPolicyKey",
 ]

@@ -67,7 +67,7 @@ Example Usage:
     result = policy.evaluate(context)
 
     # List all policies
-    policies = registry.list()  # [(id, type, version), ...]
+    policies = registry.list_keys()  # [(id, type, version), ...]
     ```
 
 Integration Points:
@@ -79,13 +79,12 @@ Integration Points:
 from __future__ import annotations
 
 import asyncio
-import builtins
 import threading
 from typing import TYPE_CHECKING, Optional, Union
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
-from omnibase_infra.runtime.models import ModelPolicyRegistration
+from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -102,8 +101,13 @@ class PolicyRegistry:
     Thread-safe registry for policy plugins. Manages pure decision logic plugins
     that can be used by orchestrator and reducer nodes.
 
-    The registry maintains a mapping from (policy_id, policy_type, version) tuples
-    to policy classes that implement the ProtocolPolicy protocol.
+    The registry maintains a mapping from ModelPolicyKey instances to policy classes
+    that implement the ProtocolPolicy protocol. ModelPolicyKey provides strong typing
+    and replaces the legacy tuple[str, str, str] pattern.
+
+    This class implements the ProtocolRegistryBase[tuple[str, str, str], type[ProtocolPolicy]]
+    interface from omnibase_spi 0.4.0. The external API maintains tuple compatibility
+    while internal operations use ModelPolicyKey for strong typing.
 
     Thread Safety:
         All registration operations are protected by a threading.Lock to ensure
@@ -115,8 +119,7 @@ class PolicyRegistry:
         deterministic_async=True is explicitly specified.
 
     Attributes:
-        _registry: Internal dictionary mapping (policy_id, policy_type, version)
-                   tuples to policy classes
+        _registry: Internal dictionary mapping ModelPolicyKey instances to policy classes
         _lock: Threading lock for thread-safe registration operations
 
     Example:
@@ -129,7 +132,7 @@ class PolicyRegistry:
         ... )
         >>> registry.register(registration)
         >>> policy_cls = registry.get("retry_backoff")
-        >>> print(registry.list())
+        >>> print(registry.list_keys())
         [('retry_backoff', 'orchestrator', '1.0.0')]
     """
 
@@ -138,8 +141,8 @@ class PolicyRegistry:
 
     def __init__(self) -> None:
         """Initialize an empty policy registry with thread lock."""
-        # Key: (policy_id, policy_type, version) -> policy_class
-        self._registry: dict[tuple[str, str, str], type[ProtocolPolicy]] = {}
+        # Key: ModelPolicyKey -> policy_class (strong typing replaces tuple pattern)
+        self._registry: dict[ModelPolicyKey, type[ProtocolPolicy]] = {}
         self._lock: threading.Lock = threading.Lock()
 
     def _validate_sync_enforcement(
@@ -249,8 +252,12 @@ class PolicyRegistry:
         # Normalize policy type
         normalized_type = self._normalize_policy_type(policy_type)
 
-        # Register the policy
-        key = (policy_id, normalized_type, version)
+        # Register the policy using ModelPolicyKey
+        key = ModelPolicyKey(
+            policy_id=policy_id,
+            policy_type=normalized_type,
+            version=version,
+        )
         with self._lock:
             self._registry[key] = policy_class
 
@@ -335,14 +342,13 @@ class PolicyRegistry:
 
         with self._lock:
             # Find matching entries
-            matches: list[tuple[tuple[str, str, str], type[ProtocolPolicy]]] = []
+            matches: list[tuple[ModelPolicyKey, type[ProtocolPolicy]]] = []
             for key, policy_cls in self._registry.items():
-                key_id, key_type, key_version = key
-                if key_id != policy_id:
+                if key.policy_id != policy_id:
                     continue
-                if normalized_type is not None and key_type != normalized_type:
+                if normalized_type is not None and key.policy_type != normalized_type:
                     continue
-                if version is not None and key_version != version:
+                if version is not None and key.version != version:
                     continue
                 matches.append((key, policy_cls))
 
@@ -364,7 +370,9 @@ class PolicyRegistry:
 
             # If version not specified, return latest (using semantic version comparison)
             if version is None and len(matches) > 1:
-                matches.sort(key=lambda x: self._parse_semver(x[0][2]), reverse=True)
+                matches.sort(
+                    key=lambda x: self._parse_semver(x[0].version), reverse=True
+                )
 
             return matches[0][1]
 
@@ -410,13 +418,21 @@ class PolicyRegistry:
         Returns:
             List of (policy_id, policy_type, version) tuples.
         """
-        return [(k[0], k[1], k[2]) for k in sorted(self._registry.keys())]
+        return [
+            k.to_tuple()
+            for k in sorted(
+                self._registry.keys(),
+                key=lambda k: (k.policy_id, k.policy_type, k.version),
+            )
+        ]
 
-    def list(
+    def list_keys(
         self,
         policy_type: Optional[Union[str, EnumPolicyType]] = None,
     ) -> list[tuple[str, str, str]]:
-        """List registered policies as (id, type, version) tuples.
+        """List registered policy keys as (id, type, version) tuples.
+
+        This method implements the ProtocolRegistryBase.list_keys() interface.
 
         Args:
             policy_type: Optional filter to list only policies of a specific type.
@@ -428,9 +444,9 @@ class PolicyRegistry:
             >>> registry = PolicyRegistry()
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
             >>> registry.register("merge", MergePolicy, EnumPolicyType.REDUCER)
-            >>> print(registry.list())
+            >>> print(registry.list_keys())
             [('merge', 'reducer', '1.0.0'), ('retry', 'orchestrator', '1.0.0')]
-            >>> print(registry.list(policy_type="orchestrator"))
+            >>> print(registry.list_keys(policy_type="orchestrator"))
             [('retry', 'orchestrator', '1.0.0')]
         """
         # Normalize policy_type if provided
@@ -440,14 +456,16 @@ class PolicyRegistry:
 
         with self._lock:
             results: list[tuple[str, str, str]] = []
-            for key in sorted(self._registry.keys()):
-                policy_id, key_type, version = key
-                if normalized_type is not None and key_type != normalized_type:
+            for key in sorted(
+                self._registry.keys(),
+                key=lambda k: (k.policy_id, k.policy_type, k.version),
+            ):
+                if normalized_type is not None and key.policy_type != normalized_type:
                     continue
-                results.append((policy_id, key_type, version))
+                results.append(key.to_tuple())
             return results
 
-    def list_policy_types(self) -> builtins.list[str]:
+    def list_policy_types(self) -> list[str]:
         """List registered policy types.
 
         Returns:
@@ -460,10 +478,10 @@ class PolicyRegistry:
             ['orchestrator']
         """
         with self._lock:
-            types = {key[1] for key in self._registry}
+            types = {key.policy_type for key in self._registry}
             return sorted(types)
 
-    def list_versions(self, policy_id: str) -> builtins.list[str]:
+    def list_versions(self, policy_id: str) -> list[str]:
         """List registered versions for a policy ID.
 
         Args:
@@ -480,7 +498,9 @@ class PolicyRegistry:
             ['1.0.0', '2.0.0']
         """
         with self._lock:
-            versions = {key[2] for key in self._registry if key[0] == policy_id}
+            versions = {
+                key.version for key in self._registry if key.policy_id == policy_id
+            }
             return sorted(versions)
 
     def is_registered(
@@ -517,12 +537,11 @@ class PolicyRegistry:
 
         with self._lock:
             for key in self._registry:
-                key_id, key_type, key_version = key
-                if key_id != policy_id:
+                if key.policy_id != policy_id:
                     continue
-                if normalized_type is not None and key_type != normalized_type:
+                if normalized_type is not None and key.policy_type != normalized_type:
                     continue
-                if version is not None and key_version != version:
+                if version is not None and key.version != version:
                     continue
                 return True
             return False
@@ -564,14 +583,13 @@ class PolicyRegistry:
                 return 0
 
         with self._lock:
-            keys_to_remove: list[tuple[str, str, str]] = []
+            keys_to_remove: list[ModelPolicyKey] = []
             for key in self._registry:
-                key_id, key_type, key_version = key
-                if key_id != policy_id:
+                if key.policy_id != policy_id:
                     continue
-                if normalized_type is not None and key_type != normalized_type:
+                if normalized_type is not None and key.policy_type != normalized_type:
                     continue
-                if version is not None and key_version != version:
+                if version is not None and key.version != version:
                     continue
                 keys_to_remove.append(key)
 
@@ -590,7 +608,7 @@ class PolicyRegistry:
             >>> registry = PolicyRegistry()
             >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
             >>> registry.clear()
-            >>> registry.list()
+            >>> registry.list_keys()
             []
         """
         with self._lock:
@@ -746,8 +764,9 @@ def register_policy(
 __all__: list[str] = [
     # Registry class
     "PolicyRegistry",
-    # Model
+    # Models
     "ModelPolicyRegistration",
+    "ModelPolicyKey",
     # Singleton accessor
     "get_policy_registry",
     # Convenience functions
