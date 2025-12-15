@@ -127,19 +127,25 @@ def validate_infra_patterns(
     result = validate_patterns(str(directory), strict=strict)
 
     # Filter known infrastructure pattern exemptions
+    # Use pattern matching instead of hardcoded line numbers for robustness
     exempted_patterns = [
-        # KafkaEventBus documented exemptions
-        "kafka_event_bus.py: Line 83: Class 'KafkaEventBus' has 14 methods",
-        "kafka_event_bus.py: Line 137: Function '__init__' has 10 parameters",
+        # KafkaEventBus documented exemptions (pattern-based, not line-specific)
+        ("kafka_event_bus.py", "Class 'KafkaEventBus' has 14 methods"),
+        ("kafka_event_bus.py", "Function '__init__' has 10 parameters"),
     ]
 
-    # Filter errors
+    # Filter errors using pattern matching (file + violation text)
     original_errors = result.errors
-    filtered_errors = [
-        err
-        for err in original_errors
-        if not any(exempt in err for exempt in exempted_patterns)
-    ]
+    filtered_errors = []
+    for err in original_errors:
+        is_exempted = False
+        for file_pattern, violation_pattern in exempted_patterns:
+            # Check if both the file pattern and violation pattern match
+            if file_pattern in err and violation_pattern in err:
+                is_exempted = True
+                break
+        if not is_exempted:
+            filtered_errors.append(err)
 
     # Update result with filtered errors
     result.errors = filtered_errors

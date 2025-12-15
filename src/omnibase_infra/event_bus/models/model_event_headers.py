@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Literal, Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelEventHeaders(BaseModel):
@@ -70,7 +70,7 @@ class ModelEventHeaders(BaseModel):
     max_retries: int = Field(default=3)
     ttl_seconds: Optional[int] = Field(default=None)
 
-    model_config = {"frozen": False, "extra": "forbid"}
+    model_config = ConfigDict(frozen=False, extra="forbid", from_attributes=True)
 
     async def validate_headers(self) -> bool:
         """Validate that required headers are present and valid.

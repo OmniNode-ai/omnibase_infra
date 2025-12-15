@@ -266,7 +266,7 @@ class KafkaEventBus:
             str, list[tuple[str, str, Callable[[ModelEventMessage], Awaitable[None]]]]
         ] = defaultdict(list)
 
-        # Lock for thread safety
+        # Lock for thread safety (protects all shared state)
         self._lock = asyncio.Lock()
 
         # State flags
@@ -275,6 +275,9 @@ class KafkaEventBus:
 
         # Background consumer tasks
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
+
+        # Producer lock for independent producer access (avoids deadlock with main lock)
+        self._producer_lock = asyncio.Lock()
 
     # =========================================================================
     # Factory Methods
@@ -410,10 +413,11 @@ class KafkaEventBus:
             self._check_circuit_breaker()
 
             try:
+                # Apply producer configuration from config model
                 self._producer = AIOKafkaProducer(
                     bootstrap_servers=self._bootstrap_servers,
-                    acks="all",
-                    enable_idempotence=True,
+                    acks=self._config.acks,
+                    enable_idempotence=self._config.enable_idempotence,
                 )
 
                 await asyncio.wait_for(
@@ -430,52 +434,66 @@ class KafkaEventBus:
                     extra={
                         "environment": self._environment,
                         "group": self._group,
-                        "bootstrap_servers": self._bootstrap_servers,
+                        "bootstrap_servers": self._sanitize_bootstrap_servers(
+                            self._bootstrap_servers
+                        ),
                     },
                 )
 
             except TimeoutError as e:
-                # Clean up producer on failure to prevent resource leak
-                self._producer = None
+                # Clean up producer on failure to prevent resource leak (thread-safe)
+                async with self._producer_lock:
+                    self._producer = None
+                # Record failure is already inside _lock context from start()
                 self._record_circuit_failure()
+                # Sanitize servers for safe logging (remove credentials)
+                sanitized_servers = self._sanitize_bootstrap_servers(
+                    self._bootstrap_servers
+                )
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="start",
-                    target_name=f"kafka.{self._bootstrap_servers}",
+                    target_name=f"kafka.{self._environment}",
                     correlation_id=uuid4(),
                 )
                 logger.warning(
                     f"Timeout connecting to Kafka after {self._timeout_seconds}s",
-                    extra={"bootstrap_servers": self._bootstrap_servers},
+                    extra={"environment": self._environment},
                 )
                 raise InfraTimeoutError(
                     f"Timeout connecting to Kafka after {self._timeout_seconds}s",
                     context=context,
-                    bootstrap_servers=self._bootstrap_servers,
+                    servers=sanitized_servers,
                     timeout_seconds=self._timeout_seconds,
                 ) from e
 
             except Exception as e:
-                # Clean up producer on failure to prevent resource leak
-                self._producer = None
+                # Clean up producer on failure to prevent resource leak (thread-safe)
+                async with self._producer_lock:
+                    self._producer = None
+                # Record failure is already inside _lock context from start()
                 self._record_circuit_failure()
+                # Sanitize servers for safe logging (remove credentials)
+                sanitized_servers = self._sanitize_bootstrap_servers(
+                    self._bootstrap_servers
+                )
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="start",
-                    target_name=f"kafka.{self._bootstrap_servers}",
+                    target_name=f"kafka.{self._environment}",
                     correlation_id=uuid4(),
                 )
                 logger.warning(
                     f"Failed to connect to Kafka: {e}",
                     extra={
-                        "bootstrap_servers": self._bootstrap_servers,
+                        "environment": self._environment,
                         "error": str(e),
                     },
                 )
                 raise InfraConnectionError(
                     f"Failed to connect to Kafka: {e}",
                     context=context,
-                    bootstrap_servers=self._bootstrap_servers,
+                    servers=sanitized_servers,
                 ) from e
 
     async def initialize(self, config: dict[str, object]) -> None:
@@ -483,7 +501,7 @@ class KafkaEventBus:
 
         Protocol method for compatibility with ProtocolEventBus.
         Extracts configuration and delegates to start(). Config updates
-        are applied before start() which acquires its own lock.
+        are applied atomically with lock protection to prevent races.
 
         Args:
             config: Configuration dictionary with optional keys:
@@ -492,16 +510,18 @@ class KafkaEventBus:
                 - bootstrap_servers: Override bootstrap servers
                 - timeout_seconds: Override timeout setting
         """
-        # Apply config updates, then call start() which handles locking
-        if "environment" in config:
-            self._environment = str(config["environment"])
-        if "group" in config:
-            self._group = str(config["group"])
-        if "bootstrap_servers" in config:
-            self._bootstrap_servers = str(config["bootstrap_servers"])
-        if "timeout_seconds" in config:
-            self._timeout_seconds = int(str(config["timeout_seconds"]))
+        # Apply config updates atomically under lock to prevent races
+        async with self._lock:
+            if "environment" in config:
+                self._environment = str(config["environment"])
+            if "group" in config:
+                self._group = str(config["group"])
+            if "bootstrap_servers" in config:
+                self._bootstrap_servers = str(config["bootstrap_servers"])
+            if "timeout_seconds" in config:
+                self._timeout_seconds = int(str(config["timeout_seconds"]))
 
+        # Start after config updates are complete
         await self.start()
 
     async def shutdown(self) -> None:
@@ -515,33 +535,48 @@ class KafkaEventBus:
         """Close the event bus and release all resources.
 
         Stops all background consumer tasks, closes all consumers, and
-        stops the producer. Safe to call multiple times.
+        stops the producer. Safe to call multiple times. Uses proper
+        synchronization to prevent races during shutdown.
         """
+        # First, signal shutdown to all background tasks
         async with self._lock:
+            if self._shutdown:
+                # Already shutting down or shutdown
+                return
             self._shutdown = True
             self._started = False
 
-            # Cancel all consumer tasks
-            for task in self._consumer_tasks.values():
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+        # Cancel all consumer tasks (outside main lock to avoid deadlock)
+        tasks_to_cancel = []
+        async with self._lock:
+            tasks_to_cancel = list(self._consumer_tasks.values())
 
+        for task in tasks_to_cancel:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        # Clear task registry
+        async with self._lock:
             self._consumer_tasks.clear()
 
-            # Close all consumers
-            for consumer in self._consumers.values():
-                try:
-                    await consumer.stop()
-                except Exception as e:
-                    logger.warning(f"Error stopping consumer: {e}")
-
+        # Close all consumers
+        consumers_to_close = []
+        async with self._lock:
+            consumers_to_close = list(self._consumers.values())
             self._consumers.clear()
 
-            # Close producer
+        for consumer in consumers_to_close:
+            try:
+                await consumer.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping consumer: {e}")
+
+        # Close producer with proper locking
+        async with self._producer_lock:
             if self._producer is not None:
                 try:
                     await self._producer.stop()
@@ -549,7 +584,8 @@ class KafkaEventBus:
                     logger.warning(f"Error stopping producer: {e}")
                 self._producer = None
 
-            # Clear subscribers
+        # Clear subscribers
+        async with self._lock:
             self._subscribers.clear()
 
         logger.info(
@@ -601,8 +637,9 @@ class KafkaEventBus:
                 event_type=topic,
             )
 
-        # Check circuit breaker - propagate correlation_id from headers
-        self._check_circuit_breaker(correlation_id=headers.correlation_id)
+        # Check circuit breaker - propagate correlation_id from headers (thread-safe)
+        async with self._lock:
+            self._check_circuit_breaker(correlation_id=headers.correlation_id)
 
         # Convert headers to Kafka format
         kafka_headers = self._model_headers_to_kafka(headers)
@@ -634,30 +671,35 @@ class KafkaEventBus:
 
         for attempt in range(self._max_retry_attempts + 1):
             try:
-                if self._producer is None:
-                    raise InfraConnectionError(
-                        "Kafka producer not initialized",
-                        context=ModelInfraErrorContext(
-                            transport_type=EnumInfraTransportType.KAFKA,
-                            operation="publish",
-                            target_name=f"kafka.{topic}",
-                            correlation_id=headers.correlation_id,
-                        ),
+                # Thread-safe producer access - acquire lock to check and use producer
+                async with self._producer_lock:
+                    if self._producer is None:
+                        raise InfraConnectionError(
+                            "Kafka producer not initialized",
+                            context=ModelInfraErrorContext(
+                                transport_type=EnumInfraTransportType.KAFKA,
+                                operation="publish",
+                                target_name=f"kafka.{topic}",
+                                correlation_id=headers.correlation_id,
+                            ),
+                        )
+
+                    future = await self._producer.send(
+                        topic,
+                        value=value,
+                        key=key,
+                        headers=kafka_headers,
                     )
 
-                future = await self._producer.send(
-                    topic,
-                    value=value,
-                    key=key,
-                    headers=kafka_headers,
-                )
+                # Wait for completion outside lock to allow other operations
                 record_metadata = await asyncio.wait_for(
                     future,
                     timeout=self._timeout_seconds,
                 )
 
-                # Success - reset circuit breaker
-                self._reset_circuit_breaker()
+                # Success - reset circuit breaker (thread-safe)
+                async with self._lock:
+                    self._reset_circuit_breaker()
 
                 logger.debug(
                     f"Published to topic {topic}",
@@ -670,10 +712,12 @@ class KafkaEventBus:
                 return
 
             except TimeoutError as e:
-                # Clean up producer on failure to prevent resource leak
-                self._producer = None
+                # Clean up producer on failure (thread-safe)
+                async with self._producer_lock:
+                    self._producer = None
                 last_exception = e
-                self._record_circuit_failure()
+                async with self._lock:
+                    self._record_circuit_failure()
                 logger.warning(
                     f"Publish timeout (attempt {attempt + 1}/{self._max_retry_attempts + 1})",
                     extra={
@@ -684,7 +728,8 @@ class KafkaEventBus:
 
             except KafkaError as e:
                 last_exception = e
-                self._record_circuit_failure()
+                async with self._lock:
+                    self._record_circuit_failure()
                 logger.warning(
                     f"Kafka error on publish (attempt {attempt + 1}/{self._max_retry_attempts + 1}): {e}",
                     extra={
@@ -695,7 +740,8 @@ class KafkaEventBus:
 
             except Exception as e:
                 last_exception = e
-                self._record_circuit_failure()
+                async with self._lock:
+                    self._record_circuit_failure()
                 logger.warning(
                     f"Publish error (attempt {attempt + 1}/{self._max_retry_attempts + 1}): {e}",
                     extra={
@@ -860,12 +906,13 @@ class KafkaEventBus:
             return
 
         try:
+            # Apply consumer configuration from config model
             consumer = AIOKafkaConsumer(
                 topic,
                 bootstrap_servers=self._bootstrap_servers,
                 group_id=f"{self._environment}.{group_id}",
-                auto_offset_reset="latest",
-                enable_auto_commit=True,
+                auto_offset_reset=self._config.auto_offset_reset,
+                enable_auto_commit=self._config.enable_auto_commit,
             )
             await asyncio.wait_for(
                 consumer.start(),
@@ -891,8 +938,8 @@ class KafkaEventBus:
             raise InfraConnectionError(
                 f"Failed to start consumer for topic {topic}",
                 context=context,
-                topic=topic,
-                bootstrap_servers=self._bootstrap_servers,
+                topic=topic
+                # bootstrap_servers removed for security (sanitization)
             ) from e
 
     async def _stop_consumer_for_topic(self, topic: str) -> None:
@@ -1064,23 +1111,28 @@ class KafkaEventBus:
             subscriber_count = sum(len(subs) for subs in self._subscribers.values())
             topic_count = len(self._subscribers)
             consumer_count = len(self._consumers)
+            started = self._started
+            circuit_state = self._circuit_state.value
 
-        # Check if producer is healthy
+        # Check if producer is healthy (thread-safe access)
         producer_healthy = False
-        if self._producer is not None:
-            try:
-                # Check if producer client is not closed
-                producer_healthy = not getattr(self._producer, "_closed", True)
-            except Exception:
-                producer_healthy = False
+        async with self._producer_lock:
+            if self._producer is not None:
+                try:
+                    # Check if producer client is not closed
+                    producer_healthy = not getattr(self._producer, "_closed", True)
+                except Exception:
+                    producer_healthy = False
 
         return {
-            "healthy": self._started and producer_healthy,
-            "started": self._started,
+            "healthy": started and producer_healthy,
+            "started": started,
             "environment": self._environment,
             "group": self._group,
-            "bootstrap_servers": self._bootstrap_servers,
-            "circuit_state": self._circuit_state.value,
+            "bootstrap_servers": self._sanitize_bootstrap_servers(
+                self._bootstrap_servers
+            ),
+            "circuit_state": circuit_state,
             "subscriber_count": subscriber_count,
             "topic_count": topic_count,
             "consumer_count": consumer_count,
@@ -1115,7 +1167,7 @@ class KafkaEventBus:
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="circuit_check",
-                    target_name=f"kafka.{self._bootstrap_servers}",
+                    target_name=f"kafka.{self._environment}",
                     correlation_id=correlation_id if correlation_id else uuid4(),
                 )
                 raise InfraUnavailableError(
@@ -1137,7 +1189,7 @@ class KafkaEventBus:
             self._circuit_state = CircuitState.OPEN
             logger.warning(
                 f"Circuit breaker opened after {self._circuit_failure_count} failures",
-                extra={"bootstrap_servers": self._bootstrap_servers},
+                extra={"environment": self._environment},
             )
 
     def _reset_circuit_breaker(self) -> None:
@@ -1152,6 +1204,38 @@ class KafkaEventBus:
     # =========================================================================
     # Helper Methods
     # =========================================================================
+
+    def _sanitize_bootstrap_servers(self, servers: str) -> str:
+        """Sanitize bootstrap servers string to remove potential credentials.
+
+        Removes any authentication tokens, passwords, or sensitive data from
+        the bootstrap servers string before logging or including in errors.
+
+        Args:
+            servers: Raw bootstrap servers string (may contain credentials)
+
+        Returns:
+            Sanitized servers string safe for logging and error messages
+
+        Example:
+            "user:pass@kafka:9092" -> "kafka:9092"
+            "kafka:9092,kafka2:9092" -> "kafka:9092,kafka2:9092"
+        """
+        if not servers:
+            return "unknown"
+
+        # Split by comma for multiple servers
+        server_list = [s.strip() for s in servers.split(",")]
+        sanitized = []
+
+        for server in server_list:
+            # Remove any user:pass@ prefix (credentials)
+            if "@" in server:
+                # Keep only the part after @
+                server = server.split("@", 1)[1]
+            sanitized.append(server)
+
+        return ",".join(sanitized)
 
     def _model_headers_to_kafka(
         self, headers: ModelEventHeaders

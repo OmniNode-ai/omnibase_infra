@@ -8,8 +8,8 @@
 # NOTE: The ${VAR_NAME:-default} syntax in this file is NOT processed by YAML.
 # yaml.safe_load() reads these as literal strings. Environment variable
 # substitution is handled by the apply_environment_overrides() method in
-# KafkaEventBus, which checks for corresponding environment variables and
-# overrides the config values at runtime.
+# ModelKafkaEventBusConfig, which checks for corresponding environment variables
+# and overrides the config values at runtime.
 #
 # The KafkaEventBus implements ProtocolEventBus using Apache Kafka (via aiokafka)
 # for production-grade message delivery with resilience patterns including circuit

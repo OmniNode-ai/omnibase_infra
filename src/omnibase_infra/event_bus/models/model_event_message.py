@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 
@@ -50,7 +50,9 @@ class ModelEventMessage(BaseModel):
     offset: Optional[str] = Field(default=None)
     partition: Optional[int] = Field(default=None)
 
-    model_config = {"frozen": False, "extra": "forbid", "arbitrary_types_allowed": True}
+    model_config = ConfigDict(
+        frozen=False, extra="forbid", arbitrary_types_allowed=True, from_attributes=True
+    )
 
     async def ack(self) -> None:
         """Acknowledge message processing.
