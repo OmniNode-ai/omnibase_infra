@@ -35,6 +35,7 @@ Integration with Handlers:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -42,7 +43,11 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.errors import (
+    ModelInfraErrorContext,
+    RuntimeHostError,
+    UnknownHandlerTypeError,
+)
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.handler_registry import get_handler_registry
 from omnibase_infra.runtime.wiring import wire_default_handlers
@@ -261,6 +266,22 @@ class RuntimeHostProcess:
 
         This method is idempotent - calling stop() on an already stopped
         process is safe and has no effect.
+
+        Handler Shutdown Order:
+            Current Behavior: Handlers are shut down in dictionary iteration order,
+            which is insertion order in Python 3.7+ but should not be relied upon
+            for dependency-based ordering.
+
+            Future Consideration: If handlers have dependencies (e.g., consumers
+            depend on producers, connections depend on pools), consider implementing
+            shutdown priority:
+            - Shut down consumers before producers
+            - Close connections before connection pools
+            - Release downstream resources before upstream resources
+
+            Handlers that need specific shutdown ordering should document their
+            requirements and consider implementing a shutdown_priority() method
+            in future iterations.
 
         Note:
             MVP Limitation: This implementation immediately unsubscribes without
@@ -504,19 +525,38 @@ class RuntimeHostProcess:
         handler = self._handlers.get(str(handler_type))
 
         if handler is None:
-            # Unknown handler type
+            # Create structured error context for unknown handler type
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation=str(operation),
+                target_name=str(handler_type),
+                correlation_id=correlation_id,
+            )
+
+            # Create structured error for logging and tracking
+            routing_error = UnknownHandlerTypeError(
+                f"No handler registered for type: {handler_type!r}",
+                context=context,
+                prefix=str(handler_type),
+                registered_prefixes=list(self._handlers.keys()),
+            )
+
+            # Publish error response for envelope-based error handling
             error_response = self._create_error_response(
-                error=f"Unknown handler type: {handler_type!r} not registered",
+                error=str(routing_error),
                 correlation_id=correlation_id,
             )
             await self._publish_envelope_safe(error_response, self._output_topic)
 
+            # Log with structured error
             logger.warning(
-                "No handler registered for type",
+                "Unknown handler type in routing",
                 extra={
                     "handler_type": handler_type,
                     "correlation_id": str(correlation_id),
                     "operation": operation,
+                    "registered_handlers": list(self._handlers.keys()),
+                    "error": str(routing_error),
                 },
             )
             return
@@ -637,6 +677,61 @@ class RuntimeHostProcess:
         json_safe_envelope = self._serialize_envelope(envelope)
         await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
+    async def _check_handler_health(
+        self,
+        handler_type: str,
+        handler: ProtocolHandler,
+        timeout_seconds: float = 5.0,
+    ) -> tuple[str, dict[str, object]]:
+        """Check health of a single handler with timeout.
+
+        This method performs an individual handler health check with a configurable
+        timeout to prevent slow handlers from blocking the overall health check.
+
+        Args:
+            handler_type: The handler type identifier.
+            handler: The handler instance to check.
+            timeout_seconds: Maximum time to wait for health check (default: 5.0).
+
+        Returns:
+            Tuple of (handler_type, health_result_dict) where health_result_dict
+            contains at minimum a "healthy" boolean key.
+        """
+        try:
+            if hasattr(handler, "health_check"):
+                handler_health = await asyncio.wait_for(
+                    handler.health_check(),
+                    timeout=timeout_seconds,
+                )
+                return handler_type, handler_health
+            else:
+                # Handler doesn't implement health_check - assume healthy
+                return handler_type, {
+                    "healthy": True,
+                    "note": "no health_check method",
+                }
+        except TimeoutError:
+            logger.warning(
+                "Handler health check timed out",
+                extra={
+                    "handler_type": handler_type,
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            return handler_type, {
+                "healthy": False,
+                "error": f"health check timeout after {timeout_seconds}s",
+            }
+        except Exception as e:
+            logger.warning(
+                "Handler health check failed",
+                extra={"handler_type": handler_type, "error": str(e)},
+            )
+            return handler_type, {
+                "healthy": False,
+                "error": str(e),
+            }
+
     async def health_check(self) -> dict[str, object]:
         """Return health check status.
 
@@ -661,6 +756,10 @@ class RuntimeHostProcess:
             - healthy=True, degraded=False: Fully operational
             - healthy=False, degraded=True: Running with reduced functionality
             - healthy=False, degraded=False: Not running or event bus unhealthy
+
+        Note:
+            Handler health checks are performed concurrently using asyncio.gather()
+            with individual 5-second timeouts to prevent slow handlers from blocking.
         """
         # Get event bus health if available
         event_bus_health: dict[str, object] = {}
@@ -697,33 +796,24 @@ class RuntimeHostProcess:
             event_bus_health = {"error": str(e), "correlation_id": str(correlation_id)}
             event_bus_healthy = False
 
-        # Check handler health for all registered handlers
+        # Check handler health for all registered handlers concurrently
+        # Each handler health check has a 5-second timeout to prevent blocking
         handler_health_results: dict[str, dict[str, object]] = {}
         handlers_all_healthy = True
 
-        for handler_type, handler in self._handlers.items():
-            try:
-                if hasattr(handler, "health_check"):
-                    handler_health = await handler.health_check()
-                    handler_health_results[handler_type] = handler_health
-                    if not handler_health.get("healthy", False):
-                        handlers_all_healthy = False
-                else:
-                    # Handler doesn't implement health_check - assume healthy
-                    handler_health_results[handler_type] = {
-                        "healthy": True,
-                        "note": "no health_check method",
-                    }
-            except Exception as e:
-                handler_health_results[handler_type] = {
-                    "healthy": False,
-                    "error": str(e),
-                }
-                handlers_all_healthy = False
-                logger.warning(
-                    "Handler health check failed",
-                    extra={"handler_type": handler_type, "error": str(e)},
-                )
+        if self._handlers:
+            # Run all handler health checks concurrently using asyncio.gather()
+            health_check_tasks = [
+                self._check_handler_health(handler_type, handler)
+                for handler_type, handler in self._handlers.items()
+            ]
+            results = await asyncio.gather(*health_check_tasks)
+
+            # Process results and build the results dict
+            for handler_type, health_result in results:
+                handler_health_results[handler_type] = health_result
+                if not health_result.get("healthy", False):
+                    handlers_all_healthy = False
 
         # Check for failed handlers - any failures indicate degraded state
         has_failed_handlers = len(self._failed_handlers) > 0
