@@ -35,6 +35,7 @@ Integration with Handlers:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -51,6 +52,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.envelope_validator import validate_envelope
 from omnibase_infra.runtime.handler_registry import get_handler_registry
+from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.wiring import wire_default_handlers
 
 if TYPE_CHECKING:
@@ -68,6 +70,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_INPUT_TOPIC = "requests"
 DEFAULT_OUTPUT_TOPIC = "responses"
 DEFAULT_GROUP_ID = "runtime-host"
+
+# Health check timeout bounds (per ModelLifecycleSubcontract)
+MIN_HEALTH_CHECK_TIMEOUT = 1.0
+MAX_HEALTH_CHECK_TIMEOUT = 60.0
+DEFAULT_HEALTH_CHECK_TIMEOUT = 5.0
 
 
 class RuntimeHostProcess:
@@ -115,6 +122,11 @@ class RuntimeHostProcess:
                     - input_topic: Override input topic
                     - output_topic: Override output topic
                     - group_id: Override consumer group identifier
+                    - health_check_timeout_seconds: Timeout for individual handler
+                      health checks (default: 5.0 seconds, valid range: 1-60 per
+                      ModelLifecycleSubcontract). Values outside this range are
+                      clamped to the nearest bound with a warning logged.
+                      Invalid string values fall back to the default with a warning.
         """
         # Create or use provided event bus
         self._event_bus: InMemoryEventBus = event_bus or InMemoryEventBus()
@@ -126,6 +138,55 @@ class RuntimeHostProcess:
         self._input_topic: str = str(config.get("input_topic", input_topic))
         self._output_topic: str = str(config.get("output_topic", output_topic))
         self._group_id: str = str(config.get("group_id", DEFAULT_GROUP_ID))
+
+        # Health check configuration (from lifecycle subcontract pattern)
+        # Default: 5.0 seconds, valid range: 1-60 seconds per ModelLifecycleSubcontract
+        # Values outside bounds are clamped with a warning
+        _timeout_raw = config.get("health_check_timeout_seconds")
+        timeout_value: float = DEFAULT_HEALTH_CHECK_TIMEOUT
+        if isinstance(_timeout_raw, (int, float)):
+            timeout_value = float(_timeout_raw)
+        elif isinstance(_timeout_raw, str):
+            try:
+                timeout_value = float(_timeout_raw)
+            except ValueError:
+                logger.warning(
+                    "Invalid health_check_timeout_seconds string value, using default",
+                    extra={
+                        "invalid_value": _timeout_raw,
+                        "default_value": DEFAULT_HEALTH_CHECK_TIMEOUT,
+                    },
+                )
+                timeout_value = DEFAULT_HEALTH_CHECK_TIMEOUT
+
+        # Validate bounds and clamp if necessary
+        if (
+            timeout_value < MIN_HEALTH_CHECK_TIMEOUT
+            or timeout_value > MAX_HEALTH_CHECK_TIMEOUT
+        ):
+            logger.warning(
+                "health_check_timeout_seconds out of valid range, clamping",
+                extra={
+                    "original_value": timeout_value,
+                    "min_value": MIN_HEALTH_CHECK_TIMEOUT,
+                    "max_value": MAX_HEALTH_CHECK_TIMEOUT,
+                    "clamped_value": max(
+                        MIN_HEALTH_CHECK_TIMEOUT,
+                        min(timeout_value, MAX_HEALTH_CHECK_TIMEOUT),
+                    ),
+                },
+            )
+            timeout_value = max(
+                MIN_HEALTH_CHECK_TIMEOUT,
+                min(timeout_value, MAX_HEALTH_CHECK_TIMEOUT),
+            )
+
+        self._health_check_timeout_seconds: float = timeout_value
+
+        # Handler executor for lifecycle operations (shutdown, health check)
+        self._lifecycle_executor = ProtocolLifecycleExecutor(
+            health_check_timeout_seconds=self._health_check_timeout_seconds
+        )
 
         # Store full config for handler initialization
         self._config: dict[str, object] = config
@@ -150,6 +211,7 @@ class RuntimeHostProcess:
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
                 "group_id": self._group_id,
+                "health_check_timeout_seconds": self._health_check_timeout_seconds,
             },
         )
 
@@ -262,10 +324,32 @@ class RuntimeHostProcess:
 
         Performs the following steps:
         1. Unsubscribe from topics
-        2. Close event bus
+        2. Shutdown all registered handlers by priority (release resources)
+        3. Close event bus
 
         This method is idempotent - calling stop() on an already stopped
         process is safe and has no effect.
+
+        Handler Shutdown Order:
+            Handlers are shutdown in priority order, with higher priority handlers
+            shutting down first. Within the same priority level, handlers are
+            shutdown in parallel for performance.
+
+            Priority is determined by the handler's shutdown_priority() method:
+            - Higher values = shutdown first
+            - Handlers without shutdown_priority() get default priority of 0
+
+            Recommended Priority Scheme:
+            - 100: Consumers (stop receiving before stopping producers)
+            - 80: Active connections (close before closing pools)
+            - 50: Producers (stop producing before closing pools)
+            - 40: Connection pools (close last)
+            - 0: Default for handlers without explicit priority
+
+            This ensures dependency-based ordering:
+            - Consumers shutdown before producers
+            - Connections shutdown before connection pools
+            - Downstream resources shutdown before upstream resources
 
         Note:
             MVP Limitation: This implementation immediately unsubscribes without
@@ -290,7 +374,30 @@ class RuntimeHostProcess:
             await self._subscription()
             self._subscription = None
 
-        # Step 2: Close event bus
+        # Step 2: Shutdown all handlers by priority (release resources like DB/Kafka connections)
+        # Delegates to ProtocolLifecycleExecutor which handles:
+        # - Grouping handlers by priority (higher priority first)
+        # - Parallel shutdown within priority groups for performance
+        if self._handlers:
+            all_succeeded, all_failed = (
+                await self._lifecycle_executor.shutdown_handlers_by_priority(
+                    self._handlers
+                )
+            )
+
+            # Log summary (ProtocolLifecycleExecutor already logs detailed info)
+            logger.info(
+                "Handler shutdown completed",
+                extra={
+                    "succeeded_handlers": all_succeeded,
+                    "failed_handlers": [f[0] for f in all_failed],
+                    "total_handlers": len(all_succeeded) + len(all_failed),
+                    "success_count": len(all_succeeded),
+                    "failure_count": len(all_failed),
+                },
+            )
+
+        # Step 3: Close event bus
         await self._event_bus.close()
 
         self._is_running = False
@@ -531,20 +638,37 @@ class RuntimeHostProcess:
         handler = self._handlers.get(str(handler_type))
 
         if handler is None:
-            # Handler not instantiated (different from unknown prefix)
+            # Handler not instantiated (different from unknown prefix - validation already passed)
             # This can happen if handler registration failed during start()
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation=str(operation),
+                target_name=str(handler_type),
+                correlation_id=correlation_id,
+            )
+
+            # Create structured error for logging and tracking
+            routing_error = RuntimeHostError(
+                f"Handler type {handler_type!r} is registered but not instantiated",
+                context=context,
+            )
+
+            # Publish error response for envelope-based error handling
             error_response = self._create_error_response(
-                error=f"Handler type {handler_type!r} is registered but not instantiated",
+                error=str(routing_error),
                 correlation_id=correlation_id,
             )
             await self._publish_envelope_safe(error_response, self._output_topic)
 
+            # Log with structured error
             logger.warning(
                 "Handler registered but not instantiated",
                 extra={
                     "handler_type": handler_type,
                     "correlation_id": str(correlation_id),
                     "operation": operation,
+                    "registered_handlers": list(self._handlers.keys()),
+                    "error": str(routing_error),
                 },
             )
             return
@@ -671,7 +795,8 @@ class RuntimeHostProcess:
         Returns:
             Dictionary with health status information:
                 - healthy: Overall health status (True only if running,
-                  event bus healthy, and no handlers failed to instantiate)
+                  event bus healthy, no handlers failed to instantiate,
+                  and all registered handlers are healthy)
                 - degraded: True when process is running but some handlers
                   failed to instantiate. Indicates partial functionality -
                   the system is operational but not at full capacity.
@@ -681,11 +806,18 @@ class RuntimeHostProcess:
                 - failed_handlers: Dict of handler_type -> error message for
                   handlers that failed to instantiate during start()
                 - registered_handlers: List of successfully registered handler types
+                - handlers: Dict of handler_type -> health status for each
+                  registered handler
 
         Health State Matrix:
             - healthy=True, degraded=False: Fully operational
             - healthy=False, degraded=True: Running with reduced functionality
             - healthy=False, degraded=False: Not running or event bus unhealthy
+
+        Note:
+            Handler health checks are performed concurrently using asyncio.gather()
+            with individual timeouts (configurable via health_check_timeout_seconds
+            config, default: 5.0 seconds) to prevent slow handlers from blocking.
         """
         # Get event bus health if available
         event_bus_health: dict[str, object] = {}
@@ -722,6 +854,25 @@ class RuntimeHostProcess:
             event_bus_health = {"error": str(e), "correlation_id": str(correlation_id)}
             event_bus_healthy = False
 
+        # Check handler health for all registered handlers concurrently
+        # Delegates to ProtocolLifecycleExecutor with configured timeout to prevent blocking
+        handler_health_results: dict[str, dict[str, object]] = {}
+        handlers_all_healthy = True
+
+        if self._handlers:
+            # Run all handler health checks concurrently using asyncio.gather()
+            health_check_tasks = [
+                self._lifecycle_executor.check_handler_health(handler_type, handler)
+                for handler_type, handler in self._handlers.items()
+            ]
+            results = await asyncio.gather(*health_check_tasks)
+
+            # Process results and build the results dict
+            for handler_type, health_result in results:
+                handler_health_results[handler_type] = health_result
+                if not health_result.get("healthy", False):
+                    handlers_all_healthy = False
+
         # Check for failed handlers - any failures indicate degraded state
         has_failed_handlers = len(self._failed_handlers) > 0
 
@@ -730,8 +881,13 @@ class RuntimeHostProcess:
         degraded = self._is_running and has_failed_handlers
 
         # Overall health is True only if running, event bus is healthy,
-        # and no handlers failed to instantiate
-        healthy = self._is_running and event_bus_healthy and not has_failed_handlers
+        # no handlers failed to instantiate, and all registered handlers are healthy
+        healthy = (
+            self._is_running
+            and event_bus_healthy
+            and not has_failed_handlers
+            and handlers_all_healthy
+        )
 
         return {
             "healthy": healthy,
@@ -741,6 +897,7 @@ class RuntimeHostProcess:
             "event_bus_healthy": event_bus_healthy,
             "failed_handlers": self._failed_handlers,
             "registered_handlers": list(self._handlers.keys()),
+            "handlers": handler_health_results,
         }
 
     def register_handler(self, handler_type: str, handler: ProtocolHandler) -> None:

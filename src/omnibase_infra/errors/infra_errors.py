@@ -432,6 +432,13 @@ class EnvelopeValidationError(RuntimeHostError):
         context: Optional[ModelInfraErrorContext] = None,
         **extra_context: object,
     ) -> None:
+        """Initialize EnvelopeValidationError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            **extra_context: Additional context information
+        """
         super().__init__(
             message=message,
             error_code=EnumCoreErrorCode.INVALID_INPUT,
@@ -441,17 +448,22 @@ class EnvelopeValidationError(RuntimeHostError):
 
 
 class UnknownHandlerTypeError(RuntimeHostError):
-    """Raised when operation prefix does not match any registered handler.
+    """Raised when an operation references an unknown handler type prefix.
 
-    Used when the operation prefix (e.g., "lolnope" from "lolnope.query")
-    is not found in the handler registry. This is a HARD FAILURE, not
-    a silent None return.
+    Used when dispatching envelopes with operation prefixes that don't
+    map to any registered handler (e.g., "lolnope.query" when only
+    "db" and "http" are registered).
 
     Example:
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.RUNTIME,
+        ...     operation="lolnope.query",
+        ... )
         >>> raise UnknownHandlerTypeError(
-        ...     f"No handler registered for prefix: {prefix}",
+        ...     "No handler registered for prefix: lolnope",
         ...     context=context,
-        ...     handler_prefix=prefix,
+        ...     prefix="lolnope",
+        ...     registered_prefixes=["db", "http"],
         ... )
     """
 
@@ -461,9 +473,16 @@ class UnknownHandlerTypeError(RuntimeHostError):
         context: Optional[ModelInfraErrorContext] = None,
         **extra_context: object,
     ) -> None:
+        """Initialize UnknownHandlerTypeError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            **extra_context: Additional context (prefix, registered_prefixes, etc.)
+        """
         super().__init__(
             message=message,
-            error_code=EnumCoreErrorCode.RESOURCE_NOT_FOUND,
+            error_code=EnumCoreErrorCode.INVALID_INPUT,
             context=context,
             **extra_context,
         )
