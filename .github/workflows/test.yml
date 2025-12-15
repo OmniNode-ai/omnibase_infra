@@ -82,7 +82,7 @@ jobs:
           retention-days: 7
 
   lint:
-    name: Code Quality
+    name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -125,13 +125,10 @@ jobs:
             exit 1
           }
 
-      - name: Check Black formatting
-        run: poetry run black --check src/ tests/
+      - name: Check ruff formatting
+        run: poetry run ruff format --check src/ tests/
 
-      - name: Check isort import sorting
-        run: poetry run isort --check-only src/ tests/
-
-      - name: Run ruff linting
+      - name: Check ruff linting (includes import sorting)
         run: poetry run ruff check src/ tests/
 
       - name: Run mypy type checking

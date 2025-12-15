@@ -81,6 +81,7 @@ Error Sanitization Guidelines:
 """
 
 from omnibase_infra.errors.infra_errors import (
+    EnvelopeValidationError,
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
@@ -103,5 +104,6 @@ __all__: list[str] = [
     "InfraTimeoutError",
     "InfraAuthenticationError",
     "InfraUnavailableError",
+    "EnvelopeValidationError",
     "UnknownHandlerTypeError",
 ]

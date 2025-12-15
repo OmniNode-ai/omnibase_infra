@@ -362,8 +362,7 @@ def wire_handlers_from_contract(
             if bus_kind not in _KNOWN_EVENT_BUSES:
                 known_kinds = sorted(_KNOWN_EVENT_BUSES.keys())
                 raise ProtocolConfigurationError(
-                    f"Unknown event bus kind: {bus_kind!r}. "
-                    f"Known kinds: {known_kinds}"
+                    f"Unknown event bus kind: {bus_kind!r}. Known kinds: {known_kinds}"
                 )
 
             # Register the event bus (check if already registered first)

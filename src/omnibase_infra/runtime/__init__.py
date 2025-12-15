@@ -17,6 +17,10 @@ and configuring the handler ecosystem.
 
 from __future__ import annotations
 
+from omnibase_infra.runtime.envelope_validator import (
+    PAYLOAD_REQUIRED_OPERATIONS,
+    validate_envelope,
+)
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     EVENT_BUS_KAFKA,
@@ -95,4 +99,7 @@ __all__: list[str] = [
     "get_known_event_bus_kinds",
     "wire_custom_handler",
     "wire_custom_event_bus",
+    # Envelope validation
+    "PAYLOAD_REQUIRED_OPERATIONS",
+    "validate_envelope",
 ]

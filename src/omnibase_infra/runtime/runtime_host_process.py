@@ -44,11 +44,13 @@ from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    EnvelopeValidationError,
     ModelInfraErrorContext,
     RuntimeHostError,
     UnknownHandlerTypeError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+from omnibase_infra.runtime.envelope_validator import validate_envelope
 from omnibase_infra.runtime.handler_registry import get_handler_registry
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.wiring import wire_default_handlers
@@ -377,10 +379,11 @@ class RuntimeHostProcess:
         # - Grouping handlers by priority (higher priority first)
         # - Parallel shutdown within priority groups for performance
         if self._handlers:
-            all_succeeded, all_failed = (
-                await self._lifecycle_executor.shutdown_handlers_by_priority(
-                    self._handlers
-                )
+            (
+                all_succeeded,
+                all_failed,
+            ) = await self._lifecycle_executor.shutdown_handlers_by_priority(
+                self._handlers
             )
 
             # Log summary (ProtocolLifecycleExecutor already logs detailed info)
@@ -554,50 +557,90 @@ class RuntimeHostProcess:
     async def _handle_envelope(self, envelope: dict[str, object]) -> None:
         """Route envelope to appropriate handler.
 
-        Extracts the handler_type from the envelope and routes it to the
-        appropriate registered handler. Publishes the response to the
-        output topic.
+        Validates envelope before dispatch and routes it to the appropriate
+        registered handler. Publishes the response to the output topic.
+
+        Validation (performed before dispatch):
+        1. Operation presence and type validation
+        2. Handler prefix validation against registry
+        3. Payload requirement validation for specific operations
+        4. Correlation ID normalization to UUID
 
         Args:
             envelope: Dict with 'operation', 'payload', optional 'correlation_id',
                 and 'handler_type'.
         """
-        # Extract correlation_id for tracking (preserve as UUID if possible)
+        # Pre-validation: Get correlation_id for error responses if validation fails
+        # This handles the case where validation itself throws before normalizing
         raw_correlation_id = envelope.get("correlation_id")
-        correlation_id: UUID | None = None
+        pre_validation_correlation_id: UUID | None = None
         if isinstance(raw_correlation_id, UUID):
-            correlation_id = raw_correlation_id
+            pre_validation_correlation_id = raw_correlation_id
         elif raw_correlation_id is not None:
             try:
-                correlation_id = UUID(str(raw_correlation_id))
+                pre_validation_correlation_id = UUID(str(raw_correlation_id))
             except (ValueError, TypeError):
-                correlation_id = uuid4()
+                pre_validation_correlation_id = uuid4()
         else:
-            correlation_id = uuid4()
+            pre_validation_correlation_id = uuid4()
 
-        # Validate envelope has required fields
-        operation = envelope.get("operation")
-        handler_type = envelope.get("handler_type")
-
-        if operation is None and handler_type is None:
-            # Invalid envelope - missing required fields
+        # Step 1: Validate envelope BEFORE dispatch
+        # This validates operation, prefix, payload requirements, and normalizes correlation_id
+        try:
+            validate_envelope(envelope, get_handler_registry())
+        except EnvelopeValidationError as e:
+            # Validation failed - missing operation or payload
             error_response = self._create_error_response(
-                error="Invalid envelope: missing 'operation' and 'handler_type' fields",
-                correlation_id=correlation_id,
+                error=str(e),
+                correlation_id=pre_validation_correlation_id,
             )
             await self._publish_envelope_safe(error_response, self._output_topic)
+            logger.warning(
+                "Envelope validation failed",
+                extra={
+                    "error": str(e),
+                    "correlation_id": str(pre_validation_correlation_id),
+                    "error_type": "EnvelopeValidationError",
+                },
+            )
             return
+        except UnknownHandlerTypeError as e:
+            # Unknown handler prefix - hard failure
+            error_response = self._create_error_response(
+                error=str(e),
+                correlation_id=pre_validation_correlation_id,
+            )
+            await self._publish_envelope_safe(error_response, self._output_topic)
+            logger.warning(
+                "Unknown handler type in envelope",
+                extra={
+                    "error": str(e),
+                    "correlation_id": str(pre_validation_correlation_id),
+                    "error_type": "UnknownHandlerTypeError",
+                },
+            )
+            return
+
+        # After validation, correlation_id is guaranteed to be a UUID
+        correlation_id = envelope.get("correlation_id")
+        if not isinstance(correlation_id, UUID):
+            correlation_id = pre_validation_correlation_id
+
+        # Extract operation (validated to exist and be a string)
+        operation = str(envelope.get("operation"))
 
         # Determine handler_type from envelope
         # If handler_type not explicit, extract from operation (e.g., "http.get" -> "http")
-        if handler_type is None and operation is not None:
-            handler_type = str(operation).split(".")[0]
+        handler_type = envelope.get("handler_type")
+        if handler_type is None:
+            handler_type = operation.split(".")[0]
 
         # Get handler from registry
         handler = self._handlers.get(str(handler_type))
 
         if handler is None:
-            # Create structured error context for unknown handler type
+            # Handler not instantiated (different from unknown prefix - validation already passed)
+            # This can happen if handler registration failed during start()
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation=str(operation),
@@ -606,11 +649,9 @@ class RuntimeHostProcess:
             )
 
             # Create structured error for logging and tracking
-            routing_error = UnknownHandlerTypeError(
-                f"No handler registered for type: {handler_type!r}",
+            routing_error = RuntimeHostError(
+                f"Handler type {handler_type!r} is registered but not instantiated",
                 context=context,
-                prefix=str(handler_type),
-                registered_prefixes=list(self._handlers.keys()),
             )
 
             # Publish error response for envelope-based error handling
@@ -622,7 +663,7 @@ class RuntimeHostProcess:
 
             # Log with structured error
             logger.warning(
-                "Unknown handler type in routing",
+                "Handler registered but not instantiated",
                 extra={
                     "handler_type": handler_type,
                     "correlation_id": str(correlation_id),

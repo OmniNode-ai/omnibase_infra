@@ -1068,9 +1068,9 @@ class TestOperationPrefixRouting:
         }
 
         for constant, expected_value in canonical_prefixes.items():
-            assert (
-                constant == expected_value
-            ), f"{constant} should be '{expected_value}'"
+            assert constant == expected_value, (
+                f"{constant} should be '{expected_value}'"
+            )
 
     def test_all_canonical_prefixes_are_unique(self) -> None:
         """Test that canonical prefixes are unique (no duplicates)."""
