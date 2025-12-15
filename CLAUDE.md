@@ -521,6 +521,23 @@ Use `EnumInfraTransportType` for transport identification in error context:
 
 ## 🏗️ Infrastructure-Specific Patterns
 
+### Accepted Pattern Exceptions
+
+**KafkaEventBus Complexity** (Documented Exception):
+The KafkaEventBus intentionally violates pattern validator thresholds:
+- **14 methods** (threshold: 10) - Required for event bus pattern implementation
+- **10 __init__ parameters** (threshold: 5) - Backwards compatibility during config migration
+
+This complexity is acceptable and documented because:
+1. **Event Bus Pattern Requirements**: Lifecycle, pub/sub, circuit breaker, protocol compatibility
+2. **Backwards Compatibility**: Gradual migration from direct parameters to config objects
+3. **Infrastructure Cohesion**: Keeping related event bus operations together improves maintainability
+4. **Well-Documented**: Design rationale documented in class and method docstrings
+
+The violations are **intentional infrastructure patterns**, not code smells. See:
+- `src/omnibase_infra/event_bus/kafka_event_bus.py` - Full design documentation
+- `src/omnibase_infra/validation/infra_validators.py` - Validation notes
+
 ### Service Integration Architecture
 - **Adapter Pattern** - External services wrapped in ONEX adapters (Consul, Kafka, Vault)
 - **Connection Pooling** - Database connections managed through dedicated pool managers

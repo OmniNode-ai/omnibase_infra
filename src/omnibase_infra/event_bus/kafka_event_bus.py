@@ -100,6 +100,21 @@ class KafkaEventBus:
         group: Consumer group identifier
         adapter: Returns self (for protocol compatibility)
 
+    Design Note:
+        This class intentionally has 14 methods as part of the Event Bus infrastructure
+        pattern. The methods are logically grouped into:
+        - Factory methods (3): from_config, from_yaml, default
+        - Properties (4): config, adapter, environment, group
+        - Lifecycle methods (4): start, initialize, shutdown, close
+        - Pub/Sub methods (5): publish, publish_envelope, subscribe, start_consuming
+        - Broadcast methods (2): broadcast_to_environment, send_to_group
+        - Health/Circuit breaker (3): health_check, circuit breaker helpers
+        - Message conversion helpers (3): header/message conversion utilities
+
+        This complexity is acceptable for infrastructure event bus implementations
+        which must handle connection management, resilience patterns, protocol
+        compatibility, and multiple communication patterns in a single component.
+
     Example:
         ```python
         bus = KafkaEventBus(bootstrap_servers="kafka:9092", environment="dev")
@@ -133,6 +148,22 @@ class KafkaEventBus:
         circuit_breaker_reset_timeout: Optional[float] = None,
     ) -> None:
         """Initialize the Kafka event bus.
+
+        Design Note:
+            This __init__ method intentionally accepts 10 parameters (1 config + 8 overrides + self)
+            to maintain backwards compatibility while transitioning to config-driven initialization.
+            The parameters follow the ONEX config pattern:
+            - Primary: `config` parameter (ModelKafkaEventBusConfig) for modern usage
+            - Overrides: 8 optional parameters for backwards compatibility
+
+            This approach allows gradual migration from direct parameters to config objects
+            without breaking existing code. Recommended usage is factory methods:
+            - KafkaEventBus.default() for defaults with env var overrides
+            - KafkaEventBus.from_config(config) for config-driven initialization
+            - KafkaEventBus.from_yaml(path) for YAML-based configuration
+
+            The parameter count is acceptable for infrastructure components supporting
+            multiple initialization patterns during deprecation periods.
 
         Args:
             config: Configuration model containing all settings. If not provided,

@@ -216,7 +216,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         Returns:
             New configuration instance with environment overrides applied
         """
-        overrides: dict[str, str | int | float | bool] = {}
+        overrides: dict[str, object] = {}
 
         env_mappings: dict[str, str] = {
             "KAFKA_BOOTSTRAP_SERVERS": "bootstrap_servers",
