@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,6 +23,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.kafka_event_bus import CircuitState, KafkaEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 
 class TestKafkaEventBusLifecycle:
@@ -224,9 +226,7 @@ class TestKafkaEventBusPublish:
             yield bus
 
     @pytest.mark.asyncio
-    async def test_publish_requires_start(
-        self, kafka_event_bus: KafkaEventBus
-    ) -> None:
+    async def test_publish_requires_start(self, kafka_event_bus: KafkaEventBus) -> None:
         """Test that publish fails if bus not started."""
         with pytest.raises(InfraUnavailableError, match="not started"):
             await kafka_event_bus.publish("test-topic", None, b"test")
@@ -295,18 +295,14 @@ class TestKafkaEventBusPublish:
             kafka_headers = call_args[1]["headers"]
             assert kafka_headers is not None
             # Find the source header
-            source_header = next(
-                (h for h in kafka_headers if h[0] == "source"), None
-            )
+            source_header = next((h for h in kafka_headers if h[0] == "source"), None)
             assert source_header is not None
             assert source_header[1] == b"custom-source"
 
             await kafka_event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_publish_circuit_breaker_open(
-        self, mock_producer: AsyncMock
-    ) -> None:
+    async def test_publish_circuit_breaker_open(self, mock_producer: AsyncMock) -> None:
         """Test error when circuit breaker is open."""
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -383,6 +379,7 @@ class TestKafkaEventBusSubscribe:
         self, kafka_event_bus: KafkaEventBus, mock_producer: AsyncMock
     ) -> None:
         """Test unsubscribe removes handler from registry."""
+
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
@@ -401,6 +398,7 @@ class TestKafkaEventBusSubscribe:
         self, kafka_event_bus: KafkaEventBus, mock_producer: AsyncMock
     ) -> None:
         """Test multiple subscribers on same topic."""
+
         async def handler1(msg: ModelEventMessage) -> None:
             pass
 
@@ -418,6 +416,7 @@ class TestKafkaEventBusSubscribe:
         self, kafka_event_bus: KafkaEventBus, mock_producer: AsyncMock
     ) -> None:
         """Test that double unsubscribe is safe."""
+
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
@@ -650,7 +649,9 @@ class TestKafkaEventBusErrors:
     @pytest.mark.asyncio
     async def test_connection_error_type(self, mock_producer: AsyncMock) -> None:
         """Test that connection errors are properly typed."""
-        mock_producer.start = AsyncMock(side_effect=ConnectionError("Connection refused"))
+        mock_producer.start = AsyncMock(
+            side_effect=ConnectionError("Connection refused")
+        )
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -751,6 +752,7 @@ class TestKafkaEventBusPublishRetry:
         self, mock_producer: AsyncMock
     ) -> None:
         """Test publish fails after exhausting all retries."""
+
         async def mock_send(*args, **kwargs):
             raise KafkaError("Persistent error")
 
@@ -832,9 +834,7 @@ class TestKafkaEventBusPublishEnvelope:
             await event_bus.close()
 
     @pytest.mark.asyncio
-    async def test_publish_envelope_with_dict(
-        self, mock_producer: AsyncMock
-    ) -> None:
+    async def test_publish_envelope_with_dict(self, mock_producer: AsyncMock) -> None:
         """Test publish_envelope with a plain dict."""
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -883,9 +883,7 @@ class TestKafkaEventBusBroadcast:
         return producer
 
     @pytest.mark.asyncio
-    async def test_broadcast_to_environment(
-        self, mock_producer: AsyncMock
-    ) -> None:
+    async def test_broadcast_to_environment(self, mock_producer: AsyncMock) -> None:
         """Test broadcast_to_environment publishes to correct topic."""
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -1130,12 +1128,15 @@ class TestKafkaEventBusConsumerManagement:
         self, mock_producer: AsyncMock, mock_consumer: AsyncMock
     ) -> None:
         """Test consumer is started when subscribing to a topic."""
-        with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
-            return_value=mock_producer,
-        ), patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
-            return_value=mock_consumer,
+        with (
+            patch(
+                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
+                return_value=mock_consumer,
+            ),
         ):
             event_bus = KafkaEventBus(bootstrap_servers="localhost:9092")
             await event_bus.start()
@@ -1155,12 +1156,15 @@ class TestKafkaEventBusConsumerManagement:
         self, mock_producer: AsyncMock, mock_consumer: AsyncMock
     ) -> None:
         """Test close stops all active consumers."""
-        with patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
-            return_value=mock_producer,
-        ), patch(
-            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
-            return_value=mock_consumer,
+        with (
+            patch(
+                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaConsumer",
+                return_value=mock_consumer,
+            ),
         ):
             event_bus = KafkaEventBus(bootstrap_servers="localhost:9092")
             await event_bus.start()
@@ -1188,9 +1192,7 @@ class TestKafkaEventBusStartConsuming:
         return producer
 
     @pytest.mark.asyncio
-    async def test_start_consuming_auto_starts(
-        self, mock_producer: AsyncMock
-    ) -> None:
+    async def test_start_consuming_auto_starts(self, mock_producer: AsyncMock) -> None:
         """Test that start_consuming auto-starts the bus."""
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -1240,3 +1242,127 @@ class TestKafkaEventBusStartConsuming:
 
             # Task should complete
             await asyncio.wait_for(task, timeout=1.0)
+
+
+class TestKafkaEventBusConfig:
+    """Test suite for config-based KafkaEventBus construction."""
+
+    def test_default_factory_creates_bus(self) -> None:
+        """Test default() factory method creates a valid bus."""
+        bus = KafkaEventBus.default()
+        assert bus is not None
+        assert bus.config is not None
+        assert bus.environment == bus.config.environment
+        assert bus.group == bus.config.group
+
+    def test_from_config_creates_bus(self) -> None:
+        """Test from_config() factory method."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="custom:9092",
+            environment="staging",
+            group="custom-group",
+        )
+        bus = KafkaEventBus.from_config(config)
+
+        assert bus.config == config
+        assert bus.environment == "staging"
+        assert bus.group == "custom-group"
+
+    def test_config_property_returns_model(self) -> None:
+        """Test config property returns the config model."""
+        config = ModelKafkaEventBusConfig.default()
+        bus = KafkaEventBus(config=config)
+
+        assert bus.config == config
+        assert isinstance(bus.config, ModelKafkaEventBusConfig)
+
+    def test_backwards_compatibility_with_direct_params(self) -> None:
+        """Test that direct parameters still work for backwards compatibility."""
+        bus = KafkaEventBus(
+            bootstrap_servers="localhost:9092",
+            environment="test",
+            group="test-group",
+        )
+
+        assert bus.environment == "test"
+        assert bus.group == "test-group"
+
+    def test_parameter_overrides_config(self) -> None:
+        """Test that explicit parameters override config values."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="config:9092",
+            environment="config-env",
+            group="config-group",
+        )
+        bus = KafkaEventBus(
+            config=config,
+            environment="override-env",  # This should override
+        )
+
+        assert bus.environment == "override-env"
+        assert bus.group == "config-group"  # This should come from config
+
+    def test_from_yaml_creates_bus(self, tmp_path: Path) -> None:
+        """Test from_yaml() factory method with a temporary config file."""
+        config_content = """bootstrap_servers: "yaml-server:9092"
+environment: "yaml-env"
+group: "yaml-group"
+timeout_seconds: 45
+max_retry_attempts: 5
+retry_backoff_base: 2.0
+circuit_breaker_threshold: 10
+circuit_breaker_reset_timeout: 60.0
+consumer_sleep_interval: 0.2
+acks: "all"
+enable_idempotence: true
+auto_offset_reset: "earliest"
+enable_auto_commit: false
+"""
+        config_file = tmp_path / "test_config.yaml"
+        config_file.write_text(config_content)
+
+        bus = KafkaEventBus.from_yaml(config_file)
+
+        assert bus.environment == "yaml-env"
+        assert bus.group == "yaml-group"
+        assert bus.config.timeout_seconds == 45
+        assert bus.config.max_retry_attempts == 5
+        assert bus.config.retry_backoff_base == 2.0
+        assert bus.config.circuit_breaker_threshold == 10
+        assert bus.config.auto_offset_reset == "earliest"
+        assert bus.config.enable_auto_commit is False
+
+    def test_config_defaults_match_property_defaults(self) -> None:
+        """Test that config defaults match the documented property defaults."""
+        bus = KafkaEventBus()  # No config, uses internal default
+
+        assert bus.environment == "local"
+        assert bus.group == "default"
+        assert bus.config.timeout_seconds == 30
+        assert bus.config.max_retry_attempts == 3
+        assert bus.config.circuit_breaker_threshold == 5
+
+    def test_config_with_all_parameters(self) -> None:
+        """Test config with all parameters explicitly set."""
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers="custom-broker:29092",
+            environment="production",
+            group="prod-workers",
+            timeout_seconds=60,
+            max_retry_attempts=5,
+            retry_backoff_base=2.0,
+            circuit_breaker_threshold=10,
+            circuit_breaker_reset_timeout=60.0,
+            consumer_sleep_interval=0.5,
+            acks="1",
+            enable_idempotence=False,
+            auto_offset_reset="earliest",
+            enable_auto_commit=False,
+        )
+        bus = KafkaEventBus.from_config(config)
+
+        assert bus.config == config
+        assert bus.environment == "production"
+        assert bus.group == "prod-workers"
+        assert bus.config.acks == "1"
+        assert bus.config.enable_idempotence is False

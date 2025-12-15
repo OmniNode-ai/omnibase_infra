@@ -45,12 +45,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import random
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
@@ -65,6 +65,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
 )
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 logger = logging.getLogger(__name__)
 
@@ -118,52 +119,98 @@ class KafkaEventBus:
 
     def __init__(
         self,
+        config: Optional[ModelKafkaEventBusConfig] = None,
+        # Backwards compatibility parameters (override config if provided)
         bootstrap_servers: Optional[str] = None,
-        environment: str = "local",
-        group: str = "default",
+        environment: Optional[str] = None,
+        group: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
-        max_retry_attempts: int = 3,
-        retry_backoff_base: float = 1.0,
-        circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 30.0,
+        max_retry_attempts: Optional[int] = None,
+        retry_backoff_base: Optional[float] = None,
+        circuit_breaker_threshold: Optional[int] = None,
+        circuit_breaker_reset_timeout: Optional[float] = None,
     ) -> None:
         """Initialize the Kafka event bus.
 
         Args:
-            bootstrap_servers: Kafka bootstrap servers (defaults to KAFKA_BOOTSTRAP_SERVERS
-                env var or "localhost:9092")
-            environment: Environment identifier for message routing
-            group: Consumer group identifier for message routing
-            timeout_seconds: Timeout for Kafka operations (defaults to KAFKA_TIMEOUT_SECONDS
-                env var or 30)
-            max_retry_attempts: Maximum retry attempts for publish operations
-            retry_backoff_base: Base delay in seconds for exponential backoff
-            circuit_breaker_threshold: Number of consecutive failures before circuit opens
-            circuit_breaker_reset_timeout: Seconds before circuit breaker resets to half-open
+            config: Configuration model containing all settings. If not provided,
+                defaults are used with environment variable overrides.
+            bootstrap_servers: Override bootstrap servers from config
+            environment: Override environment identifier from config
+            group: Override consumer group identifier from config
+            timeout_seconds: Override timeout from config
+            max_retry_attempts: Override max retry attempts from config
+            retry_backoff_base: Override retry backoff base from config
+            circuit_breaker_threshold: Override circuit breaker threshold from config
+            circuit_breaker_reset_timeout: Override circuit breaker reset timeout from config
 
         Raises:
             ValueError: If circuit_breaker_threshold is not a positive integer
-        """
-        if circuit_breaker_threshold < 1:
-            raise ValueError(
-                f"circuit_breaker_threshold must be a positive integer, got {circuit_breaker_threshold}"
+
+        Example:
+            ```python
+            # Using config model (recommended)
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers="kafka:9092",
+                environment="prod",
             )
+            bus = KafkaEventBus(config=config)
 
-        # Configuration from environment with defaults
-        self._bootstrap_servers = bootstrap_servers or os.getenv(
-            "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
-        )
-        self._environment = environment
-        self._group = group
-        self._timeout_seconds = timeout_seconds or int(
-            os.getenv("KAFKA_TIMEOUT_SECONDS", "30")
-        )
-        self._max_retry_attempts = max_retry_attempts
-        self._retry_backoff_base = retry_backoff_base
+            # Using factory methods
+            bus = KafkaEventBus.default()
+            bus = KafkaEventBus.from_yaml(Path("kafka.yaml"))
 
-        # Circuit breaker configuration
-        self._circuit_breaker_threshold = circuit_breaker_threshold
-        self._circuit_breaker_reset_timeout = circuit_breaker_reset_timeout
+            # Backwards compatible direct parameters
+            bus = KafkaEventBus(bootstrap_servers="kafka:9092", environment="dev")
+            ```
+        """
+        # Use provided config or create default with environment overrides
+        if config is None:
+            config = ModelKafkaEventBusConfig.default()
+
+        # Store config reference
+        self._config = config
+
+        # Apply parameter overrides for backwards compatibility
+        self._bootstrap_servers = (
+            bootstrap_servers
+            if bootstrap_servers is not None
+            else config.bootstrap_servers
+        )
+        self._environment = (
+            environment if environment is not None else config.environment
+        )
+        self._group = group if group is not None else config.group
+        self._timeout_seconds = (
+            timeout_seconds if timeout_seconds is not None else config.timeout_seconds
+        )
+        self._max_retry_attempts = (
+            max_retry_attempts
+            if max_retry_attempts is not None
+            else config.max_retry_attempts
+        )
+        self._retry_backoff_base = (
+            retry_backoff_base
+            if retry_backoff_base is not None
+            else config.retry_backoff_base
+        )
+
+        # Circuit breaker configuration with override support
+        effective_threshold = (
+            circuit_breaker_threshold
+            if circuit_breaker_threshold is not None
+            else config.circuit_breaker_threshold
+        )
+        if effective_threshold < 1:
+            raise ValueError(
+                f"circuit_breaker_threshold must be a positive integer, got {effective_threshold}"
+            )
+        self._circuit_breaker_threshold = effective_threshold
+        self._circuit_breaker_reset_timeout = (
+            circuit_breaker_reset_timeout
+            if circuit_breaker_reset_timeout is not None
+            else config.circuit_breaker_reset_timeout
+        )
         self._circuit_state = CircuitState.CLOSED
         self._circuit_failure_count = 0
         self._circuit_last_failure_time: float = 0.0
@@ -189,6 +236,89 @@ class KafkaEventBus:
 
         # Background consumer tasks
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
+
+    # =========================================================================
+    # Factory Methods
+    # =========================================================================
+
+    @classmethod
+    def from_config(cls, config: ModelKafkaEventBusConfig) -> KafkaEventBus:
+        """Create KafkaEventBus from a configuration model.
+
+        Args:
+            config: Configuration model containing all settings
+
+        Returns:
+            KafkaEventBus instance configured with the provided settings
+
+        Example:
+            ```python
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers="kafka:9092",
+                environment="prod",
+                timeout_seconds=60,
+            )
+            bus = KafkaEventBus.from_config(config)
+            ```
+        """
+        return cls(config=config)
+
+    @classmethod
+    def from_yaml(cls, path: Path) -> KafkaEventBus:
+        """Create KafkaEventBus from a YAML configuration file.
+
+        Loads configuration from a YAML file with environment variable
+        overrides applied automatically.
+
+        Args:
+            path: Path to YAML configuration file
+
+        Returns:
+            KafkaEventBus instance configured from the YAML file
+
+        Raises:
+            FileNotFoundError: If the YAML file does not exist
+            ValueError: If the YAML content is invalid
+
+        Example:
+            ```python
+            bus = KafkaEventBus.from_yaml(Path("/etc/kafka/config.yaml"))
+            ```
+        """
+        config = ModelKafkaEventBusConfig.from_yaml(path)
+        return cls(config=config)
+
+    @classmethod
+    def default(cls) -> KafkaEventBus:
+        """Create KafkaEventBus with default configuration.
+
+        Creates an instance with default settings and environment variable
+        overrides applied automatically. This is the recommended way to
+        create a KafkaEventBus for most use cases.
+
+        Returns:
+            KafkaEventBus instance with default configuration
+
+        Example:
+            ```python
+            bus = KafkaEventBus.default()
+            await bus.start()
+            ```
+        """
+        return cls(config=ModelKafkaEventBusConfig.default())
+
+    # =========================================================================
+    # Properties
+    # =========================================================================
+
+    @property
+    def config(self) -> ModelKafkaEventBusConfig:
+        """Get the configuration model.
+
+        Returns:
+            Configuration model instance used by this event bus
+        """
+        return self._config
 
     @property
     def adapter(self) -> KafkaEventBus:
@@ -293,7 +423,10 @@ class KafkaEventBus:
                 )
                 logger.warning(
                     f"Failed to connect to Kafka: {e}",
-                    extra={"bootstrap_servers": self._bootstrap_servers, "error": str(e)},
+                    extra={
+                        "bootstrap_servers": self._bootstrap_servers,
+                        "error": str(e),
+                    },
                 )
                 raise InfraConnectionError(
                     f"Failed to connect to Kafka: {e}",
@@ -496,7 +629,10 @@ class KafkaEventBus:
                 self._record_circuit_failure()
                 logger.warning(
                     f"Publish timeout (attempt {attempt + 1}/{self._max_retry_attempts + 1})",
-                    extra={"topic": topic, "correlation_id": str(headers.correlation_id)},
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(headers.correlation_id),
+                    },
                 )
 
             except KafkaError as e:
@@ -504,7 +640,10 @@ class KafkaEventBus:
                 self._record_circuit_failure()
                 logger.warning(
                     f"Kafka error on publish (attempt {attempt + 1}/{self._max_retry_attempts + 1}): {e}",
-                    extra={"topic": topic, "correlation_id": str(headers.correlation_id)},
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(headers.correlation_id),
+                    },
                 )
 
             except Exception as e:
@@ -512,7 +651,10 @@ class KafkaEventBus:
                 self._record_circuit_failure()
                 logger.warning(
                     f"Publish error (attempt {attempt + 1}/{self._max_retry_attempts + 1}): {e}",
-                    extra={"topic": topic, "correlation_id": str(headers.correlation_id)},
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(headers.correlation_id),
+                    },
                 )
 
             # Calculate backoff with jitter
@@ -773,7 +915,7 @@ class KafkaEventBus:
 
         # Block until shutdown
         while not self._shutdown:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(self._config.consumer_sleep_interval)
 
     async def broadcast_to_environment(
         self,
@@ -887,7 +1029,10 @@ class KafkaEventBus:
 
         if self._circuit_state == CircuitState.OPEN:
             # Check if reset timeout has passed
-            if current_time - self._circuit_last_failure_time > self._circuit_breaker_reset_timeout:
+            if (
+                current_time - self._circuit_last_failure_time
+                > self._circuit_breaker_reset_timeout
+            ):
                 self._circuit_state = CircuitState.HALF_OPEN
                 self._circuit_failure_count = 0
                 logger.info("Circuit breaker transitioning to half-open")
