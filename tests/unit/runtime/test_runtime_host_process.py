@@ -1048,11 +1048,11 @@ class TestRuntimeHostProcessIntegration:
                     }
                 )
 
-                # Send to DB handler
+                # Send to DB handler (db.query requires non-empty payload)
                 await process._handle_envelope(
                     {
                         "operation": "db.query",
-                        "payload": {},
+                        "payload": {"sql": "SELECT 1"},
                         "correlation_id": uuid4(),
                         "handler_type": "db",
                     }

@@ -45,6 +45,10 @@ from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.envelope_validator import (
+    PAYLOAD_REQUIRED_OPERATIONS,
+    validate_envelope,
+)
 from omnibase_infra.runtime.wiring import (
     get_known_event_bus_kinds,
     get_known_handler_types,
@@ -95,4 +99,7 @@ __all__: list[str] = [
     "get_known_event_bus_kinds",
     "wire_custom_handler",
     "wire_custom_event_bus",
+    # Envelope validation
+    "PAYLOAD_REQUIRED_OPERATIONS",
+    "validate_envelope",
 ]

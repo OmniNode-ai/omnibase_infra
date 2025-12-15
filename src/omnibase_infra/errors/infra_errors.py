@@ -408,6 +408,67 @@ class InfraUnavailableError(RuntimeHostError):
         )
 
 
+class EnvelopeValidationError(RuntimeHostError):
+    """Raised when envelope validation fails before dispatch.
+
+    Used for:
+    - Missing required fields (operation)
+    - Missing required payload for data operations
+    - Invalid correlation_id format
+
+    This is a pre-dispatch validation error, NOT a handler-specific error.
+    Handlers should NOT use this error class.
+
+    Example:
+        >>> raise EnvelopeValidationError(
+        ...     "operation is required and must be non-empty string",
+        ...     context=context,
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: Optional[ModelInfraErrorContext] = None,
+        **extra_context: object,
+    ) -> None:
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.INVALID_INPUT,
+            context=context,
+            **extra_context,
+        )
+
+
+class UnknownHandlerTypeError(RuntimeHostError):
+    """Raised when operation prefix does not match any registered handler.
+
+    Used when the operation prefix (e.g., "lolnope" from "lolnope.query")
+    is not found in the handler registry. This is a HARD FAILURE, not
+    a silent None return.
+
+    Example:
+        >>> raise UnknownHandlerTypeError(
+        ...     f"No handler registered for prefix: {prefix}",
+        ...     context=context,
+        ...     handler_prefix=prefix,
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: Optional[ModelInfraErrorContext] = None,
+        **extra_context: object,
+    ) -> None:
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.RESOURCE_NOT_FOUND,
+            context=context,
+            **extra_context,
+        )
+
+
 __all__ = [
     "RuntimeHostError",
     "ProtocolConfigurationError",
@@ -416,4 +477,6 @@ __all__ = [
     "InfraTimeoutError",
     "InfraAuthenticationError",
     "InfraUnavailableError",
+    "EnvelopeValidationError",
+    "UnknownHandlerTypeError",
 ]
