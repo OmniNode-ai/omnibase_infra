@@ -23,7 +23,7 @@ Design Principles:
 
 Handler Categories (by protocol type):
 - HTTP handlers: REST API integrations
-- Database handlers: PostgreSQL, Redis connections
+- Database handlers: PostgreSQL, Valkey connections
 - Message broker handlers: Kafka message processing
 - Service discovery handlers: Consul integration
 - Secret management handlers: Vault integration
