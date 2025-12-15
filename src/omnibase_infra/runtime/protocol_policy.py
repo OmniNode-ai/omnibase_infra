@@ -48,10 +48,8 @@ Policy Types and Use Cases:
 
 Example Usage:
     ```python
-    from typing import Protocol, runtime_checkable
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
 
-    @runtime_checkable
     class ExponentialBackoffPolicy:
         '''Policy for calculating exponential backoff delays.'''
 
@@ -75,16 +73,16 @@ Example Usage:
                 "should_retry": attempt < 10,
             }
 
-    # Type checking works via Protocol
+    # Type checking works via Protocol (ProtocolPolicy is already @runtime_checkable)
     policy: ProtocolPolicy = ExponentialBackoffPolicy()
     result = policy.evaluate({"attempt": 3, "base_delay_seconds": 1.0})
     ```
 
 Integration with PolicyRegistry:
     ```python
-    from omnibase_infra.runtime.registry_policy import RegistryPolicy
+    from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
-    registry = RegistryPolicy()
+    registry = PolicyRegistry()
     registry.register(ExponentialBackoffPolicy())
 
     # Retrieve and use policy
@@ -93,7 +91,7 @@ Integration with PolicyRegistry:
     ```
 
 See Also:
-    - RegistryPolicy: Registry for managing policy plugins
+    - PolicyRegistry: Registry for managing policy plugins (SINGLE SOURCE OF TRUTH)
     - ProtocolHandler: Protocol for I/O handlers (contrast with pure policies)
     - ModelPolicyContext: Structured context model for policy evaluation
 """
@@ -261,6 +259,10 @@ class ProtocolPolicy(Protocol):
 
         Some use cases read more naturally with "decide" rather than "evaluate".
         This method is semantically identical to evaluate().
+
+        **NOTE: This method is optional.** If your policy only implements evaluate(),
+        the PolicyRegistry will work correctly. The decide() method is provided as
+        a convenience for policies that prefer this semantic naming.
 
         Args:
             context: Dictionary containing evaluation context.

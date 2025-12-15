@@ -8,7 +8,7 @@ used to register policy plugins with the PolicyRegistry.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,6 +16,10 @@ from omnibase_infra.enums import EnumPolicyType
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+
+    PolicyClass = type[ProtocolPolicy]
+else:
+    PolicyClass = type
 
 
 class ModelPolicyRegistration(BaseModel):
@@ -56,7 +60,7 @@ class ModelPolicyRegistration(BaseModel):
         ...,
         description="Unique policy identifier (e.g., 'exponential_backoff')",
     )
-    policy_class: type = Field(
+    policy_class: PolicyClass = Field(
         ...,
         description="Policy implementation class that implements ProtocolPolicy",
     )

@@ -9,7 +9,7 @@ to comply with ONEX standards.
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumPolicyType
 
@@ -50,6 +50,10 @@ class ModelPolicyTypeFilter(BaseModel):
     )
     enum_value: Optional[EnumPolicyType] = Field(
         default=None, description="Policy type as EnumPolicyType enum"
+    )
+
+    model_config = ConfigDict(
+        frozen=True,  # Make immutable like ModelPolicyKey
     )
 
     @classmethod

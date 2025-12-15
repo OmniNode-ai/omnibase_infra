@@ -41,20 +41,6 @@ class ModelPolicyKey(BaseModel):
         str_strip_whitespace=True,
     )
 
-    def __hash__(self) -> int:
-        """Make hashable for use as dict key."""
-        return hash((self.policy_id, self.policy_type, self.version))
-
-    def __eq__(self, other: object) -> bool:
-        """Equality comparison for dict operations."""
-        if not isinstance(other, ModelPolicyKey):
-            return False
-        return (
-            self.policy_id == other.policy_id
-            and self.policy_type == other.policy_type
-            and self.version == other.version
-        )
-
     def to_tuple(self) -> tuple[str, str, str]:
         """Convert to tuple for backward compatibility.
 
