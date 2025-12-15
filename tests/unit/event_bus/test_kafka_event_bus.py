@@ -203,7 +203,7 @@ class TestKafkaEventBusPublish:
         mock_record_metadata.offset = 42
 
         async def mock_send(*args, **kwargs):
-            future = asyncio.get_event_loop().create_future()
+            future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
 
@@ -522,11 +522,13 @@ class TestKafkaEventBusCircuitBreaker:
         return producer
 
     def test_circuit_breaker_threshold_validation(self) -> None:
-        """Test that invalid circuit_breaker_threshold raises ValueError."""
-        with pytest.raises(ValueError, match="positive integer"):
+        """Test that invalid circuit_breaker_threshold raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="positive integer"):
             KafkaEventBus(circuit_breaker_threshold=0)
 
-        with pytest.raises(ValueError, match="positive integer"):
+        with pytest.raises(ProtocolConfigurationError, match="positive integer"):
             KafkaEventBus(circuit_breaker_threshold=-1)
 
     @pytest.mark.asyncio
@@ -722,7 +724,7 @@ class TestKafkaEventBusPublishRetry:
             call_count += 1
             if call_count < 3:
                 raise KafkaError("Temporary error")
-            future = asyncio.get_event_loop().create_future()
+            future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
 
@@ -793,7 +795,7 @@ class TestKafkaEventBusPublishEnvelope:
         mock_record_metadata.offset = 42
 
         async def mock_send(*args, **kwargs):
-            future = asyncio.get_event_loop().create_future()
+            future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
 
@@ -875,7 +877,7 @@ class TestKafkaEventBusBroadcast:
         mock_record_metadata.offset = 42
 
         async def mock_send(*args, **kwargs):
-            future = asyncio.get_event_loop().create_future()
+            future = asyncio.get_running_loop().create_future()
             future.set_result(mock_record_metadata)
             return future
 

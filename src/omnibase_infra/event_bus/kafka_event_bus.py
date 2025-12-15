@@ -49,10 +49,11 @@ import random
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import KafkaError
@@ -63,6 +64,7 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -145,7 +147,7 @@ class KafkaEventBus:
             circuit_breaker_reset_timeout: Override circuit breaker reset timeout from config
 
         Raises:
-            ValueError: If circuit_breaker_threshold is not a positive integer
+            ProtocolConfigurationError: If circuit_breaker_threshold is not a positive integer
 
         Example:
             ```python
@@ -202,8 +204,17 @@ class KafkaEventBus:
             else config.circuit_breaker_threshold
         )
         if effective_threshold < 1:
-            raise ValueError(
-                f"circuit_breaker_threshold must be a positive integer, got {effective_threshold}"
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="init",
+                target_name="kafka_event_bus",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"circuit_breaker_threshold must be a positive integer, got {effective_threshold}",
+                context=context,
+                parameter="circuit_breaker_threshold",
+                value=effective_threshold,
             )
         self._circuit_breaker_threshold = effective_threshold
         self._circuit_breaker_reset_timeout = (
@@ -223,9 +234,6 @@ class KafkaEventBus:
         self._subscribers: dict[
             str, list[tuple[str, str, Callable[[ModelEventMessage], Awaitable[None]]]]
         ] = defaultdict(list)
-
-        # Topic -> offset counter for message tracking
-        self._topic_offsets: dict[str, int] = defaultdict(int)
 
         # Lock for thread safety
         self._lock = asyncio.Lock()
@@ -367,6 +375,7 @@ class KafkaEventBus:
                 return
 
             # Check circuit breaker before attempting connection
+            # No correlation_id available during startup - generate new if needed
             self._check_circuit_breaker()
 
             try:
@@ -395,6 +404,8 @@ class KafkaEventBus:
                 )
 
             except TimeoutError as e:
+                # Clean up producer on failure to prevent resource leak
+                self._producer = None
                 self._record_circuit_failure()
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
@@ -414,6 +425,8 @@ class KafkaEventBus:
                 ) from e
 
             except Exception as e:
+                # Clean up producer on failure to prevent resource leak
+                self._producer = None
                 self._record_circuit_failure()
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
@@ -438,7 +451,8 @@ class KafkaEventBus:
         """Initialize the event bus with configuration.
 
         Protocol method for compatibility with ProtocolEventBus.
-        Extracts configuration and delegates to start().
+        Extracts configuration and delegates to start(). Config updates
+        are applied before start() which acquires its own lock.
 
         Args:
             config: Configuration dictionary with optional keys:
@@ -447,15 +461,15 @@ class KafkaEventBus:
                 - bootstrap_servers: Override bootstrap servers
                 - timeout_seconds: Override timeout setting
         """
-        async with self._lock:
-            if "environment" in config:
-                self._environment = str(config["environment"])
-            if "group" in config:
-                self._group = str(config["group"])
-            if "bootstrap_servers" in config:
-                self._bootstrap_servers = str(config["bootstrap_servers"])
-            if "timeout_seconds" in config:
-                self._timeout_seconds = int(str(config["timeout_seconds"]))
+        # Apply config updates, then call start() which handles locking
+        if "environment" in config:
+            self._environment = str(config["environment"])
+        if "group" in config:
+            self._group = str(config["group"])
+        if "bootstrap_servers" in config:
+            self._bootstrap_servers = str(config["bootstrap_servers"])
+        if "timeout_seconds" in config:
+            self._timeout_seconds = int(str(config["timeout_seconds"]))
 
         await self.start()
 
@@ -556,8 +570,8 @@ class KafkaEventBus:
                 event_type=topic,
             )
 
-        # Check circuit breaker
-        self._check_circuit_breaker()
+        # Check circuit breaker - propagate correlation_id from headers
+        self._check_circuit_breaker(correlation_id=headers.correlation_id)
 
         # Convert headers to Kafka format
         kafka_headers = self._model_headers_to_kafka(headers)
@@ -625,6 +639,8 @@ class KafkaEventBus:
                 return
 
             except TimeoutError as e:
+                # Clean up producer on failure to prevent resource leak
+                self._producer = None
                 last_exception = e
                 self._record_circuit_failure()
                 logger.warning(
@@ -664,13 +680,21 @@ class KafkaEventBus:
                 delay *= jitter
                 await asyncio.sleep(delay)
 
-        # All retries exhausted
+        # All retries exhausted - differentiate timeout vs connection errors
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="publish",
             target_name=f"kafka.{topic}",
             correlation_id=headers.correlation_id,
         )
+        if isinstance(last_exception, TimeoutError):
+            raise InfraTimeoutError(
+                f"Timeout publishing to topic {topic} after {self._max_retry_attempts + 1} attempts",
+                context=context,
+                topic=topic,
+                retry_count=self._max_retry_attempts + 1,
+                timeout_seconds=self._timeout_seconds,
+            ) from last_exception
         raise InfraConnectionError(
             f"Failed to publish to topic {topic} after {self._max_retry_attempts + 1} attempts",
             context=context,
@@ -825,8 +849,20 @@ class KafkaEventBus:
 
             logger.debug(f"Started consumer for topic {topic}")
 
-        except Exception:
+        except Exception as e:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="start_consumer",
+                target_name=f"kafka.{topic}",
+                correlation_id=uuid4(),
+            )
             logger.exception(f"Failed to start consumer for topic {topic}")
+            raise InfraConnectionError(
+                f"Failed to start consumer for topic {topic}",
+                context=context,
+                topic=topic,
+                bootstrap_servers=self._bootstrap_servers,
+            ) from e
 
     async def _stop_consumer_for_topic(self, topic: str) -> None:
         """Stop the consumer for a specific topic.
@@ -903,15 +939,19 @@ class KafkaEventBus:
         if not self._started:
             await self.start()
 
-        # Start consumers for any existing subscriptions
+        # Collect topics that need consumers while holding lock briefly
+        topics_to_start: list[tuple[str, str]] = []
         async with self._lock:
             for topic in self._subscribers:
                 if topic not in self._consumers:
-                    # Get first subscriber's group_id
                     subs = self._subscribers[topic]
                     if subs:
                         group_id = subs[0][0]
-                        await self._start_consumer_for_topic(topic, group_id)
+                        topics_to_start.append((topic, group_id))
+
+        # Start consumers outside the lock to avoid blocking
+        for topic, group_id in topics_to_start:
+            await self._start_consumer_for_topic(topic, group_id)
 
         # Block until shutdown
         while not self._shutdown:
@@ -1019,8 +1059,12 @@ class KafkaEventBus:
     # Circuit Breaker Methods
     # =========================================================================
 
-    def _check_circuit_breaker(self) -> None:
+    def _check_circuit_breaker(self, correlation_id: Optional[UUID] = None) -> None:
         """Check circuit breaker state and raise if open.
+
+        Args:
+            correlation_id: Optional correlation ID to propagate from caller.
+                If not provided, a new UUID will be generated.
 
         Raises:
             InfraUnavailableError: If circuit breaker is open
@@ -1041,7 +1085,7 @@ class KafkaEventBus:
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="circuit_check",
                     target_name=f"kafka.{self._bootstrap_servers}",
-                    correlation_id=uuid4(),
+                    correlation_id=correlation_id if correlation_id else uuid4(),
                 )
                 raise InfraUnavailableError(
                     "Circuit breaker is open - Kafka temporarily unavailable",
@@ -1149,8 +1193,41 @@ class KafkaEventBus:
             if value is not None:
                 headers_dict[key] = value.decode("utf-8")
 
+        # Parse correlation_id from string to UUID (with fallback to new UUID)
+        correlation_id_str = headers_dict.get("correlation_id")
+        correlation_id = UUID(correlation_id_str) if correlation_id_str else uuid4()
+
+        # Parse message_id from string to UUID (with fallback to new UUID)
+        message_id_str = headers_dict.get("message_id")
+        message_id = UUID(message_id_str) if message_id_str else uuid4()
+
+        # Parse timestamp from ISO format string to datetime (with fallback to now)
+        timestamp_str = headers_dict.get("timestamp")
+        if timestamp_str:
+            timestamp = datetime.fromisoformat(timestamp_str)
+        else:
+            timestamp = datetime.now(UTC)
+
+        # Parse priority with validation (default to "normal" if invalid)
+        priority_str = headers_dict.get("priority", "normal")
+        valid_priorities = ("low", "normal", "high", "critical")
+        priority = priority_str if priority_str in valid_priorities else "normal"
+
+        # Parse integer fields with fallback defaults
+        retry_count_str = headers_dict.get("retry_count")
+        retry_count = int(retry_count_str) if retry_count_str else 0
+
+        max_retries_str = headers_dict.get("max_retries")
+        max_retries = int(max_retries_str) if max_retries_str else 3
+
+        ttl_seconds_str = headers_dict.get("ttl_seconds")
+        ttl_seconds = int(ttl_seconds_str) if ttl_seconds_str else None
+
         return ModelEventHeaders(
             content_type=headers_dict.get("content_type", "application/json"),
+            correlation_id=correlation_id,
+            message_id=message_id,
+            timestamp=timestamp,
             source=headers_dict.get("source", "unknown"),
             event_type=headers_dict.get("event_type", "unknown"),
             schema_version=headers_dict.get("schema_version", "1.0.0"),
@@ -1159,8 +1236,12 @@ class KafkaEventBus:
             span_id=headers_dict.get("span_id"),
             parent_span_id=headers_dict.get("parent_span_id"),
             operation_name=headers_dict.get("operation_name"),
+            priority=priority,  # type: ignore[arg-type]
             routing_key=headers_dict.get("routing_key"),
             partition_key=headers_dict.get("partition_key"),
+            retry_count=retry_count,
+            max_retries=max_retries,
+            ttl_seconds=ttl_seconds,
         )
 
     def _kafka_msg_to_model(self, msg: object, topic: str) -> ModelEventMessage:

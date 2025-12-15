@@ -24,11 +24,14 @@ Environment Variables:
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class ModelKafkaEventBusConfig(BaseModel):
@@ -70,7 +73,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         ```
     """
 
-    model_config = ConfigDict(frozen=False, extra="forbid")
+    model_config = ConfigDict(frozen=False, extra="forbid", from_attributes=True)
 
     # Connection settings
     bootstrap_servers: str = Field(
@@ -155,11 +158,11 @@ class ModelKafkaEventBusConfig(BaseModel):
 
     @field_validator("bootstrap_servers", mode="before")
     @classmethod
-    def validate_bootstrap_servers(cls, v: str) -> str:
+    def validate_bootstrap_servers(cls, v: object) -> str:
         """Validate bootstrap servers format.
 
         Args:
-            v: Bootstrap servers string
+            v: Bootstrap servers value (any type before Pydantic conversion)
 
         Returns:
             Validated bootstrap servers string
@@ -167,25 +170,33 @@ class ModelKafkaEventBusConfig(BaseModel):
         Raises:
             ValueError: If bootstrap servers format is invalid
         """
-        if not v or not v.strip():
+        if v is None:
+            raise ValueError("bootstrap_servers cannot be None")
+        if not isinstance(v, str):
+            raise ValueError(f"bootstrap_servers must be a string, got {type(v).__name__}")
+        if not v.strip():
             raise ValueError("bootstrap_servers cannot be empty")
         return v.strip()
 
     @field_validator("environment", mode="before")
     @classmethod
-    def validate_environment(cls, v: str) -> str:
+    def validate_environment(cls, v: object) -> str:
         """Validate environment identifier.
 
         Args:
-            v: Environment string
+            v: Environment value (any type before Pydantic conversion)
 
         Returns:
             Validated environment string
 
         Raises:
-            ValueError: If environment is empty
+            ValueError: If environment is empty or invalid type
         """
-        if not v or not v.strip():
+        if v is None:
+            raise ValueError("environment cannot be None")
+        if not isinstance(v, str):
+            raise ValueError(f"environment must be a string, got {type(v).__name__}")
+        if not v.strip():
             raise ValueError("environment cannot be empty")
         return v.strip()
 
@@ -248,11 +259,25 @@ class ModelKafkaEventBusConfig(BaseModel):
                     try:
                         overrides[field_name] = int(env_value)
                     except ValueError:
+                        logger.warning(
+                            "Failed to parse integer environment variable %s='%s', "
+                            "using default value for %s",
+                            env_var,
+                            env_value,
+                            field_name,
+                        )
                         continue
                 elif field_name in float_fields:
                     try:
                         overrides[field_name] = float(env_value)
                     except ValueError:
+                        logger.warning(
+                            "Failed to parse float environment variable %s='%s', "
+                            "using default value for %s",
+                            env_var,
+                            env_value,
+                            field_name,
+                        )
                         continue
                 elif field_name in bool_fields:
                     overrides[field_name] = env_value.lower() in (
