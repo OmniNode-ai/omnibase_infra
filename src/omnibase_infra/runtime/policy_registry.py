@@ -79,6 +79,7 @@ Integration Points:
 from __future__ import annotations
 
 import asyncio
+import builtins
 import threading
 from typing import TYPE_CHECKING, Optional, Union
 
@@ -446,7 +447,7 @@ class PolicyRegistry:
                 results.append((policy_id, key_type, version))
             return results
 
-    def list_policy_types(self) -> list[str]:
+    def list_policy_types(self) -> builtins.list[str]:
         """List registered policy types.
 
         Returns:
@@ -462,7 +463,7 @@ class PolicyRegistry:
             types = {key[1] for key in self._registry}
             return sorted(types)
 
-    def list_versions(self, policy_id: str) -> list[str]:
+    def list_versions(self, policy_id: str) -> builtins.list[str]:
         """List registered versions for a policy ID.
 
         Args:
