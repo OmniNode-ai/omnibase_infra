@@ -83,6 +83,7 @@ Error Sanitization Guidelines:
 
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.infra_errors import (
+    EnvelopeValidationError,
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
@@ -105,6 +106,7 @@ __all__: list[str] = [
     "InfraTimeoutError",
     "InfraAuthenticationError",
     "InfraUnavailableError",
+    "EnvelopeValidationError",
     "UnknownHandlerTypeError",
     "PolicyRegistryError",
 ]

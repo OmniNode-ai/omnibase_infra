@@ -384,9 +384,9 @@ class TestInfraConnectionErrorTransportMapping:
         for transport in [EnumInfraTransportType.HTTP, EnumInfraTransportType.GRPC]:
             context = ModelInfraErrorContext(transport_type=transport)
             error_code = InfraConnectionError._resolve_connection_error_code(context)
-            assert (
-                error_code == EnumCoreErrorCode.NETWORK_ERROR
-            ), f"Expected NETWORK_ERROR for {transport}, got {error_code}"
+            assert error_code == EnumCoreErrorCode.NETWORK_ERROR, (
+                f"Expected NETWORK_ERROR for {transport}, got {error_code}"
+            )
 
     def test_resolve_connection_error_code_service_transports(self) -> None:
         """Test _resolve_connection_error_code for service transports."""
@@ -399,9 +399,9 @@ class TestInfraConnectionErrorTransportMapping:
         for transport in service_transports:
             context = ModelInfraErrorContext(transport_type=transport)
             error_code = InfraConnectionError._resolve_connection_error_code(context)
-            assert (
-                error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
-            ), f"Expected SERVICE_UNAVAILABLE for {transport}, got {error_code}"
+            assert error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE, (
+                f"Expected SERVICE_UNAVAILABLE for {transport}, got {error_code}"
+            )
 
     def test_all_transport_types_have_mapping(self) -> None:
         """Test that all EnumInfraTransportType values have error code mappings."""
@@ -409,16 +409,16 @@ class TestInfraConnectionErrorTransportMapping:
             context = ModelInfraErrorContext(transport_type=transport)
             # Should not raise and should return a valid error code
             error_code = InfraConnectionError._resolve_connection_error_code(context)
-            assert isinstance(
-                error_code, EnumCoreErrorCode
-            ), f"Transport {transport} returned invalid error code type: {type(error_code)}"
+            assert isinstance(error_code, EnumCoreErrorCode), (
+                f"Transport {transport} returned invalid error code type: {type(error_code)}"
+            )
 
     def test_transport_error_code_map_completeness(self) -> None:
         """Test that the transport error code map includes all transport types."""
         for transport in EnumInfraTransportType:
-            assert (
-                transport in InfraConnectionError._TRANSPORT_ERROR_CODE_MAP
-            ), f"Transport {transport} missing from _TRANSPORT_ERROR_CODE_MAP"
+            assert transport in InfraConnectionError._TRANSPORT_ERROR_CODE_MAP, (
+                f"Transport {transport} missing from _TRANSPORT_ERROR_CODE_MAP"
+            )
         # Also verify None is in the map
         assert None in InfraConnectionError._TRANSPORT_ERROR_CODE_MAP
 
@@ -439,9 +439,9 @@ class TestInfraConnectionErrorTransportMapping:
         for transport, expected_code in test_cases:
             context = ModelInfraErrorContext(transport_type=transport)
             error = InfraConnectionError("Test error", context=context)
-            assert (
-                error.model.error_code == expected_code
-            ), f"Transport {transport}: expected {expected_code}, got {error.model.error_code}"
+            assert error.model.error_code == expected_code, (
+                f"Transport {transport}: expected {expected_code}, got {error.model.error_code}"
+            )
 
 
 class TestInfraTimeoutError:

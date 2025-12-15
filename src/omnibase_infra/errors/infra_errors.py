@@ -408,6 +408,45 @@ class InfraUnavailableError(RuntimeHostError):
         )
 
 
+class EnvelopeValidationError(RuntimeHostError):
+    """Raised when envelope validation fails before dispatch.
+
+    Used for:
+    - Missing required fields (operation)
+    - Missing required payload for data operations
+    - Invalid correlation_id format
+
+    This is a pre-dispatch validation error, NOT a handler-specific error.
+    Handlers should NOT use this error class.
+
+    Example:
+        >>> raise EnvelopeValidationError(
+        ...     "operation is required and must be non-empty string",
+        ...     context=context,
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: Optional[ModelInfraErrorContext] = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize EnvelopeValidationError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            **extra_context: Additional context information
+        """
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.INVALID_INPUT,
+            context=context,
+            **extra_context,
+        )
+
+
 class UnknownHandlerTypeError(RuntimeHostError):
     """Raised when an operation references an unknown handler type prefix.
 
@@ -457,5 +496,6 @@ __all__ = [
     "InfraTimeoutError",
     "InfraAuthenticationError",
     "InfraUnavailableError",
+    "EnvelopeValidationError",
     "UnknownHandlerTypeError",
 ]
