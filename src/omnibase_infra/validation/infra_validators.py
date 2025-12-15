@@ -130,7 +130,7 @@ def validate_infra_patterns(
     # Use pattern matching instead of hardcoded line numbers for robustness
     exempted_patterns = [
         # KafkaEventBus documented exemptions (pattern-based, not line-specific)
-        ("kafka_event_bus.py", "Class 'KafkaEventBus' has 14 methods"),
+        ("kafka_event_bus.py", "Class 'KafkaEventBus' has 15 methods"),
         ("kafka_event_bus.py", "Function '__init__' has 10 parameters"),
     ]
 

@@ -27,7 +27,9 @@ class TestKafkaEventBusThreadingSafety:
         mock_producer.send.return_value = mock_future
 
         # Start the bus (this will fail to connect but we'll mock it)
-        with patch("omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer") as MockProducer:
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+        ) as MockProducer:
             MockProducer.return_value = mock_producer
             mock_producer.start = AsyncMock()
 
@@ -57,7 +59,9 @@ class TestKafkaEventBusThreadingSafety:
         """Test that initialize() doesn't race with start()."""
         bus = KafkaEventBus.default()
 
-        with patch("omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer") as MockProducer:
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+        ) as MockProducer:
             mock_producer = AsyncMock()
             mock_producer.start = AsyncMock()
             MockProducer.return_value = mock_producer
@@ -65,10 +69,12 @@ class TestKafkaEventBusThreadingSafety:
             # Simulate concurrent initialize and config updates
             async def init_task():
                 try:
-                    await bus.initialize({
-                        "environment": "test-env",
-                        "group": "test-group",
-                    })
+                    await bus.initialize(
+                        {
+                            "environment": "test-env",
+                            "group": "test-group",
+                        }
+                    )
                 except Exception:
                     pass
 
@@ -89,7 +95,9 @@ class TestKafkaEventBusThreadingSafety:
         """Test that producer field access during retry is thread-safe."""
         bus = KafkaEventBus.default()
 
-        with patch("omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer") as MockProducer:
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+        ) as MockProducer:
             mock_producer = AsyncMock()
             MockProducer.return_value = mock_producer
 
@@ -128,7 +136,9 @@ class TestKafkaEventBusThreadingSafety:
         """Test that concurrent close operations don't cause race conditions."""
         bus = KafkaEventBus.default()
 
-        with patch("omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer") as MockProducer:
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+        ) as MockProducer:
             mock_producer = AsyncMock()
             mock_producer.start = AsyncMock()
             mock_producer.stop = AsyncMock()
@@ -148,7 +158,9 @@ class TestKafkaEventBusThreadingSafety:
         """Test that health_check() during shutdown is thread-safe."""
         bus = KafkaEventBus.default()
 
-        with patch("omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer") as MockProducer:
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+        ) as MockProducer:
             mock_producer = AsyncMock()
             mock_producer.start = AsyncMock()
             mock_producer.stop = AsyncMock()
@@ -179,7 +191,9 @@ class TestKafkaEventBusThreadingSafety:
             circuit_breaker_threshold=3,
         )
 
-        with patch("omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer") as MockProducer:
+        with patch(
+            "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer"
+        ) as MockProducer:
             mock_producer = AsyncMock()
             MockProducer.return_value = mock_producer
 

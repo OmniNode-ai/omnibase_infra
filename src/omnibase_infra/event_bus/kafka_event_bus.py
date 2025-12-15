@@ -938,7 +938,7 @@ class KafkaEventBus:
             raise InfraConnectionError(
                 f"Failed to start consumer for topic {topic}",
                 context=context,
-                topic=topic
+                topic=topic,
                 # bootstrap_servers removed for security (sanitization)
             ) from e
 
