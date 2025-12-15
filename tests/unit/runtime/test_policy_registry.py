@@ -532,9 +532,9 @@ class TestPolicyRegistryVersioning:
 
         # Get without version should return 10.0.0 (semver highest), not 2.0.0
         latest_cls = policy_registry.get("semver-policy")
-        assert (
-            latest_cls is MockPolicyV2
-        ), "10.0.0 should be considered later than 2.0.0"
+        assert latest_cls is MockPolicyV2, (
+            "10.0.0 should be considered later than 2.0.0"
+        )
 
     def test_get_latest_with_prerelease_versions(
         self, policy_registry: PolicyRegistry
