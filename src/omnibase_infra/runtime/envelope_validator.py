@@ -28,23 +28,25 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
 # Operations that REQUIRE payload to be present and non-empty
-PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset({
-    # Database operations
-    "db.query",
-    "db.execute",
-    # HTTP operations with body
-    "http.post",
-    "http.put",
-    # Kafka operations
-    "kafka.produce",
-    # Consul operations
-    "consul.kv_put",
-    "consul.register",
-    # Vault operations
-    "vault.write",
-    "vault.encrypt",
-    "vault.decrypt",
-})
+PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
+    {
+        # Database operations
+        "db.query",
+        "db.execute",
+        # HTTP operations with body
+        "http.post",
+        "http.put",
+        # Kafka operations
+        "kafka.produce",
+        # Consul operations
+        "consul.kv_put",
+        "consul.register",
+        # Vault operations
+        "vault.write",
+        "vault.encrypt",
+        "vault.decrypt",
+    }
+)
 
 
 def validate_envelope(

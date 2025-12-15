@@ -17,6 +17,10 @@ and configuring the handler ecosystem.
 
 from __future__ import annotations
 
+from omnibase_infra.runtime.envelope_validator import (
+    PAYLOAD_REQUIRED_OPERATIONS,
+    validate_envelope,
+)
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     EVENT_BUS_KAFKA,
@@ -45,10 +49,6 @@ from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
-from omnibase_infra.runtime.envelope_validator import (
-    PAYLOAD_REQUIRED_OPERATIONS,
-    validate_envelope,
-)
 from omnibase_infra.runtime.wiring import (
     get_known_event_bus_kinds,
     get_known_handler_types,

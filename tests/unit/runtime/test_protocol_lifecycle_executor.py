@@ -342,7 +342,8 @@ class TestProtocolLifecycleExecutorShutdown:
             success,
             error_msg,
         ) = await protocol_lifecycle_executor.shutdown_handler(
-            "test", handler  # type: ignore[arg-type]
+            "test",
+            handler,  # type: ignore[arg-type]
         )
 
         assert handler_type == "test"
@@ -363,7 +364,8 @@ class TestProtocolLifecycleExecutorShutdown:
             success,
             error_msg,
         ) = await protocol_lifecycle_executor.shutdown_handler(
-            "no_shutdown", handler  # type: ignore[arg-type]
+            "no_shutdown",
+            handler,  # type: ignore[arg-type]
         )
 
         assert handler_type == "no_shutdown"
@@ -383,7 +385,8 @@ class TestProtocolLifecycleExecutorShutdown:
             success,
             error_msg,
         ) = await protocol_lifecycle_executor.shutdown_handler(
-            "failing", handler  # type: ignore[arg-type]
+            "failing",
+            handler,  # type: ignore[arg-type]
         )
 
         assert handler_type == "failing"
@@ -413,7 +416,8 @@ class TestProtocolLifecycleExecutorHealthCheck:
             handler_type,
             health_result,
         ) = await protocol_lifecycle_executor.check_handler_health(
-            "test", handler  # type: ignore[arg-type]
+            "test",
+            handler,  # type: ignore[arg-type]
         )
 
         assert handler_type == "test"
@@ -431,12 +435,13 @@ class TestProtocolLifecycleExecutorHealthCheck:
         )
 
         # Use a very short timeout to trigger timeout quickly
-        handler_type, health_result = (
-            await protocol_lifecycle_executor.check_handler_health(
-                "slow",
-                handler,  # type: ignore[arg-type]
-                timeout_seconds=0.1,
-            )
+        (
+            handler_type,
+            health_result,
+        ) = await protocol_lifecycle_executor.check_handler_health(
+            "slow",
+            handler,  # type: ignore[arg-type]
+            timeout_seconds=0.1,
         )
 
         assert handler_type == "slow"
@@ -455,7 +460,8 @@ class TestProtocolLifecycleExecutorHealthCheck:
             handler_type,
             health_result,
         ) = await protocol_lifecycle_executor.check_handler_health(
-            "failing", handler  # type: ignore[arg-type]
+            "failing",
+            handler,  # type: ignore[arg-type]
         )
 
         assert handler_type == "failing"
@@ -474,7 +480,8 @@ class TestProtocolLifecycleExecutorHealthCheck:
             handler_type,
             health_result,
         ) = await protocol_lifecycle_executor.check_handler_health(
-            "no_health", handler  # type: ignore[arg-type]
+            "no_health",
+            handler,  # type: ignore[arg-type]
         )
 
         assert handler_type == "no_health"
@@ -500,7 +507,8 @@ class TestProtocolLifecycleExecutorHealthCheck:
             handler_type,
             health_result,
         ) = await protocol_lifecycle_executor_custom_timeout.check_handler_health(
-            "test", handler  # type: ignore[arg-type]
+            "test",
+            handler,  # type: ignore[arg-type]
         )
 
         assert handler_type == "test"
@@ -517,12 +525,13 @@ class TestProtocolLifecycleExecutorHealthCheck:
         handler = MockHandlerWithSlowHealthCheck(handler_type="slow", delay_seconds=0.2)
 
         # Use a timeout that allows completion
-        handler_type, health_result = (
-            await protocol_lifecycle_executor.check_handler_health(
-                "slow",
-                handler,  # type: ignore[arg-type]
-                timeout_seconds=1.0,
-            )
+        (
+            handler_type,
+            health_result,
+        ) = await protocol_lifecycle_executor.check_handler_health(
+            "slow",
+            handler,  # type: ignore[arg-type]
+            timeout_seconds=1.0,
         )
 
         assert handler_type == "slow"
@@ -813,12 +822,13 @@ class TestProtocolLifecycleExecutorEdgeCases:
         """Test health check with very short timeout still returns proper structure."""
         handler = MockHandlerWithSlowHealthCheck(handler_type="slow", delay_seconds=1.0)
 
-        handler_type, health_result = (
-            await protocol_lifecycle_executor.check_handler_health(
-                "slow",
-                handler,  # type: ignore[arg-type]
-                timeout_seconds=0.001,
-            )
+        (
+            handler_type,
+            health_result,
+        ) = await protocol_lifecycle_executor.check_handler_health(
+            "slow",
+            handler,  # type: ignore[arg-type]
+            timeout_seconds=0.001,
         )
 
         assert handler_type == "slow"

@@ -150,9 +150,7 @@ class TestEnvExampleSecurity:
                 or "CRITICAL" in section_text
             )
 
-            assert (
-                has_warning
-            ), f"{var} should have security warning in comments (checked {len(section_lines)} lines)"
+            assert has_warning, f"{var} should have security warning in comments (checked {len(section_lines)} lines)"
 
 
 class TestDockerfileSecurity:

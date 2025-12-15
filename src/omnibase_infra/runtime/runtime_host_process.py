@@ -379,10 +379,11 @@ class RuntimeHostProcess:
         # - Grouping handlers by priority (higher priority first)
         # - Parallel shutdown within priority groups for performance
         if self._handlers:
-            all_succeeded, all_failed = (
-                await self._lifecycle_executor.shutdown_handlers_by_priority(
-                    self._handlers
-                )
+            (
+                all_succeeded,
+                all_failed,
+            ) = await self._lifecycle_executor.shutdown_handlers_by_priority(
+                self._handlers
             )
 
             # Log summary (ProtocolLifecycleExecutor already logs detailed info)

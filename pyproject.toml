@@ -80,11 +80,9 @@ pytest-cov = "^6.0.0"
 pytest-xdist = "^3.5.0"  # Parallel test execution
 pytest-timeout = "^2.3.0"  # Test timeout support
 mypy = "^1.13.0"
-black = "^24.10.0"
-isort = "^5.13.0"
-ruff = "^0.8.0"
+ruff = "^0.14.7"  # Ruff handles both formatting and linting (replaces black + isort)
 types-pyyaml = "^6.0.12.20250822"
-pre-commit = "^3.6.0"
+pre-commit = "^4.3.0"
 
 # Test infrastructure dependencies
 locust = "^2.31.8"  # Load testing framework for postgres adapter tests
@@ -104,6 +102,13 @@ exclude = [
     "**/__pycache__/**",
     "**/site-packages/**",
 ]
+
+[tool.ruff.format]
+# Use black-compatible formatting (ruff format is a drop-in replacement for black)
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
 
 [tool.ruff.lint]
 # Matches omnibase_core settings for consistency across ONEX ecosystem
@@ -246,19 +251,6 @@ init_forbid_extra = true
 init_typed = false
 warn_required_dynamic_aliases = true
 warn_untyped_fields = true
-
-[tool.black]
-line-length = 88
-target-version = ['py312']
-
-[tool.isort]
-profile = "black"
-line_length = 88
-multi_line_output = 3
-known_first_party = ["omnibase_infra"]
-extend_skip = [
-    "archived", "archive",
-]
 
 [tool.coverage.run]
 source = ["src/omnibase_infra"]

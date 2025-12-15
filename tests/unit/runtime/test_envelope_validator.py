@@ -262,7 +262,7 @@ class TestPayloadValidation:
             "vault.encrypt",
             "vault.decrypt",
         }
-        assert PAYLOAD_REQUIRED_OPERATIONS == expected
+        assert expected == PAYLOAD_REQUIRED_OPERATIONS
 
 
 class TestCorrelationIdNormalization:
