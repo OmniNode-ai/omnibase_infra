@@ -48,14 +48,12 @@ Policy Types and Use Cases:
 
 Example Usage:
     ```python
+    from typing import Protocol, runtime_checkable
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
 
+    @runtime_checkable
     class ExponentialBackoffPolicy:
-        '''Policy for calculating exponential backoff delays.
-
-        This class implements the ProtocolPolicy protocol through structural
-        subtyping (duck typing) - no explicit inheritance required.
-        '''
+        '''Policy for calculating exponential backoff delays.'''
 
         @property
         def policy_id(self) -> str:
@@ -77,16 +75,9 @@ Example Usage:
                 "should_retry": attempt < 10,
             }
 
-        def decide(self, context: dict[str, object]) -> dict[str, object]:
-            '''Alias for evaluate() - delegates to evaluate().'''
-            return self.evaluate(context)
-
-    # Type checking works via Protocol structural subtyping
+    # Type checking works via Protocol
     policy: ProtocolPolicy = ExponentialBackoffPolicy()
     result = policy.evaluate({"attempt": 3, "base_delay_seconds": 1.0})
-
-    # Runtime isinstance() checks work because ProtocolPolicy is @runtime_checkable
-    assert isinstance(policy, ProtocolPolicy)  # True
     ```
 
 Integration with PolicyRegistry:

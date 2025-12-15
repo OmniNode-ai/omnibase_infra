@@ -119,6 +119,8 @@ ignore = [
     "BLE001",    # Blind exception catching (technical debt)
     "E402",      # Module level import not at top (technical debt)
     "TC001",     # Type checking imports (technical debt)
+    "UP007",     # Use X | Y for Union (conflicts with ONEX union validator)
+    "UP045",     # Use X | None for Optional (conflicts with ONEX union validator)
     "TC003",     # Type checking imports (technical debt)
     "PLR0911",   # Too many returns (technical debt)
     "PLR0912",   # Too many branches (technical debt)
