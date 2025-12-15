@@ -271,9 +271,9 @@ class TestShutdownHealthIntegration:
 
         # Assert no ERROR logs
         error_logs = [r for r in caplog.records if r.levelno >= logging.ERROR]
-        assert (
-            len(error_logs) == 0
-        ), f"Unexpected errors during shutdown: {[r.message for r in error_logs]}"
+        assert len(error_logs) == 0, (
+            f"Unexpected errors during shutdown: {[r.message for r in error_logs]}"
+        )
 
         # Verify both are stopped
         assert runtime.is_running is False

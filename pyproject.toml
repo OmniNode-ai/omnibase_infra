@@ -133,7 +133,7 @@ ignore = [
     "TRY004",    # Exception type preference (technical debt)
     "TRY300",    # Consider else block (technical debt)
     "DTZ005",    # datetime.now() without tz (technical debt)
-    "UP038",     # Use X | Y in isinstance (technical debt)
+    # "UP038",     # Removed in ruff 0.14.x (rule no longer exists)
     "B008",      # Function call in defaults (technical debt)
     "ARG003",    # Unused class method argument (technical debt)
     "ERA001",    # Commented out code (technical debt)
@@ -203,6 +203,9 @@ ignore = [
     "E722",      # Bare except (technical debt)
     "PLR1722",   # Sys exit alias (technical debt)
     "ISC001",    # Implicit string concatenation (conflicts with formatter)
+    "PLC0415",   # Import not at top-level (intentional lazy imports in tests)
+    "UP045",     # Optional[X] vs X | None (style preference, keep Optional for clarity)
+    "TC006",     # Add quotes to type expression in cast (style preference)
 ]
 
 [tool.pytest.ini_options]
