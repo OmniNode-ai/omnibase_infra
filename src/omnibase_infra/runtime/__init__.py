@@ -25,7 +25,7 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_GRPC,
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_KAFKA,
-    HANDLER_TYPE_REDIS,
+    HANDLER_TYPE_VALKEY,
     HANDLER_TYPE_VAULT,
     EventBusBindingRegistry,
     ProtocolBindingRegistry,
@@ -71,7 +71,7 @@ __all__: list[str] = [
     "HANDLER_TYPE_KAFKA",
     "HANDLER_TYPE_VAULT",
     "HANDLER_TYPE_CONSUL",
-    "HANDLER_TYPE_REDIS",
+    "HANDLER_TYPE_VALKEY",
     "HANDLER_TYPE_GRPC",
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",

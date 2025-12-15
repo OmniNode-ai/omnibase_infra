@@ -7,22 +7,33 @@ This module provides the Pydantic model for enabled protocol configuration.
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # Literal type for valid protocol names
 # These correspond to handler_registry constants:
 # HANDLER_TYPE_HTTP, HANDLER_TYPE_DATABASE, HANDLER_TYPE_KAFKA, etc.
+# NOTE: Values must match the operation prefixes used in handler implementations
+# (e.g., "db" matches "db.query", "valkey" matches "valkey.get")
 ProtocolName = Literal[
     "http",
-    "database",
+    "db",
     "kafka",
     "vault",
     "consul",
-    "redis",
+    "valkey",
     "grpc",
 ]
+
+
+def _default_enabled_protocols() -> list[ProtocolName]:
+    """Create default list of enabled protocols.
+
+    Returns a properly typed list of default protocol names.
+    Using a factory function avoids cast() in default_factory for type safety.
+    """
+    return ["http", "db"]
 
 
 class ModelEnabledProtocolsConfig(BaseModel):
@@ -31,7 +42,7 @@ class ModelEnabledProtocolsConfig(BaseModel):
     Defines which protocol types are enabled for the runtime.
 
     Attributes:
-        enabled: List of enabled protocol type names (e.g., ['http', 'database'])
+        enabled: List of enabled protocol type names (e.g., ['http', 'db'])
     """
 
     model_config = ConfigDict(
@@ -41,7 +52,7 @@ class ModelEnabledProtocolsConfig(BaseModel):
     )
 
     enabled: list[ProtocolName] = Field(
-        default_factory=lambda: cast(list[ProtocolName], ["http", "database"]),
+        default_factory=_default_enabled_protocols,
         description="List of enabled protocol type names",
     )
 

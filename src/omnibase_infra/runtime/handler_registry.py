@@ -23,7 +23,7 @@ Design Principles:
 
 Handler Categories (by protocol type):
 - HTTP handlers: REST API integrations
-- Database handlers: PostgreSQL, Redis connections
+- Database handlers: PostgreSQL, Valkey connections
 - Message broker handlers: Kafka message processing
 - Service discovery handlers: Consul integration
 - Secret management handlers: Vault integration
@@ -71,6 +71,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
 
 if TYPE_CHECKING:
     from omnibase_core.protocol.protocol_event_bus import ProtocolEventBus
@@ -85,8 +86,11 @@ if TYPE_CHECKING:
 HANDLER_TYPE_HTTP: str = "http"
 """HTTP/REST API protocol handler type."""
 
-HANDLER_TYPE_DATABASE: str = "database"
-"""Database (PostgreSQL, etc.) protocol handler type."""
+HANDLER_TYPE_DATABASE: str = "db"
+"""Database (PostgreSQL, etc.) protocol handler type.
+
+Note: Value is "db" to match operation prefixes (db.query, db.execute).
+Operations are routed by extracting the prefix before the first dot."""
 
 HANDLER_TYPE_KAFKA: str = "kafka"
 """Kafka message broker protocol handler type."""
@@ -97,8 +101,11 @@ HANDLER_TYPE_VAULT: str = "vault"
 HANDLER_TYPE_CONSUL: str = "consul"
 """HashiCorp Consul service discovery protocol handler type."""
 
-HANDLER_TYPE_REDIS: str = "redis"
-"""Redis cache/message protocol handler type."""
+HANDLER_TYPE_VALKEY: str = "valkey"
+"""Valkey (Redis-compatible) cache/message protocol handler type.
+
+Note: Value is "valkey" to match operation prefixes (valkey.get, valkey.set).
+Valkey is a Redis-compatible fork; we use valkey-py (redis-py compatible)."""
 
 HANDLER_TYPE_GRPC: str = "grpc"
 """gRPC protocol handler type."""
@@ -176,7 +183,7 @@ class ProtocolBindingRegistry:
     protocol from omnibase_spi.
 
     The registry maintains a mapping from protocol type identifiers (strings like
-    "http", "database", "kafka") to handler classes that implement the ProtocolHandler
+    "http", "db", "kafka") to handler classes that implement the ProtocolHandler
     protocol.
 
     Thread Safety:
@@ -190,10 +197,10 @@ class ProtocolBindingRegistry:
     Example:
         >>> registry = ProtocolBindingRegistry()
         >>> registry.register("http", HttpHandler)
-        >>> registry.register("database", PostgresHandler)
+        >>> registry.register("db", PostgresHandler)
         >>> handler_cls = registry.get("http")
         >>> print(registry.list_protocols())
-        ['database', 'http']
+        ['db', 'http']
     """
 
     def __init__(self) -> None:
@@ -212,7 +219,7 @@ class ProtocolBindingRegistry:
         type is already registered, the existing registration is overwritten.
 
         Args:
-            protocol_type: Protocol type identifier (e.g., 'http', 'database', 'kafka').
+            protocol_type: Protocol type identifier (e.g., 'http', 'db', 'kafka').
                           Should be one of the HANDLER_TYPE_* constants.
             handler_cls: Handler class implementing the ProtocolHandler protocol.
 
@@ -270,9 +277,9 @@ class ProtocolBindingRegistry:
         Example:
             >>> registry = ProtocolBindingRegistry()
             >>> registry.register("http", HttpHandler)
-            >>> registry.register("database", PostgresHandler)
+            >>> registry.register("db", PostgresHandler)
             >>> print(registry.list_protocols())
-            ['database', 'http']
+            ['db', 'http']
         """
         with self._lock:
             return sorted(self._registry.keys())
@@ -621,42 +628,42 @@ def get_event_bus_class(bus_kind: str) -> type[ProtocolEventBus]:
 
 def register_handlers_from_config(
     runtime: object,  # Will be BaseRuntimeHostProcess
-    handler_configs: list[dict[str, object]],
+    protocol_configs: list[ModelProtocolRegistrationConfig],
 ) -> None:
-    """Register handlers from configuration.
+    """Register protocol handlers from configuration.
 
     Called by BaseRuntimeHostProcess to wire up handlers based on contract config.
-    This function validates and processes handler configuration dictionaries,
+    This function validates and processes protocol registration configurations,
     registering the appropriate handlers with the runtime.
 
     Args:
         runtime: The runtime host process instance (BaseRuntimeHostProcess).
             Typed as object temporarily until BaseRuntimeHostProcess is implemented.
-        handler_configs: List of handler configuration dicts from contract.
-            Each dict should have 'type' (handler type string) and optionally
-            'class' (handler class name), 'enabled' (bool), and other config.
+        protocol_configs: List of ModelProtocolRegistrationConfig instances from contract.
+            Each config specifies type, protocol_class, enabled flag, and options.
 
     Example:
-        >>> handler_configs = [
-        ...     {"type": "http", "class": "HttpHandler", "enabled": True},
-        ...     {"type": "database", "class": "PostgresHandler", "enabled": True},
+        >>> from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
+        >>> protocol_configs = [
+        ...     ModelProtocolRegistrationConfig(
+        ...         type="http", protocol_class="HttpHandler", enabled=True
+        ...     ),
+        ...     ModelProtocolRegistrationConfig(
+        ...         type="db", protocol_class="PostgresHandler", enabled=True
+        ...     ),
         ... ]
-        >>> register_handlers_from_config(runtime, handler_configs)
+        >>> register_handlers_from_config(runtime, protocol_configs)
 
     Note:
-        This is a placeholder implementation. Full handler class resolution
+        This is a placeholder implementation. Full protocol class resolution
         will be implemented when BaseRuntimeHostProcess is available.
     """
     registry = get_handler_registry()
-    for config in handler_configs:
-        handler_type = config.get("type")
-        handler_cls_name = config.get("class")
-        enabled = config.get("enabled", True)
-
-        if not enabled:
+    for config in protocol_configs:
+        if not config.enabled:
             continue
 
-        if handler_type and handler_cls_name:
+        if config.type and config.protocol_class:
             # TODO: Resolve handler class from name using importlib
             # For now, just validate config structure is correct
             # The actual handler instantiation will be done by RuntimeHostProcess
@@ -674,7 +681,7 @@ __all__: list[str] = [
     "HANDLER_TYPE_KAFKA",
     "HANDLER_TYPE_VAULT",
     "HANDLER_TYPE_CONSUL",
-    "HANDLER_TYPE_REDIS",
+    "HANDLER_TYPE_VALKEY",
     "HANDLER_TYPE_GRPC",
     # Event bus kind constants
     "EVENT_BUS_INMEMORY",

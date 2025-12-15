@@ -174,6 +174,9 @@ class TestEventBusValidation:
 
     def test_invalid_event_bus_type(self) -> None:
         """Test that invalid event bus type fails validation."""
+        # NOTE: "redis" is intentionally used as an example of an invalid event bus type.
+        # This is unrelated to the REDIS->VALKEY cache backend rename; event_bus only
+        # supports "inmemory" and "kafka" types.
         config: dict[str, object] = {"event_bus": {"type": "redis"}}
         errors = validate_runtime_config(config)
         assert len(errors) == 1

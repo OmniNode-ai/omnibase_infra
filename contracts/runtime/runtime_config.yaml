@@ -66,7 +66,7 @@ handlers:
   # This section can be extended for handler-specific config
   enabled:
     - http
-    - database
+    - db
 
 # Logging configuration [RESERVED - not currently used]
 # Note: kernel.py currently uses ONEX_LOG_LEVEL env var directly

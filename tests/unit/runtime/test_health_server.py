@@ -283,7 +283,7 @@ class TestHealthServerIntegration:
                 "degraded": False,
                 "is_running": True,
                 "event_bus_healthy": True,
-                "registered_handlers": ["http", "database"],
+                "registered_handlers": ["http", "db"],
             }
         )
 

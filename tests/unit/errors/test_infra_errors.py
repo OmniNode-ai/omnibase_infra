@@ -329,13 +329,13 @@ class TestInfraConnectionError:
         error = InfraConnectionError("Vault connection failed", context=context)
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
-    def test_error_code_mapping_redis_transport(self) -> None:
-        """Test REDIS transport uses SERVICE_UNAVAILABLE."""
+    def test_error_code_mapping_valkey_transport(self) -> None:
+        """Test VALKEY transport uses SERVICE_UNAVAILABLE."""
         context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.REDIS,
-            target_name="redis-cluster",
+            transport_type=EnumInfraTransportType.VALKEY,
+            target_name="valkey-cluster",
         )
-        error = InfraConnectionError("Redis connection failed", context=context)
+        error = InfraConnectionError("Valkey connection failed", context=context)
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
     def test_error_code_mapping_context_without_transport(self) -> None:
@@ -349,7 +349,7 @@ class TestInfraConnectionError:
 
     def test_error_chaining(self) -> None:
         """Test error chaining from connection exception."""
-        context = ModelInfraErrorContext(target_name="redis")
+        context = ModelInfraErrorContext(target_name="valkey")
         conn_error = OSError("Connection refused")
         try:
             raise InfraConnectionError(
@@ -357,7 +357,7 @@ class TestInfraConnectionError:
             ) from conn_error
         except InfraConnectionError as e:
             assert e.__cause__ == conn_error
-            assert e.model.context["target_name"] == "redis"
+            assert e.model.context["target_name"] == "valkey"
             assert e.model.context["port"] == 6379
 
 
@@ -394,7 +394,7 @@ class TestInfraConnectionErrorTransportMapping:
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VAULT,
-            EnumInfraTransportType.REDIS,
+            EnumInfraTransportType.VALKEY,
         ]
         for transport in service_transports:
             context = ModelInfraErrorContext(transport_type=transport)
@@ -434,7 +434,7 @@ class TestInfraConnectionErrorTransportMapping:
             (EnumInfraTransportType.KAFKA, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
             (EnumInfraTransportType.CONSUL, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
             (EnumInfraTransportType.VAULT, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
-            (EnumInfraTransportType.REDIS, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
+            (EnumInfraTransportType.VALKEY, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
         ]
         for transport, expected_code in test_cases:
             context = ModelInfraErrorContext(transport_type=transport)
@@ -625,7 +625,7 @@ class TestStructuredFieldsComprehensive:
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.CONSUL,
-            EnumInfraTransportType.REDIS,
+            EnumInfraTransportType.VALKEY,
         ]
         errors = [
             ProtocolConfigurationError(
@@ -661,7 +661,7 @@ class TestStructuredFieldsComprehensive:
             InfraUnavailableError(
                 "test",
                 context=ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.REDIS
+                    transport_type=EnumInfraTransportType.VALKEY
                 ),
             ),
         ]
@@ -705,7 +705,7 @@ class TestStructuredFieldsComprehensive:
 
     def test_all_errors_support_target_name(self) -> None:
         """Test that all errors support target_name via context model."""
-        targets = ["api", "vault", "postgresql", "kafka", "consul", "redis"]
+        targets = ["api", "vault", "postgresql", "kafka", "consul", "valkey"]
         errors = [
             ProtocolConfigurationError(
                 "test", context=ModelInfraErrorContext(target_name="api")
@@ -723,7 +723,7 @@ class TestStructuredFieldsComprehensive:
                 "test", context=ModelInfraErrorContext(target_name="consul")
             ),
             InfraUnavailableError(
-                "test", context=ModelInfraErrorContext(target_name="redis")
+                "test", context=ModelInfraErrorContext(target_name="valkey")
             ),
         ]
 
@@ -1034,7 +1034,7 @@ class TestContextSerialization:
 
     def test_context_enum_field_serialization(self) -> None:
         """Test that enum fields serialize and deserialize correctly."""
-        context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.REDIS)
+        context = ModelInfraErrorContext(transport_type=EnumInfraTransportType.VALKEY)
 
         # Verify internal type is enum
         assert isinstance(context.transport_type, EnumInfraTransportType)
@@ -1042,12 +1042,12 @@ class TestContextSerialization:
         # Serialize with mode='json' converts to string value
         json_data = context.model_dump(mode="json")
         assert isinstance(json_data["transport_type"], str)
-        assert json_data["transport_type"] == "redis"
+        assert json_data["transport_type"] == "valkey"
 
         # Standard dump preserves enum type
         data = context.model_dump()
         assert isinstance(data["transport_type"], EnumInfraTransportType)
-        assert data["transport_type"] == EnumInfraTransportType.REDIS
+        assert data["transport_type"] == EnumInfraTransportType.VALKEY
 
     def test_context_none_fields_in_serialization(self) -> None:
         """Test that None fields are properly handled in serialization."""
@@ -1088,7 +1088,7 @@ class TestContextSerialization:
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.CONSUL,
-            EnumInfraTransportType.REDIS,
+            EnumInfraTransportType.VALKEY,
         ]
         for transport in transport_types:
             context = ModelInfraErrorContext(transport_type=transport)

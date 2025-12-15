@@ -94,7 +94,7 @@ Example Usage:
     contract_config = {
         "handlers": [
             {"type": "http", "enabled": True},
-            {"type": "database", "enabled": True},
+            {"type": "db", "enabled": True},
         ],
         "event_bus": {"kind": "inmemory"},
     }
@@ -167,7 +167,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
     Registered Handlers:
         - HTTP: HttpRestAdapter for HTTP/REST protocol operations
-        - DATABASE: DbAdapter for PostgreSQL database operations
+        - DB: DbAdapter for PostgreSQL database operations
 
     Registered Event Buses:
         - INMEMORY: InMemoryEventBus for local/testing deployments
@@ -180,7 +180,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
     Example:
         >>> summary = wire_default_handlers()
         >>> print(summary)
-        {'handlers': ['database', 'http'], 'event_buses': ['inmemory']}
+        {'handlers': ['db', 'http'], 'event_buses': ['inmemory']}
 
     Note:
         This function uses the singleton registries returned by
@@ -248,7 +248,7 @@ def wire_handlers_from_contract(
     Args:
         contract_config: Contract configuration dict containing:
             - handlers: Optional list of handler configs, each with:
-                - type: Handler type string (e.g., "http", "database")
+                - type: Handler type string (e.g., "http", "db")
                 - enabled: Optional bool, defaults to True
             - event_bus: Optional event bus config with:
                 - kind: Event bus kind string (e.g., "inmemory")
@@ -267,7 +267,7 @@ def wire_handlers_from_contract(
         >>> config = {
         ...     "handlers": [
         ...         {"type": "http", "enabled": True},
-        ...         {"type": "database", "enabled": False},  # Skipped
+        ...         {"type": "db", "enabled": False},  # Skipped
         ...     ],
         ...     "event_bus": {"kind": "inmemory"},
         ... }
@@ -406,7 +406,7 @@ def get_known_handler_types() -> list[str]:
 
     Example:
         >>> get_known_handler_types()
-        ['database', 'http']
+        ['db', 'http']
     """
     return sorted(_KNOWN_HANDLERS.keys())
 
