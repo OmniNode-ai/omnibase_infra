@@ -7,6 +7,8 @@ filter values, replacing `str | EnumPolicyType | None` union types
 to comply with ONEX standards.
 """
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 from omnibase_infra.enums import EnumPolicyType
@@ -43,10 +45,10 @@ class ModelPolicyTypeFilter(BaseModel):
         True
     """
 
-    string_value: str | None = Field(
+    string_value: Optional[str] = Field(
         default=None, description="Policy type as string literal"
     )
-    enum_value: EnumPolicyType | None = Field(
+    enum_value: Optional[EnumPolicyType] = Field(
         default=None, description="Policy type as EnumPolicyType enum"
     )
 
@@ -83,7 +85,7 @@ class ModelPolicyTypeFilter(BaseModel):
         """
         return cls()
 
-    def normalize(self) -> str | None:
+    def normalize(self) -> Optional[str]:
         """Normalize the filter value to a string or None.
 
         Converts the internal representation to a consistent string

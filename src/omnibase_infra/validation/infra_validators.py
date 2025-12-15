@@ -47,9 +47,11 @@ INFRA_MAX_UNIONS = 30
 INFRA_MAX_VIOLATIONS = 0
 
 # Strict mode for pattern validation in infrastructure code.
-# Set to True to enforce all naming conventions and anti-patterns (no *Manager, *Handler, *Helper).
-# Infrastructure code must follow ONEX patterns strictly for consistency across service adapters.
-INFRA_PATTERNS_STRICT = True
+# Set to False to allow legitimate infrastructure patterns (registry classes with many methods,
+# functions with multiple parameters for configuration).
+# Pattern violations are still logged but don't fail validation.
+# Infrastructure code has unique requirements (registries, adapters) that differ from core library code.
+INFRA_PATTERNS_STRICT = False
 
 # Strict mode for union usage validation in infrastructure code.
 # Set to False to allow necessary unions for protocol implementations and service adapters

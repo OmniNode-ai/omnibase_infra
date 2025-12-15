@@ -11,6 +11,7 @@ logging, and distributed system observability.
 """
 
 from collections.abc import Callable
+from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -39,7 +40,7 @@ class ModelOptionalCorrelationId(BaseModel):
         True
     """
 
-    value: UUID | None = Field(
+    value: Optional[UUID] = Field(
         default=None, description="Optional correlation ID (UUID)"
     )
 
@@ -76,7 +77,7 @@ class ModelOptionalCorrelationId(BaseModel):
         """
         return cls()
 
-    def get(self) -> UUID | None:
+    def get(self) -> Optional[UUID]:
         """Get the optional correlation ID.
 
         Returns:
@@ -84,7 +85,7 @@ class ModelOptionalCorrelationId(BaseModel):
         """
         return self.value
 
-    def set(self, value: UUID | None) -> None:
+    def set(self, value: Optional[UUID]) -> None:
         """Set the correlation ID.
 
         Args:

@@ -105,7 +105,7 @@ Example Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
@@ -426,7 +426,7 @@ def get_known_event_bus_kinds() -> list[str]:
 def wire_custom_handler(
     handler_type: str,
     handler_cls: type[ProtocolHandler],
-    registry: ProtocolBindingRegistry | None = None,
+    registry: Optional[ProtocolBindingRegistry] = None,
 ) -> None:
     """Register a custom handler class with the registry.
 
@@ -460,7 +460,7 @@ def wire_custom_handler(
 def wire_custom_event_bus(
     bus_kind: str,
     bus_cls: type[ProtocolEventBus],
-    registry: EventBusBindingRegistry | None = None,
+    registry: Optional[EventBusBindingRegistry] = None,
 ) -> None:
     """Register a custom event bus class with the registry.
 

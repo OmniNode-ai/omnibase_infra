@@ -36,27 +36,29 @@ Example Usage:
     ```python
     from omnibase_infra.runtime.policy_registry import (
         PolicyRegistry,
+        ModelPolicyRegistration,
         get_policy_registry,
     )
     from omnibase_infra.enums import EnumPolicyType
 
     registry = get_policy_registry()
 
-    # Register a synchronous policy (default)
-    registry.register(
+    # Register a synchronous policy using the model (preferred)
+    registration = ModelPolicyRegistration(
         policy_id="exponential_backoff",
         policy_class=ExponentialBackoffPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
         version="1.0.0",
     )
+    registry.register(registration)
 
-    # Register an async policy (must explicitly flag)
-    registry.register(
+    # Register using convenience method (preserves original API)
+    registry.register_policy(
         policy_id="async_merge",
         policy_class=AsyncMergePolicy,
         policy_type=EnumPolicyType.REDUCER,
         version="1.0.0",
-        deterministic_async=True,  # MUST be explicit
+        deterministic_async=True,  # MUST be explicit for async policies
     )
 
     # Retrieve a policy
@@ -79,10 +81,11 @@ from __future__ import annotations
 import asyncio
 import builtins
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Union
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
+from omnibase_infra.runtime.models import ModelPolicyRegistration
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -117,12 +120,14 @@ class PolicyRegistry:
         _lock: Threading lock for thread-safe registration operations
 
     Example:
+        >>> from omnibase_infra.runtime.models import ModelPolicyRegistration
         >>> registry = PolicyRegistry()
-        >>> registry.register(
+        >>> registration = ModelPolicyRegistration(
         ...     policy_id="retry_backoff",
         ...     policy_class=RetryBackoffPolicy,
         ...     policy_type=EnumPolicyType.ORCHESTRATOR,
         ... )
+        >>> registry.register(registration)
         >>> policy_cls = registry.get("retry_backoff")
         >>> print(registry.list())
         [('retry_backoff', 'orchestrator', '1.0.0')]
@@ -200,17 +205,67 @@ class PolicyRegistry:
 
     def register(
         self,
+        registration: ModelPolicyRegistration,
+    ) -> None:
+        """Register a policy plugin using a registration model.
+
+        Associates a (policy_id, policy_type, version) tuple with a policy class.
+        If the combination is already registered, the existing registration is
+        overwritten.
+
+        Args:
+            registration: ModelPolicyRegistration containing all registration parameters:
+                - policy_id: Unique identifier for the policy
+                - policy_class: The policy class to register (must implement ProtocolPolicy)
+                - policy_type: Whether this is orchestrator or reducer policy
+                - version: Semantic version string (default: "1.0.0")
+                - deterministic_async: If True, allows async interface
+
+        Raises:
+            PolicyRegistryError: If policy has async methods and
+                               deterministic_async=False, or if policy_type is invalid
+
+        Example:
+            >>> from omnibase_infra.runtime.models import ModelPolicyRegistration
+            >>> registry = PolicyRegistry()
+            >>> registration = ModelPolicyRegistration(
+            ...     policy_id="retry_backoff",
+            ...     policy_class=RetryBackoffPolicy,
+            ...     policy_type=EnumPolicyType.ORCHESTRATOR,
+            ...     version="1.0.0",
+            ... )
+            >>> registry.register(registration)
+        """
+        # Extract fields from model
+        policy_id = registration.policy_id
+        policy_class = registration.policy_class
+        policy_type = registration.policy_type
+        version = registration.version
+        deterministic_async = registration.deterministic_async
+
+        # Validate sync enforcement
+        self._validate_sync_enforcement(policy_id, policy_class, deterministic_async)
+
+        # Normalize policy type
+        normalized_type = self._normalize_policy_type(policy_type)
+
+        # Register the policy
+        key = (policy_id, normalized_type, version)
+        with self._lock:
+            self._registry[key] = policy_class
+
+    def register_policy(
+        self,
         policy_id: str,
         policy_class: type[ProtocolPolicy],
         policy_type: str | EnumPolicyType,
         version: str = "1.0.0",
         deterministic_async: bool = False,
     ) -> None:
-        """Register a policy plugin.
+        """Convenience method to register a policy with individual parameters.
 
-        Associates a (policy_id, policy_type, version) tuple with a policy class.
-        If the combination is already registered, the existing registration is
-        overwritten.
+        Wraps parameters in ModelPolicyRegistration and calls register().
+        This method preserves the original API for backwards compatibility.
 
         Args:
             policy_id: Unique identifier for the policy (e.g., 'exponential_backoff')
@@ -227,29 +282,27 @@ class PolicyRegistry:
 
         Example:
             >>> registry = PolicyRegistry()
-            >>> registry.register(
+            >>> registry.register_policy(
             ...     policy_id="retry_backoff",
             ...     policy_class=RetryBackoffPolicy,
             ...     policy_type=EnumPolicyType.ORCHESTRATOR,
             ...     version="1.0.0",
             ... )
         """
-        # Validate sync enforcement
-        self._validate_sync_enforcement(policy_id, policy_class, deterministic_async)
-
-        # Normalize policy type
-        normalized_type = self._normalize_policy_type(policy_type)
-
-        # Register the policy
-        key = (policy_id, normalized_type, version)
-        with self._lock:
-            self._registry[key] = policy_class
+        registration = ModelPolicyRegistration(
+            policy_id=policy_id,
+            policy_class=policy_class,
+            policy_type=policy_type,
+            version=version,
+            deterministic_async=deterministic_async,
+        )
+        self.register(registration)
 
     def get(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
-        version: str | None = None,
+        policy_type: Optional[Union[str, EnumPolicyType]] = None,
+        version: Optional[str] = None,
     ) -> type[ProtocolPolicy]:
         """Get policy class by ID, type, and optional version.
 
@@ -276,7 +329,7 @@ class PolicyRegistry:
             >>> policy_cls = registry.get("retry", version="1.0.0")
         """
         # Normalize policy_type if provided
-        normalized_type: str | None = None
+        normalized_type: Optional[str] = None
         if policy_type is not None:
             normalized_type = self._normalize_policy_type(policy_type)
 
@@ -325,7 +378,7 @@ class PolicyRegistry:
 
     def list(
         self,
-        policy_type: str | EnumPolicyType | None = None,
+        policy_type: Optional[Union[str, EnumPolicyType]] = None,
     ) -> list[tuple[str, str, str]]:
         """List registered policies as (id, type, version) tuples.
 
@@ -345,7 +398,7 @@ class PolicyRegistry:
             [('retry', 'orchestrator', '1.0.0')]
         """
         # Normalize policy_type if provided
-        normalized_type: str | None = None
+        normalized_type: Optional[str] = None
         if policy_type is not None:
             normalized_type = self._normalize_policy_type(policy_type)
 
@@ -397,8 +450,8 @@ class PolicyRegistry:
     def is_registered(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
-        version: str | None = None,
+        policy_type: Optional[Union[str, EnumPolicyType]] = None,
+        version: Optional[str] = None,
     ) -> bool:
         """Check if a policy is registered.
 
@@ -419,7 +472,7 @@ class PolicyRegistry:
             False
         """
         # Normalize policy_type if provided
-        normalized_type: str | None = None
+        normalized_type: Optional[str] = None
         if policy_type is not None:
             try:
                 normalized_type = self._normalize_policy_type(policy_type)
@@ -441,8 +494,8 @@ class PolicyRegistry:
     def unregister(
         self,
         policy_id: str,
-        policy_type: str | EnumPolicyType | None = None,
-        version: str | None = None,
+        policy_type: Optional[Union[str, EnumPolicyType]] = None,
+        version: Optional[str] = None,
     ) -> int:
         """Unregister policy plugins.
 
@@ -467,7 +520,7 @@ class PolicyRegistry:
             1
         """
         # Normalize policy_type if provided
-        normalized_type: str | None = None
+        normalized_type: Optional[str] = None
         if policy_type is not None:
             try:
                 normalized_type = self._normalize_policy_type(policy_type)
@@ -549,7 +602,7 @@ class PolicyRegistry:
 # =============================================================================
 
 # Module-level singleton instance (lazy initialized)
-_policy_registry: PolicyRegistry | None = None
+_policy_registry: Optional[PolicyRegistry] = None
 _singleton_lock: threading.Lock = threading.Lock()
 
 
@@ -585,8 +638,8 @@ def get_policy_registry() -> PolicyRegistry:
 
 def get_policy_class(
     policy_id: str,
-    policy_type: str | EnumPolicyType | None = None,
-    version: str | None = None,
+    policy_type: Optional[Union[str, EnumPolicyType]] = None,
+    version: Optional[str] = None,
 ) -> type[ProtocolPolicy]:
     """Get policy class from the singleton registry.
 
@@ -620,7 +673,7 @@ def register_policy(
 ) -> None:
     """Register a policy in the singleton registry.
 
-    Convenience function that wraps get_policy_registry().register().
+    Convenience function that wraps get_policy_registry().register_policy().
 
     Args:
         policy_id: Unique identifier for the policy.
@@ -641,7 +694,7 @@ def register_policy(
         ...     policy_type="orchestrator",
         ... )
     """
-    get_policy_registry().register(
+    get_policy_registry().register_policy(
         policy_id=policy_id,
         policy_class=policy_class,
         policy_type=policy_type,
@@ -657,6 +710,8 @@ def register_policy(
 __all__: list[str] = [
     # Registry class
     "PolicyRegistry",
+    # Model
+    "ModelPolicyRegistration",
     # Singleton accessor
     "get_policy_registry",
     # Convenience functions

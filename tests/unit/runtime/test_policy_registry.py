@@ -174,13 +174,13 @@ def policy_registry() -> PolicyRegistry:
 def populated_policy_registry() -> PolicyRegistry:
     """Provide a PolicyRegistry with pre-registered policies."""
     registry = PolicyRegistry()
-    registry.register(
+    registry.register_policy(
         policy_id="sync-orchestrator",
         policy_class=MockSyncPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
         version="1.0.0",
     )
-    registry.register(
+    registry.register_policy(
         policy_id="sync-reducer",
         policy_class=MockSyncReducerPolicy,
         policy_type=EnumPolicyType.REDUCER,
@@ -214,7 +214,7 @@ class TestPolicyRegistryBasics:
 
     def test_register_and_get_policy(self, policy_registry: PolicyRegistry) -> None:
         """Test basic registration and retrieval."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="test-policy",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -236,7 +236,7 @@ class TestPolicyRegistryBasics:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test registering an orchestrator policy with EnumPolicyType.ORCHESTRATOR."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="orchestrator-policy",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -252,7 +252,7 @@ class TestPolicyRegistryBasics:
 
     def test_register_reducer_policy(self, policy_registry: PolicyRegistry) -> None:
         """Test registering a reducer policy with EnumPolicyType.REDUCER."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="reducer-policy",
             policy_class=MockSyncReducerPolicy,
             policy_type=EnumPolicyType.REDUCER,
@@ -285,7 +285,7 @@ class TestPolicyRegistrySyncEnforcement:
     ) -> None:
         """Test that synchronous policy registers without issues."""
         # Should not raise - sync policy with default deterministic_async=False
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="sync-policy",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -300,7 +300,7 @@ class TestPolicyRegistrySyncEnforcement:
     ) -> None:
         """Test that async policy without deterministic_async=True raises error."""
         with pytest.raises(PolicyRegistryError) as exc_info:
-            policy_registry.register(
+            policy_registry.register_policy(
                 policy_id="async-policy",
                 policy_class=MockAsyncPolicy,
                 policy_type=EnumPolicyType.REDUCER,
@@ -317,7 +317,7 @@ class TestPolicyRegistrySyncEnforcement:
     ) -> None:
         """Test that async policy with deterministic_async=True registers OK."""
         # Should not raise with explicit flag
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="async-policy",
             policy_class=MockAsyncPolicy,
             policy_type=EnumPolicyType.REDUCER,
@@ -333,7 +333,7 @@ class TestPolicyRegistrySyncEnforcement:
     ) -> None:
         """Test that async evaluate() method is detected and enforced."""
         with pytest.raises(PolicyRegistryError) as exc_info:
-            policy_registry.register(
+            policy_registry.register_policy(
                 policy_id="async-evaluate",
                 policy_class=MockAsyncPolicy,
                 policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -349,7 +349,7 @@ class TestPolicyRegistrySyncEnforcement:
     ) -> None:
         """Test that async decide() method is detected and enforced."""
         with pytest.raises(PolicyRegistryError) as exc_info:
-            policy_registry.register(
+            policy_registry.register_policy(
                 policy_id="async-decide",
                 policy_class=MockAsyncDecidePolicy,
                 policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -365,7 +365,7 @@ class TestPolicyRegistrySyncEnforcement:
     ) -> None:
         """Test that async reduce() method is detected and enforced."""
         with pytest.raises(PolicyRegistryError) as exc_info:
-            policy_registry.register(
+            policy_registry.register_policy(
                 policy_id="async-reduce",
                 policy_class=MockAsyncReducePolicy,
                 policy_type=EnumPolicyType.REDUCER,
@@ -378,7 +378,7 @@ class TestPolicyRegistrySyncEnforcement:
 
     def test_sync_decide_method_succeeds(self, policy_registry: PolicyRegistry) -> None:
         """Test that sync decide() method policy registers successfully."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="sync-decide",
             policy_class=MockSyncDecidePolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -388,7 +388,7 @@ class TestPolicyRegistrySyncEnforcement:
 
     def test_sync_reduce_method_succeeds(self, policy_registry: PolicyRegistry) -> None:
         """Test that sync reduce() method policy registers successfully."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="sync-reduce",
             policy_class=MockSyncReducerPolicy,
             policy_type=EnumPolicyType.REDUCER,
@@ -452,13 +452,13 @@ class TestPolicyRegistryVersioning:
 
     def test_register_multiple_versions(self, policy_registry: PolicyRegistry) -> None:
         """Test registering same policy with different versions."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV1,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV2,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -468,13 +468,13 @@ class TestPolicyRegistryVersioning:
 
     def test_get_specific_version(self, policy_registry: PolicyRegistry) -> None:
         """Test retrieving a specific version."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV1,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV2,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -492,13 +492,13 @@ class TestPolicyRegistryVersioning:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that get() returns latest version when version=None."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV1,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV2,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -511,13 +511,13 @@ class TestPolicyRegistryVersioning:
 
     def test_list_versions(self, policy_registry: PolicyRegistry) -> None:
         """Test list_versions() method."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV1,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV2,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -572,7 +572,7 @@ class TestPolicyRegistryIsRegistered:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test is_registered with version filter."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockPolicyV1,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -594,7 +594,7 @@ class TestPolicyRegistryUnregister:
 
     def test_unregister_removes_policy(self, policy_registry: PolicyRegistry) -> None:
         """Test basic unregister removes policy."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="to-remove",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -609,7 +609,7 @@ class TestPolicyRegistryUnregister:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test unregister returns count of removed policies."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="to-remove",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -629,13 +629,13 @@ class TestPolicyRegistryUnregister:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test unregister removes all versions by default."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned",
             policy_class=MockPolicyV1,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned",
             policy_class=MockPolicyV2,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -647,13 +647,13 @@ class TestPolicyRegistryUnregister:
 
     def test_unregister_specific_version(self, policy_registry: PolicyRegistry) -> None:
         """Test unregister with specific version."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned",
             policy_class=MockPolicyV1,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned",
             policy_class=MockPolicyV2,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -696,7 +696,7 @@ class TestPolicyRegistryLen:
         """Test __len__ returns correct count."""
         assert len(policy_registry) == 0
 
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="policy1",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -704,7 +704,7 @@ class TestPolicyRegistryLen:
         )
         assert len(policy_registry) == 1
 
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="policy2",
             policy_class=MockSyncReducerPolicy,
             policy_type=EnumPolicyType.REDUCER,
@@ -753,7 +753,7 @@ class TestPolicyRegistryThreadSafety:
             policy_id: str, policy_class: type, policy_type: EnumPolicyType
         ) -> None:
             try:
-                policy_registry.register(
+                policy_registry.register_policy(
                     policy_id=policy_id,
                     policy_class=policy_class,
                     policy_type=policy_type,
@@ -818,7 +818,7 @@ class TestPolicyRegistrySingleton:
     def test_get_policy_class_uses_singleton(self) -> None:
         """Test that get_policy_class convenience function uses singleton."""
         # Register via singleton
-        get_policy_registry().register(
+        get_policy_registry().register_policy(
             policy_id="singleton-test",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -909,7 +909,7 @@ class TestPolicyRegistryPolicyTypeNormalization:
 
     def test_register_with_enum_type(self, policy_registry: PolicyRegistry) -> None:
         """Test registering with EnumPolicyType enum value."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="enum-type",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -919,7 +919,7 @@ class TestPolicyRegistryPolicyTypeNormalization:
 
     def test_register_with_string_type(self, policy_registry: PolicyRegistry) -> None:
         """Test registering with string policy type."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="string-type",
             policy_class=MockSyncPolicy,
             policy_type="orchestrator",
@@ -932,7 +932,7 @@ class TestPolicyRegistryPolicyTypeNormalization:
     ) -> None:
         """Test that invalid policy type string raises PolicyRegistryError."""
         with pytest.raises(PolicyRegistryError) as exc_info:
-            policy_registry.register(
+            policy_registry.register_policy(
                 policy_id="invalid-type",
                 policy_class=MockSyncPolicy,
                 policy_type="invalid_type",
@@ -944,7 +944,7 @@ class TestPolicyRegistryPolicyTypeNormalization:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that get() works with both enum and string type."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="type-test",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -981,13 +981,13 @@ class TestPolicyRegistryListPolicyTypes:
 
     def test_list_policy_types_unique(self, policy_registry: PolicyRegistry) -> None:
         """Test list_policy_types returns unique types only."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="policy1",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="policy2",
             policy_class=MockSyncDecidePolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -1009,13 +1009,13 @@ class TestPolicyRegistryOverwrite:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that registering same (id, type, version) overwrites."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="overwrite-test",
             policy_class=MockPolicyV1,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="overwrite-test",
             policy_class=MockPolicyV2,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -1045,7 +1045,7 @@ class TestPolicyRegistryEdgeCases:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test error message includes policy_type when specified in get()."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="typed-policy",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -1060,7 +1060,7 @@ class TestPolicyRegistryEdgeCases:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test error message includes version when specified in get()."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="versioned-policy",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -1075,7 +1075,7 @@ class TestPolicyRegistryEdgeCases:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test is_registered returns False for invalid policy type."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="test-policy",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -1091,7 +1091,7 @@ class TestPolicyRegistryEdgeCases:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test unregister returns 0 for invalid policy type."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="test-policy",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -1108,13 +1108,13 @@ class TestPolicyRegistryEdgeCases:
     ) -> None:
         """Test unregister with policy_type filter only removes matching."""
         # Register same policy_id with different types
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="multi-type",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="multi-type",
             policy_class=MockSyncReducerPolicy,
             policy_type=EnumPolicyType.REDUCER,
@@ -1147,7 +1147,7 @@ class TestPolicyRegistryIntegration:
     def test_full_registration_workflow(self, policy_registry: PolicyRegistry) -> None:
         """Test complete workflow: register, get, list, unregister."""
         # Register
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="workflow-test",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
@@ -1172,13 +1172,13 @@ class TestPolicyRegistryIntegration:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test registering policies of different types."""
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="orchestrator",
             policy_class=MockSyncPolicy,
             policy_type=EnumPolicyType.ORCHESTRATOR,
             version="1.0.0",
         )
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="reducer",
             policy_class=MockSyncReducerPolicy,
             policy_type=EnumPolicyType.REDUCER,
@@ -1200,7 +1200,7 @@ class TestPolicyRegistryIntegration:
     ) -> None:
         """Test async policy workflow with deterministic_async=True."""
         # This should succeed with the flag
-        policy_registry.register(
+        policy_registry.register_policy(
             policy_id="async-workflow",
             policy_class=MockAsyncPolicy,
             policy_type=EnumPolicyType.REDUCER,

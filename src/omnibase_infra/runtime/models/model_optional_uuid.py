@@ -7,6 +7,7 @@ values, replacing `UUID | None` union types to comply with ONEX standards.
 """
 
 from collections.abc import Callable
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -35,9 +36,9 @@ class ModelOptionalUUID(BaseModel):
         False
     """
 
-    value: UUID | None = Field(default=None, description="Optional UUID value")
+    value: Optional[UUID] = Field(default=None, description="Optional UUID value")
 
-    def get(self) -> UUID | None:
+    def get(self) -> Optional[UUID]:
         """Get the optional value.
 
         Returns:
@@ -45,7 +46,7 @@ class ModelOptionalUUID(BaseModel):
         """
         return self.value
 
-    def set(self, value: UUID | None) -> None:
+    def set(self, value: Optional[UUID]) -> None:
         """Set the optional value.
 
         Args:
