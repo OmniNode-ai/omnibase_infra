@@ -173,7 +173,9 @@ class ModelKafkaEventBusConfig(BaseModel):
         if v is None:
             raise ValueError("bootstrap_servers cannot be None")
         if not isinstance(v, str):
-            raise ValueError(f"bootstrap_servers must be a string, got {type(v).__name__}")
+            raise ValueError(
+                f"bootstrap_servers must be a string, got {type(v).__name__}"
+            )
         if not v.strip():
             raise ValueError("bootstrap_servers cannot be empty")
         return v.strip()

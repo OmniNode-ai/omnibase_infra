@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Literal
 
 from omnibase_core.models.common.model_validation_result import ModelValidationResult
-from omnibase_core.models.model_import_validation_result import (
-    ModelValidationResult as CircularImportValidationResult,
-)
 from omnibase_core.models.validation.model_contract_validation_result import (
     ModelContractValidationResult,
+)
+from omnibase_core.models.validation.model_import_validation_result import (
+    ModelValidationResult as CircularImportValidationResult,
 )
 from omnibase_core.validation import (
     validate_architecture,
