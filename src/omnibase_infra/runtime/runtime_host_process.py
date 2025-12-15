@@ -114,6 +114,9 @@ class RuntimeHostProcess:
                     - input_topic: Override input topic
                     - output_topic: Override output topic
                     - group_id: Override consumer group identifier
+                    - health_check_timeout_seconds: Timeout for individual handler
+                      health checks (default: 5.0 seconds, range: 1-60 per
+                      ModelLifecycleSubcontract)
         """
         # Create or use provided event bus
         self._event_bus: InMemoryEventBus = event_bus or InMemoryEventBus()
@@ -125,6 +128,16 @@ class RuntimeHostProcess:
         self._input_topic: str = str(config.get("input_topic", input_topic))
         self._output_topic: str = str(config.get("output_topic", output_topic))
         self._group_id: str = str(config.get("group_id", DEFAULT_GROUP_ID))
+
+        # Health check configuration (from lifecycle subcontract pattern)
+        # Default: 5.0 seconds, valid range: 1-60 seconds per ModelLifecycleSubcontract
+        _timeout_raw = config.get("health_check_timeout_seconds")
+        if isinstance(_timeout_raw, (int, float)):
+            self._health_check_timeout_seconds: float = float(_timeout_raw)
+        elif isinstance(_timeout_raw, str):
+            self._health_check_timeout_seconds = float(_timeout_raw)
+        else:
+            self._health_check_timeout_seconds = 5.0
 
         # Store full config for handler initialization
         self._config: dict[str, object] = config
@@ -149,6 +162,7 @@ class RuntimeHostProcess:
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
                 "group_id": self._group_id,
+                "health_check_timeout_seconds": self._health_check_timeout_seconds,
             },
         )
 
@@ -681,7 +695,7 @@ class RuntimeHostProcess:
         self,
         handler_type: str,
         handler: ProtocolHandler,
-        timeout_seconds: float = 5.0,
+        timeout_seconds: float = -1.0,
     ) -> tuple[str, dict[str, object]]:
         """Check health of a single handler with timeout.
 
@@ -691,17 +705,27 @@ class RuntimeHostProcess:
         Args:
             handler_type: The handler type identifier.
             handler: The handler instance to check.
-            timeout_seconds: Maximum time to wait for health check (default: 5.0).
+            timeout_seconds: Override timeout for this specific check. If negative
+                (default: -1.0), uses the configured health_check_timeout_seconds
+                from config dict (default: 5.0 seconds).
 
         Returns:
             Tuple of (handler_type, health_result_dict) where health_result_dict
             contains at minimum a "healthy" boolean key.
         """
+        # Use provided timeout or fall back to configured instance timeout
+        # Negative value signals "use default from config"
+        effective_timeout = (
+            timeout_seconds
+            if timeout_seconds > 0
+            else self._health_check_timeout_seconds
+        )
+
         try:
             if hasattr(handler, "health_check"):
                 handler_health = await asyncio.wait_for(
                     handler.health_check(),
-                    timeout=timeout_seconds,
+                    timeout=effective_timeout,
                 )
                 return handler_type, handler_health
             else:
@@ -715,12 +739,12 @@ class RuntimeHostProcess:
                 "Handler health check timed out",
                 extra={
                     "handler_type": handler_type,
-                    "timeout_seconds": timeout_seconds,
+                    "timeout_seconds": effective_timeout,
                 },
             )
             return handler_type, {
                 "healthy": False,
-                "error": f"health check timeout after {timeout_seconds}s",
+                "error": f"health check timeout after {effective_timeout}s",
             }
         except Exception as e:
             logger.warning(
@@ -759,7 +783,8 @@ class RuntimeHostProcess:
 
         Note:
             Handler health checks are performed concurrently using asyncio.gather()
-            with individual 5-second timeouts to prevent slow handlers from blocking.
+            with individual timeouts (configurable via health_check_timeout_seconds
+            config, default: 5.0 seconds) to prevent slow handlers from blocking.
         """
         # Get event bus health if available
         event_bus_health: dict[str, object] = {}
