@@ -1042,7 +1042,7 @@ class TestContextSerialization:
         # Serialize with mode='json' converts to string value
         json_data = context.model_dump(mode="json")
         assert isinstance(json_data["transport_type"], str)
-        assert json_data["transport_type"] == "redis"
+        assert json_data["transport_type"] == "valkey"
 
         # Standard dump preserves enum type
         data = context.model_dump()
