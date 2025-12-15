@@ -44,6 +44,13 @@ from omnibase_infra.runtime.health_server import (
 from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
+from omnibase_infra.runtime.policy_registry import (
+    PolicyRegistry,
+    get_policy_class,
+    get_policy_registry,
+    register_policy,
+)
+from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.wiring import (
     get_known_event_bus_kinds,
@@ -95,4 +102,10 @@ __all__: list[str] = [
     "get_known_event_bus_kinds",
     "wire_custom_handler",
     "wire_custom_event_bus",
+    # Policy protocol and registry
+    "ProtocolPolicy",
+    "PolicyRegistry",
+    "get_policy_registry",
+    "get_policy_class",
+    "register_policy",
 ]

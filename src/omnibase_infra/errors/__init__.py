@@ -15,6 +15,7 @@ Exports:
     InfraTimeoutError: Infrastructure timeout errors
     InfraAuthenticationError: Infrastructure authentication errors
     InfraUnavailableError: Infrastructure resource unavailable errors
+    PolicyRegistryError: Policy registry operation errors
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -80,6 +81,7 @@ Error Sanitization Guidelines:
         )
 """
 
+from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.infra_errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -104,4 +106,5 @@ __all__: list[str] = [
     "InfraAuthenticationError",
     "InfraUnavailableError",
     "UnknownHandlerTypeError",
+    "PolicyRegistryError",
 ]
