@@ -864,9 +864,9 @@ class TestHttpPortValidation:
         # Verify HealthServer was created with default port
         mock_health_server.assert_called_once()
         call_kwargs = mock_health_server.call_args[1]
-        assert call_kwargs["port"] == DEFAULT_HTTP_PORT, (
-            f"Expected default port for {description}"
-        )
+        assert (
+            call_kwargs["port"] == DEFAULT_HTTP_PORT
+        ), f"Expected default port for {description}"
 
         # Verify warning was logged about invalid port value
         warning_calls = [
@@ -874,6 +874,6 @@ class TestHttpPortValidation:
             for call in mock_logger.warning.call_args_list
             if "invalid" in str(call).lower() and "onex_http_port" in str(call).lower()
         ]
-        assert len(warning_calls) == 1, (
-            f"Expected exactly one warning logged for {description}"
-        )
+        assert (
+            len(warning_calls) == 1
+        ), f"Expected exactly one warning logged for {description}"

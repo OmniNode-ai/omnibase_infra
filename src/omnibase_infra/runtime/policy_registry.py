@@ -79,7 +79,6 @@ Integration Points:
 from __future__ import annotations
 
 import asyncio
-import builtins
 import threading
 from typing import TYPE_CHECKING, Optional, Union
 
@@ -362,11 +361,47 @@ class PolicyRegistry:
                     policy_type=str(policy_type) if policy_type else None,
                 )
 
-            # If version not specified, return latest (lexicographically highest)
+            # If version not specified, return latest (using semantic version comparison)
             if version is None and len(matches) > 1:
-                matches.sort(key=lambda x: x[0][2], reverse=True)
+                matches.sort(key=lambda x: self._parse_semver(x[0][2]), reverse=True)
 
             return matches[0][1]
+
+    @staticmethod
+    def _parse_semver(version: str) -> tuple[int, int, int, str]:
+        """Parse semantic version string into comparable tuple.
+
+        Handles versions like "1.0.0", "2.1.3", "1.0.0-alpha".
+        Pre-release versions sort before release versions.
+
+        Args:
+            version: Semantic version string (e.g., "1.2.3" or "1.0.0-beta")
+
+        Returns:
+            Tuple of (major, minor, patch, prerelease) for comparison.
+            Prerelease is empty string for release versions (sorts after prereleases).
+        """
+        # Split off any prerelease suffix (e.g., "1.0.0-alpha" -> "1.0.0", "alpha")
+        if "-" in version:
+            version_part, prerelease = version.split("-", 1)
+        else:
+            version_part, prerelease = version, ""
+
+        # Parse major.minor.patch
+        parts = version_part.split(".")
+        try:
+            major = int(parts[0]) if len(parts) > 0 else 0
+            minor = int(parts[1]) if len(parts) > 1 else 0
+            patch = int(parts[2]) if len(parts) > 2 else 0
+        except ValueError:
+            # Fall back to (0, 0, 0) for unparseable versions
+            major, minor, patch = 0, 0, 0
+
+        # Empty prerelease sorts after non-empty (release > prerelease)
+        # Use chr(127) for empty to sort after any prerelease string
+        sort_prerelease = prerelease if prerelease else chr(127)
+
+        return (major, minor, patch, sort_prerelease)
 
     def _list_internal(self) -> list[tuple[str, str, str]]:
         """Internal list method (assumes lock is held).
@@ -411,7 +446,7 @@ class PolicyRegistry:
                 results.append((policy_id, key_type, version))
             return results
 
-    def list_policy_types(self) -> builtins.list[str]:
+    def list_policy_types(self) -> list[str]:
         """List registered policy types.
 
         Returns:
@@ -427,7 +462,7 @@ class PolicyRegistry:
             types = {key[1] for key in self._registry}
             return sorted(types)
 
-    def list_versions(self, policy_id: str) -> builtins.list[str]:
+    def list_versions(self, policy_id: str) -> list[str]:
         """List registered versions for a policy ID.
 
         Args:

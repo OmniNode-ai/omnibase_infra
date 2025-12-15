@@ -505,9 +505,57 @@ class TestPolicyRegistryVersioning:
             version="2.0.0",
         )
 
-        # Get without version should return latest (lexicographically highest)
+        # Get without version should return latest (semantically highest)
         latest_cls = policy_registry.get("versioned-policy")
         assert latest_cls is MockPolicyV2
+
+    def test_get_latest_with_double_digit_versions(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test semver sorting handles double-digit versions correctly.
+
+        This tests the fix for lexicographic sorting which would incorrectly
+        sort "10.0.0" before "2.0.0" (because '1' < '2' as strings).
+        """
+        policy_registry.register_policy(
+            policy_id="semver-policy",
+            policy_class=MockPolicyV1,
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="2.0.0",
+        )
+        policy_registry.register_policy(
+            policy_id="semver-policy",
+            policy_class=MockPolicyV2,
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="10.0.0",
+        )
+
+        # Get without version should return 10.0.0 (semver highest), not 2.0.0
+        latest_cls = policy_registry.get("semver-policy")
+        assert (
+            latest_cls is MockPolicyV2
+        ), "10.0.0 should be considered later than 2.0.0"
+
+    def test_get_latest_with_prerelease_versions(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test semver sorting prefers release over prerelease versions."""
+        policy_registry.register_policy(
+            policy_id="prerelease-policy",
+            policy_class=MockPolicyV1,
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.0.0-alpha",
+        )
+        policy_registry.register_policy(
+            policy_id="prerelease-policy",
+            policy_class=MockPolicyV2,
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.0.0",
+        )
+
+        # Get without version should return release (1.0.0), not prerelease (1.0.0-alpha)
+        latest_cls = policy_registry.get("prerelease-policy")
+        assert latest_cls is MockPolicyV2, "Release should be preferred over prerelease"
 
     def test_list_versions(self, policy_registry: PolicyRegistry) -> None:
         """Test list_versions() method."""
