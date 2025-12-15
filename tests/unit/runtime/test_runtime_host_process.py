@@ -482,6 +482,132 @@ class TestRuntimeHostProcessLifecycle:
 
         assert process.is_running is False
 
+    @pytest.mark.asyncio
+    async def test_stop_calls_shutdown_on_all_handlers(self) -> None:
+        """Test that stop() calls shutdown() on all registered handlers.
+
+        When stopping, the process should call shutdown() on each handler
+        to allow them to release resources (DB connections, Kafka connections, etc.).
+        """
+        process = RuntimeHostProcess()
+
+        # Create multiple handlers
+        http_handler = MockHandler(handler_type="http")
+        db_handler = MockHandler(handler_type="db")
+
+        # Patch _populate_handlers_from_registry to prevent auto-population
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process, "_handlers", {"http": http_handler, "db": db_handler}
+            ):
+                await process.start()
+
+                # Verify handlers are not shutdown yet
+                assert http_handler.shutdown_called is False
+                assert db_handler.shutdown_called is False
+
+                await process.stop()
+
+                # Verify shutdown was called on all handlers
+                assert http_handler.shutdown_called is True
+                assert db_handler.shutdown_called is True
+
+    @pytest.mark.asyncio
+    async def test_stop_continues_on_handler_shutdown_error(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that stop() continues shutting down handlers even if one fails.
+
+        If a handler's shutdown() raises an exception, the process should
+        log the error but continue shutting down other handlers.
+        """
+        import logging
+
+        process = RuntimeHostProcess()
+
+        # Create handlers where one will fail during shutdown
+        http_handler = MockHandler(handler_type="http")
+        failing_handler = MockHandler(handler_type="failing")
+        db_handler = MockHandler(handler_type="db")
+
+        # Make failing_handler's shutdown raise an exception
+        async def failing_shutdown() -> None:
+            raise RuntimeError("Simulated shutdown failure")
+
+        failing_handler.shutdown = failing_shutdown
+
+        # Patch _populate_handlers_from_registry to prevent auto-population
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"http": http_handler, "failing": failing_handler, "db": db_handler},
+            ):
+                await process.start()
+
+                with caplog.at_level(logging.ERROR):
+                    await process.stop()
+
+                # Verify other handlers were still shutdown
+                assert http_handler.shutdown_called is True
+                assert db_handler.shutdown_called is True
+
+                # Verify error was logged
+                error_logs = [r for r in caplog.records if r.levelno == logging.ERROR]
+                assert len(error_logs) >= 1
+                assert any(
+                    "Error shutting down handler" in r.message for r in error_logs
+                )
+
+    @pytest.mark.asyncio
+    async def test_stop_handles_handlers_without_shutdown_method(self) -> None:
+        """Test that stop() gracefully handles handlers without shutdown().
+
+        Some handlers may not implement a shutdown() method. The process
+        should skip shutdown for those handlers without raising an error.
+        """
+        process = RuntimeHostProcess()
+
+        # Create a handler-like object without shutdown method
+        class HandlerWithoutShutdown:
+            def __init__(self) -> None:
+                self.handler_type = "no_shutdown"
+                self.calls: list[dict[str, object]] = []
+
+            async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+                self.calls.append(envelope)
+                return {"status": "success"}
+
+        no_shutdown_handler = HandlerWithoutShutdown()
+        regular_handler = MockHandler(handler_type="regular")
+
+        # Patch _populate_handlers_from_registry to prevent auto-population
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"no_shutdown": no_shutdown_handler, "regular": regular_handler},
+            ):
+                await process.start()
+                # Should not raise any exception
+                await process.stop()
+
+                # Regular handler should still be shutdown
+                assert regular_handler.shutdown_called is True
+
+        # Process should be stopped
+        assert process.is_running is False
+
 
 # =============================================================================
 # TestRuntimeHostProcessEnvelopeRouting
@@ -968,6 +1094,200 @@ class TestRuntimeHostProcessHealthCheck:
         assert health["healthy"] is False
         # Should not be running
         assert health["is_running"] is False
+
+    @pytest.mark.asyncio
+    async def test_health_check_includes_handler_health(
+        self,
+        mock_handler: MockHandler,
+    ) -> None:
+        """Test that health_check aggregates handler health status.
+
+        Health check should iterate all registered handlers and call
+        their health_check() method, aggregating results into the response.
+        """
+
+        process = RuntimeHostProcess()
+        mock_handler.initialized = True  # Mark as healthy
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", {"http": mock_handler}):
+                await process.start()
+
+                try:
+                    health = await process.health_check()
+
+                    # Should include handlers key
+                    assert "handlers" in health
+                    # Should include http handler health
+                    assert "http" in health["handlers"]
+                    # Handler should be healthy (initialized=True)
+                    assert health["handlers"]["http"]["healthy"] is True
+                    # Overall health should be True
+                    assert health["healthy"] is True
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_unhealthy_handler(
+        self,
+        mock_handler: MockHandler,
+    ) -> None:
+        """Test that unhealthy handler makes overall health False.
+
+        When a registered handler reports unhealthy status, the overall
+        health check should report healthy=False.
+        """
+
+        process = RuntimeHostProcess()
+        mock_handler.initialized = False  # Mark as unhealthy
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", {"http": mock_handler}):
+                await process.start()
+
+                try:
+                    health = await process.health_check()
+
+                    # Handler should be unhealthy
+                    assert health["handlers"]["http"]["healthy"] is False
+                    # Overall health should be False due to unhealthy handler
+                    assert health["healthy"] is False
+                    # Process should still be running
+                    assert health["is_running"] is True
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_handler_error_caught(self) -> None:
+        """Test that handler health_check errors are caught and reported.
+
+        When a handler's health_check() raises an exception, the error
+        should be caught, reported in the response, and not crash the
+        overall health check.
+        """
+
+        process = RuntimeHostProcess()
+
+        class ErrorHandler:
+            """Handler that raises an error during health check."""
+
+            async def health_check(self) -> dict[str, object]:
+                raise RuntimeError("Health check failed")
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", {"error": ErrorHandler()}):
+                await process.start()
+
+                try:
+                    # Should not crash
+                    health = await process.health_check()
+
+                    # Error handler should be reported as unhealthy
+                    assert "error" in health["handlers"]
+                    assert health["handlers"]["error"]["healthy"] is False
+                    # Error message should be captured
+                    assert "error" in health["handlers"]["error"]
+                    assert "Health check failed" in health["handlers"]["error"]["error"]
+                    # Overall health should be False
+                    assert health["healthy"] is False
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_handler_without_health_check_method(self) -> None:
+        """Test that handlers without health_check method are assumed healthy.
+
+        When a handler does not implement a health_check() method, it should
+        be assumed healthy with a note indicating no health_check method.
+        """
+
+        process = RuntimeHostProcess()
+
+        class SimpleHandler:
+            """Handler without health_check method."""
+
+            async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+                return {"status": "success"}
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", {"simple": SimpleHandler()}):
+                await process.start()
+
+                try:
+                    health = await process.health_check()
+
+                    # Simple handler should be reported as healthy
+                    assert "simple" in health["handlers"]
+                    assert health["handlers"]["simple"]["healthy"] is True
+                    # Should have note about no health_check method
+                    assert "note" in health["handlers"]["simple"]
+                    assert (
+                        "no health_check method" in health["handlers"]["simple"]["note"]
+                    )
+                    # Overall health should be True
+                    assert health["healthy"] is True
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_multiple_handlers_mixed_health(self) -> None:
+        """Test health check with multiple handlers of mixed health status.
+
+        When multiple handlers are registered with different health statuses,
+        the overall health should be False if any handler is unhealthy.
+        """
+
+        process = RuntimeHostProcess()
+
+        healthy_handler = MockHandler(handler_type="healthy")
+        healthy_handler.initialized = True
+
+        unhealthy_handler = MockHandler(handler_type="unhealthy")
+        unhealthy_handler.initialized = False
+
+        handlers = {
+            "healthy": healthy_handler,
+            "unhealthy": unhealthy_handler,
+        }
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", handlers):
+                await process.start()
+
+                try:
+                    health = await process.health_check()
+
+                    # Both handlers should be reported
+                    assert "healthy" in health["handlers"]
+                    assert "unhealthy" in health["handlers"]
+                    # Healthy handler should report healthy
+                    assert health["handlers"]["healthy"]["healthy"] is True
+                    # Unhealthy handler should report unhealthy
+                    assert health["handlers"]["unhealthy"]["healthy"] is False
+                    # Overall health should be False (due to unhealthy handler)
+                    assert health["healthy"] is False
+                finally:
+                    await process.stop()
 
 
 # =============================================================================

@@ -256,7 +256,8 @@ class RuntimeHostProcess:
 
         Performs the following steps:
         1. Unsubscribe from topics
-        2. Close event bus
+        2. Shutdown all registered handlers (release resources)
+        3. Close event bus
 
         This method is idempotent - calling stop() on an already stopped
         process is safe and has no effect.
@@ -284,7 +285,24 @@ class RuntimeHostProcess:
             await self._subscription()
             self._subscription = None
 
-        # Step 2: Close event bus
+        # Step 2: Shutdown all handlers (release resources like DB/Kafka connections)
+        for handler_type, handler in self._handlers.items():
+            try:
+                if hasattr(handler, "shutdown"):
+                    await handler.shutdown()
+                    logger.debug(
+                        "Handler shutdown completed",
+                        extra={"handler_type": handler_type},
+                    )
+            except Exception as e:
+                # Log error but continue shutting down other handlers
+                # This ensures all handlers get a chance to cleanup even if one fails
+                logger.exception(
+                    "Error shutting down handler",
+                    extra={"handler_type": handler_type, "error": str(e)},
+                )
+
+        # Step 3: Close event bus
         await self._event_bus.close()
 
         self._is_running = False
@@ -625,7 +643,8 @@ class RuntimeHostProcess:
         Returns:
             Dictionary with health status information:
                 - healthy: Overall health status (True only if running,
-                  event bus healthy, and no handlers failed to instantiate)
+                  event bus healthy, no handlers failed to instantiate,
+                  and all registered handlers are healthy)
                 - degraded: True when process is running but some handlers
                   failed to instantiate. Indicates partial functionality -
                   the system is operational but not at full capacity.
@@ -635,6 +654,8 @@ class RuntimeHostProcess:
                 - failed_handlers: Dict of handler_type -> error message for
                   handlers that failed to instantiate during start()
                 - registered_handlers: List of successfully registered handler types
+                - handlers: Dict of handler_type -> health status for each
+                  registered handler
 
         Health State Matrix:
             - healthy=True, degraded=False: Fully operational
@@ -676,6 +697,34 @@ class RuntimeHostProcess:
             event_bus_health = {"error": str(e), "correlation_id": str(correlation_id)}
             event_bus_healthy = False
 
+        # Check handler health for all registered handlers
+        handler_health_results: dict[str, dict[str, object]] = {}
+        handlers_all_healthy = True
+
+        for handler_type, handler in self._handlers.items():
+            try:
+                if hasattr(handler, "health_check"):
+                    handler_health = await handler.health_check()
+                    handler_health_results[handler_type] = handler_health
+                    if not handler_health.get("healthy", False):
+                        handlers_all_healthy = False
+                else:
+                    # Handler doesn't implement health_check - assume healthy
+                    handler_health_results[handler_type] = {
+                        "healthy": True,
+                        "note": "no health_check method",
+                    }
+            except Exception as e:
+                handler_health_results[handler_type] = {
+                    "healthy": False,
+                    "error": str(e),
+                }
+                handlers_all_healthy = False
+                logger.warning(
+                    "Handler health check failed",
+                    extra={"handler_type": handler_type, "error": str(e)},
+                )
+
         # Check for failed handlers - any failures indicate degraded state
         has_failed_handlers = len(self._failed_handlers) > 0
 
@@ -684,8 +733,13 @@ class RuntimeHostProcess:
         degraded = self._is_running and has_failed_handlers
 
         # Overall health is True only if running, event bus is healthy,
-        # and no handlers failed to instantiate
-        healthy = self._is_running and event_bus_healthy and not has_failed_handlers
+        # no handlers failed to instantiate, and all registered handlers are healthy
+        healthy = (
+            self._is_running
+            and event_bus_healthy
+            and not has_failed_handlers
+            and handlers_all_healthy
+        )
 
         return {
             "healthy": healthy,
@@ -695,6 +749,7 @@ class RuntimeHostProcess:
             "event_bus_healthy": event_bus_healthy,
             "failed_handlers": self._failed_handlers,
             "registered_handlers": list(self._handlers.keys()),
+            "handlers": handler_health_results,
         }
 
     def register_handler(self, handler_type: str, handler: ProtocolHandler) -> None:

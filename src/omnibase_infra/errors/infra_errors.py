@@ -408,6 +408,47 @@ class InfraUnavailableError(RuntimeHostError):
         )
 
 
+class UnknownHandlerTypeError(RuntimeHostError):
+    """Raised when an operation references an unknown handler type prefix.
+
+    Used when dispatching envelopes with operation prefixes that don't
+    map to any registered handler (e.g., "lolnope.query" when only
+    "db" and "http" are registered).
+
+    Example:
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.RUNTIME,
+        ...     operation="lolnope.query",
+        ... )
+        >>> raise UnknownHandlerTypeError(
+        ...     "No handler registered for prefix: lolnope",
+        ...     context=context,
+        ...     prefix="lolnope",
+        ...     registered_prefixes=["db", "http"],
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: Optional[ModelInfraErrorContext] = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize UnknownHandlerTypeError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            **extra_context: Additional context (prefix, registered_prefixes, etc.)
+        """
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.INVALID_INPUT,
+            context=context,
+            **extra_context,
+        )
+
+
 __all__ = [
     "RuntimeHostError",
     "ProtocolConfigurationError",
@@ -416,4 +457,5 @@ __all__ = [
     "InfraTimeoutError",
     "InfraAuthenticationError",
     "InfraUnavailableError",
+    "UnknownHandlerTypeError",
 ]

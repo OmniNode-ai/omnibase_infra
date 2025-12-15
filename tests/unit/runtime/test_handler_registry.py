@@ -12,6 +12,7 @@ All tests validate:
 - Thread safety
 - Error handling for missing registrations
 - Convenience functions
+- Operation prefix routing validation (OMN-807)
 """
 
 from __future__ import annotations
@@ -20,7 +21,11 @@ import threading
 
 import pytest
 
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import (
+    ModelInfraErrorContext,
+    RuntimeHostError,
+    UnknownHandlerTypeError,
+)
 from omnibase_infra.runtime import handler_registry as registry_module
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
@@ -973,3 +978,198 @@ class TestEventBusRegistryIntegration:
         event_bus_registry.register(EVENT_BUS_KAFKA, MockKafkaEventBus)
         assert event_bus_registry.get(EVENT_BUS_KAFKA) is MockKafkaEventBus
         assert len(event_bus_registry.list_bus_kinds()) == 2
+
+
+# =============================================================================
+# Operation Prefix Routing Tests (OMN-807)
+# =============================================================================
+
+
+class TestOperationPrefixRouting:
+    """Tests for operation prefix routing validation (OMN-807)."""
+
+    def test_registered_prefixes_route_correctly(
+        self, populated_handler_registry: ProtocolBindingRegistry
+    ) -> None:
+        """Test that registered prefixes resolve to correct handlers."""
+        # populated_handler_registry has http, db, kafka registered
+        assert populated_handler_registry.get(HANDLER_TYPE_HTTP) is MockHttpHandler
+        assert populated_handler_registry.get(HANDLER_TYPE_DATABASE) is MockDbHandler
+        assert populated_handler_registry.get(HANDLER_TYPE_KAFKA) is MockKafkaHandler
+
+    def test_unknown_prefix_raises_registry_error(
+        self, handler_registry: ProtocolBindingRegistry
+    ) -> None:
+        """Test that unknown prefix raises RegistryError.
+
+        CRITICAL: This is the negative test case required by OMN-807.
+        Operations like "lolnope.query" MUST fail with RegistryError.
+        """
+        # Register only http
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+
+        # Unknown prefixes must raise RegistryError
+        unknown_prefixes = ["lolnope", "unknown", "nonexistent", "fake"]
+
+        for prefix in unknown_prefixes:
+            with pytest.raises(RegistryError) as exc_info:
+                handler_registry.get(prefix)
+
+            error_msg = str(exc_info.value)
+            assert "No handler registered" in error_msg
+            assert prefix in error_msg
+
+    def test_operation_prefix_extraction_pattern(
+        self, populated_handler_registry: ProtocolBindingRegistry
+    ) -> None:
+        """Test the operation prefix extraction pattern used by runtime.
+
+        Operations like "http.get" -> prefix "http"
+        Operations like "db.query" -> prefix "db"
+        """
+        operations = [
+            ("http.get", HANDLER_TYPE_HTTP, MockHttpHandler),
+            ("http.post", HANDLER_TYPE_HTTP, MockHttpHandler),
+            ("db.query", HANDLER_TYPE_DATABASE, MockDbHandler),
+            ("db.execute", HANDLER_TYPE_DATABASE, MockDbHandler),
+            ("kafka.produce", HANDLER_TYPE_KAFKA, MockKafkaHandler),
+            ("kafka.consume", HANDLER_TYPE_KAFKA, MockKafkaHandler),
+        ]
+
+        for operation, expected_prefix, expected_handler in operations:
+            # Extract prefix (same pattern as RuntimeHostProcess._handle_envelope)
+            prefix = operation.split(".")[0]
+            assert prefix == expected_prefix
+
+            # Verify handler resolves
+            handler_cls = populated_handler_registry.get(prefix)
+            assert handler_cls is expected_handler
+
+    def test_canonical_prefixes_documented(self) -> None:
+        """Test that all canonical prefixes are documented as constants.
+
+        FROZEN prefixes per OMN-807:
+        - db: Database operations
+        - http: HTTP REST operations
+        - kafka: Kafka message operations
+        - consul: Consul service discovery
+        - vault: Vault secret management
+        - valkey: Valkey (Redis-compatible) cache
+        - grpc: gRPC protocol operations
+        """
+        canonical_prefixes = {
+            HANDLER_TYPE_DATABASE: "db",
+            HANDLER_TYPE_HTTP: "http",
+            HANDLER_TYPE_KAFKA: "kafka",
+            HANDLER_TYPE_CONSUL: "consul",
+            HANDLER_TYPE_VAULT: "vault",
+            HANDLER_TYPE_VALKEY: "valkey",
+            HANDLER_TYPE_GRPC: "grpc",
+        }
+
+        for constant, expected_value in canonical_prefixes.items():
+            assert (
+                constant == expected_value
+            ), f"{constant} should be '{expected_value}'"
+
+    def test_all_canonical_prefixes_are_unique(self) -> None:
+        """Test that canonical prefixes are unique (no duplicates)."""
+        prefixes = [
+            HANDLER_TYPE_DATABASE,
+            HANDLER_TYPE_HTTP,
+            HANDLER_TYPE_KAFKA,
+            HANDLER_TYPE_CONSUL,
+            HANDLER_TYPE_VAULT,
+            HANDLER_TYPE_VALKEY,
+            HANDLER_TYPE_GRPC,
+        ]
+        assert len(prefixes) == len(set(prefixes)), "Duplicate prefix detected"
+
+    def test_unknown_operation_prefix_fails_dispatch(
+        self, handler_registry: ProtocolBindingRegistry
+    ) -> None:
+        """Test that operations with unknown prefixes fail during dispatch.
+
+        Simulates the runtime dispatch pattern where operation like
+        'lolnope.query' would be split to extract 'lolnope' prefix.
+        """
+        # Setup: Register only valid prefixes
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
+
+        # Invalid operations that must fail
+        invalid_operations = [
+            "lolnope.query",
+            "fake.execute",
+            "unknown.request",
+            "invalid.operation",
+        ]
+
+        for operation in invalid_operations:
+            # Extract prefix (same pattern as runtime dispatch)
+            prefix = operation.split(".")[0]
+
+            # Must raise RegistryError for unknown prefix
+            with pytest.raises(RegistryError) as exc_info:
+                handler_registry.get(prefix)
+
+            error_msg = str(exc_info.value)
+            assert prefix in error_msg
+            assert "No handler registered" in error_msg
+
+
+# =============================================================================
+# UnknownHandlerTypeError Tests
+# =============================================================================
+
+
+class TestUnknownHandlerTypeError:
+    """Tests for UnknownHandlerTypeError exception class."""
+
+    def test_error_is_importable(self) -> None:
+        """Test UnknownHandlerTypeError can be imported."""
+        assert UnknownHandlerTypeError is not None
+
+    def test_error_inherits_from_runtime_host_error(self) -> None:
+        """Test UnknownHandlerTypeError inherits from RuntimeHostError."""
+        assert issubclass(UnknownHandlerTypeError, RuntimeHostError)
+
+    def test_error_with_context(self) -> None:
+        """Test UnknownHandlerTypeError with context."""
+        context = ModelInfraErrorContext(
+            operation="lolnope.query",
+        )
+        error = UnknownHandlerTypeError(
+            "No handler registered for prefix: lolnope",
+            context=context,
+            prefix="lolnope",
+            registered_prefixes=["db", "http"],
+        )
+        assert "lolnope" in str(error)
+
+    def test_error_without_context(self) -> None:
+        """Test UnknownHandlerTypeError without context."""
+        error = UnknownHandlerTypeError(
+            "No handler registered for prefix: unknown",
+            prefix="unknown",
+        )
+        assert "unknown" in str(error)
+
+    def test_error_extra_context_preserved(self) -> None:
+        """Test that extra context kwargs are preserved in error."""
+        error = UnknownHandlerTypeError(
+            "Handler not found",
+            prefix="fake",
+            registered_prefixes=["db", "http", "kafka"],
+            operation="fake.query",
+        )
+        # Error should preserve the context in model
+        assert error.model.context.get("prefix") == "fake"
+        assert error.model.context.get("registered_prefixes") == ["db", "http", "kafka"]
+        assert error.model.context.get("operation") == "fake.query"
+
+    def test_error_is_exception(self) -> None:
+        """Test UnknownHandlerTypeError is an Exception."""
+        error = UnknownHandlerTypeError("Test error")
+        assert isinstance(error, Exception)
+        assert isinstance(error, RuntimeHostError)
