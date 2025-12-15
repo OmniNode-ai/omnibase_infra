@@ -8,21 +8,17 @@ All wrappers maintain strong typing and follow ONEX validation patterns.
 from pathlib import Path
 from typing import Literal
 
-from omnibase_core.models.common.model_validation_result import ModelValidationResult
-from omnibase_core.models.model_import_validation_result import (
-    ModelValidationResult as CircularImportValidationResult,
-)
-from omnibase_core.models.validation.model_contract_validation_result import (
-    ModelContractValidationResult,
-)
 from omnibase_core.validation import (
+    CircularImportValidationResult,
+    CircularImportValidator,
+    ModelContractValidationResult,
+    ModelValidationResult,
+    ProtocolContractValidator,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
 )
-from omnibase_core.validation.circular_import_validator import CircularImportValidator
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
 # Type alias for cleaner return types in infrastructure validators
 # Most validation results return None as the data payload (validation only)
