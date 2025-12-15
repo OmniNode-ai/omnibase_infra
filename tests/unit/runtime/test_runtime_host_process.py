@@ -49,12 +49,16 @@ from tests.helpers import DeterministicClock, DeterministicIdGenerator
 # Try to import RuntimeHostProcess to determine if implementation exists
 _RUNTIME_HOST_IMPLEMENTED = False
 try:
+    from omnibase_infra.runtime.protocol_lifecycle_executor import (
+        ProtocolLifecycleExecutor,
+    )
     from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
     _RUNTIME_HOST_IMPLEMENTED = True
 except ImportError:
     # RuntimeHostProcess not implemented yet - define a placeholder for type checking
     RuntimeHostProcess = None  # type: ignore[misc, assignment]
+    ProtocolLifecycleExecutor = None  # type: ignore[misc, assignment]
 
 # Skip marker for all tests when implementation doesn't exist
 pytestmark = pytest.mark.skipif(
@@ -369,6 +373,152 @@ class TestRuntimeHostProcessInitialization:
 
 
 # =============================================================================
+# TestRuntimeHostProcessTimeoutValidation
+# =============================================================================
+
+
+class TestRuntimeHostProcessTimeoutValidation:
+    """Test health_check_timeout_seconds configuration validation.
+
+    Tests the bounds validation (1-60 seconds) per ModelLifecycleSubcontract.
+    """
+
+    @pytest.mark.asyncio
+    async def test_timeout_below_minimum_is_clamped(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that timeout values below minimum are clamped to 1.0."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            process = RuntimeHostProcess(config={"health_check_timeout_seconds": 0.5})
+
+        # Should be clamped to minimum
+        assert process._health_check_timeout_seconds == 1.0
+
+        # Warning should be logged
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1
+        assert any(
+            "out of valid range" in r.message or "clamping" in r.message
+            for r in warning_logs
+        )
+
+    @pytest.mark.asyncio
+    async def test_timeout_above_maximum_is_clamped(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that timeout values above maximum are clamped to 60.0."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            process = RuntimeHostProcess(config={"health_check_timeout_seconds": 120.0})
+
+        # Should be clamped to maximum
+        assert process._health_check_timeout_seconds == 60.0
+
+        # Warning should be logged
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1
+        assert any(
+            "out of valid range" in r.message or "clamping" in r.message
+            for r in warning_logs
+        )
+
+    @pytest.mark.asyncio
+    async def test_timeout_within_range_is_accepted(self) -> None:
+        """Test that timeout values within range are accepted as-is."""
+        # Test minimum boundary
+        process_min = RuntimeHostProcess(config={"health_check_timeout_seconds": 1.0})
+        assert process_min._health_check_timeout_seconds == 1.0
+
+        # Test maximum boundary
+        process_max = RuntimeHostProcess(config={"health_check_timeout_seconds": 60.0})
+        assert process_max._health_check_timeout_seconds == 60.0
+
+        # Test middle value
+        process_mid = RuntimeHostProcess(config={"health_check_timeout_seconds": 30.0})
+        assert process_mid._health_check_timeout_seconds == 30.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_integer_within_range_is_accepted(self) -> None:
+        """Test that integer timeout values within range are accepted."""
+        process = RuntimeHostProcess(config={"health_check_timeout_seconds": 10})
+        assert process._health_check_timeout_seconds == 10.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_string_within_range_is_accepted(self) -> None:
+        """Test that valid string timeout values within range are accepted."""
+        process = RuntimeHostProcess(config={"health_check_timeout_seconds": "15.5"})
+        assert process._health_check_timeout_seconds == 15.5
+
+    @pytest.mark.asyncio
+    async def test_invalid_string_timeout_falls_back_to_default(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that invalid string timeout values fall back to default."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            process = RuntimeHostProcess(
+                config={"health_check_timeout_seconds": "not-a-number"}
+            )
+
+        # Should fall back to default
+        assert process._health_check_timeout_seconds == 5.0
+
+        # Warning should be logged
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1
+        assert any(
+            "Invalid health_check_timeout_seconds" in r.message for r in warning_logs
+        )
+
+    @pytest.mark.asyncio
+    async def test_timeout_zero_is_clamped_to_minimum(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that timeout value of 0 is clamped to minimum."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            process = RuntimeHostProcess(config={"health_check_timeout_seconds": 0})
+
+        # Should be clamped to minimum
+        assert process._health_check_timeout_seconds == 1.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_negative_is_clamped_to_minimum(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that negative timeout values are clamped to minimum."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            process = RuntimeHostProcess(config={"health_check_timeout_seconds": -5.0})
+
+        # Should be clamped to minimum
+        assert process._health_check_timeout_seconds == 1.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_default_when_not_specified(self) -> None:
+        """Test that default timeout is used when not specified in config."""
+        process = RuntimeHostProcess()
+        assert process._health_check_timeout_seconds == 5.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_default_when_none(self) -> None:
+        """Test that default timeout is used when explicitly set to None."""
+        process = RuntimeHostProcess(config={"health_check_timeout_seconds": None})
+        assert process._health_check_timeout_seconds == 5.0
+
+
+# =============================================================================
 # TestRuntimeHostProcessLifecycle
 # =============================================================================
 
@@ -480,6 +630,132 @@ class TestRuntimeHostProcessLifecycle:
         await process.stop()
         await process.stop()  # Second stop should be safe
 
+        assert process.is_running is False
+
+    @pytest.mark.asyncio
+    async def test_stop_calls_shutdown_on_all_handlers(self) -> None:
+        """Test that stop() calls shutdown() on all registered handlers.
+
+        When stopping, the process should call shutdown() on each handler
+        to allow them to release resources (DB connections, Kafka connections, etc.).
+        """
+        process = RuntimeHostProcess()
+
+        # Create multiple handlers
+        http_handler = MockHandler(handler_type="http")
+        db_handler = MockHandler(handler_type="db")
+
+        # Patch _populate_handlers_from_registry to prevent auto-population
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process, "_handlers", {"http": http_handler, "db": db_handler}
+            ):
+                await process.start()
+
+                # Verify handlers are not shutdown yet
+                assert http_handler.shutdown_called is False
+                assert db_handler.shutdown_called is False
+
+                await process.stop()
+
+                # Verify shutdown was called on all handlers
+                assert http_handler.shutdown_called is True
+                assert db_handler.shutdown_called is True
+
+    @pytest.mark.asyncio
+    async def test_stop_continues_on_handler_shutdown_error(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that stop() continues shutting down handlers even if one fails.
+
+        If a handler's shutdown() raises an exception, the process should
+        log the error but continue shutting down other handlers.
+        """
+        import logging
+
+        process = RuntimeHostProcess()
+
+        # Create handlers where one will fail during shutdown
+        http_handler = MockHandler(handler_type="http")
+        failing_handler = MockHandler(handler_type="failing")
+        db_handler = MockHandler(handler_type="db")
+
+        # Make failing_handler's shutdown raise an exception
+        async def failing_shutdown() -> None:
+            raise RuntimeError("Simulated shutdown failure")
+
+        failing_handler.shutdown = failing_shutdown
+
+        # Patch _populate_handlers_from_registry to prevent auto-population
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"http": http_handler, "failing": failing_handler, "db": db_handler},
+            ):
+                await process.start()
+
+                with caplog.at_level(logging.ERROR):
+                    await process.stop()
+
+                # Verify other handlers were still shutdown
+                assert http_handler.shutdown_called is True
+                assert db_handler.shutdown_called is True
+
+                # Verify error was logged
+                error_logs = [r for r in caplog.records if r.levelno == logging.ERROR]
+                assert len(error_logs) >= 1
+                assert any(
+                    "Error shutting down handler" in r.message for r in error_logs
+                )
+
+    @pytest.mark.asyncio
+    async def test_stop_handles_handlers_without_shutdown_method(self) -> None:
+        """Test that stop() gracefully handles handlers without shutdown().
+
+        Some handlers may not implement a shutdown() method. The process
+        should skip shutdown for those handlers without raising an error.
+        """
+        process = RuntimeHostProcess()
+
+        # Create a handler-like object without shutdown method
+        class HandlerWithoutShutdown:
+            def __init__(self) -> None:
+                self.handler_type = "no_shutdown"
+                self.calls: list[dict[str, object]] = []
+
+            async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+                self.calls.append(envelope)
+                return {"status": "success"}
+
+        no_shutdown_handler = HandlerWithoutShutdown()
+        regular_handler = MockHandler(handler_type="regular")
+
+        # Patch _populate_handlers_from_registry to prevent auto-population
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"no_shutdown": no_shutdown_handler, "regular": regular_handler},
+            ):
+                await process.start()
+                # Should not raise any exception
+                await process.stop()
+
+                # Regular handler should still be shutdown
+                assert regular_handler.shutdown_called is True
+
+        # Process should be stopped
         assert process.is_running is False
 
 
@@ -969,6 +1245,200 @@ class TestRuntimeHostProcessHealthCheck:
         # Should not be running
         assert health["is_running"] is False
 
+    @pytest.mark.asyncio
+    async def test_health_check_includes_handler_health(
+        self,
+        mock_handler: MockHandler,
+    ) -> None:
+        """Test that health_check aggregates handler health status.
+
+        Health check should iterate all registered handlers and call
+        their health_check() method, aggregating results into the response.
+        """
+
+        process = RuntimeHostProcess()
+        mock_handler.initialized = True  # Mark as healthy
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", {"http": mock_handler}):
+                await process.start()
+
+                try:
+                    health = await process.health_check()
+
+                    # Should include handlers key
+                    assert "handlers" in health
+                    # Should include http handler health
+                    assert "http" in health["handlers"]
+                    # Handler should be healthy (initialized=True)
+                    assert health["handlers"]["http"]["healthy"] is True
+                    # Overall health should be True
+                    assert health["healthy"] is True
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_unhealthy_handler(
+        self,
+        mock_handler: MockHandler,
+    ) -> None:
+        """Test that unhealthy handler makes overall health False.
+
+        When a registered handler reports unhealthy status, the overall
+        health check should report healthy=False.
+        """
+
+        process = RuntimeHostProcess()
+        mock_handler.initialized = False  # Mark as unhealthy
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", {"http": mock_handler}):
+                await process.start()
+
+                try:
+                    health = await process.health_check()
+
+                    # Handler should be unhealthy
+                    assert health["handlers"]["http"]["healthy"] is False
+                    # Overall health should be False due to unhealthy handler
+                    assert health["healthy"] is False
+                    # Process should still be running
+                    assert health["is_running"] is True
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_handler_error_caught(self) -> None:
+        """Test that handler health_check errors are caught and reported.
+
+        When a handler's health_check() raises an exception, the error
+        should be caught, reported in the response, and not crash the
+        overall health check.
+        """
+
+        process = RuntimeHostProcess()
+
+        class ErrorHandler:
+            """Handler that raises an error during health check."""
+
+            async def health_check(self) -> dict[str, object]:
+                raise RuntimeError("Health check failed")
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", {"error": ErrorHandler()}):
+                await process.start()
+
+                try:
+                    # Should not crash
+                    health = await process.health_check()
+
+                    # Error handler should be reported as unhealthy
+                    assert "error" in health["handlers"]
+                    assert health["handlers"]["error"]["healthy"] is False
+                    # Error message should be captured
+                    assert "error" in health["handlers"]["error"]
+                    assert "Health check failed" in health["handlers"]["error"]["error"]
+                    # Overall health should be False
+                    assert health["healthy"] is False
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_handler_without_health_check_method(self) -> None:
+        """Test that handlers without health_check method are assumed healthy.
+
+        When a handler does not implement a health_check() method, it should
+        be assumed healthy with a note indicating no health_check method.
+        """
+
+        process = RuntimeHostProcess()
+
+        class SimpleHandler:
+            """Handler without health_check method."""
+
+            async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+                return {"status": "success"}
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", {"simple": SimpleHandler()}):
+                await process.start()
+
+                try:
+                    health = await process.health_check()
+
+                    # Simple handler should be reported as healthy
+                    assert "simple" in health["handlers"]
+                    assert health["handlers"]["simple"]["healthy"] is True
+                    # Should have note about no health_check method
+                    assert "note" in health["handlers"]["simple"]
+                    assert (
+                        "no health_check method" in health["handlers"]["simple"]["note"]
+                    )
+                    # Overall health should be True
+                    assert health["healthy"] is True
+                finally:
+                    await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_multiple_handlers_mixed_health(self) -> None:
+        """Test health check with multiple handlers of mixed health status.
+
+        When multiple handlers are registered with different health statuses,
+        the overall health should be False if any handler is unhealthy.
+        """
+
+        process = RuntimeHostProcess()
+
+        healthy_handler = MockHandler(handler_type="healthy")
+        healthy_handler.initialized = True
+
+        unhealthy_handler = MockHandler(handler_type="unhealthy")
+        unhealthy_handler.initialized = False
+
+        handlers = {
+            "healthy": healthy_handler,
+            "unhealthy": unhealthy_handler,
+        }
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(process, "_handlers", handlers):
+                await process.start()
+
+                try:
+                    health = await process.health_check()
+
+                    # Both handlers should be reported
+                    assert "healthy" in health["handlers"]
+                    assert "unhealthy" in health["handlers"]
+                    # Healthy handler should report healthy
+                    assert health["handlers"]["healthy"]["healthy"] is True
+                    # Unhealthy handler should report unhealthy
+                    assert health["handlers"]["unhealthy"]["healthy"] is False
+                    # Overall health should be False (due to unhealthy handler)
+                    assert health["healthy"] is False
+                finally:
+                    await process.stop()
+
 
 # =============================================================================
 # TestRuntimeHostProcessIntegration
@@ -1169,12 +1639,371 @@ class TestRuntimeHostProcessLogWarnings:
 
 
 # =============================================================================
+# Shutdown Priority Tests
+# =============================================================================
+
+
+class MockHandlerWithPriority(MockHandler):
+    """Mock handler with configurable shutdown priority."""
+
+    def __init__(
+        self,
+        handler_type: str = "mock",
+        priority: int = 0,
+    ) -> None:
+        """Initialize mock handler with priority.
+
+        Args:
+            handler_type: The type identifier for this handler.
+            priority: Shutdown priority (higher = shutdown first).
+        """
+        super().__init__(handler_type=handler_type)
+        self._priority = priority
+        self.shutdown_order: int | None = None  # Track when shutdown was called
+
+    def shutdown_priority(self) -> int:
+        """Return shutdown priority."""
+        return self._priority
+
+
+class MockHandlerWithInvalidPriority:
+    """Mock handler with invalid shutdown_priority return type."""
+
+    def __init__(self, handler_type: str = "invalid_priority") -> None:
+        """Initialize mock handler."""
+        self.handler_type = handler_type
+        self.shutdown_called = False
+
+    def shutdown_priority(self) -> str:  # type: ignore[return-value]
+        """Return invalid priority type."""
+        return "not_an_int"  # type: ignore[return-value]
+
+    async def shutdown(self) -> None:
+        """Shutdown the mock handler."""
+        self.shutdown_called = True
+
+
+class MockHandlerWithFailingPriority:
+    """Mock handler where shutdown_priority raises an exception."""
+
+    def __init__(self, handler_type: str = "failing_priority") -> None:
+        """Initialize mock handler."""
+        self.handler_type = handler_type
+        self.shutdown_called = False
+
+    def shutdown_priority(self) -> int:
+        """Raise exception when getting priority."""
+        raise RuntimeError("Priority check failed")
+
+    async def shutdown(self) -> None:
+        """Shutdown the mock handler."""
+        self.shutdown_called = True
+
+
+class TestRuntimeHostProcessShutdownPriority:
+    """Tests for shutdown priority-based handler ordering."""
+
+    @pytest.mark.asyncio
+    async def test_get_shutdown_priority_returns_default_for_handler_without_method(
+        self,
+    ) -> None:
+        """Test that get_shutdown_priority returns 0 for handlers without the method."""
+        handler = MockHandler(handler_type="no_priority")
+
+        # Use ProtocolLifecycleExecutor static method directly
+        priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)  # type: ignore[arg-type]
+
+        assert priority == 0
+
+    @pytest.mark.asyncio
+    async def test_get_shutdown_priority_returns_handler_priority(self) -> None:
+        """Test that get_shutdown_priority returns the handler's priority value."""
+        handler = MockHandlerWithPriority(handler_type="with_priority", priority=100)
+
+        # Use ProtocolLifecycleExecutor static method directly
+        priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)  # type: ignore[arg-type]
+
+        assert priority == 100
+
+    @pytest.mark.asyncio
+    async def test_get_shutdown_priority_returns_default_for_invalid_return_type(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that get_shutdown_priority returns 0 when handler returns non-int."""
+        import logging
+
+        handler = MockHandlerWithInvalidPriority()
+
+        with caplog.at_level(logging.WARNING):
+            # Use ProtocolLifecycleExecutor static method directly
+            priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)  # type: ignore[arg-type]
+
+        assert priority == 0
+        assert any(
+            "shutdown_priority() returned non-int" in r.message for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_shutdown_priority_returns_default_when_method_raises(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that get_shutdown_priority returns 0 when handler raises exception."""
+        import logging
+
+        handler = MockHandlerWithFailingPriority()
+
+        with caplog.at_level(logging.WARNING):
+            # Use ProtocolLifecycleExecutor static method directly
+            priority = ProtocolLifecycleExecutor.get_shutdown_priority(handler)  # type: ignore[arg-type]
+
+        assert priority == 0
+        assert any(
+            "Error calling handler shutdown_priority()" in r.message
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_stop_shuts_down_higher_priority_handlers_first(self) -> None:
+        """Test that handlers with higher priority are shutdown before lower priority."""
+        process = RuntimeHostProcess()
+
+        # Track shutdown order globally
+        shutdown_order: list[str] = []
+
+        # Create handlers with different priorities
+        consumer = MockHandlerWithPriority(handler_type="consumer", priority=100)
+        producer = MockHandlerWithPriority(handler_type="producer", priority=50)
+        pool = MockHandlerWithPriority(handler_type="pool", priority=0)
+
+        # Override shutdown to track order
+        original_consumer_shutdown = consumer.shutdown
+
+        async def consumer_shutdown() -> None:
+            shutdown_order.append("consumer")
+            await original_consumer_shutdown()
+
+        consumer.shutdown = consumer_shutdown  # type: ignore[method-assign]
+
+        original_producer_shutdown = producer.shutdown
+
+        async def producer_shutdown() -> None:
+            shutdown_order.append("producer")
+            await original_producer_shutdown()
+
+        producer.shutdown = producer_shutdown  # type: ignore[method-assign]
+
+        original_pool_shutdown = pool.shutdown
+
+        async def pool_shutdown() -> None:
+            shutdown_order.append("pool")
+            await original_pool_shutdown()
+
+        pool.shutdown = pool_shutdown  # type: ignore[method-assign]
+
+        # Patch to prevent auto-population
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"consumer": consumer, "producer": producer, "pool": pool},
+            ):
+                await process.start()
+                await process.stop()
+
+        # Verify shutdown order: consumer (100) -> producer (50) -> pool (0)
+        assert shutdown_order == ["consumer", "producer", "pool"]
+        assert consumer.shutdown_called is True
+        assert producer.shutdown_called is True
+        assert pool.shutdown_called is True
+
+    @pytest.mark.asyncio
+    async def test_stop_shuts_down_same_priority_handlers_in_parallel(self) -> None:
+        """Test that handlers with same priority are shutdown in parallel."""
+        process = RuntimeHostProcess()
+
+        # Create multiple handlers with same priority
+        handler_a = MockHandlerWithPriority(handler_type="handler_a", priority=50)
+        handler_b = MockHandlerWithPriority(handler_type="handler_b", priority=50)
+
+        # Track concurrent execution
+        execution_times: dict[str, tuple[float, float]] = {}
+        import time
+
+        async def make_timed_shutdown(
+            handler: MockHandlerWithPriority, name: str
+        ) -> AsyncMock:
+            original = handler.shutdown
+
+            async def timed_shutdown() -> None:
+                start = time.monotonic()
+                await asyncio.sleep(0.05)  # Small delay to observe parallelism
+                await original()
+                end = time.monotonic()
+                execution_times[name] = (start, end)
+
+            return timed_shutdown  # type: ignore[return-value]
+
+        handler_a.shutdown = await make_timed_shutdown(handler_a, "handler_a")  # type: ignore[method-assign]
+        handler_b.shutdown = await make_timed_shutdown(handler_b, "handler_b")  # type: ignore[method-assign]
+
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"handler_a": handler_a, "handler_b": handler_b},
+            ):
+                await process.start()
+
+                start_time = time.monotonic()
+                await process.stop()
+                total_time = time.monotonic() - start_time
+
+        # If run in parallel, total time should be close to single handler time (~0.05s)
+        # If sequential, it would be ~0.1s
+        # Allow some margin for test overhead
+        assert (
+            total_time < 0.15
+        ), f"Parallel shutdown took too long: {total_time}s (expected < 0.15s)"
+
+        # Verify both were called
+        assert handler_a.shutdown_called is True
+        assert handler_b.shutdown_called is True
+
+    @pytest.mark.asyncio
+    async def test_stop_handles_mixed_priority_handlers(self) -> None:
+        """Test stop with handlers that have and don't have shutdown_priority."""
+        process = RuntimeHostProcess()
+
+        shutdown_order: list[str] = []
+
+        # Handler with priority
+        high_priority = MockHandlerWithPriority(
+            handler_type="high_priority", priority=100
+        )
+
+        # Handler without priority method (default 0)
+        no_priority = MockHandler(handler_type="no_priority")
+
+        async def high_shutdown() -> None:
+            shutdown_order.append("high_priority")
+            high_priority.shutdown_called = True
+
+        high_priority.shutdown = high_shutdown  # type: ignore[method-assign]
+
+        async def no_priority_shutdown() -> None:
+            shutdown_order.append("no_priority")
+            no_priority.shutdown_called = True
+
+        no_priority.shutdown = no_priority_shutdown  # type: ignore[method-assign]
+
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"high_priority": high_priority, "no_priority": no_priority},
+            ):
+                await process.start()
+                await process.stop()
+
+        # High priority (100) should shutdown before no priority (0)
+        assert shutdown_order == ["high_priority", "no_priority"]
+
+    @pytest.mark.asyncio
+    async def test_stop_logs_priority_groups(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that stop logs priority group information."""
+        import logging
+
+        process = RuntimeHostProcess()
+
+        handler_a = MockHandlerWithPriority(handler_type="handler_a", priority=100)
+        handler_b = MockHandlerWithPriority(handler_type="handler_b", priority=50)
+
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"handler_a": handler_a, "handler_b": handler_b},
+            ):
+                await process.start()
+
+                with caplog.at_level(logging.INFO):
+                    await process.stop()
+
+        # Check that priority-based shutdown message was logged
+        assert any(
+            "Priority-based handler shutdown completed" in r.message
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_stop_continues_with_next_priority_group_on_failure(self) -> None:
+        """Test that failure in one priority group doesn't prevent shutdown of next."""
+        process = RuntimeHostProcess()
+
+        shutdown_order: list[str] = []
+
+        # High priority handler that fails
+        failing_handler = MockHandlerWithPriority(handler_type="failing", priority=100)
+
+        async def failing_shutdown() -> None:
+            shutdown_order.append("failing")
+            raise RuntimeError("Shutdown failed")
+
+        failing_handler.shutdown = failing_shutdown  # type: ignore[method-assign]
+
+        # Lower priority handler that should still be shutdown
+        normal_handler = MockHandlerWithPriority(handler_type="normal", priority=50)
+
+        async def normal_shutdown() -> None:
+            shutdown_order.append("normal")
+            normal_handler.shutdown_called = True
+
+        normal_handler.shutdown = normal_shutdown  # type: ignore[method-assign]
+
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            with patch.object(
+                process,
+                "_handlers",
+                {"failing": failing_handler, "normal": normal_handler},
+            ):
+                await process.start()
+                await process.stop()
+
+        # Both should have been attempted, regardless of failure
+        assert "failing" in shutdown_order
+        assert "normal" in shutdown_order
+        assert shutdown_order.index("failing") < shutdown_order.index("normal")
+        assert normal_handler.shutdown_called is True
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
 
 __all__: list[str] = [
     "TestRuntimeHostProcessInitialization",
+    "TestRuntimeHostProcessTimeoutValidation",
     "TestRuntimeHostProcessLifecycle",
     "TestRuntimeHostProcessEnvelopeRouting",
     "TestRuntimeHostProcessErrorHandling",
@@ -1182,7 +2011,11 @@ __all__: list[str] = [
     "TestRuntimeHostProcessIntegration",
     "TestRuntimeHostProcessDeterministic",
     "TestRuntimeHostProcessLogWarnings",
+    "TestRuntimeHostProcessShutdownPriority",
     "MockHandler",
     "MockFailingHandler",
     "MockEventBus",
+    "MockHandlerWithPriority",
+    "MockHandlerWithInvalidPriority",
+    "MockHandlerWithFailingPriority",
 ]
