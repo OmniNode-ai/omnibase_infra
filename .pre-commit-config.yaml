@@ -105,6 +105,8 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
       # Union usage validation
+      # TECH DEBT: Baseline increased to 108 violations (OMN-871)
+      # Target: Reduce to 30 incrementally after PR #37 merges
       - id: onex-validate-unions
         name: ONEX Union Usage Validation
         entry: poetry run python scripts/validate.py unions

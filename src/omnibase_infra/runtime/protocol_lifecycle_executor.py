@@ -173,7 +173,7 @@ class ProtocolLifecycleExecutor:
         self,
         handler_type: str,
         handler: ProtocolHandler,
-    ) -> tuple[str, bool, Optional[str]]:
+    ) -> tuple[str, bool, str | None]:
         """Shutdown a single handler with error handling.
 
         This method performs individual handler shutdown with comprehensive error
@@ -280,7 +280,7 @@ class ProtocolLifecycleExecutor:
     async def shutdown_handlers_by_priority(
         self,
         handlers: dict[str, ProtocolHandler],
-    ) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
+    ) -> tuple[list[str], list[tuple[str, str | None]]]:
         """Shutdown all handlers grouped by priority (higher first, parallel within group).
 
         Handlers are shutdown in priority order, with higher priority handlers
@@ -322,7 +322,7 @@ class ProtocolLifecycleExecutor:
 
         # Track overall results
         all_succeeded: list[str] = []
-        all_failed: list[tuple[str, Optional[str]]] = []
+        all_failed: list[tuple[str, str | None]] = []
 
         # Shutdown each priority group sequentially, handlers within group in parallel
         for priority in sorted_priorities:

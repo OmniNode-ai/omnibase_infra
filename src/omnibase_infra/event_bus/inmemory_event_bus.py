@@ -51,7 +51,11 @@ from typing import Optional
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.errors import (
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
 logger = logging.getLogger(__name__)
@@ -113,11 +117,20 @@ class InMemoryEventBus:
             circuit_breaker_threshold: Number of consecutive failures before circuit opens
 
         Raises:
-            ValueError: If circuit_breaker_threshold is not a positive integer
+            ProtocolConfigurationError: If circuit_breaker_threshold is not a positive integer
         """
         if circuit_breaker_threshold < 1:
-            raise ValueError(
-                f"circuit_breaker_threshold must be a positive integer, got {circuit_breaker_threshold}"
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="init",
+                target_name="inmemory_event_bus",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"circuit_breaker_threshold must be a positive integer, got {circuit_breaker_threshold}",
+                context=context,
+                parameter="circuit_breaker_threshold",
+                value=circuit_breaker_threshold,
             )
         self._environment = environment
         self._group = group
@@ -226,9 +239,9 @@ class InMemoryEventBus:
     async def publish(
         self,
         topic: str,
-        key: Optional[bytes],
+        key: bytes | None,
         value: bytes,
-        headers: Optional[ModelEventHeaders] = None,
+        headers: ModelEventHeaders | None = None,
     ) -> None:
         """Publish message to topic.
 
@@ -443,7 +456,7 @@ class InMemoryEventBus:
         self,
         command: str,
         payload: dict[str, object],
-        target_environment: Optional[str] = None,
+        target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
 
@@ -546,7 +559,7 @@ class InMemoryEventBus:
     async def get_event_history(
         self,
         limit: int = 100,
-        topic: Optional[str] = None,
+        topic: str | None = None,
     ) -> list[ModelEventMessage]:
         """Get recent events for debugging.
 
@@ -580,7 +593,7 @@ class InMemoryEventBus:
             self._event_history.clear()
         logger.debug("Event history cleared")
 
-    async def get_subscriber_count(self, topic: Optional[str] = None) -> int:
+    async def get_subscriber_count(self, topic: str | None = None) -> int:
         """Get subscriber count, optionally filtered by topic.
 
         Args:

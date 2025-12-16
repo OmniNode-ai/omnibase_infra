@@ -42,6 +42,7 @@ class ModelDbDescribeResponse(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     adapter_type: str = Field(

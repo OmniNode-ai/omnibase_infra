@@ -40,6 +40,7 @@ class ModelDbQueryPayload(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     rows: list[dict[str, object]] = Field(

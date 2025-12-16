@@ -65,8 +65,8 @@ class RuntimeHostError(ModelOnexError):
     def __init__(
         self,
         message: str,
-        error_code: Optional[EnumCoreErrorCode] = None,
-        context: Optional[ModelInfraErrorContext] = None,
+        error_code: EnumCoreErrorCode | None = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize RuntimeHostError with structured fields.
@@ -122,7 +122,7 @@ class ProtocolConfigurationError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize ProtocolConfigurationError.
@@ -162,7 +162,7 @@ class SecretResolutionError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize SecretResolutionError.
@@ -226,7 +226,7 @@ class InfraConnectionError(RuntimeHostError):
 
     # Transport type to error code mapping
     _TRANSPORT_ERROR_CODE_MAP: dict[
-        Optional[EnumInfraTransportType], EnumCoreErrorCode
+        EnumInfraTransportType | None, EnumCoreErrorCode
     ] = {
         EnumInfraTransportType.DATABASE: EnumCoreErrorCode.DATABASE_CONNECTION_ERROR,
         EnumInfraTransportType.HTTP: EnumCoreErrorCode.NETWORK_ERROR,
@@ -241,7 +241,7 @@ class InfraConnectionError(RuntimeHostError):
 
     @classmethod
     def _resolve_connection_error_code(
-        cls, context: Optional[ModelInfraErrorContext]
+        cls, context: ModelInfraErrorContext | None
     ) -> EnumCoreErrorCode:
         """Resolve the appropriate error code based on transport type.
 
@@ -264,7 +264,7 @@ class InfraConnectionError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize InfraConnectionError with transport-aware error code.
@@ -310,7 +310,7 @@ class InfraTimeoutError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize InfraTimeoutError.
@@ -350,7 +350,7 @@ class InfraAuthenticationError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize InfraAuthenticationError.
@@ -392,7 +392,7 @@ class InfraUnavailableError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize InfraUnavailableError.
@@ -431,7 +431,7 @@ class EnvelopeValidationError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize EnvelopeValidationError.
@@ -472,7 +472,7 @@ class UnknownHandlerTypeError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize UnknownHandlerTypeError.

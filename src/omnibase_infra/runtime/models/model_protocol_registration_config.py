@@ -43,12 +43,13 @@ class ModelProtocolRegistrationConfig(BaseModel):
         frozen=True,
         extra="forbid",
         populate_by_name=True,  # Allow both alias and field name
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     type: ProtocolName = Field(
         description="Protocol type identifier (e.g., 'http', 'db', 'kafka')",
     )
-    protocol_class: Optional[str] = Field(
+    protocol_class: str | None = Field(
         default=None,
         alias="class",
         description="Fully qualified protocol class name for instantiation",

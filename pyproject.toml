@@ -19,8 +19,8 @@ onex-runtime = "omnibase_infra.runtime.kernel:main"
 python = "^3.12"
 
 # ONEX dependencies - from PyPI
-omnibase-core = "^0.3.6"
-omnibase-spi = "0.2.0"
+omnibase-core = "^0.4.0"
+omnibase-spi = "^0.4.0"
 
 # Core dependencies
 pydantic = "^2.11.7"

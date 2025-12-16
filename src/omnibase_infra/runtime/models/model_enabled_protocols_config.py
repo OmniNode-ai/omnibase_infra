@@ -49,6 +49,7 @@ class ModelEnabledProtocolsConfig(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     enabled: list[ProtocolName] = Field(
