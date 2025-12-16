@@ -265,3 +265,64 @@ class TestPluginJsonNormalizer:
         assert elapsed_time < 0.05, (
             f"Early exit optimization failed: took {elapsed_time:.3f}s"
         )
+
+    def test_recursion_depth_limit_exceeded(self, plugin: PluginJsonNormalizer) -> None:
+        """Test that deeply nested structures exceeding MAX_RECURSION_DEPTH raise RecursionError.
+
+        This test validates the depth protection mechanism that prevents stack overflow
+        on maliciously crafted or malformed JSON with excessive nesting.
+        """
+        # Create structure that exceeds the default MAX_RECURSION_DEPTH (100)
+        depth = plugin.MAX_RECURSION_DEPTH + 5  # 105 levels deep
+        nested: dict[str, Any] = {"deepest": "value"}
+        for i in range(depth - 1):
+            nested = {f"level_{i}": nested}
+
+        input_data = {"json": nested}
+
+        with pytest.raises(RecursionError) as exc_info:
+            plugin.execute(input_data, {})
+
+        # Verify error message contains the depth limit
+        assert str(plugin.MAX_RECURSION_DEPTH) in str(exc_info.value)
+        assert "maximum nesting depth" in str(exc_info.value)
+
+    def test_recursion_depth_at_limit_succeeds(
+        self, plugin: PluginJsonNormalizer
+    ) -> None:
+        """Test that structures exactly at MAX_RECURSION_DEPTH succeed.
+
+        Validates that the depth check uses > (not >=) to allow structures
+        exactly at the limit to be processed.
+        """
+        # Create structure exactly at the limit (100 levels)
+        depth = plugin.MAX_RECURSION_DEPTH
+        nested: dict[str, Any] = {"deepest": "value"}
+        for i in range(depth - 1):
+            nested = {f"level_{i}": nested}
+
+        input_data = {"json": nested}
+
+        # Should succeed without raising RecursionError
+        result = plugin.execute(input_data, {})
+        assert "normalized" in result
+
+    def test_recursion_depth_limit_with_lists(
+        self, plugin: PluginJsonNormalizer
+    ) -> None:
+        """Test depth protection applies to list nesting as well.
+
+        Validates that depth tracking works correctly for mixed dict/list structures.
+        """
+        # Create deeply nested list structure
+        depth = plugin.MAX_RECURSION_DEPTH + 5
+        nested: list[Any] = ["deepest"]
+        for _ in range(depth - 1):
+            nested = [nested]
+
+        input_data = {"json": nested}
+
+        with pytest.raises(RecursionError) as exc_info:
+            plugin.execute(input_data, {})
+
+        assert "maximum nesting depth" in str(exc_info.value)

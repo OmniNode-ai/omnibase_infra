@@ -37,6 +37,8 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
     proper error handling patterns following ONEX standards.
     """
 
+    __slots__ = ()  # Enforce statelessness - no instance attributes
+
     def execute(
         self, input_data: PluginInputData, context: PluginContext
     ) -> PluginOutputData:

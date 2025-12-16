@@ -81,12 +81,17 @@ ONEX 4-Node Architecture Integration:
     Integration with NodeComputeService:
         ```python
         from omnibase_infra.plugins import PluginComputeBase
+        from omnibase_infra.protocols.protocol_plugin_compute import (
+            PluginInputData,
+            PluginContext,
+            PluginOutputData,
+        )
 
         # Step 1: Implement plugin (pure computation)
         class DataValidatorPlugin(PluginComputeBase):
             def execute(
-        self, input_data: dict[str, Any], context: dict[str, Any]
-    ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # Pure validation logic (no I/O)
                 is_valid = self._validate_schema(input_data)
                 return {
@@ -94,7 +99,7 @@ ONEX 4-Node Architecture Integration:
                     "errors": [] if is_valid else self._get_errors(input_data),
                 }
 
-            def validate_input(self, input_data: dict[str, Any]) -> None:
+            def validate_input(self, input_data: PluginInputData) -> None:
                 if "schema" not in input_data:
                     raise ValueError("schema field required")
 
@@ -216,10 +221,16 @@ class PluginComputeBase(ABC):
 
     Example:
         ```python
+        from omnibase_infra.protocols.protocol_plugin_compute import (
+            PluginInputData,
+            PluginContext,
+            PluginOutputData,
+        )
+
         class MyComputePlugin(PluginComputeBase):
             def execute(
-        self, input_data: dict[str, Any], context: dict[str, Any]
-    ) -> dict[str, Any]:
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
                 # Handle edge cases
                 if not input_data:
                     return {"result": None, "warning": "Empty input"}
@@ -237,7 +248,7 @@ class PluginComputeBase(ABC):
                 result = self._process(input_data)
                 return {"result": result}
 
-            def validate_input(self, input_data: dict[str, Any]) -> None:
+            def validate_input(self, input_data: PluginInputData) -> None:
                 # Optional: Validate required fields upfront
                 if "required_field" not in input_data:
                     raise ValueError("Missing required_field")
@@ -248,143 +259,151 @@ class PluginComputeBase(ABC):
         ```
     """
 
+    __slots__ = ()  # Enforce statelessness - no instance attributes
+
     @abstractmethod
     def execute(
         self, input_data: PluginInputData, context: PluginContext
     ) -> PluginOutputData:
         """Execute computation. MUST be deterministic.
 
-            Given the same input_data and context, this method MUST return
-            the same result every time it is called.
+        Given the same input_data and context, this method MUST return
+        the same result every time it is called.
 
-            Args:
-                input_data: The input data to process
-                context: Execution context (correlation_id, timestamps, etc.)
+        Args:
+            input_data: The input data to process
+            context: Execution context (correlation_id, timestamps, etc.)
 
-            Returns:
-                Computation result as dictionary
+        Returns:
+            Computation result as dictionary
 
-            Raises:
-                OnexError: For all computation failures (with proper error chaining)
-                ValueError: If input validation fails (should be wrapped in OnexError)
-                TypeError: If input types are incorrect (should be wrapped in OnexError)
+        Raises:
+            OnexError: For all computation failures (with proper error chaining)
+            ValueError: If input validation fails (should be wrapped in OnexError)
+            TypeError: If input types are incorrect (should be wrapped in OnexError)
 
-            Error Handling Requirements:
-                All implementations MUST follow ONEX error handling standards:
+        Error Handling Requirements:
+            All implementations MUST follow ONEX error handling standards:
 
-                1. **OnexError Chaining**: Convert all exceptions to OnexError
-                   ```python
-                   from omnibase_core.errors import OnexError
-                   from omnibase_core.enums import CoreErrorCode
+            1. **OnexError Chaining**: Convert all exceptions to OnexError
+               ```python
+               from omnibase_core.errors import OnexError
+               from omnibase_core.enums import CoreErrorCode
 
-                   try:
-                       result = self._compute(input_data)
-                   except Exception as e:
-                       raise OnexError(
-                           message=f"Computation failed: {e}",
-                           error_code=CoreErrorCode.INTERNAL_ERROR,
-                           correlation_id=context.get("correlation_id", "unknown"),
-                           plugin_name=self.__class__.__name__,
-                       ) from e
-                   ```
-
-                2. **Correlation ID Propagation**: Always extract and propagate correlation_id
-                   ```python
-                   correlation_id = context.get("correlation_id", "unknown")
-                   # Include in all OnexError instances and output
-                   ```
-
-                3. **Never Suppress Errors**: All exceptions must be converted to OnexError
-                   ```python
-                   # NEVER do this:
-                   except Exception:
-                       pass  # ❌ Silent failure prohibited
-
-                   # ALWAYS do this:
-                   except Exception as e:
-                       raise OnexError(...) from e  # ✅ Proper error chaining
-                   ```
-
-                4. **Context Preservation**: Include debugging context in OnexError
-                   ```python
+               try:
+                   result = self._compute(input_data)
+               except Exception as e:
                    raise OnexError(
-                       message="Validation failed",
-                       error_code=CoreErrorCode.INVALID_INPUT,
-                       correlation_id=correlation_id,
+                       message=f"Computation failed: {e}",
+                       error_code=CoreErrorCode.INTERNAL_ERROR,
+                       correlation_id=context.get("correlation_id", "unknown"),
                        plugin_name=self.__class__.__name__,
-                       input_keys=list(input_data.keys()),  # Additional context
-                       expected_type="list",
-                       actual_type=type(value).__name__,
                    ) from e
-                   ```
+               ```
 
-            Common Error Patterns:
-                See ProtocolPluginCompute.execute() documentation for detailed examples:
-                - Input validation errors (missing fields, invalid types)
-                - Computation errors (ZeroDivisionError, overflow, underflow)
-                - Type validation errors (expected vs actual types)
-                - Fallback strategies with graceful degradation
+            2. **Correlation ID Propagation**: Always extract and propagate correlation_id
+               ```python
+               correlation_id = context.get("correlation_id", "unknown")
+               # Include in all OnexError instances and output
+               ```
 
-            Edge Cases to Handle:
-                1. **Empty inputs**: `input_data == {}` or `input_data.get("key") == []`
-                2. **None values**: `input_data is None` or `context is None`
-                3. **Missing keys**: Use `.get()` with defaults or validate upfront
-                4. **Type mismatches**: Validate types before processing
-                5. **Division by zero**: Check denominators before division
-                6. **NaN/Infinity**: Use `math.isnan()` and `math.isinf()` checks
-                7. **Deep nesting**: Limit recursion depth (e.g., max_depth=100)
-                8. **Large inputs**: Monitor memory for inputs >10MB
-                9. **Unicode strings**: Handle UTF-8 and control characters
-                10. **Circular references**: Track visited objects with `set()`
+            3. **Never Suppress Errors**: All exceptions must be converted to OnexError
+               ```python
+               # NEVER do this:
+               except Exception:
+                   pass  # ❌ Silent failure prohibited
 
-            What NOT to Do:
-                Implementations MUST NOT:
-                - ❌ Access network (HTTP, gRPC, WebSocket)
-                - ❌ Access file system (read, write, delete)
-                - ❌ Query databases (SQL, NoSQL)
-                - ❌ Use random numbers (unless seeded from context)
-                - ❌ Use current time (unless passed in context)
-                - ❌ Maintain mutable state between calls
-                - ❌ Modify input_data or context dictionaries
-                - ❌ Use global variables or class-level mutable state
+               # ALWAYS do this:
+               except Exception as e:
+                   raise OnexError(...) from e  # ✅ Proper error chaining
+               ```
 
-            Example - Handling Edge Cases:
-                ```python
-                def execute(
-            self, input_data: dict[str, Any], context: dict[str, Any]
-        ) -> dict[str, Any]:
-                    # Edge Case 1 & 2: Handle None/empty inputs
-                    if not input_data:
-                        return {"result": None, "warning": "Empty input"}
+            4. **Context Preservation**: Include debugging context in OnexError
+               ```python
+               raise OnexError(
+                   message="Validation failed",
+                   error_code=CoreErrorCode.INVALID_INPUT,
+                   correlation_id=correlation_id,
+                   plugin_name=self.__class__.__name__,
+                   input_keys=list(input_data.keys()),  # Additional context
+                   expected_type="list",
+                   actual_type=type(value).__name__,
+               ) from e
+               ```
 
-                    # Edge Case 3: Handle missing keys
-                    values = input_data.get("values", [])
-                    if not values:
-                        return {"result": 0, "count": 0}
+        Common Error Patterns:
+            See ProtocolPluginCompute.execute() documentation for detailed examples:
+            - Input validation errors (missing fields, invalid types)
+            - Computation errors (ZeroDivisionError, overflow, underflow)
+            - Type validation errors (expected vs actual types)
+            - Fallback strategies with graceful degradation
 
-                    # Edge Case 4: Validate types
-                    if not all(isinstance(v, (int, float)) for v in values):
-                        raise TypeError("All values must be numeric")
+        Edge Cases to Handle:
+            1. **Empty inputs**: `input_data == {}` or `input_data.get("key") == []`
+            2. **None values**: `input_data is None` or `context is None`
+            3. **Missing keys**: Use `.get()` with defaults or validate upfront
+            4. **Type mismatches**: Validate types before processing
+            5. **Division by zero**: Check denominators before division
+            6. **NaN/Infinity**: Use `math.isnan()` and `math.isinf()` checks
+            7. **Deep nesting**: Limit recursion depth (e.g., max_depth=100)
+            8. **Large inputs**: Monitor memory for inputs >10MB
+            9. **Unicode strings**: Handle UTF-8 and control characters
+            10. **Circular references**: Track visited objects with `set()`
 
-                    # Edge Case 6: Handle NaN/Infinity
-                    import math
-                    clean_values = [v for v in values if not math.isnan(v) and not math.isinf(v)]
+        What NOT to Do:
+            Implementations MUST NOT:
+            - ❌ Access network (HTTP, gRPC, WebSocket)
+            - ❌ Access file system (read, write, delete)
+            - ❌ Query databases (SQL, NoSQL)
+            - ❌ Use random numbers (unless seeded from context)
+            - ❌ Use current time (unless passed in context)
+            - ❌ Maintain mutable state between calls
+            - ❌ Modify input_data or context dictionaries
+            - ❌ Use global variables or class-level mutable state
 
-                    # Edge Case 5: Division by zero check
-                    count = len(clean_values)
-                    if count == 0:
-                        return {"result": 0, "warning": "All values were NaN/Inf"}
+        Example - Handling Edge Cases:
+            ```python
+            from omnibase_infra.protocols.protocol_plugin_compute import (
+                PluginInputData,
+                PluginContext,
+                PluginOutputData,
+            )
 
-                    # Safe computation
-                    total = sum(clean_values)
-                    average = total / count  # Safe: count > 0
+            def execute(
+                self, input_data: PluginInputData, context: PluginContext
+            ) -> PluginOutputData:
+                # Edge Case 1 & 2: Handle None/empty inputs
+                if not input_data:
+                    return {"result": None, "warning": "Empty input"}
 
-                    return {
-                        "result": average,
-                        "count": count,
-                        "filtered": len(values) - count,
-                    }
-                ```
+                # Edge Case 3: Handle missing keys
+                values = input_data.get("values", [])
+                if not values:
+                    return {"result": 0, "count": 0}
+
+                # Edge Case 4: Validate types
+                if not all(isinstance(v, (int, float)) for v in values):
+                    raise TypeError("All values must be numeric")
+
+                # Edge Case 6: Handle NaN/Infinity
+                import math
+                clean_values = [v for v in values if not math.isnan(v) and not math.isinf(v)]
+
+                # Edge Case 5: Division by zero check
+                count = len(clean_values)
+                if count == 0:
+                    return {"result": 0, "warning": "All values were NaN/Inf"}
+
+                # Safe computation
+                total = sum(clean_values)
+                average = total / count  # Safe: count > 0
+
+                return {
+                    "result": average,
+                    "count": count,
+                    "filtered": len(values) - count,
+                }
+            ```
         """
         ...
 

@@ -38,7 +38,16 @@ class JsonNormalizerOutput(TypedDict):
 
 
 class PluginJsonNormalizer(PluginComputeBase):
-    """Normalizes JSON structures for deterministic comparison."""
+    """Normalizes JSON structures for deterministic comparison.
+
+    Attributes:
+        MAX_RECURSION_DEPTH: Maximum allowed nesting depth for JSON structures.
+            Defaults to 100 levels. Override in subclass if needed.
+    """
+
+    __slots__ = ()  # Enforce statelessness - no instance attributes
+
+    MAX_RECURSION_DEPTH: int = 100
 
     def execute(
         self, input_data: PluginInputData, context: PluginContext
@@ -49,8 +58,8 @@ class PluginJsonNormalizer(PluginComputeBase):
         output: JsonNormalizerOutput = {"normalized": normalized}
         return output
 
-    def _sort_keys_recursively(self, obj: JsonValue) -> JsonValue:
-        """Recursively sort dictionary keys with optimized performance.
+    def _sort_keys_recursively(self, obj: JsonValue, _depth: int = 0) -> JsonValue:
+        """Recursively sort dictionary keys with optimized performance and depth protection.
 
         Performance Characteristics:
             - Time Complexity: O(n * k log k) where n is total nodes, k is keys per dict
@@ -67,27 +76,48 @@ class PluginJsonNormalizer(PluginComputeBase):
             - Avoids redundant type checks
             - Maintains deterministic behavior
 
+        Depth Protection:
+            To prevent stack overflow on deeply nested structures, recursion depth
+            is limited to MAX_RECURSION_DEPTH (default: 100 levels). This protects
+            against maliciously crafted or malformed JSON that could exhaust the
+            Python call stack.
+
         Args:
             obj: JSON-compatible object (dict, list, or primitive)
+            _depth: Internal depth counter for recursion protection. Do not set
+                manually; this is tracked automatically during recursion.
 
         Returns:
             Object with recursively sorted keys (if dict), or original value
+
+        Raises:
+            RecursionError: If nesting depth exceeds MAX_RECURSION_DEPTH levels.
 
         Note:
             - Dicts: Sorted by key name (alphabetically)
             - Lists: Items processed recursively, order preserved
             - Primitives: Returned unchanged (early exit for performance)
         """
+        # Depth protection to prevent stack overflow on deeply nested structures
+        if _depth > self.MAX_RECURSION_DEPTH:
+            raise RecursionError(
+                f"JSON structure exceeds maximum nesting depth of "
+                f"{self.MAX_RECURSION_DEPTH} levels"
+            )
+
         # Early exit for primitives (most common case in large structures)
         # This optimization avoids isinstance checks for dict/list on every primitive
         if not isinstance(obj, (dict, list)):
             return obj
 
         if isinstance(obj, dict):
-            return {k: self._sort_keys_recursively(v) for k, v in sorted(obj.items())}
+            return {
+                k: self._sort_keys_recursively(v, _depth + 1)
+                for k, v in sorted(obj.items())
+            }
 
         # Must be a list at this point
-        return [self._sort_keys_recursively(item) for item in obj]
+        return [self._sort_keys_recursively(item, _depth + 1) for item in obj]
 
     def validate_input(self, input_data: PluginInputData) -> None:
         """Validate input with runtime type checking and type guards."""
