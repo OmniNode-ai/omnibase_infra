@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for VaultHandler.
+"""Unit tests for VaultAdapter.
 
-These tests use mocked hvac client to validate VaultHandler behavior
+These tests use mocked hvac client to validate VaultAdapter behavior
 without requiring actual Vault server infrastructure.
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import UUID, uuid4
 
@@ -24,11 +24,9 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.handler_vault import VaultHandler
-from omnibase_infra.handlers.model_vault_handler_config import (
-    ModelVaultHandlerConfig,
-    ModelVaultRetryConfig,
-)
+from omnibase_infra.handlers.handler_vault import VaultAdapter
+from omnibase_infra.handlers.model_vault_handler_config import ModelVaultAdapterConfig
+from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
 
 
 @pytest.fixture
@@ -61,8 +59,8 @@ def mock_hvac_client() -> MagicMock:
     return client
 
 
-class TestVaultHandlerInitialization:
-    """Test VaultHandler initialization and configuration."""
+class TestVaultAdapterInitialization:
+    """Test VaultAdapter initialization and configuration."""
 
     @pytest.mark.asyncio
     async def test_initialize_success(
@@ -71,7 +69,7 @@ class TestVaultHandlerInitialization:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful initialization with valid config."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -88,7 +86,7 @@ class TestVaultHandlerInitialization:
     @pytest.mark.asyncio
     async def test_initialize_missing_url(self) -> None:
         """Test initialization fails with missing URL."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
         config = {"token": "s.test1234"}
 
         with pytest.raises(RuntimeHostError) as exc_info:
@@ -100,7 +98,7 @@ class TestVaultHandlerInitialization:
     @pytest.mark.asyncio
     async def test_initialize_missing_token(self) -> None:
         """Test initialization fails with missing token."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
         config = {"url": "https://vault.example.com:8200"}
 
         with pytest.raises(RuntimeHostError) as exc_info:
@@ -115,7 +113,7 @@ class TestVaultHandlerInitialization:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test initialization fails with authentication failure."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
         mock_hvac_client.is_authenticated.return_value = False
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
@@ -132,10 +130,11 @@ class TestVaultHandlerInitialization:
         vault_config: dict[str, object],
     ) -> None:
         """Test initialization fails with connection error."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             import hvac.exceptions
+
             MockClient.side_effect = hvac.exceptions.VaultError("Connection refused")
 
             with pytest.raises(InfraConnectionError) as exc_info:
@@ -147,7 +146,7 @@ class TestVaultHandlerInitialization:
     async def test_config_model_validation(self) -> None:
         """Test Pydantic config model validation."""
         # Valid config
-        config = ModelVaultHandlerConfig(
+        config = ModelVaultAdapterConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.test1234"),
             timeout_seconds=30.0,
@@ -157,7 +156,7 @@ class TestVaultHandlerInitialization:
 
         # Invalid timeout (too high)
         with pytest.raises(Exception):  # Pydantic ValidationError
-            ModelVaultHandlerConfig(
+            ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 timeout_seconds=400.0,  # Max is 300.0
@@ -166,7 +165,7 @@ class TestVaultHandlerInitialization:
     @pytest.mark.asyncio
     async def test_secretstr_prevents_token_logging(self) -> None:
         """Test SecretStr prevents token from being logged."""
-        config = ModelVaultHandlerConfig(
+        config = ModelVaultAdapterConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.sensitive_token_12345"),
         )
@@ -177,8 +176,8 @@ class TestVaultHandlerInitialization:
         assert "SecretStr" in token_repr
 
 
-class TestVaultHandlerOperations:
-    """Test VaultHandler secret operations."""
+class TestVaultAdapterOperations:
+    """Test VaultAdapter secret operations."""
 
     @pytest.mark.asyncio
     async def test_read_secret_success(
@@ -187,7 +186,7 @@ class TestVaultHandlerOperations:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret read operation."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -225,7 +224,7 @@ class TestVaultHandlerOperations:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret write operation."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -260,7 +259,7 @@ class TestVaultHandlerOperations:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret deletion."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -286,7 +285,7 @@ class TestVaultHandlerOperations:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret listing."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -317,7 +316,7 @@ class TestVaultHandlerOperations:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operation fails with missing path."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -335,8 +334,8 @@ class TestVaultHandlerOperations:
             assert "path" in str(exc_info.value).lower()
 
 
-class TestVaultHandlerTokenRenewal:
-    """Test VaultHandler token renewal management."""
+class TestVaultAdapterTokenRenewal:
+    """Test VaultAdapter token renewal management."""
 
     @pytest.mark.asyncio
     async def test_renew_token_success(
@@ -345,7 +344,7 @@ class TestVaultHandlerTokenRenewal:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful token renewal."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -373,7 +372,7 @@ class TestVaultHandlerTokenRenewal:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test token renewal via envelope operation."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -400,8 +399,8 @@ class TestVaultHandlerTokenRenewal:
             assert response["payload"]["lease_duration"] == 3600
 
 
-class TestVaultHandlerRetryLogic:
-    """Test VaultHandler retry logic with exponential backoff."""
+class TestVaultAdapterRetryLogic:
+    """Test VaultAdapter retry logic with exponential backoff."""
 
     @pytest.mark.asyncio
     async def test_retry_on_transient_failure(
@@ -410,7 +409,7 @@ class TestVaultHandlerRetryLogic:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test retry logic on transient failures."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -447,7 +446,7 @@ class TestVaultHandlerRetryLogic:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test retry logic when all attempts exhausted."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -478,13 +477,13 @@ class TestVaultHandlerRetryLogic:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operation timeout raises InfraTimeoutError."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
 
             # Simulate timeout
-            async def slow_operation(*args: Any, **kwargs: Any) -> None:
+            async def slow_operation(*args: object, **kwargs: object) -> None:
                 await asyncio.sleep(100)  # Longer than timeout
 
             with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
@@ -502,8 +501,8 @@ class TestVaultHandlerRetryLogic:
                 assert "timed out" in str(exc_info.value).lower()
 
 
-class TestVaultHandlerErrorHandling:
-    """Test VaultHandler error handling and sanitization."""
+class TestVaultAdapterErrorHandling:
+    """Test VaultAdapter error handling and sanitization."""
 
     @pytest.mark.asyncio
     async def test_authentication_error(
@@ -512,12 +511,13 @@ class TestVaultHandlerErrorHandling:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test authentication error handling."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
 
             import hvac.exceptions
+
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
                 hvac.exceptions.Forbidden("Permission denied")
             )
@@ -543,12 +543,13 @@ class TestVaultHandlerErrorHandling:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test secret not found error handling."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
 
             import hvac.exceptions
+
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
                 hvac.exceptions.InvalidPath("Secret not found")
             )
@@ -574,12 +575,13 @@ class TestVaultHandlerErrorHandling:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test Vault server unavailable error."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
 
             import hvac.exceptions
+
             mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
                 hvac.exceptions.VaultDown("Vault is sealed")
             )
@@ -599,8 +601,8 @@ class TestVaultHandlerErrorHandling:
             assert mock_hvac_client.secrets.kv.v2.read_secret_version.call_count == 3
 
 
-class TestVaultHandlerHealthCheck:
-    """Test VaultHandler health check functionality."""
+class TestVaultAdapterHealthCheck:
+    """Test VaultAdapter health check functionality."""
 
     @pytest.mark.asyncio
     async def test_health_check_healthy(
@@ -609,7 +611,7 @@ class TestVaultHandlerHealthCheck:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test health check returns healthy status."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -634,7 +636,7 @@ class TestVaultHandlerHealthCheck:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test health check returns unhealthy on error."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -657,7 +659,7 @@ class TestVaultHandlerHealthCheck:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test health check via envelope operation."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -681,8 +683,8 @@ class TestVaultHandlerHealthCheck:
             assert response["payload"]["healthy"] is True
 
 
-class TestVaultHandlerDescribe:
-    """Test VaultHandler describe functionality."""
+class TestVaultAdapterDescribe:
+    """Test VaultAdapter describe functionality."""
 
     @pytest.mark.asyncio
     async def test_describe(
@@ -691,7 +693,7 @@ class TestVaultHandlerDescribe:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test describe returns handler metadata."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -709,8 +711,8 @@ class TestVaultHandlerDescribe:
             assert description["initialized"] is True
 
 
-class TestVaultHandlerShutdown:
-    """Test VaultHandler shutdown functionality."""
+class TestVaultAdapterShutdown:
+    """Test VaultAdapter shutdown functionality."""
 
     @pytest.mark.asyncio
     async def test_shutdown(
@@ -719,7 +721,7 @@ class TestVaultHandlerShutdown:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test handler shutdown releases resources."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -735,8 +737,8 @@ class TestVaultHandlerShutdown:
             assert handler._config is None
 
 
-class TestVaultHandlerThreadPool:
-    """Test VaultHandler thread pool functionality."""
+class TestVaultAdapterThreadPool:
+    """Test VaultAdapter thread pool functionality."""
 
     @pytest.mark.asyncio
     async def test_thread_pool_created_with_config_size(
@@ -745,7 +747,7 @@ class TestVaultHandlerThreadPool:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool is created with configured size."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         # Set custom thread pool size
         vault_config["max_concurrent_operations"] = 15
@@ -755,7 +757,7 @@ class TestVaultHandlerThreadPool:
             await handler.initialize(vault_config)
 
             assert handler._executor is not None
-            assert handler._executor._max_workers == 15
+            assert handler.max_workers == 15
 
     @pytest.mark.asyncio
     async def test_thread_pool_default_size(
@@ -764,7 +766,7 @@ class TestVaultHandlerThreadPool:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool uses default size when not specified."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         # Remove max_concurrent_operations to test default
         vault_config.pop("max_concurrent_operations", None)
@@ -774,7 +776,7 @@ class TestVaultHandlerThreadPool:
             await handler.initialize(vault_config)
 
             assert handler._executor is not None
-            assert handler._executor._max_workers == 10  # Default value
+            assert handler.max_workers == 10  # Default value
 
     @pytest.mark.asyncio
     async def test_thread_pool_shutdown_on_handler_shutdown(
@@ -783,7 +785,7 @@ class TestVaultHandlerThreadPool:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool is properly shutdown when handler shuts down."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -805,7 +807,7 @@ class TestVaultHandlerThreadPool:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operations execute in thread pool executor."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -844,11 +846,11 @@ class TestVaultHandlerThreadPool:
     async def test_config_validates_thread_pool_bounds(self) -> None:
         """Test config validation enforces thread pool size bounds."""
         from omnibase_infra.handlers.model_vault_handler_config import (
-            ModelVaultHandlerConfig,
+            ModelVaultAdapterConfig,
         )
 
         # Valid: within bounds (1-100)
-        config = ModelVaultHandlerConfig(
+        config = ModelVaultAdapterConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.test1234"),
             max_concurrent_operations=50,
@@ -857,7 +859,7 @@ class TestVaultHandlerThreadPool:
 
         # Invalid: below minimum (< 1)
         with pytest.raises(Exception):  # Pydantic ValidationError
-            ModelVaultHandlerConfig(
+            ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 max_concurrent_operations=0,
@@ -865,15 +867,15 @@ class TestVaultHandlerThreadPool:
 
         # Invalid: above maximum (> 100)
         with pytest.raises(Exception):  # Pydantic ValidationError
-            ModelVaultHandlerConfig(
+            ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 max_concurrent_operations=150,
             )
 
 
-class TestVaultHandlerCircuitBreaker:
-    """Test VaultHandler circuit breaker functionality."""
+class TestVaultAdapterCircuitBreaker:
+    """Test VaultAdapter circuit breaker functionality."""
 
     @pytest.mark.asyncio
     async def test_circuit_opens_after_threshold_failures(
@@ -882,7 +884,7 @@ class TestVaultHandlerCircuitBreaker:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit opens after threshold consecutive failures."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         # Configure circuit breaker with low threshold for testing
         vault_config["circuit_breaker_failure_threshold"] = 2
@@ -910,6 +912,7 @@ class TestVaultHandlerCircuitBreaker:
 
             # Circuit should now be OPEN
             from omnibase_infra.handlers.handler_vault import CircuitState
+
             assert handler._circuit_state == CircuitState.OPEN
             assert handler._circuit_failure_count >= 2
 
@@ -920,7 +923,7 @@ class TestVaultHandlerCircuitBreaker:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit blocks requests when OPEN."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         vault_config["circuit_breaker_failure_threshold"] = 2
 
@@ -959,7 +962,7 @@ class TestVaultHandlerCircuitBreaker:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit transitions to HALF_OPEN after reset timeout."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         # Minimum timeout for testing (1.0 seconds)
         vault_config["circuit_breaker_failure_threshold"] = 2
@@ -986,6 +989,7 @@ class TestVaultHandlerCircuitBreaker:
                     await handler.execute(envelope)
 
             from omnibase_infra.handlers.handler_vault import CircuitState
+
             assert handler._circuit_state == CircuitState.OPEN
 
             # Wait for reset timeout
@@ -1011,7 +1015,7 @@ class TestVaultHandlerCircuitBreaker:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit closes on successful request in HALF_OPEN state."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         vault_config["circuit_breaker_failure_threshold"] = 2
         vault_config["circuit_breaker_reset_timeout_seconds"] = 1.0
@@ -1049,6 +1053,7 @@ class TestVaultHandlerCircuitBreaker:
             response = await handler.execute(envelope)
 
             from omnibase_infra.handlers.handler_vault import CircuitState
+
             assert response["status"] == "success"
             assert handler._circuit_state == CircuitState.CLOSED
             assert handler._circuit_failure_count == 0
@@ -1060,7 +1065,7 @@ class TestVaultHandlerCircuitBreaker:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit reopens on failed request in HALF_OPEN state."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         vault_config["circuit_breaker_failure_threshold"] = 2
         vault_config["circuit_breaker_reset_timeout_seconds"] = 1.0
@@ -1093,6 +1098,7 @@ class TestVaultHandlerCircuitBreaker:
                 await handler.execute(envelope)
 
             from omnibase_infra.handlers.handler_vault import CircuitState
+
             # Circuit should reopen
             assert handler._circuit_state == CircuitState.OPEN
 
@@ -1103,7 +1109,7 @@ class TestVaultHandlerCircuitBreaker:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit breaker can be disabled via config."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         # Disable circuit breaker
         vault_config["circuit_breaker_enabled"] = False
@@ -1129,6 +1135,7 @@ class TestVaultHandlerCircuitBreaker:
                     await handler.execute(envelope)
 
             from omnibase_infra.handlers.handler_vault import CircuitState
+
             # Circuit should remain CLOSED (disabled)
             assert handler._circuit_state == CircuitState.CLOSED
 
@@ -1139,7 +1146,7 @@ class TestVaultHandlerCircuitBreaker:
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit breaker state resets on handler shutdown."""
-        handler = VaultHandler()
+        handler = VaultAdapter()
 
         vault_config["circuit_breaker_failure_threshold"] = 2
 
@@ -1164,6 +1171,7 @@ class TestVaultHandlerCircuitBreaker:
                     await handler.execute(envelope)
 
             from omnibase_infra.handlers.handler_vault import CircuitState
+
             # Circuit should be OPEN after threshold failures
             assert handler._circuit_state == CircuitState.OPEN
             assert handler._circuit_failure_count >= 2
@@ -1180,11 +1188,11 @@ class TestVaultHandlerCircuitBreaker:
     async def test_config_validates_circuit_breaker_bounds(self) -> None:
         """Test config validation enforces circuit breaker parameter bounds."""
         from omnibase_infra.handlers.model_vault_handler_config import (
-            ModelVaultHandlerConfig,
+            ModelVaultAdapterConfig,
         )
 
         # Valid: within bounds
-        config = ModelVaultHandlerConfig(
+        config = ModelVaultAdapterConfig(
             url="https://vault.example.com:8200",
             token=SecretStr("s.test1234"),
             circuit_breaker_failure_threshold=10,
@@ -1195,7 +1203,7 @@ class TestVaultHandlerCircuitBreaker:
 
         # Invalid: threshold below minimum (< 1)
         with pytest.raises(Exception):  # Pydantic ValidationError
-            ModelVaultHandlerConfig(
+            ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_failure_threshold=0,
@@ -1203,7 +1211,7 @@ class TestVaultHandlerCircuitBreaker:
 
         # Invalid: threshold above maximum (> 20)
         with pytest.raises(Exception):  # Pydantic ValidationError
-            ModelVaultHandlerConfig(
+            ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_failure_threshold=25,
@@ -1211,7 +1219,7 @@ class TestVaultHandlerCircuitBreaker:
 
         # Invalid: timeout below minimum (< 1.0)
         with pytest.raises(Exception):  # Pydantic ValidationError
-            ModelVaultHandlerConfig(
+            ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_reset_timeout_seconds=0.5,
@@ -1219,7 +1227,7 @@ class TestVaultHandlerCircuitBreaker:
 
         # Invalid: timeout above maximum (> 300.0)
         with pytest.raises(Exception):  # Pydantic ValidationError
-            ModelVaultHandlerConfig(
+            ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_reset_timeout_seconds=400.0,

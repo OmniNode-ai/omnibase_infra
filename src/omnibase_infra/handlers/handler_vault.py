@@ -18,11 +18,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
-from typing import Any
+from typing import Optional, TypeVar
 from uuid import UUID, uuid4
+
+T = TypeVar("T")
 
 import hvac
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
@@ -38,19 +42,21 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultHandlerConfig
+from omnibase_infra.handlers.model_vault_handler_config import ModelVaultAdapterConfig
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MOUNT_POINT: str = "secret"
-_SUPPORTED_OPERATIONS: frozenset[str] = frozenset({
-    "vault.read_secret",
-    "vault.write_secret",
-    "vault.delete_secret",
-    "vault.list_secrets",
-    "vault.renew_token",
-    "vault.health_check",
-})
+_SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
+    {
+        "vault.read_secret",
+        "vault.write_secret",
+        "vault.delete_secret",
+        "vault.list_secrets",
+        "vault.renew_token",
+        "vault.health_check",
+    }
+)
 
 
 class CircuitState(str, Enum):
@@ -61,13 +67,14 @@ class CircuitState(str, Enum):
         OPEN: Too many failures, blocking requests temporarily
         HALF_OPEN: Testing if service recovered, allowing limited requests
     """
+
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
 
 
-class VaultHandler:
-    """HashiCorp Vault handler using hvac client (MVP: KV v2 secrets engine).
+class VaultAdapter:
+    """HashiCorp Vault adapter using hvac client (MVP: KV v2 secrets engine).
 
     Security Policy - Token Handling:
         The Vault token contains sensitive credentials and is treated as a secret
@@ -111,13 +118,15 @@ class VaultHandler:
     """
 
     def __init__(self) -> None:
-        """Initialize VaultHandler in uninitialized state."""
-        self._client: hvac.Client | None = None
-        self._config: ModelVaultHandlerConfig | None = None
+        """Initialize VaultAdapter in uninitialized state."""
+        self._client: Optional[hvac.Client] = None
+        self._config: Optional[ModelVaultAdapterConfig] = None
         self._initialized: bool = False
         self._token_expires_at: float = 0.0
-        self._executor: ThreadPoolExecutor | None = None
-        # Circuit breaker state (thread-safe with single writer pattern)
+        self._executor: Optional[ThreadPoolExecutor] = None
+        self._max_workers: int = 0
+        # Circuit breaker state (thread-safe with RLock for reentrant access)
+        self._circuit_lock: threading.RLock = threading.RLock()
         self._circuit_state: CircuitState = CircuitState.CLOSED
         self._circuit_failure_count: int = 0
         self._circuit_last_failure_time: float = 0.0
@@ -126,6 +135,11 @@ class VaultHandler:
     def handler_type(self) -> EnumHandlerType:
         """Return EnumHandlerType.VAULT."""
         return EnumHandlerType.VAULT
+
+    @property
+    def max_workers(self) -> int:
+        """Return thread pool max workers (public API for tests)."""
+        return self._max_workers
 
     async def initialize(self, config: dict[str, object]) -> None:
         """Initialize Vault client with configuration.
@@ -160,7 +174,7 @@ class VaultHandler:
                 config["token"] = SecretStr(token_raw)
 
             # Type ignore for dict unpacking - Pydantic handles validation
-            self._config = ModelVaultHandlerConfig(**config)  # type: ignore[arg-type]
+            self._config = ModelVaultAdapterConfig(**config)  # type: ignore[arg-type]
         except Exception as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
@@ -225,14 +239,15 @@ class VaultHandler:
             self._token_expires_at = time.time() + 3600.0  # Default 1 hour TTL
 
             # Create bounded thread pool executor for production safety
+            self._max_workers = self._config.max_concurrent_operations
             self._executor = ThreadPoolExecutor(
-                max_workers=self._config.max_concurrent_operations,
+                max_workers=self._max_workers,
                 thread_name_prefix="vault_handler_",
             )
 
             self._initialized = True
             logger.info(
-                "VaultHandler initialized",
+                "VaultAdapter initialized",
                 extra={
                     "url": self._config.url,
                     "namespace": self._config.namespace,
@@ -305,7 +320,7 @@ class VaultHandler:
 
         self._initialized = False
         self._config = None
-        logger.info("VaultHandler shutdown complete")
+        logger.info("VaultAdapter shutdown complete")
 
     async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
         """Execute Vault operation from envelope.
@@ -335,7 +350,7 @@ class VaultHandler:
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "VaultHandler not initialized. Call initialize() first.",
+                "VaultAdapter not initialized. Call initialize() first.",
                 context=ctx,
             )
 
@@ -442,6 +457,9 @@ class VaultHandler:
             HALF_OPEN -> CLOSED: On successful request
             HALF_OPEN -> OPEN: On failed request
 
+        Thread Safety:
+            Uses RLock for thread-safe state access and modification.
+
         Args:
             correlation_id: Correlation ID for tracing
 
@@ -451,41 +469,43 @@ class VaultHandler:
         if self._config is None or not self._config.circuit_breaker_enabled:
             return
 
-        current_time = time.time()
+        with self._circuit_lock:
+            current_time = time.time()
 
-        # Check if circuit is OPEN
-        if self._circuit_state == CircuitState.OPEN:
-            time_since_failure = current_time - self._circuit_last_failure_time
+            # Check if circuit is OPEN
+            if self._circuit_state == CircuitState.OPEN:
+                time_since_failure = current_time - self._circuit_last_failure_time
 
-            # Check if reset timeout has passed
-            if time_since_failure >= self._config.circuit_breaker_reset_timeout_seconds:
-                # Transition to HALF_OPEN to test service recovery
-                self._circuit_state = CircuitState.HALF_OPEN
-                self._circuit_failure_count = 0
-                logger.info(
-                    "Circuit breaker transitioning to HALF_OPEN state",
-                    extra={
-                        "time_since_failure_seconds": time_since_failure,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-            else:
-                # Circuit still open, reject request
-                retry_after = int(
-                    self._config.circuit_breaker_reset_timeout_seconds - time_since_failure
-                )
-                ctx = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.VAULT,
-                    operation="circuit_breaker_check",
-                    target_name="vault_handler",
-                    correlation_id=correlation_id,
-                )
-                raise InfraUnavailableError(
-                    "Circuit breaker is open - Vault temporarily unavailable",
-                    context=ctx,
-                    circuit_state=self._circuit_state.value,
-                    retry_after_seconds=retry_after,
-                )
+                # Check if reset timeout has passed
+                if time_since_failure >= self._config.circuit_breaker_reset_timeout_seconds:
+                    # Transition to HALF_OPEN to test service recovery
+                    self._circuit_state = CircuitState.HALF_OPEN
+                    self._circuit_failure_count = 0
+                    logger.info(
+                        "Circuit breaker transitioning to HALF_OPEN state",
+                        extra={
+                            "time_since_failure_seconds": time_since_failure,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                else:
+                    # Circuit still open, reject request
+                    retry_after = int(
+                        self._config.circuit_breaker_reset_timeout_seconds
+                        - time_since_failure
+                    )
+                    ctx = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.VAULT,
+                        operation="circuit_breaker_check",
+                        target_name="vault_handler",
+                        correlation_id=correlation_id,
+                    )
+                    raise InfraUnavailableError(
+                        "Circuit breaker is open - Vault temporarily unavailable",
+                        context=ctx,
+                        circuit_state=self._circuit_state.value,
+                        retry_after_seconds=retry_after,
+                    )
 
     def _record_circuit_success(self) -> None:
         """Record successful operation for circuit breaker.
@@ -494,18 +514,22 @@ class VaultHandler:
             - CLOSED: No change
             - HALF_OPEN: Transition to CLOSED (service recovered)
             - OPEN: Should not reach here (check prevents execution)
+
+        Thread Safety:
+            Uses RLock for thread-safe state access and modification.
         """
         if self._config is None or not self._config.circuit_breaker_enabled:
             return
 
-        if self._circuit_state == CircuitState.HALF_OPEN:
-            # Service recovered, close circuit
-            self._circuit_state = CircuitState.CLOSED
-            self._circuit_failure_count = 0
-            logger.info("Circuit breaker closed - service recovered")
+        with self._circuit_lock:
+            if self._circuit_state == CircuitState.HALF_OPEN:
+                # Service recovered, close circuit
+                self._circuit_state = CircuitState.CLOSED
+                self._circuit_failure_count = 0
+                logger.info("Circuit breaker closed - service recovered")
 
-        # Reset failure count on success
-        self._circuit_failure_count = 0
+            # Reset failure count on success
+            self._circuit_failure_count = 0
 
     def _record_circuit_failure(self) -> None:
         """Record failed operation for circuit breaker.
@@ -514,40 +538,47 @@ class VaultHandler:
             - CLOSED: Increment failure count, open if threshold exceeded
             - HALF_OPEN: Transition back to OPEN (service still failing)
             - OPEN: Should not reach here (check prevents execution)
+
+        Thread Safety:
+            Uses RLock for thread-safe state access and modification.
         """
         if self._config is None or not self._config.circuit_breaker_enabled:
             return
 
-        self._circuit_failure_count += 1
-        self._circuit_last_failure_time = time.time()
+        with self._circuit_lock:
+            self._circuit_failure_count += 1
+            self._circuit_last_failure_time = time.time()
 
-        if self._circuit_state == CircuitState.HALF_OPEN:
-            # Service still failing, reopen circuit
-            self._circuit_state = CircuitState.OPEN
-            logger.warning(
-                "Circuit breaker reopened - service still failing",
-                extra={
-                    "failure_count": self._circuit_failure_count,
-                },
-            )
-        elif self._circuit_state == CircuitState.CLOSED:
-            # Check if threshold exceeded
-            if self._circuit_failure_count >= self._config.circuit_breaker_failure_threshold:
+            if self._circuit_state == CircuitState.HALF_OPEN:
+                # Service still failing, reopen circuit
                 self._circuit_state = CircuitState.OPEN
                 logger.warning(
-                    "Circuit breaker opened due to consecutive failures",
+                    "Circuit breaker reopened - service still failing",
                     extra={
                         "failure_count": self._circuit_failure_count,
-                        "threshold": self._config.circuit_breaker_failure_threshold,
                     },
                 )
+            elif self._circuit_state == CircuitState.CLOSED:
+                # Check if threshold exceeded
+                if (
+                    self._circuit_failure_count
+                    >= self._config.circuit_breaker_failure_threshold
+                ):
+                    self._circuit_state = CircuitState.OPEN
+                    logger.warning(
+                        "Circuit breaker opened due to consecutive failures",
+                        extra={
+                            "failure_count": self._circuit_failure_count,
+                            "threshold": self._config.circuit_breaker_failure_threshold,
+                        },
+                    )
 
     async def _execute_with_retry(
         self,
         operation: str,
-        func: Any,
+        func: Callable[[], T],
         correlation_id: UUID,
-    ) -> Any:
+    ) -> T:
         """Execute operation with exponential backoff retry logic and circuit breaker.
 
         Circuit breaker integration:
@@ -576,12 +607,18 @@ class VaultHandler:
         self._check_circuit_breaker(correlation_id)
 
         retry_config = self._config.retry
-        last_exception: Exception | None = None
+        last_exception: Optional[Exception] = None
 
         for attempt in range(retry_config.max_attempts):
             try:
                 # hvac is synchronous, wrap in custom thread executor
-                loop = asyncio.get_event_loop()
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    # No running loop, create new one (should not happen in async context)
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
                 result = await asyncio.wait_for(
                     loop.run_in_executor(self._executor, func),
                     timeout=self._config.timeout_seconds,
@@ -670,7 +707,8 @@ class VaultHandler:
 
             # Calculate exponential backoff
             backoff = min(
-                retry_config.initial_backoff_seconds * (retry_config.exponential_base ** attempt),
+                retry_config.initial_backoff_seconds
+                * (retry_config.exponential_base**attempt),
                 retry_config.max_backoff_seconds,
             )
 
@@ -727,10 +765,10 @@ class VaultHandler:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def read_func() -> dict[str, Any]:
+        def read_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, Any] = self._client.secrets.kv.v2.read_secret_version(
+            result: dict[str, object] = self._client.secrets.kv.v2.read_secret_version(
                 path=path,
                 mount_point=mount_point,
             )
@@ -742,11 +780,17 @@ class VaultHandler:
             correlation_id,
         )
 
+        # Extract nested data with type checking
+        data_obj = result.get("data", {})
+        data_dict = data_obj if isinstance(data_obj, dict) else {}
+        secret_data = data_dict.get("data", {})
+        metadata = data_dict.get("metadata", {})
+
         return {
             "status": "success",
             "payload": {
-                "data": result.get("data", {}).get("data", {}),
-                "metadata": result.get("data", {}).get("metadata", {}),
+                "data": secret_data if isinstance(secret_data, dict) else {},
+                "metadata": metadata if isinstance(metadata, dict) else {},
             },
             "correlation_id": correlation_id,
         }
@@ -800,10 +844,10 @@ class VaultHandler:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def write_func() -> dict[str, Any]:
+        def write_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, Any] = self._client.secrets.kv.v2.create_or_update_secret(
+            result: dict[str, object] = self._client.secrets.kv.v2.create_or_update_secret(
                 path=path,
                 secret=data,
                 mount_point=mount_point,
@@ -816,11 +860,15 @@ class VaultHandler:
             correlation_id,
         )
 
+        # Extract nested data with type checking
+        data_obj = result.get("data", {})
+        data_dict = data_obj if isinstance(data_obj, dict) else {}
+
         return {
             "status": "success",
             "payload": {
-                "version": result.get("data", {}).get("version"),
-                "created_time": result.get("data", {}).get("created_time"),
+                "version": data_dict.get("version"),
+                "created_time": data_dict.get("created_time"),
             },
             "correlation_id": correlation_id,
         }
@@ -916,10 +964,10 @@ class VaultHandler:
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def list_func() -> dict[str, Any]:
+        def list_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, Any] = self._client.secrets.kv.v2.list_secrets(
+            result: dict[str, object] = self._client.secrets.kv.v2.list_secrets(
                 path=path,
                 mount_point=mount_point,
             )
@@ -931,15 +979,18 @@ class VaultHandler:
             correlation_id,
         )
 
-        keys = result.get("data", {}).get("keys", [])
+        # Extract nested data with type checking
+        data_obj = result.get("data", {})
+        data_dict = data_obj if isinstance(data_obj, dict) else {}
+        keys = data_dict.get("keys", [])
 
         return {
             "status": "success",
-            "payload": {"keys": keys},
+            "payload": {"keys": keys if isinstance(keys, list) else []},
             "correlation_id": correlation_id,
         }
 
-    async def renew_token(self) -> dict[str, Any]:
+    async def renew_token(self) -> dict[str, object]:
         """Renew Vault authentication token.
 
         Returns:
@@ -958,14 +1009,14 @@ class VaultHandler:
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
-                "VaultHandler not initialized",
+                "VaultAdapter not initialized",
                 context=ctx,
             )
 
-        def renew_func() -> dict[str, Any]:
+        def renew_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, Any] = self._client.auth.token.renew_self()
+            result: dict[str, object] = self._client.auth.token.renew_self()
             return result
 
         try:
@@ -977,8 +1028,15 @@ class VaultHandler:
 
             # Update token expiration tracking
             auth_data = result.get("auth", {})
-            lease_duration = auth_data.get("lease_duration", 3600)
-            self._token_expires_at = time.time() + lease_duration
+            if isinstance(auth_data, dict):
+                lease_duration = auth_data.get("lease_duration", 3600)
+            else:
+                lease_duration = 3600
+
+            if isinstance(lease_duration, int):
+                self._token_expires_at = time.time() + lease_duration
+            else:
+                self._token_expires_at = time.time() + 3600
 
             logger.info(
                 "Token renewed successfully",
@@ -988,9 +1046,7 @@ class VaultHandler:
                 },
             )
 
-            # Explicit type annotation for mypy
-            return_value: dict[str, Any] = result
-            return return_value
+            return result
 
         except Exception as e:
             ctx = ModelInfraErrorContext(
@@ -1018,7 +1074,10 @@ class VaultHandler:
         """
         result = await self.renew_token()
 
-        auth_data = result.get("auth", {})
+        # Extract nested auth data with type checking
+        auth_obj = result.get("auth", {})
+        auth_data = auth_obj if isinstance(auth_obj, dict) else {}
+
         return {
             "status": "success",
             "payload": {
@@ -1037,10 +1096,16 @@ class VaultHandler:
         healthy = False
         if self._initialized and self._client is not None:
             try:
-                # Synchronous hvac health check
-                loop = asyncio.get_event_loop()
+                # Synchronous hvac health check using thread pool for consistency
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    # No running loop, create new one (should not happen in async context)
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
                 health_result = await loop.run_in_executor(
-                    None,
+                    self._executor,
                     self._client.sys.read_health_status,
                 )
                 healthy = health_result.get("initialized", False)
@@ -1096,4 +1161,4 @@ class VaultHandler:
         }
 
 
-__all__: list[str] = ["VaultHandler"]
+__all__: list[str] = ["VaultAdapter"]

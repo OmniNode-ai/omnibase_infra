@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Vault Handler Configuration Models.
+"""Vault Handler Configuration Model.
 
-This module provides Pydantic configuration models for HashiCorp Vault
+This module provides the Pydantic configuration model for HashiCorp Vault
 handler initialization and operation.
 
 Security Note:
@@ -13,62 +13,15 @@ Security Note:
 
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-
-class ModelVaultRetryConfig(BaseModel):
-    """Configuration for Vault operation retry logic with exponential backoff.
-
-    Attributes:
-        max_attempts: Maximum number of retry attempts (1-10)
-        initial_backoff_seconds: Initial backoff delay in seconds (0.01-10.0)
-        max_backoff_seconds: Maximum backoff delay in seconds (1.0-60.0)
-        exponential_base: Exponential backoff multiplier (1.5-4.0)
-
-    Example:
-        >>> retry_config = ModelVaultRetryConfig(
-        ...     max_attempts=3,
-        ...     initial_backoff_seconds=0.1,
-        ...     max_backoff_seconds=10.0,
-        ...     exponential_base=2.0,
-        ... )
-        >>> # Backoff sequence: 0.1s, 0.2s, 0.4s
-    """
-
-    model_config = ConfigDict(
-        strict=True,
-        frozen=True,
-        extra="forbid",
-    )
-
-    max_attempts: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="Maximum number of retry attempts",
-    )
-    initial_backoff_seconds: float = Field(
-        default=0.1,
-        ge=0.01,
-        le=10.0,
-        description="Initial backoff delay in seconds",
-    )
-    max_backoff_seconds: float = Field(
-        default=10.0,
-        ge=1.0,
-        le=60.0,
-        description="Maximum backoff delay in seconds",
-    )
-    exponential_base: float = Field(
-        default=2.0,
-        ge=1.5,
-        le=4.0,
-        description="Exponential backoff multiplier",
-    )
+from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
 
 
-class ModelVaultHandlerConfig(BaseModel):
-    """Configuration for HashiCorp Vault handler.
+class ModelVaultAdapterConfig(BaseModel):
+    """Configuration for HashiCorp Vault adapter.
 
     Security Policy:
         - The token field uses SecretStr to prevent accidental logging
@@ -87,7 +40,7 @@ class ModelVaultHandlerConfig(BaseModel):
 
     Example:
         >>> from pydantic import SecretStr
-        >>> config = ModelVaultHandlerConfig(
+        >>> config = ModelVaultAdapterConfig(
         ...     url="https://vault.example.com:8200",
         ...     token=SecretStr("s.1234567890abcdefghijklmnopqrstuv"),
         ...     namespace="engineering",
@@ -103,16 +56,17 @@ class ModelVaultHandlerConfig(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     url: str = Field(
         description="Vault server URL (e.g., 'https://vault.example.com:8200')",
     )
-    token: SecretStr | None = Field(
+    token: Optional[SecretStr] = Field(
         default=None,
         description="Vault authentication token (use SecretStr for security)",
     )
-    namespace: str | None = Field(
+    namespace: Optional[str] = Field(
         default=None,
         description="Vault namespace for Vault Enterprise",
     )
@@ -159,7 +113,4 @@ class ModelVaultHandlerConfig(BaseModel):
     )
 
 
-__all__: list[str] = [
-    "ModelVaultRetryConfig",
-    "ModelVaultHandlerConfig",
-]
+__all__: list[str] = ["ModelVaultAdapterConfig"]
