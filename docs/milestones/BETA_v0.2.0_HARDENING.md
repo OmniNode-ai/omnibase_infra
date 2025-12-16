@@ -261,18 +261,18 @@ Complete the error hierarchy with additional error types.
 
 ---
 
-### Issue 3.9: Implement VaultHandler [BETA]
+### Issue 3.9: Implement VaultAdapter [BETA]
 
-**Title**: Create Vault secrets management protocol handler
+**Title**: Create Vault secrets management protocol adapter
 **Type**: Feature
 **Priority**: High
 **Labels**: `handler`, `infrastructure`, `secrets`
 **Milestone**: v0.2.0 Beta
 
 **Description**:
-Implement `VaultHandler` for HashiCorp Vault operations using hvac.
+Implement `VaultAdapter` for HashiCorp Vault operations using hvac.
 
-**File**: `src/omnibase_infra/handlers/vault_handler.py`
+**File**: `src/omnibase_infra/handlers/handler_vault.py`
 
 **Operations**: `get_secret`, `set_secret`, `delete_secret`, `list_secrets`
 
@@ -612,7 +612,7 @@ Integration tests using docker-compose with real PostgreSQL, Kafka, Vault.
 
 **Tests**:
 - DbHandler with real PostgreSQL
-- VaultHandler with real Vault
+- VaultAdapter with real Vault
 - KafkaEventBus with real Kafka
 - Full envelope flow
 
@@ -794,7 +794,7 @@ Phase 1 (Core Types - Beta)
     v
 Phase 3 (Infra - Beta)
     |
-    +-- 3.9 VaultHandler [BETA]
+    +-- 3.9 VaultAdapter [BETA]
     +-- 3.10 ConsulHandler [BETA]
     +-- 3.11 KafkaEventBus [BETA]
     +-- 3.12 SecretResolver [BETA]

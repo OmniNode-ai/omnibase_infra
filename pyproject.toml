@@ -114,6 +114,8 @@ line-ending = "auto"
 # Matches omnibase_core settings for consistency across ONEX ecosystem
 select = ["E", "F", "W", "C90", "I", "N", "UP", "YTT", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
 ignore = [
+    "UP007",     # Use X | Y for type annotations (preserve Optional[T] for ONEX validator compliance)
+    "UP045",     # Use X | None for Optional - conflicts with ONEX validator (requires Optional[X])
     "S101",      # Allow assert statements in tests
     "E501",      # Line too long (technical debt - will fix incrementally)
     "BLE001",    # Blind exception catching (technical debt)
@@ -135,7 +137,6 @@ ignore = [
     "TRY004",    # Exception type preference (technical debt)
     "TRY300",    # Consider else block (technical debt)
     "DTZ005",    # datetime.now() without tz (technical debt)
-    # "UP038",     # Removed in ruff 0.14.x (rule no longer exists)
     "B008",      # Function call in defaults (technical debt)
     "ARG003",    # Unused class method argument (technical debt)
     "ERA001",    # Commented out code (technical debt)
@@ -190,7 +191,6 @@ ignore = [
     "SIM108",    # If else block instead of if exp (technical debt)
     "F401",      # Unused import (technical debt)
     "PLR1714",   # Repeated equality comparison (technical debt)
-    "UP007",     # Non pep604 annotation (technical debt)
     "RUF012",    # Mutable class default (technical debt)
     "TRY401",    # Verbose log message (technical debt)
     "B017",      # Assert raises exception (technical debt)

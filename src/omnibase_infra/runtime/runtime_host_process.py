@@ -129,7 +129,6 @@ class RuntimeHostProcess:
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
         config: Optional[dict[str, object]] = None,
-        handler_registry: Optional[ProtocolBindingRegistry] = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -147,14 +146,9 @@ class RuntimeHostProcess:
                       ModelLifecycleSubcontract). Values outside this range are
                       clamped to the nearest bound with a warning logged.
                       Invalid string values fall back to the default with a warning.
-            handler_registry: Optional pre-resolved ProtocolBindingRegistry from container.
-                If provided, uses this registry instead of singleton. If None, falls back
-                to singleton pattern for backwards compatibility. This approach allows
-                synchronous initialization while supporting container-based DI (container
-                resolution must happen before RuntimeHostProcess instantiation).
         """
-        # Store handler registry (pre-resolved from container or None for singleton fallback)
-        self._handler_registry: Optional[ProtocolBindingRegistry] = handler_registry
+        # Handler registry (singleton fallback - container-based DI resolved externally)
+        self._handler_registry: Optional[ProtocolBindingRegistry] = None
 
         # Create or use provided event bus
         self._event_bus: InMemoryEventBus = event_bus or InMemoryEventBus()
