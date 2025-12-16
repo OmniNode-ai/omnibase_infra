@@ -544,7 +544,7 @@ class HttpRestAdapter:
         )
 
         # Prepare request content for POST
-        request_content: Union[bytes, str] | None = None
+        request_content: bytes | str | None = None
         request_json: dict[str, object] | None = None
         request_headers = dict(headers)  # Copy to avoid mutating caller's headers
 
