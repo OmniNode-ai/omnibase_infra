@@ -30,7 +30,7 @@ T = TypeVar("T")
 
 import hvac
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -39,10 +39,11 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
     SecretResolutionError,
 )
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultAdapterConfig
+from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -119,14 +120,14 @@ class VaultAdapter:
 
     def __init__(self) -> None:
         """Initialize VaultAdapter in uninitialized state."""
-        self._client: Optional[hvac.Client] = None
-        self._config: Optional[ModelVaultAdapterConfig] = None
+        self._client: hvac.Client | None = None
+        self._config: ModelVaultAdapterConfig | None = None
         self._initialized: bool = False
         self._token_expires_at: float = 0.0
-        self._executor: Optional[ThreadPoolExecutor] = None
+        self._executor: ThreadPoolExecutor | None = None
         self._max_workers: int = 0
         self._max_queue_size: int = 0
-        self._queue_semaphore: Optional[threading.Semaphore] = None
+        self._queue_semaphore: threading.Semaphore | None = None
         # Circuit breaker state (thread-safe with RLock for reentrant access)
         self._circuit_lock: threading.RLock = threading.RLock()
         self._circuit_state: CircuitState = CircuitState.CLOSED
@@ -182,15 +183,28 @@ class VaultAdapter:
 
             # Type ignore for dict unpacking - Pydantic handles validation
             self._config = ModelVaultAdapterConfig(**config)  # type: ignore[arg-type]
+        except ValidationError as e:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.VAULT,
+                operation="initialize",
+                target_name="vault_adapter",
+                correlation_id=init_correlation_id,
+                namespace=None,  # Config not initialized yet
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid Vault configuration: {e}",
+                context=ctx,
+            ) from e
         except Exception as e:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
                 target_name="vault_adapter",
                 correlation_id=init_correlation_id,
+                namespace=None,  # Config not initialized yet
             )
             raise RuntimeHostError(
-                f"Invalid Vault configuration: {type(e).__name__}",
+                f"Configuration parsing failed: {type(e).__name__}",
                 context=ctx,
             ) from e
 
@@ -201,6 +215,7 @@ class VaultAdapter:
                 operation="initialize",
                 target_name="vault_adapter",
                 correlation_id=init_correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing 'url' in config - Vault server URL required",
@@ -213,6 +228,7 @@ class VaultAdapter:
                 operation="initialize",
                 target_name="vault_adapter",
                 correlation_id=init_correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing 'token' in config - Vault authentication token required",
@@ -236,6 +252,7 @@ class VaultAdapter:
                     operation="initialize",
                     target_name="vault_adapter",
                     correlation_id=init_correlation_id,
+                    namespace=self._config.namespace if self._config else None,
                 )
                 raise InfraAuthenticationError(
                     "Vault authentication failed - check token validity",
@@ -291,7 +308,7 @@ class VaultAdapter:
             self._max_workers = self._config.max_concurrent_operations
             self._executor = ThreadPoolExecutor(
                 max_workers=self._max_workers,
-                thread_name_prefix="vault_handler_",
+                thread_name_prefix="vault_adapter_",
             )
             # Use semaphore to limit pending operations in queue
             self._max_queue_size = (
@@ -321,6 +338,7 @@ class VaultAdapter:
                 operation="initialize",
                 target_name="vault_adapter",
                 correlation_id=init_correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise InfraAuthenticationError(
                 "Vault authentication failed - invalid token or permissions",
@@ -332,6 +350,7 @@ class VaultAdapter:
                 operation="initialize",
                 target_name="vault_adapter",
                 correlation_id=init_correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise InfraConnectionError(
                 f"Failed to connect to Vault: {type(e).__name__}",
@@ -343,6 +362,7 @@ class VaultAdapter:
                 operation="initialize",
                 target_name="vault_adapter",
                 correlation_id=init_correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 f"Failed to initialize Vault client: {type(e).__name__}",
@@ -401,6 +421,7 @@ class VaultAdapter:
                 operation="execute",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "VaultAdapter not initialized. Call initialize() first.",
@@ -414,6 +435,7 @@ class VaultAdapter:
                 operation="execute",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing or invalid 'operation' in envelope",
@@ -426,6 +448,7 @@ class VaultAdapter:
                 operation=operation,
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 f"Operation '{operation}' not supported in MVP. "
@@ -440,6 +463,7 @@ class VaultAdapter:
                 operation=operation,
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing or invalid 'payload' in envelope",
@@ -513,6 +537,10 @@ class VaultAdapter:
         Thread Safety:
             Uses RLock for thread-safe state access and modification.
 
+        Observability:
+            Circuit state transitions are logged at INFO level for monitoring.
+            Use logs to track circuit breaker behavior and adjust thresholds.
+
         Args:
             correlation_id: Correlation ID for tracing
 
@@ -555,6 +583,7 @@ class VaultAdapter:
                         operation="circuit_breaker_check",
                         target_name="vault_adapter",
                         correlation_id=correlation_id,
+                        namespace=self._config.namespace if self._config else None,
                     )
                     raise InfraUnavailableError(
                         "Circuit breaker is open - Vault temporarily unavailable",
@@ -637,6 +666,11 @@ class VaultAdapter:
     ) -> T:
         """Execute operation with exponential backoff retry logic and circuit breaker.
 
+        Thread Pool Integration:
+            All hvac operations (which are synchronous) are executed in a dedicated
+            thread pool via loop.run_in_executor(). This prevents blocking the async
+            event loop and allows concurrent Vault operations up to max_workers limit.
+
         Circuit breaker integration:
             - Checks circuit state before execution (raises if OPEN)
             - Records success/failure for circuit state management
@@ -663,7 +697,7 @@ class VaultAdapter:
         self._check_circuit_breaker(correlation_id)
 
         retry_config = self._config.retry
-        last_exception: Optional[Exception] = None
+        last_exception: Exception | None = None
 
         for attempt in range(retry_config.max_attempts):
             try:
@@ -690,6 +724,7 @@ class VaultAdapter:
                         operation=operation,
                         target_name="vault_adapter",
                         correlation_id=correlation_id,
+                        namespace=self._config.namespace if self._config else None,
                     )
                     raise InfraTimeoutError(
                         f"Vault operation timed out after {self._config.timeout_seconds}s",
@@ -705,6 +740,7 @@ class VaultAdapter:
                     operation=operation,
                     target_name="vault_adapter",
                     correlation_id=correlation_id,
+                    namespace=self._config.namespace if self._config else None,
                 )
                 raise InfraAuthenticationError(
                     "Vault operation forbidden - check token permissions",
@@ -718,6 +754,7 @@ class VaultAdapter:
                     operation=operation,
                     target_name="vault_adapter",
                     correlation_id=correlation_id,
+                    namespace=self._config.namespace if self._config else None,
                 )
                 raise SecretResolutionError(
                     "Secret path not found or invalid",
@@ -734,6 +771,7 @@ class VaultAdapter:
                         operation=operation,
                         target_name="vault_adapter",
                         correlation_id=correlation_id,
+                        namespace=self._config.namespace if self._config else None,
                     )
                     raise InfraUnavailableError(
                         "Vault server is unavailable",
@@ -750,6 +788,7 @@ class VaultAdapter:
                         operation=operation,
                         target_name="vault_adapter",
                         correlation_id=correlation_id,
+                        namespace=self._config.namespace if self._config else None,
                     )
                     raise InfraConnectionError(
                         f"Vault operation failed: {type(e).__name__}",
@@ -803,6 +842,7 @@ class VaultAdapter:
                 operation="vault.read_secret",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing or invalid 'path' in payload",
@@ -869,6 +909,7 @@ class VaultAdapter:
                 operation="vault.write_secret",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing or invalid 'path' in payload",
@@ -882,6 +923,7 @@ class VaultAdapter:
                 operation="vault.write_secret",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing or invalid 'data' in payload - must be a dict",
@@ -948,6 +990,7 @@ class VaultAdapter:
                 operation="vault.delete_secret",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing or invalid 'path' in payload",
@@ -1004,6 +1047,7 @@ class VaultAdapter:
                 operation="vault.list_secrets",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "Missing or invalid 'path' in payload",
@@ -1046,6 +1090,12 @@ class VaultAdapter:
     async def renew_token(self) -> dict[str, object]:
         """Renew Vault authentication token.
 
+        Token TTL Extraction Logic:
+            1. Extract 'auth.lease_duration' from Vault renewal response
+            2. If lease_duration is invalid or missing, use default_token_ttl
+            3. Update _token_expires_at = current_time + extracted_ttl
+            4. Log warning when falling back to default TTL
+
         Returns:
             Token renewal information including new TTL
 
@@ -1060,6 +1110,7 @@ class VaultAdapter:
                 operation="vault.renew_token",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise RuntimeHostError(
                 "VaultAdapter not initialized",
@@ -1117,6 +1168,7 @@ class VaultAdapter:
                 operation="vault.renew_token",
                 target_name="vault_adapter",
                 correlation_id=correlation_id,
+                namespace=self._config.namespace if self._config else None,
             )
             raise InfraAuthenticationError(
                 "Failed to renew Vault token",
@@ -1158,41 +1210,32 @@ class VaultAdapter:
 
         Returns:
             Health status dict with handler state information
+
+        Raises:
+            RuntimeHostError: If health check fails (errors are propagated, not swallowed)
         """
         healthy = False
         correlation_id = uuid4()
 
         if self._initialized and self._client is not None:
-            try:
+            def health_check_func() -> dict[str, object]:
+                if self._client is None:
+                    raise RuntimeError("Client not initialized")
+                result: dict[str, object] = self._client.sys.read_health_status()
+                return result
 
-                def health_check_func() -> dict[str, object]:
-                    if self._client is None:
-                        raise RuntimeError("Client not initialized")
-                    result: dict[str, object] = self._client.sys.read_health_status()
-                    return result
-
-                # Use thread pool executor with retry logic for consistency
-                health_result = await self._execute_with_retry(
-                    "vault.health_check",
-                    health_check_func,
-                    correlation_id,
-                )
-                # Type checking for healthy status extraction
-                initialized_val = health_result.get("initialized", False)
-                healthy = (
-                    initialized_val if isinstance(initialized_val, bool) else False
-                )
-
-            except Exception as e:
-                logger.warning(
-                    "Health check failed",
-                    extra={
-                        "error_type": type(e).__name__,
-                        "error": str(e),
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                healthy = False
+            # Use thread pool executor with retry logic for consistency
+            # Errors are propagated (not caught) per PR #38 feedback
+            health_result = await self._execute_with_retry(
+                "vault.health_check",
+                health_check_func,
+                correlation_id,
+            )
+            # Type checking for healthy status extraction
+            initialized_val = health_result.get("initialized", False)
+            healthy = (
+                initialized_val if isinstance(initialized_val, bool) else False
+            )
 
         return {
             "healthy": healthy,

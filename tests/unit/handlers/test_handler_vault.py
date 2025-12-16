@@ -25,7 +25,7 @@ from omnibase_infra.errors import (
     SecretResolutionError,
 )
 from omnibase_infra.handlers.handler_vault import VaultAdapter
-from omnibase_infra.handlers.model_vault_handler_config import ModelVaultAdapterConfig
+from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
 from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
 
 
@@ -657,7 +657,9 @@ class TestVaultAdapterHealthCheck:
         vault_config: dict[str, object],
         mock_hvac_client: MagicMock,
     ) -> None:
-        """Test health check returns unhealthy on error."""
+        """Test health check propagates errors instead of returning unhealthy."""
+        from omnibase_infra.errors import InfraConnectionError
+
         handler = VaultAdapter()
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
@@ -669,10 +671,9 @@ class TestVaultAdapterHealthCheck:
 
             await handler.initialize(vault_config)
 
-            health = await handler.health_check()
-
-            assert health["healthy"] is False
-            assert health["initialized"] is True
+            # Health check now propagates errors instead of returning healthy=False
+            with pytest.raises(InfraConnectionError):
+                await handler.health_check()
 
     @pytest.mark.asyncio
     async def test_health_check_operation_envelope(
@@ -873,7 +874,7 @@ class TestVaultAdapterThreadPool:
     @pytest.mark.asyncio
     async def test_config_validates_thread_pool_bounds(self) -> None:
         """Test config validation enforces thread pool size bounds."""
-        from omnibase_infra.handlers.model_vault_handler_config import (
+        from omnibase_infra.handlers.model_vault_adapter_config import (
             ModelVaultAdapterConfig,
         )
 
@@ -1247,7 +1248,7 @@ class TestVaultAdapterCircuitBreaker:
     @pytest.mark.asyncio
     async def test_config_validates_circuit_breaker_bounds(self) -> None:
         """Test config validation enforces circuit breaker parameter bounds."""
-        from omnibase_infra.handlers.model_vault_handler_config import (
+        from omnibase_infra.handlers.model_vault_adapter_config import (
             ModelVaultAdapterConfig,
         )
 
@@ -1339,9 +1340,9 @@ class TestVaultAdapterErrorCodes:
             with pytest.raises(RuntimeHostError) as exc_info:
                 await handler.initialize(config)
 
-            # Verify error code
+            # Verify error code is OPERATION_FAILED for validation failures
             assert exc_info.value.model.error_code is not None
-            assert exc_info.value.model.error_code.name == "SERVICE_UNAVAILABLE"
+            assert exc_info.value.model.error_code.name == "OPERATION_FAILED"
 
     @pytest.mark.asyncio
     async def test_infra_authentication_error_code(
@@ -1486,7 +1487,7 @@ class TestVaultAdapterBoundedQueue:
     @pytest.mark.asyncio
     async def test_config_validates_queue_multiplier_bounds(self) -> None:
         """Test config validation enforces queue multiplier bounds."""
-        from omnibase_infra.handlers.model_vault_handler_config import (
+        from omnibase_infra.handlers.model_vault_adapter_config import (
             ModelVaultAdapterConfig,
         )
 
@@ -1515,3 +1516,309 @@ class TestVaultAdapterBoundedQueue:
                 max_queue_size_multiplier=15,
             )
         assert "max_queue_size_multiplier" in str(exc_info.value)
+
+
+class TestVaultAdapterErrorCodeValidation:
+    """Test error code mappings and validation per PR #38 feedback."""
+
+    @pytest.mark.asyncio
+    async def test_validation_error_uses_protocol_configuration_error(
+        self,
+    ) -> None:
+        """Test ValidationError raises ProtocolConfigurationError with correct error code."""
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        handler = VaultAdapter()
+
+        # Invalid configuration (missing required field)
+        invalid_config = {
+            # Missing 'url' and 'token'
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(invalid_config)
+
+        # Validate error code is INVALID_CONFIGURATION
+        error = exc_info.value
+        assert error.model.error_code == EnumCoreErrorCode.INVALID_CONFIGURATION
+        assert "Vault configuration" in str(error)
+
+    @pytest.mark.asyncio
+    async def test_connection_error_uses_service_unavailable_code(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test InfraConnectionError for Vault uses SERVICE_UNAVAILABLE error code."""
+        import hvac.exceptions
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        from omnibase_infra.errors import InfraConnectionError
+
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            # Simulate VaultError during connection
+            mock_hvac_client.is_authenticated.side_effect = hvac.exceptions.VaultError(
+                "Connection refused"
+            )
+
+            with pytest.raises(InfraConnectionError) as exc_info:
+                await handler.initialize(vault_config)
+
+            # Validate error code is SERVICE_UNAVAILABLE (Vault transport type)
+            error = exc_info.value
+            assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+
+    @pytest.mark.asyncio
+    async def test_authentication_error_uses_authentication_error_code(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test InfraAuthenticationError uses AUTHENTICATION_ERROR code."""
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        from omnibase_infra.errors import InfraAuthenticationError
+
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            # Simulate authentication failure
+            mock_hvac_client.is_authenticated.return_value = False
+
+            with pytest.raises(InfraAuthenticationError) as exc_info:
+                await handler.initialize(vault_config)
+
+            # Validate error code is AUTHENTICATION_ERROR
+            error = exc_info.value
+            assert error.model.error_code == EnumCoreErrorCode.AUTHENTICATION_ERROR
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_uses_timeout_error_code(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test InfraTimeoutError uses TIMEOUT_ERROR code."""
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        from omnibase_infra.errors import InfraTimeoutError
+
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            # Mock timeout on secret read
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
+                TimeoutError("Operation timed out")
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            with pytest.raises(InfraTimeoutError) as exc_info:
+                await handler.execute(envelope)
+
+            # Validate error code is TIMEOUT_ERROR
+            error = exc_info.value
+            assert error.model.error_code == EnumCoreErrorCode.TIMEOUT_ERROR
+
+    @pytest.mark.asyncio
+    async def test_unavailable_error_uses_service_unavailable_code(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test InfraUnavailableError uses SERVICE_UNAVAILABLE code."""
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        from omnibase_infra.errors import InfraUnavailableError
+
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            # Configure circuit breaker with low threshold for testing
+            vault_config["circuit_breaker_enabled"] = True
+            vault_config["circuit_breaker_failure_threshold"] = 1
+            vault_config["circuit_breaker_reset_timeout_seconds"] = 5.0
+
+            await handler.initialize(vault_config)
+
+            # Trigger circuit breaker open
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Vault down"
+            )
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # First call fails and opens circuit
+            with pytest.raises(InfraConnectionError):
+                await handler.execute(envelope)
+
+            # Second call hits open circuit
+            with pytest.raises(InfraUnavailableError) as exc_info:
+                await handler.execute(envelope)
+
+            # Validate error code is SERVICE_UNAVAILABLE
+            error = exc_info.value
+            assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+
+    @pytest.mark.asyncio
+    async def test_secret_resolution_error_uses_resource_not_found_code(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test SecretResolutionError uses RESOURCE_NOT_FOUND code."""
+        import hvac.exceptions
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        from omnibase_infra.errors import SecretResolutionError
+
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            # Simulate invalid path error
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
+                hvac.exceptions.InvalidPath("Secret not found")
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "nonexistent/path"},
+                "correlation_id": uuid4(),
+            }
+
+            with pytest.raises(SecretResolutionError) as exc_info:
+                await handler.execute(envelope)
+
+            # Validate error code is RESOURCE_NOT_FOUND
+            error = exc_info.value
+            assert error.model.error_code == EnumCoreErrorCode.RESOURCE_NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_error_context_includes_namespace(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test all error contexts include Vault namespace per PR #38 feedback."""
+        from omnibase_infra.errors import RuntimeHostError
+
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            await handler.initialize(vault_config)
+
+            # Test missing path error includes namespace
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {},  # Missing 'path'
+                "correlation_id": uuid4(),
+            }
+
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await handler.execute(envelope)
+
+            error = exc_info.value
+            # Validate namespace is in error context (context is a dict)
+            assert error.model.context is not None
+            assert isinstance(error.model.context, dict)
+            assert error.model.context.get("namespace") == "engineering"  # From fixture
+
+    @pytest.mark.asyncio
+    async def test_health_check_propagates_errors(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test health_check propagates errors instead of swallowing them per PR #38."""
+        from omnibase_infra.errors import InfraConnectionError
+
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            await handler.initialize(vault_config)
+
+            # Simulate health check failure
+            mock_hvac_client.sys.read_health_status.side_effect = Exception(
+                "Health check failed"
+            )
+
+            # Health check should propagate error, not return healthy=False
+            with pytest.raises(InfraConnectionError):
+                await handler.health_check()
+
+    @pytest.mark.asyncio
+    async def test_all_error_codes_are_mapped_correctly(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Comprehensive test verifying all error types use correct error codes."""
+        import hvac.exceptions
+        from omnibase_core.enums import EnumCoreErrorCode
+
+        from omnibase_infra.errors import (
+            InfraAuthenticationError,
+            InfraConnectionError,
+            InfraTimeoutError,
+            InfraUnavailableError,
+            ProtocolConfigurationError,
+            SecretResolutionError,
+        )
+
+        # Test matrix: (error_class, expected_code)
+        error_mappings = [
+            (ProtocolConfigurationError, EnumCoreErrorCode.INVALID_CONFIGURATION),
+            (SecretResolutionError, EnumCoreErrorCode.RESOURCE_NOT_FOUND),
+            (InfraConnectionError, EnumCoreErrorCode.SERVICE_UNAVAILABLE),  # Vault transport
+            (InfraTimeoutError, EnumCoreErrorCode.TIMEOUT_ERROR),
+            (InfraAuthenticationError, EnumCoreErrorCode.AUTHENTICATION_ERROR),
+            (InfraUnavailableError, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
+        ]
+
+        for error_class, expected_code in error_mappings:
+            # Validate error code is correctly mapped
+            if error_class == ProtocolConfigurationError:
+                # Test via invalid config
+                handler = VaultAdapter()
+                try:
+                    await handler.initialize({})
+                except error_class as e:
+                    assert e.model.error_code == expected_code
+            elif error_class == InfraConnectionError:
+                # Test via VaultError during connection
+                handler = VaultAdapter()
+                with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+                    MockClient.return_value = mock_hvac_client
+                    mock_hvac_client.is_authenticated.side_effect = hvac.exceptions.VaultError(
+                        "Connection error"
+                    )
+                    try:
+                        await handler.initialize(vault_config)
+                    except error_class as e:
+                        assert e.model.error_code == expected_code

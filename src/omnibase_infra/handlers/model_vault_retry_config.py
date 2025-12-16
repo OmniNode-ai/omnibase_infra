@@ -41,25 +41,25 @@ class ModelVaultRetryConfig(BaseModel):
         default=3,
         ge=1,
         le=10,
-        description="Maximum number of retry attempts",
+        description="Maximum retry attempts for failed operations",
     )
     initial_backoff_seconds: float = Field(
         default=0.1,
         ge=0.01,
         le=10.0,
-        description="Initial backoff delay in seconds",
+        description="Initial delay before first retry",
     )
     max_backoff_seconds: float = Field(
         default=10.0,
         ge=1.0,
         le=60.0,
-        description="Maximum backoff delay in seconds",
+        description="Maximum delay cap for exponential backoff",
     )
     exponential_base: float = Field(
         default=2.0,
         ge=1.5,
         le=4.0,
-        description="Exponential backoff multiplier",
+        description="Base multiplier for exponential backoff calculation",
     )
 
 

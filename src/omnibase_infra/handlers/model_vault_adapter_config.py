@@ -65,64 +65,64 @@ class ModelVaultAdapterConfig(BaseModel):
     )
     token: SecretStr | None = Field(
         default=None,
-        description="Vault authentication token (use SecretStr for security)",
+        description="Authentication token protected from logging",
     )
     namespace: str | None = Field(
         default=None,
-        description="Vault namespace for Vault Enterprise",
+        description="Vault namespace for multi-tenant isolation",
     )
     timeout_seconds: float = Field(
         default=30.0,
         ge=1.0,
         le=300.0,
-        description="Operation timeout in seconds",
+        description="Maximum time allowed per operation",
     )
     verify_ssl: bool = Field(
         default=True,
-        description="Whether to verify SSL certificates",
+        description="Enable SSL certificate verification",
     )
     token_renewal_threshold_seconds: float = Field(
         default=300.0,
         ge=0.0,
-        description="Token renewal threshold in seconds (renew when TTL below this)",
+        description="Trigger renewal when remaining TTL falls below this value",
     )
     default_token_ttl: int = Field(
         default=3600,
         ge=300,
         le=86400,
-        description="Default token TTL in seconds when not provided by Vault (minimum 300s)",
+        description="Fallback TTL when Vault response does not provide TTL",
     )
     retry: ModelVaultRetryConfig = Field(
         default_factory=ModelVaultRetryConfig,
-        description="Retry configuration with exponential backoff",
+        description="Retry behavior for failed operations",
     )
     max_concurrent_operations: int = Field(
         default=10,
         ge=1,
         le=100,
-        description="Maximum concurrent Vault operations (thread pool size)",
+        description="Thread pool size for concurrent operations",
     )
     max_queue_size_multiplier: int = Field(
         default=3,
         ge=1,
         le=10,
-        description="Queue size multiplier (queue_size = max_workers * multiplier)",
+        description="Multiplier to calculate queue capacity from thread pool size",
     )
     circuit_breaker_enabled: bool = Field(
         default=True,
-        description="Enable circuit breaker pattern for error recovery",
+        description="Enable automatic failure detection and recovery",
     )
     circuit_breaker_failure_threshold: int = Field(
         default=5,
         ge=1,
         le=20,
-        description="Number of consecutive failures before opening circuit",
+        description="Consecutive failures required to open circuit",
     )
     circuit_breaker_reset_timeout_seconds: float = Field(
         default=30.0,
         ge=1.0,
         le=300.0,
-        description="Seconds to wait before attempting to close opened circuit",
+        description="Wait time before testing recovery after circuit opens",
     )
 
 

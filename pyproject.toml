@@ -187,7 +187,6 @@ ignore = [
     "SIM108",    # If else block instead of if exp (technical debt)
     "F401",      # Unused import (technical debt)
     "PLR1714",   # Repeated equality comparison (technical debt)
-    "UP007",     # Non pep604 annotation (technical debt)
     "RUF012",    # Mutable class default (technical debt)
     "TRY401",    # Verbose log message (technical debt)
     "B017",      # Assert raises exception (technical debt)

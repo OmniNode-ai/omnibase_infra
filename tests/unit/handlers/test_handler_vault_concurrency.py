@@ -287,14 +287,20 @@ class TestVaultAdapterConcurrency:
                     return None
 
             # Start operations
-            tasks = [execute_request(i) for i in range(10)]
+            tasks = [asyncio.create_task(execute_request(i)) for i in range(10)]
 
-            # Trigger shutdown mid-execution
-            await asyncio.sleep(0.01)  # Let some operations start
+            # Trigger shutdown mid-execution - use asyncio.wait with timeout for proper synchronization
+            done, pending = await asyncio.wait(tasks, timeout=0.01)
+
+            # Shutdown handler while some tasks may still be running
             await handler.shutdown()
 
-            # Gather results (some may fail due to shutdown)
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # Wait for all remaining tasks to complete (some may fail due to shutdown)
+            if pending:
+                await asyncio.wait(pending)
+
+            # Gather all results
+            results = [task.result() if not task.exception() else task.exception() for task in tasks]
 
             # Verify handler is shut down
             assert handler._initialized is False
