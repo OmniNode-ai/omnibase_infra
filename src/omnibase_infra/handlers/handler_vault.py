@@ -568,8 +568,10 @@ class VaultAdapter:
                     logger.info(
                         "Circuit breaker transitioning to HALF_OPEN state",
                         extra={
+                            "circuit_state": self._circuit_state.value,
                             "time_since_failure_seconds": time_since_failure,
                             "correlation_id": str(correlation_id),
+                            "namespace": self._config.namespace,
                         },
                     )
                 else:
@@ -592,7 +594,7 @@ class VaultAdapter:
                         retry_after_seconds=retry_after,
                     )
 
-    def _record_circuit_success(self) -> None:
+    def _record_circuit_success(self, correlation_id: Optional[UUID] = None) -> None:
         """Record successful operation for circuit breaker.
 
         On success:
@@ -602,6 +604,9 @@ class VaultAdapter:
 
         Thread Safety:
             Uses RLock for thread-safe state access and modification.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing
         """
         if self._config is None or not self._config.circuit_breaker_enabled:
             return
@@ -611,12 +616,22 @@ class VaultAdapter:
                 # Service recovered, close circuit
                 self._circuit_state = CircuitState.CLOSED
                 self._circuit_failure_count = 0
-                logger.info("Circuit breaker closed - service recovered")
+                logger.info(
+                    "Circuit breaker closed - service recovered",
+                    extra={
+                        "circuit_state": self._circuit_state.value,
+                        "failure_count": self._circuit_failure_count,
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
+                        "namespace": self._config.namespace,
+                    },
+                )
 
             # Reset failure count on success
             self._circuit_failure_count = 0
 
-    def _record_circuit_failure(self) -> None:
+    def _record_circuit_failure(self, correlation_id: Optional[UUID] = None) -> None:
         """Record failed operation for circuit breaker.
 
         On failure:
@@ -626,6 +641,9 @@ class VaultAdapter:
 
         Thread Safety:
             Uses RLock for thread-safe state access and modification.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing
         """
         if self._config is None or not self._config.circuit_breaker_enabled:
             return
@@ -640,7 +658,13 @@ class VaultAdapter:
                 logger.warning(
                     "Circuit breaker reopened - service still failing",
                     extra={
+                        "circuit_state": self._circuit_state.value,
                         "failure_count": self._circuit_failure_count,
+                        "threshold": self._config.circuit_breaker_failure_threshold,
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
+                        "namespace": self._config.namespace,
                     },
                 )
             elif self._circuit_state == CircuitState.CLOSED:
@@ -653,8 +677,13 @@ class VaultAdapter:
                     logger.warning(
                         "Circuit breaker opened due to consecutive failures",
                         extra={
+                            "circuit_state": self._circuit_state.value,
                             "failure_count": self._circuit_failure_count,
                             "threshold": self._config.circuit_breaker_failure_threshold,
+                            "correlation_id": str(correlation_id)
+                            if correlation_id
+                            else None,
+                            "namespace": self._config.namespace,
                         },
                     )
 
@@ -710,7 +739,7 @@ class VaultAdapter:
                 )
 
                 # Record success for circuit breaker
-                self._record_circuit_success()
+                self._record_circuit_success(correlation_id)
 
                 return result
 
@@ -718,7 +747,7 @@ class VaultAdapter:
                 last_exception = e
                 # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
-                    self._record_circuit_failure()
+                    self._record_circuit_failure(correlation_id)
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
@@ -734,7 +763,7 @@ class VaultAdapter:
 
             except hvac.exceptions.Forbidden as e:
                 # Don't retry authentication failures, record for circuit breaker
-                self._record_circuit_failure()
+                self._record_circuit_failure(correlation_id)
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation=operation,
@@ -765,7 +794,7 @@ class VaultAdapter:
                 last_exception = e
                 # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
-                    self._record_circuit_failure()
+                    self._record_circuit_failure(correlation_id)
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
@@ -782,7 +811,7 @@ class VaultAdapter:
                 last_exception = e
                 # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
-                    self._record_circuit_failure()
+                    self._record_circuit_failure(correlation_id)
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
@@ -1150,6 +1179,36 @@ class VaultAdapter:
                     },
                 )
 
+            # After successful renewal, query actual TTL from Vault to handle
+            # server-side TTL updates or policies that modify actual TTL
+            loop = asyncio.get_running_loop()
+            try:
+                token_info = await loop.run_in_executor(
+                    self._executor,
+                    self._client.auth.token.lookup_self,
+                )
+                token_data = token_info.get("data", {})
+                if isinstance(token_data, dict):
+                    ttl_seconds = token_data.get("ttl")
+                    if isinstance(ttl_seconds, int) and ttl_seconds > 0:
+                        token_ttl = ttl_seconds
+                        logger.info(
+                            "Token TTL refreshed from Vault lookup",
+                            extra={
+                                "ttl_seconds": token_ttl,
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+            except Exception as e:
+                # Fallback to lease_duration from renewal response (already set above)
+                logger.debug(
+                    "Token lookup after renewal failed, using lease_duration",
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
             self._token_expires_at = time.time() + token_ttl
 
             logger.info(
@@ -1203,19 +1262,47 @@ class VaultAdapter:
         }
 
     async def health_check(self) -> dict[str, object]:
-        """Return handler health status.
+        """Return handler health status with operational metrics.
 
         Uses thread pool executor and retry logic for consistency with other operations.
         Includes circuit breaker protection and exponential backoff on transient failures.
 
         Returns:
-            Health status dict with handler state information
+            Health status dict with handler state information including:
+            - Basic health status (healthy, initialized, handler_type, timeout_seconds)
+            - Token TTL remaining (sanitized - no actual token value)
+            - Circuit breaker state and failure count
+            - Thread pool utilization metrics
 
         Raises:
             RuntimeHostError: If health check fails (errors are propagated, not swallowed)
         """
         healthy = False
         correlation_id = uuid4()
+
+        # Calculate operational metrics (safe even if not initialized)
+        token_ttl_remaining: Optional[int] = None
+        circuit_state: Optional[str] = None
+        circuit_failure_count: int = 0
+        thread_pool_active: int = 0
+        thread_pool_max: int = 0
+
+        if self._initialized and self._config is not None:
+            # Token TTL remaining (sanitized - never expose actual token)
+            current_time = time.time()
+            ttl_remaining = self._token_expires_at - current_time
+            token_ttl_remaining = max(0, int(ttl_remaining))
+
+            # Circuit breaker state (thread-safe access)
+            with self._circuit_lock:
+                circuit_state = self._circuit_state.value
+                circuit_failure_count = self._circuit_failure_count
+
+            # Thread pool metrics (safely access internal state)
+            thread_pool_max = self._max_workers
+            if self._executor is not None:
+                # ThreadPoolExecutor tracks active threads in _threads set
+                thread_pool_active = len(self._executor._threads)
 
         if self._initialized and self._client is not None:
 
@@ -1241,6 +1328,12 @@ class VaultAdapter:
             "initialized": self._initialized,
             "handler_type": self.handler_type.value,
             "timeout_seconds": self._config.timeout_seconds if self._config else 30.0,
+            # Operational metrics for visibility
+            "token_ttl_remaining_seconds": token_ttl_remaining,
+            "circuit_breaker_state": circuit_state,
+            "circuit_breaker_failure_count": circuit_failure_count,
+            "thread_pool_active_workers": thread_pool_active,
+            "thread_pool_max_workers": thread_pool_max,
         }
 
     async def _health_check_operation(
