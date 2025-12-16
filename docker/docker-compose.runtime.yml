@@ -30,9 +30,7 @@
 # Network:
 #   Uses internal omnibase-infra-network (created automatically by this compose file).
 #   For external infrastructure services, use extra_hosts with REMOTE_HOST env var.
-
 name: omnibase-infra-runtime
-
 # ==========================================================================
 # Shared Configuration Templates (YAML Anchors)
 # ==========================================================================
@@ -63,14 +61,12 @@ x-runtime-base: &runtime-base
       reservations:
         cpus: '0.25'
         memory: 128M
-
 # Common environment variables for all runtime services
 x-runtime-env: &runtime-env
   # -------------------------------------------------------------------------
   # Kafka/Redpanda Event Bus Configuration
   # -------------------------------------------------------------------------
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
-
   # -------------------------------------------------------------------------
   # PostgreSQL Database Configuration
   # SECURITY: POSTGRES_PASSWORD is required - no default for fail-fast behavior
@@ -80,21 +76,18 @@ x-runtime-env: &runtime-env
   POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-
   # -------------------------------------------------------------------------
   # Consul Service Discovery Configuration
   # -------------------------------------------------------------------------
   CONSUL_HOST: ${CONSUL_HOST:-omninode-bridge-consul}
   CONSUL_PORT: ${CONSUL_PORT:-8500}
   CONSUL_SCHEME: ${CONSUL_SCHEME:-http}
-
   # -------------------------------------------------------------------------
   # Vault Secret Management Configuration
   # SECURITY: VAULT_TOKEN is required - no default for fail-fast behavior
   # -------------------------------------------------------------------------
   VAULT_ADDR: ${VAULT_ADDR:-http://omninode-bridge-vault:8200}
   VAULT_TOKEN: ${VAULT_TOKEN}
-
   # -------------------------------------------------------------------------
   # Redis/Valkey Cache Configuration
   # SECURITY: REDIS_PASSWORD is required - no default for fail-fast behavior
@@ -102,14 +95,12 @@ x-runtime-env: &runtime-env
   REDIS_HOST: ${REDIS_HOST:-omninode-bridge-redis}
   REDIS_PORT: ${REDIS_PORT:-6379}
   REDIS_PASSWORD: ${REDIS_PASSWORD}
-
   # -------------------------------------------------------------------------
   # ONEX Runtime Configuration
   # -------------------------------------------------------------------------
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
   CONTRACTS_DIR: /app/contracts
-
   # -------------------------------------------------------------------------
   # OpenTelemetry Observability Configuration
   # -------------------------------------------------------------------------
@@ -117,7 +108,6 @@ x-runtime-env: &runtime-env
   OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omnibase-infra-runtime}
   OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
   OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-otlp}
-
 # ==========================================================================
 # Services
 # ==========================================================================
@@ -191,7 +181,6 @@ services:
       - "com.omninode.service=runtime-main"
       - "com.omninode.profile=main"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
-
   # ==========================================================================
   # Effects Runtime Service - External interaction handlers
   # ==========================================================================
@@ -232,7 +221,6 @@ services:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.profile=effects"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
-
   # ==========================================================================
   # Worker Runtime Service - Scalable compute workers
   # ==========================================================================
@@ -277,7 +265,6 @@ services:
       - "com.omninode.service=runtime-worker"
       - "com.omninode.profile=workers"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
-
 # ==========================================================================
 # Secrets Configuration
 # ==========================================================================
@@ -286,7 +273,6 @@ services:
 secrets:
   github_token:
     environment: "GITHUB_TOKEN"
-
 # ==========================================================================
 # Network Configuration
 # ==========================================================================
@@ -296,7 +282,6 @@ networks:
   omnibase-infra-network:
     name: omnibase-infra-network
     driver: bridge
-
 # ==========================================================================
 # Volume Configuration
 # ==========================================================================
@@ -307,13 +292,11 @@ volumes:
     name: omnibase-infra-runtime-logs
   runtime_data:
     name: omnibase-infra-runtime-data
-
   # Effects runtime logs and data
   effects_logs:
     name: omnibase-infra-effects-logs
   effects_data:
     name: omnibase-infra-effects-data
-
   # Worker runtime logs (shared across worker instances)
   worker_logs:
     name: omnibase-infra-worker-logs

@@ -430,7 +430,7 @@ def get_known_event_bus_kinds() -> list[str]:
 def wire_custom_handler(
     handler_type: str,
     handler_cls: type[ProtocolHandler],
-    registry: Optional[ProtocolBindingRegistry] = None,
+    registry: ProtocolBindingRegistry | None = None,
 ) -> None:
     """Register a custom handler class with the registry.
 
@@ -464,7 +464,7 @@ def wire_custom_handler(
 def wire_custom_event_bus(
     bus_kind: str,
     bus_cls: type[ProtocolEventBus],
-    registry: Optional[EventBusBindingRegistry] = None,
+    registry: EventBusBindingRegistry | None = None,
 ) -> None:
     """Register a custom event bus class with the registry.
 

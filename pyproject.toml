@@ -204,7 +204,6 @@ ignore = [
     "PLR1722",   # Sys exit alias (technical debt)
     "ISC001",    # Implicit string concatenation (conflicts with formatter)
     "PLC0415",   # Import not at top-level (intentional lazy imports in tests)
-    "UP045",     # Optional[X] vs X | None (style preference, keep Optional for clarity)
     "TC006",     # Add quotes to type expression in cast (style preference)
 ]
 

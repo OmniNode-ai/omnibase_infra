@@ -223,6 +223,9 @@ class MixinAsyncCircuitBreaker:
             service_name: Service identifier for error context (e.g., "kafka.dev")
             transport_type: Transport type for error context (default: HTTP)
 
+        Raises:
+            ValueError: If threshold < 1 or reset_timeout < 0
+
         Example:
             ```python
             class MyService(MixinAsyncCircuitBreaker):
@@ -235,6 +238,14 @@ class MixinAsyncCircuitBreaker:
                     )
             ```
         """
+        # Validate parameters
+        if threshold < 1:
+            raise ValueError(f"Circuit breaker threshold must be >= 1, got {threshold}")
+        if reset_timeout < 0:
+            raise ValueError(
+                f"Circuit breaker reset_timeout must be >= 0, got {reset_timeout}"
+            )
+
         # State variables
         self._circuit_breaker_failures = 0
         self._circuit_breaker_open = False
@@ -259,7 +270,7 @@ class MixinAsyncCircuitBreaker:
         )
 
     async def _check_circuit_breaker(
-        self, operation: str, correlation_id: Optional[UUID] = None
+        self, operation: str, correlation_id: UUID | None = None
     ) -> None:
         """Check if circuit breaker allows operation.
 
@@ -312,13 +323,24 @@ class MixinAsyncCircuitBreaker:
                 return result
             ```
         """
+        # Verify lock is held (debug assertion)
+        if not self._circuit_breaker_lock.locked():
+            logger.error(
+                "Circuit breaker lock not held during state check",
+                extra={
+                    "service": self.service_name,
+                    "operation": operation,
+                },
+            )
+            # Still proceed but log the violation for debugging
+
         current_time = time.time()
 
-        # Check if circuit is open
+        # Check if circuit is open (atomic read protected by caller's lock)
         if self._circuit_breaker_open:
             # Check if reset timeout has passed
             if current_time >= self._circuit_breaker_open_until:
-                # Transition to HALF_OPEN
+                # Transition to HALF_OPEN (atomic write protected by caller's lock)
                 self._circuit_breaker_open = False
                 self._circuit_breaker_failures = 0
                 logger.info(
@@ -345,7 +367,7 @@ class MixinAsyncCircuitBreaker:
                 )
 
     async def _record_circuit_failure(
-        self, operation: str, correlation_id: Optional[UUID] = None
+        self, operation: str, correlation_id: UUID | None = None
     ) -> None:
         """Record a circuit breaker failure and potentially open the circuit.
 
@@ -400,10 +422,23 @@ class MixinAsyncCircuitBreaker:
                     raise
             ```
         """
+        # Verify lock is held (debug assertion)
+        if not self._circuit_breaker_lock.locked():
+            logger.error(
+                "Circuit breaker lock not held during failure recording",
+                extra={
+                    "service": self.service_name,
+                    "operation": operation,
+                },
+            )
+            # Still proceed but log the violation for debugging
+
+        # Increment failure counter (atomic write protected by caller's lock)
         self._circuit_breaker_failures += 1
 
         # Check if threshold reached
         if self._circuit_breaker_failures >= self.circuit_breaker_threshold:
+            # Transition to OPEN state (atomic write protected by caller's lock)
             self._circuit_breaker_open = True
             self._circuit_breaker_open_until = (
                 time.time() + self.circuit_breaker_reset_timeout
@@ -471,6 +506,16 @@ class MixinAsyncCircuitBreaker:
                     raise
             ```
         """
+        # Verify lock is held (debug assertion)
+        if not self._circuit_breaker_lock.locked():
+            logger.error(
+                "Circuit breaker lock not held during reset",
+                extra={
+                    "service": self.service_name,
+                },
+            )
+            # Still proceed but log the violation for debugging
+
         # Log state transition if circuit was open or had failures
         if self._circuit_breaker_open or self._circuit_breaker_failures > 0:
             previous_state = "open" if self._circuit_breaker_open else "closed"
@@ -483,7 +528,7 @@ class MixinAsyncCircuitBreaker:
                 },
             )
 
-        # Reset state
+        # Reset state (atomic write protected by caller's lock)
         self._circuit_breaker_open = False
         self._circuit_breaker_failures = 0
         self._circuit_breaker_open_until = 0.0

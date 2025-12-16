@@ -99,15 +99,15 @@ class ModelRuntimeConfig(BaseModel):
     )
 
     # Contract metadata (optional, may not be present in minimal configs)
-    contract_version: Optional[str] = Field(
+    contract_version: str | None = Field(
         default=None,
         description="Version of the configuration contract",
     )
-    name: Optional[str] = Field(
+    name: str | None = Field(
         default=None,
         description="Configuration name identifier",
     )
-    description: Optional[str] = Field(
+    description: str | None = Field(
         default=None,
         description="Human-readable description",
     )

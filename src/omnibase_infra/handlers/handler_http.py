@@ -74,7 +74,7 @@ class HttpRestAdapter:
 
     def __init__(self) -> None:
         """Initialize HttpRestAdapter in uninitialized state."""
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._max_request_size: int = _DEFAULT_MAX_REQUEST_SIZE
         self._max_response_size: int = _DEFAULT_MAX_RESPONSE_SIZE
@@ -297,7 +297,7 @@ class HttpRestAdapter:
 
     def _validate_request_size(
         self, body: object, correlation_id: UUID
-    ) -> Optional[bytes]:
+    ) -> bytes | None:
         """Validate request body size and cache serialized bytes for dict bodies.
 
         For dict bodies, this method serializes the body once and returns the
@@ -319,7 +319,7 @@ class HttpRestAdapter:
             return None
 
         size: int = 0
-        serialized_bytes: Optional[bytes] = None
+        serialized_bytes: bytes | None = None
 
         if isinstance(body, str):
             size = len(body.encode("utf-8"))
@@ -508,7 +508,7 @@ class HttpRestAdapter:
         headers: dict[str, str],
         body: object,
         correlation_id: UUID,
-        pre_serialized: Optional[bytes] = None,
+        pre_serialized: bytes | None = None,
     ) -> dict[str, object]:
         """Execute HTTP request with pre-read response size validation.
 
@@ -544,8 +544,8 @@ class HttpRestAdapter:
         )
 
         # Prepare request content for POST
-        request_content: Optional[Union[bytes, str]] = None
-        request_json: Optional[dict[str, object]] = None
+        request_content: Union[bytes, str] | None = None
+        request_json: dict[str, object] | None = None
         request_headers = dict(headers)  # Copy to avoid mutating caller's headers
 
         if method == "POST" and body is not None:

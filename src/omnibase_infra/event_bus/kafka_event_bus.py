@@ -11,6 +11,7 @@ Features:
     - Async publish/subscribe with callback handlers
     - Circuit breaker for connection failure protection
     - Retry with exponential backoff on publish failures
+    - Dead letter queue (DLQ) for failed message processing
     - Graceful degradation when Kafka is unavailable
     - Support for environment/group-based routing
     - Proper producer/consumer lifecycle management
@@ -86,6 +87,18 @@ Environment Variables:
                      All other values = False
             Example: "true"
 
+    Dead Letter Queue Settings:
+        KAFKA_DEAD_LETTER_TOPIC: Topic name for failed messages
+            Default: None (DLQ disabled)
+            Example: "dlq-events"
+
+            When configured, messages that fail processing will be published
+            to this topic with comprehensive failure metadata including:
+            - Original topic and message
+            - Failure reason and timestamp
+            - Correlation ID for tracking
+            - Retry count and error type
+
 Usage:
     ```python
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
@@ -122,11 +135,10 @@ import asyncio
 import json
 import logging
 import random
-import time
+import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from enum import Enum
 from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
@@ -154,13 +166,15 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
     Implements ProtocolEventBus interface using Apache Kafka (via aiokafka)
     with resilience patterns including circuit breaker, retry with exponential
-    backoff, and graceful degradation when Kafka is unavailable.
+    backoff, dead letter queue support, and graceful degradation when Kafka
+    is unavailable.
 
     Features:
         - Topic-based message routing with Kafka partitioning
         - Multiple subscribers per topic with callback-based delivery
         - Circuit breaker for connection failure protection
         - Retry with exponential backoff on publish failures
+        - Dead letter queue (DLQ) for failed message processing
         - Environment and group-based message routing
         - Proper async producer/consumer lifecycle management
 
@@ -205,16 +219,16 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
     def __init__(
         self,
-        config: Optional[ModelKafkaEventBusConfig] = None,
+        config: ModelKafkaEventBusConfig | None = None,
         # Backwards compatibility parameters (override config if provided)
-        bootstrap_servers: Optional[str] = None,
-        environment: Optional[str] = None,
-        group: Optional[str] = None,
-        timeout_seconds: Optional[int] = None,
-        max_retry_attempts: Optional[int] = None,
-        retry_backoff_base: Optional[float] = None,
-        circuit_breaker_threshold: Optional[int] = None,
-        circuit_breaker_reset_timeout: Optional[float] = None,
+        bootstrap_servers: str | None = None,
+        environment: str | None = None,
+        group: str | None = None,
+        timeout_seconds: int | None = None,
+        max_retry_attempts: int | None = None,
+        retry_backoff_base: float | None = None,
+        circuit_breaker_threshold: int | None = None,
+        circuit_breaker_reset_timeout: float | None = None,
     ) -> None:
         """Initialize the Kafka event bus.
 
@@ -331,7 +345,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         )
 
         # Kafka producer and consumer
-        self._producer: Optional[AIOKafkaProducer] = None
+        self._producer: AIOKafkaProducer | None = None
         self._consumers: dict[str, AIOKafkaConsumer] = {}
 
         # Subscriber registry: topic -> list of (group_id, subscription_id, callback) tuples
@@ -697,9 +711,9 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def publish(
         self,
         topic: str,
-        key: Optional[bytes],
+        key: bytes | None,
         value: bytes,
-        headers: Optional[ModelEventHeaders] = None,
+        headers: ModelEventHeaders | None = None,
     ) -> None:
         """Publish message to topic.
 
@@ -738,6 +752,9 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 event_type=topic,
             )
 
+        # Validate topic name
+        self._validate_topic_name(topic, headers.correlation_id)
+
         # Check circuit breaker - propagate correlation_id from headers (thread-safe)
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
@@ -753,7 +770,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def _publish_with_retry(
         self,
         topic: str,
-        key: Optional[bytes],
+        key: bytes | None,
         value: bytes,
         kafka_headers: list[tuple[str, bytes]],
         headers: ModelEventHeaders,
@@ -770,7 +787,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         Raises:
             InfraConnectionError: If publish fails after all retries
         """
-        last_exception: Optional[Exception] = None
+        last_exception: Exception | None = None
 
         for attempt in range(self._max_retry_attempts + 1):
             try:
@@ -962,6 +979,10 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             ```
         """
         subscription_id = str(uuid4())
+        correlation_id = uuid4()
+
+        # Validate topic name
+        self._validate_topic_name(topic, correlation_id)
 
         async with self._lock:
             # Add to subscriber registry
@@ -1012,12 +1033,23 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
     async def _start_consumer_for_topic(self, topic: str, group_id: str) -> None:
         """Start a Kafka consumer for a specific topic.
 
+        This method creates and starts a Kafka consumer for the specified topic,
+        then launches a background task to consume messages. All startup failures
+        are logged and propagated to the caller.
+
         Args:
             topic: Topic to consume from
             group_id: Consumer group ID
+
+        Raises:
+            InfraTimeoutError: If consumer startup times out after timeout_seconds
+            InfraConnectionError: If consumer fails to connect to Kafka brokers
         """
         if topic in self._consumers:
             return
+
+        correlation_id = uuid4()
+        sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
@@ -1036,25 +1068,44 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
             self._consumers[topic] = consumer
 
-            # Start background task to consume messages
-            task = asyncio.create_task(self._consume_loop(topic))
+            # Start background task to consume messages with correlation tracking
+            task = asyncio.create_task(self._consume_loop(topic, correlation_id))
             self._consumer_tasks[topic] = task
 
-            logger.debug(f"Started consumer for topic {topic}")
+            logger.info(
+                f"Started consumer for topic {topic}",
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "correlation_id": str(correlation_id),
+                    "servers": sanitized_servers,
+                },
+            )
 
         except TimeoutError as e:
-            # Propagate timeout error to surface startup failures
+            # Clean up consumer on failure to prevent resource leak
+            try:
+                await consumer.stop()
+            except Exception:
+                pass  # Best effort cleanup
+
+            # Propagate timeout error to surface startup failures (differentiate from connection errors)
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="start_consumer",
                 target_name=f"kafka.{topic}",
-                correlation_id=uuid4(),
-            )
-            sanitized_servers = self._sanitize_bootstrap_servers(
-                self._bootstrap_servers
+                correlation_id=correlation_id,
             )
             logger.exception(
-                f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s"
+                f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "correlation_id": str(correlation_id),
+                    "timeout_seconds": self._timeout_seconds,
+                    "servers": sanitized_servers,
+                    "error_type": "timeout",
+                },
             )
             raise InfraTimeoutError(
                 f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
@@ -1065,19 +1116,32 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             ) from e
 
         except Exception as e:
-            # Propagate connection error to surface startup failures
+            # Clean up consumer on failure to prevent resource leak
+            try:
+                await consumer.stop()
+            except Exception:
+                pass  # Best effort cleanup
+
+            # Propagate connection error to surface startup failures (differentiate from timeout)
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="start_consumer",
                 target_name=f"kafka.{topic}",
-                correlation_id=uuid4(),
+                correlation_id=correlation_id,
             )
-            sanitized_servers = self._sanitize_bootstrap_servers(
-                self._bootstrap_servers
+            logger.exception(
+                f"Failed to start consumer for topic {topic}: {e}",
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "correlation_id": str(correlation_id),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "servers": sanitized_servers,
+                },
             )
-            logger.exception(f"Failed to start consumer for topic {topic}")
             raise InfraConnectionError(
-                f"Failed to start consumer for topic {topic}",
+                f"Failed to start consumer for topic {topic}: {e}",
                 context=context,
                 topic=topic,
                 servers=sanitized_servers,
@@ -1107,23 +1171,62 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             except Exception as e:
                 logger.warning(f"Error stopping consumer for topic {topic}: {e}")
 
-    async def _consume_loop(self, topic: str) -> None:
+    async def _consume_loop(self, topic: str, correlation_id: UUID) -> None:
         """Background loop to consume messages and dispatch to subscribers.
+
+        This method runs in a background task and continuously polls the Kafka consumer
+        for new messages. It handles graceful cancellation, dispatches messages to all
+        registered subscribers, and logs all errors without terminating the loop.
 
         Args:
             topic: Topic being consumed
+            correlation_id: Correlation ID for tracking this consumer task
         """
         consumer = self._consumers.get(topic)
         if consumer is None:
+            logger.warning(
+                f"Consumer not found for topic {topic} in consume loop",
+                extra={
+                    "topic": topic,
+                    "correlation_id": str(correlation_id),
+                },
+            )
             return
+
+        logger.debug(
+            f"Consumer loop started for topic {topic}",
+            extra={
+                "topic": topic,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
         try:
             async for msg in consumer:
                 if self._shutdown:
+                    logger.debug(
+                        f"Consumer loop shutdown signal received for topic {topic}",
+                        extra={
+                            "topic": topic,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
                     break
 
-                # Convert Kafka message to ModelEventMessage
-                event_message = self._kafka_msg_to_model(msg, topic)
+                # Convert Kafka message to ModelEventMessage - handle conversion errors
+                try:
+                    event_message = self._kafka_msg_to_model(msg, topic)
+                except Exception as e:
+                    logger.exception(
+                        f"Failed to convert Kafka message to event model for topic {topic}",
+                        extra={
+                            "topic": topic,
+                            "correlation_id": str(correlation_id),
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                        },
+                    )
+                    continue  # Skip this message but continue consuming
 
                 # Get subscribers snapshot
                 async with self._lock:
@@ -1140,14 +1243,52 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                                 "topic": topic,
                                 "group_id": group_id,
                                 "subscription_id": subscription_id,
+                                "correlation_id": str(correlation_id),
                                 "error": str(e),
+                                "error_type": type(e).__name__,
                             },
                         )
+                        # Publish to DLQ if configured
+                        await self._publish_to_dlq(
+                            original_topic=topic,
+                            failed_message=event_message,
+                            error=e,
+                            correlation_id=correlation_id,
+                        )
+                        # Continue dispatching to other subscribers even if one fails
 
         except asyncio.CancelledError:
-            logger.debug(f"Consumer loop cancelled for topic {topic}")
-        except Exception:
-            logger.exception(f"Consumer loop error for topic {topic}")
+            # Graceful cancellation - this is expected during shutdown
+            logger.info(
+                f"Consumer loop cancelled for topic {topic}",
+                extra={
+                    "topic": topic,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            raise  # Re-raise to properly handle task cancellation
+
+        except Exception as e:
+            # Unexpected error in consumer loop - log with full context
+            logger.exception(
+                f"Consumer loop error for topic {topic}: {e}",
+                extra={
+                    "topic": topic,
+                    "correlation_id": str(correlation_id),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+            # Don't raise - allow task to complete and cleanup to proceed
+
+        finally:
+            logger.info(
+                f"Consumer loop exiting for topic {topic}",
+                extra={
+                    "topic": topic,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
     async def start_consuming(self) -> None:
         """Start the consumer loop.
@@ -1180,7 +1321,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         self,
         command: str,
         payload: dict[str, object],
-        target_environment: Optional[str] = None,
+        target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
 
@@ -1318,6 +1459,67 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
         return ",".join(sanitized)
 
+    def _validate_topic_name(self, topic: str, correlation_id: UUID) -> None:
+        """Validate Kafka topic name according to Kafka naming rules.
+
+        Kafka topic names must:
+        - Not be empty
+        - Be 255 characters or less
+        - Contain only: a-z, A-Z, 0-9, period (.), underscore (_), hyphen (-)
+        - Not be "." or ".." (reserved)
+
+        Args:
+            topic: Topic name to validate
+            correlation_id: Correlation ID for error context
+
+        Raises:
+            ProtocolConfigurationError: If topic name is invalid
+
+        Reference:
+            https://kafka.apache.org/documentation/#topicconfigs
+        """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="validate_topic",
+            target_name=f"kafka.{self._environment}",
+            correlation_id=correlation_id,
+        )
+
+        if not topic:
+            raise ProtocolConfigurationError(
+                "Topic name cannot be empty",
+                context=context,
+                parameter="topic",
+                value=topic,
+            )
+
+        if len(topic) > 255:
+            raise ProtocolConfigurationError(
+                f"Topic name '{topic}' exceeds maximum length of 255 characters",
+                context=context,
+                parameter="topic",
+                value=topic,
+            )
+
+        if topic in (".", ".."):
+            raise ProtocolConfigurationError(
+                f"Topic name '{topic}' is reserved and cannot be used",
+                context=context,
+                parameter="topic",
+                value=topic,
+            )
+
+        # Validate characters (a-z, A-Z, 0-9, '.', '_', '-')
+        if not re.match(r"^[a-zA-Z0-9._-]+$", topic):
+            raise ProtocolConfigurationError(
+                f"Topic name '{topic}' contains invalid characters. "
+                "Only alphanumeric characters, periods (.), underscores (_), "
+                "and hyphens (-) are allowed",
+                context=context,
+                parameter="topic",
+                value=topic,
+            )
+
     def _model_headers_to_kafka(
         self, headers: ModelEventHeaders
     ) -> list[tuple[str, bytes]]:
@@ -1371,7 +1573,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         return kafka_headers
 
     def _kafka_headers_to_model(
-        self, kafka_headers: Optional[list[tuple[str, bytes]]]
+        self, kafka_headers: list[tuple[str, bytes]] | None
     ) -> ModelEventHeaders:
         """Convert Kafka headers to ModelEventHeaders.
 
@@ -1489,6 +1691,136 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             offset=str(offset) if offset is not None else None,
             partition=partition,
         )
+
+    async def _publish_to_dlq(
+        self,
+        original_topic: str,
+        failed_message: ModelEventMessage,
+        error: Exception,
+        correlation_id: UUID,
+    ) -> None:
+        """Publish failed message to dead letter queue.
+
+        This method publishes messages that failed processing to the configured
+        dead letter queue topic with comprehensive failure metadata for later
+        analysis and retry. If DLQ publishing fails, the error is logged but
+        does not crash the consumer.
+
+        Args:
+            original_topic: Original topic where message was consumed from
+            failed_message: The message that failed processing
+            error: The exception that caused the failure
+            correlation_id: Correlation ID for tracking
+
+        Note:
+            This method logs errors if DLQ publishing fails but does not raise
+            exceptions to prevent cascading failures in the consumer loop.
+        """
+        # Check if DLQ is configured
+        if self._config.dead_letter_topic is None:
+            logger.debug(
+                "Dead letter queue not configured, skipping DLQ publish",
+                extra={
+                    "topic": original_topic,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return
+
+        # Build DLQ message with failure metadata
+        dlq_payload = {
+            "original_topic": original_topic,
+            "original_message": {
+                "key": (
+                    failed_message.key.decode("utf-8", errors="replace")
+                    if failed_message.key
+                    else None
+                ),
+                "value": failed_message.value.decode("utf-8", errors="replace"),
+                "offset": failed_message.offset,
+                "partition": failed_message.partition,
+            },
+            "failure_reason": str(error),
+            "failure_timestamp": datetime.now(UTC).isoformat(),
+            "correlation_id": str(correlation_id),
+            "retry_count": failed_message.headers.retry_count,
+            "error_type": type(error).__name__,
+        }
+
+        # Create DLQ headers with failure metadata
+        dlq_headers = ModelEventHeaders(
+            source=f"{self._environment}.{self._group}",
+            event_type="dlq_message",
+            content_type="application/json",
+            correlation_id=correlation_id,
+        )
+
+        # Convert DLQ payload to JSON bytes
+        dlq_value = json.dumps(dlq_payload).encode("utf-8")
+
+        # Publish to DLQ (without retry - best effort)
+        try:
+            async with self._producer_lock:
+                if self._producer is None:
+                    logger.warning(
+                        "Producer not available, cannot publish to DLQ",
+                        extra={
+                            "original_topic": original_topic,
+                            "dlq_topic": self._config.dead_letter_topic,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    return
+
+                kafka_headers = self._model_headers_to_kafka(dlq_headers)
+                # Add DLQ-specific headers
+                kafka_headers.extend(
+                    [
+                        ("original_topic", original_topic.encode("utf-8")),
+                        ("failure_reason", str(error).encode("utf-8")),
+                        (
+                            "failure_timestamp",
+                            datetime.now(UTC).isoformat().encode("utf-8"),
+                        ),
+                    ]
+                )
+
+                future = await self._producer.send(
+                    self._config.dead_letter_topic,
+                    value=dlq_value,
+                    key=failed_message.key,
+                    headers=kafka_headers,
+                )
+
+            # Wait for completion with timeout
+            await asyncio.wait_for(
+                future,
+                timeout=self._timeout_seconds,
+            )
+
+            logger.info(
+                f"Published failed message to DLQ: {self._config.dead_letter_topic}",
+                extra={
+                    "original_topic": original_topic,
+                    "dlq_topic": self._config.dead_letter_topic,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(error).__name__,
+                },
+            )
+
+        except Exception as dlq_error:
+            # Log DLQ publish failure but do not raise to prevent consumer crash
+            logger.exception(
+                f"Failed to publish to DLQ topic {self._config.dead_letter_topic}",
+                extra={
+                    "original_topic": original_topic,
+                    "dlq_topic": self._config.dead_letter_topic,
+                    "correlation_id": str(correlation_id),
+                    "dlq_error": str(dlq_error),
+                    "dlq_error_type": type(dlq_error).__name__,
+                    "original_error": str(error),
+                },
+            )
 
 
 __all__: list[str] = ["KafkaEventBus"]

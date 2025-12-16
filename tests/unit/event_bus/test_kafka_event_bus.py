@@ -24,7 +24,6 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.mixins import CircuitState
 
 
 class TestKafkaEventBusLifecycle:
@@ -41,7 +40,7 @@ class TestKafkaEventBusLifecycle:
         return producer
 
     @pytest.fixture
-    def kafka_event_bus(self, mock_producer: AsyncMock) -> KafkaEventBus:
+    async def kafka_event_bus(self, mock_producer: AsyncMock) -> KafkaEventBus:
         """Create KafkaEventBus with mocked producer."""
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -53,6 +52,11 @@ class TestKafkaEventBusLifecycle:
                 group="test-group",
             )
             yield bus
+            # Cleanup: Ensure resources are freed even if test fails
+            try:
+                await bus.close()
+            except Exception:
+                pass  # Best effort cleanup
 
     @pytest.mark.asyncio
     async def test_start_and_close(
@@ -212,7 +216,7 @@ class TestKafkaEventBusPublish:
         return producer
 
     @pytest.fixture
-    def kafka_event_bus(self, mock_producer: AsyncMock) -> KafkaEventBus:
+    async def kafka_event_bus(self, mock_producer: AsyncMock) -> KafkaEventBus:
         """Create KafkaEventBus with mocked producer."""
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -225,6 +229,11 @@ class TestKafkaEventBusPublish:
                 max_retry_attempts=0,  # Disable retries for faster tests
             )
             yield bus
+            # Cleanup: Ensure resources are freed even if test fails
+            try:
+                await bus.close()
+            except Exception:
+                pass  # Best effort cleanup
 
     @pytest.mark.asyncio
     async def test_publish_requires_start(self, kafka_event_bus: KafkaEventBus) -> None:
@@ -344,7 +353,7 @@ class TestKafkaEventBusSubscribe:
         return producer
 
     @pytest.fixture
-    def kafka_event_bus(self, mock_producer: AsyncMock) -> KafkaEventBus:
+    async def kafka_event_bus(self, mock_producer: AsyncMock) -> KafkaEventBus:
         """Create KafkaEventBus with mocked producer."""
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -356,6 +365,11 @@ class TestKafkaEventBusSubscribe:
                 group="test-group",
             )
             yield bus
+            # Cleanup: Ensure resources are freed even if test fails
+            try:
+                await bus.close()
+            except Exception:
+                pass  # Best effort cleanup
 
     @pytest.mark.asyncio
     async def test_subscribe_returns_unsubscribe_function(
@@ -441,7 +455,7 @@ class TestKafkaEventBusHealthCheck:
         return producer
 
     @pytest.fixture
-    def kafka_event_bus(self, mock_producer: AsyncMock) -> KafkaEventBus:
+    async def kafka_event_bus(self, mock_producer: AsyncMock) -> KafkaEventBus:
         """Create KafkaEventBus with mocked producer."""
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",
@@ -453,6 +467,11 @@ class TestKafkaEventBusHealthCheck:
                 group="test-group",
             )
             yield bus
+            # Cleanup: Ensure resources are freed even if test fails
+            try:
+                await bus.close()
+            except Exception:
+                pass  # Best effort cleanup
 
     @pytest.mark.asyncio
     async def test_health_check_not_started(
@@ -595,7 +614,6 @@ class TestKafkaEventBusCircuitBreaker:
         self, mock_producer: AsyncMock
     ) -> None:
         """Test circuit breaker transitions to half-open state."""
-        import time
 
         with patch(
             "omnibase_infra.event_bus.kafka_event_bus.AIOKafkaProducer",

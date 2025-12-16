@@ -20,7 +20,6 @@
 #   pre-commit install                    # Install pre-commit hooks
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
-
 repos:
   # YAML formatting (standard across ecosystem)
   - repo: https://github.com/google/yamlfmt
@@ -28,7 +27,6 @@ repos:
     hooks:
       - id: yamlfmt
         exclude: ^(archived/|tests/fixtures/|\.github/workflows/)
-
   # Essential file formatting (standard across ecosystem)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -41,7 +39,6 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
-
   # ONEX Python Development Hooks (from shared templates)
   # Order: ruff format → ruff check → mypy (formatting before linting before type checking)
   # Note: ruff replaces both black and isort (10-100x faster)
@@ -54,7 +51,6 @@ repos:
         types: [python]
         exclude: ^(archived/|tests/fixtures/|\.github/workflows/).*$
         stages: [pre-commit]
-
       - id: ruff-fix
         name: ruff check (auto-fix linting + import sorting)
         entry: poetry run ruff check --fix --exit-non-zero-on-fix
@@ -64,7 +60,6 @@ repos:
         stages: [pre-commit]
         # Note: --exit-non-zero-on-fix ensures pre-commit fails if files were modified,
         # forcing you to re-stage the changes. This keeps pre-commit and CI in sync.
-
       - id: mypy-type-check
         name: mypy (type checking)
         entry: bash -c 'poetry run mypy "$@" --show-error-codes --no-error-summary' --
@@ -72,9 +67,8 @@ repos:
         types: [python]
         files: ^src/omnibase_infra/.*\.py$
         exclude: ^(tests/|archived/).*\.py$
-        pass_filenames: true  # Only check changed files, not entire codebase
-        stages: [pre-push]  # Moved to pre-push: ~1-5s for changed files only
-
+        pass_filenames: true # Only check changed files, not entire codebase
+        stages: [pre-push] # Moved to pre-push: ~1-5s for changed files only
       # Cleanup: Clear tmp/ directory before commits
       - id: clean-tmp-directory
         name: Clean tmp directory
@@ -83,7 +77,6 @@ repos:
         always_run: true
         pass_filenames: false
         stages: [pre-commit]
-
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
@@ -95,7 +88,6 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
-
       # Contract validation - YAML contracts
       - id: onex-validate-contracts
         name: ONEX Contract Validation
@@ -104,7 +96,6 @@ repos:
         files: '\.yaml$'
         pass_filenames: false
         stages: [pre-commit]
-
       # Pattern validation - naming conventions
       - id: onex-validate-patterns
         name: ONEX Pattern Validation
@@ -113,8 +104,9 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
-
       # Union usage validation
+      # TECH DEBT: Baseline increased to 108 violations (OMN-871)
+      # Target: Reduce to 30 incrementally after PR #37 merges
       - id: onex-validate-unions
         name: ONEX Union Usage Validation
         entry: poetry run python scripts/validate.py unions
@@ -122,7 +114,6 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
-
       # Circular import check
       - id: onex-validate-imports
         name: ONEX Circular Import Check
@@ -131,12 +122,10 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
-
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
 fail_fast: false
-
 # CI configuration
 ci:
   autofix_commit_msg: |

@@ -28,21 +28,16 @@
 # The KafkaEventBus implements ProtocolEventBus using Apache Kafka (via aiokafka)
 # for production-grade message delivery with resilience patterns including circuit
 # breaker, retry with exponential backoff, and graceful degradation.
-
 # =============================================================================
 # Connection Settings
 # =============================================================================
 # Kafka broker connection configuration
-
 # Comma-separated list of Kafka broker addresses
 bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
-
 # Environment identifier for message routing (e.g., "local", "dev", "staging", "prod")
 environment: "${KAFKA_ENVIRONMENT:-local}"
-
 # Consumer group identifier for message routing
 group: "${KAFKA_GROUP:-default}"
-
 # =============================================================================
 # Timeout and Retry Settings
 # =============================================================================
@@ -50,14 +45,11 @@ group: "${KAFKA_GROUP:-default}"
 
 # Timeout in seconds for Kafka operations (connect, publish, etc.)
 timeout_seconds: ${KAFKA_TIMEOUT_SECONDS:-30}
-
 # Maximum number of retry attempts for publish operations before failing
 max_retry_attempts: ${KAFKA_MAX_RETRY_ATTEMPTS:-3}
-
 # Base delay in seconds for exponential backoff between retries
 # Actual delay = retry_backoff_base * (2 ^ attempt) * random_jitter(0.5, 1.5)
 retry_backoff_base: ${KAFKA_RETRY_BACKOFF_BASE:-1.0}
-
 # =============================================================================
 # Circuit Breaker Settings
 # =============================================================================
@@ -65,11 +57,9 @@ retry_backoff_base: ${KAFKA_RETRY_BACKOFF_BASE:-1.0}
 
 # Number of consecutive failures before circuit opens (blocks requests)
 circuit_breaker_threshold: ${KAFKA_CIRCUIT_BREAKER_THRESHOLD:-5}
-
 # Seconds before circuit breaker resets from open to half-open state
 # In half-open state, a single successful operation resets the circuit
 circuit_breaker_reset_timeout: ${KAFKA_CIRCUIT_BREAKER_RESET_TIMEOUT:-30.0}
-
 # =============================================================================
 # Consumer Settings
 # =============================================================================
@@ -77,15 +67,12 @@ circuit_breaker_reset_timeout: ${KAFKA_CIRCUIT_BREAKER_RESET_TIMEOUT:-30.0}
 
 # Sleep interval in seconds between consumer poll iterations
 consumer_sleep_interval: ${KAFKA_CONSUMER_SLEEP_INTERVAL:-0.1}
-
 # Where to start reading messages when no committed offset exists
 # Options: "earliest" (beginning), "latest" (end of topic)
 auto_offset_reset: "${KAFKA_AUTO_OFFSET_RESET:-latest}"
-
 # Whether to automatically commit consumer offsets
 # Set to false for manual offset management
 enable_auto_commit: ${KAFKA_ENABLE_AUTO_COMMIT:-true}
-
 # =============================================================================
 # Producer Settings
 # =============================================================================
@@ -94,7 +81,6 @@ enable_auto_commit: ${KAFKA_ENABLE_AUTO_COMMIT:-true}
 # Acknowledgment mode for message delivery confirmation
 # Options: "0" (no ack), "1" (leader ack), "all" (all replicas ack)
 acks: "${KAFKA_ACKS:-all}"
-
 # Enable idempotent producer to prevent duplicate messages
 # Recommended for exactly-once semantics
 enable_idempotence: ${KAFKA_ENABLE_IDEMPOTENCE:-true}

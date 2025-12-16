@@ -106,10 +106,10 @@ class RuntimeHostProcess:
 
     def __init__(
         self,
-        event_bus: Optional[InMemoryEventBus] = None,
+        event_bus: InMemoryEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
-        config: Optional[dict[str, object]] = None,
+        config: dict[str, object] | None = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -195,7 +195,7 @@ class RuntimeHostProcess:
         self._is_running: bool = False
 
         # Subscription handle (callable to unsubscribe)
-        self._subscription: Optional[Callable[[], Awaitable[None]]] = None
+        self._subscription: Callable[[], Awaitable[None]] | None = None
 
         # Handler registry (handler_type -> handler instance)
         # This will be populated from the singleton registry during start()
@@ -573,7 +573,7 @@ class RuntimeHostProcess:
         # Pre-validation: Get correlation_id for error responses if validation fails
         # This handles the case where validation itself throws before normalizing
         raw_correlation_id = envelope.get("correlation_id")
-        pre_validation_correlation_id: Optional[UUID] = None
+        pre_validation_correlation_id: UUID | None = None
         if isinstance(raw_correlation_id, UUID):
             pre_validation_correlation_id = raw_correlation_id
         elif raw_correlation_id is not None:
@@ -735,7 +735,7 @@ class RuntimeHostProcess:
     def _create_error_response(
         self,
         error: str,
-        correlation_id: Optional[UUID],
+        correlation_id: UUID | None,
     ) -> dict[str, object]:
         """Create a standardized error response envelope.
 
@@ -919,7 +919,7 @@ class RuntimeHostProcess:
             },
         )
 
-    def get_handler(self, handler_type: str) -> Optional[ProtocolHandler]:
+    def get_handler(self, handler_type: str) -> ProtocolHandler | None:
         """Get handler for type, returns None if not registered.
 
         Args:

@@ -67,7 +67,7 @@ class DbAdapter:
 
     def __init__(self) -> None:
         """Initialize DbAdapter in uninitialized state."""
-        self._pool: Optional[asyncpg.Pool] = None
+        self._pool: asyncpg.Pool | None = None
         self._pool_size: int = _DEFAULT_POOL_SIZE
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._initialized: bool = False

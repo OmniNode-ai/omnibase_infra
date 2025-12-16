@@ -239,9 +239,9 @@ class InMemoryEventBus:
     async def publish(
         self,
         topic: str,
-        key: Optional[bytes],
+        key: bytes | None,
         value: bytes,
-        headers: Optional[ModelEventHeaders] = None,
+        headers: ModelEventHeaders | None = None,
     ) -> None:
         """Publish message to topic.
 
@@ -456,7 +456,7 @@ class InMemoryEventBus:
         self,
         command: str,
         payload: dict[str, object],
-        target_environment: Optional[str] = None,
+        target_environment: str | None = None,
     ) -> None:
         """Broadcast command to environment.
 
@@ -559,7 +559,7 @@ class InMemoryEventBus:
     async def get_event_history(
         self,
         limit: int = 100,
-        topic: Optional[str] = None,
+        topic: str | None = None,
     ) -> list[ModelEventMessage]:
         """Get recent events for debugging.
 
@@ -593,7 +593,7 @@ class InMemoryEventBus:
             self._event_history.clear()
         logger.debug("Event history cleared")
 
-    async def get_subscriber_count(self, topic: Optional[str] = None) -> int:
+    async def get_subscriber_count(self, topic: str | None = None) -> int:
         """Get subscriber count, optionally filtered by topic.
 
         Args:

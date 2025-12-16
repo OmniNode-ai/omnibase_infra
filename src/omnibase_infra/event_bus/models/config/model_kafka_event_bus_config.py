@@ -85,6 +85,11 @@ Environment Variables:
             False values: "false", "0", "no", "off" (case-insensitive)
             Warning: Logs warning if unexpected value, treats as False
 
+    Dead Letter Queue Settings:
+        KAFKA_DEAD_LETTER_TOPIC: Topic name for failed messages (optional)
+            Default: None (DLQ disabled)
+            Example: "dlq-events"
+
 Parsing Behavior:
     - Integer/Float fields: Logs warning and uses default if parsing fails
     - Boolean fields: Logs warning if value not in expected set, treats as False
@@ -130,6 +135,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         enable_idempotence: Enable producer idempotence for exactly-once semantics
         auto_offset_reset: Consumer offset reset policy ("earliest", "latest")
         enable_auto_commit: Enable auto-commit for consumer offsets
+        dead_letter_topic: Dead letter queue topic for failed messages (optional)
 
     Example:
         ```python
@@ -229,6 +235,12 @@ class ModelKafkaEventBusConfig(BaseModel):
     enable_auto_commit: bool = Field(
         default=True,
         description="Enable auto-commit for consumer offsets",
+    )
+
+    # Dead letter queue configuration
+    dead_letter_topic: str | None = Field(
+        default=None,
+        description="Dead letter queue topic for failed messages (optional)",
     )
 
     @field_validator("bootstrap_servers", mode="before")
@@ -366,6 +378,73 @@ class ModelKafkaEventBusConfig(BaseModel):
             )
         return v.strip()
 
+    @field_validator("group", mode="before")
+    @classmethod
+    def validate_group(cls, v: object) -> str:
+        """Validate consumer group identifier.
+
+        Args:
+            v: Group value (any type before Pydantic conversion)
+
+        Returns:
+            Validated group string
+
+        Raises:
+            ProtocolConfigurationError: If group is empty, invalid type, or contains invalid characters
+        """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="validate_config",
+            target_name="kafka_config",
+            correlation_id=uuid4(),
+        )
+
+        if v is None:
+            raise ProtocolConfigurationError(
+                "group cannot be None",
+                context=context,
+                parameter="group",
+                value=None,
+            )
+        if not isinstance(v, str):
+            raise ProtocolConfigurationError(
+                f"group must be a string, got {type(v).__name__}",
+                context=context,
+                parameter="group",
+                value=type(v).__name__,
+            )
+
+        group_name = v.strip()
+        if not group_name:
+            raise ProtocolConfigurationError(
+                "group cannot be empty",
+                context=context,
+                parameter="group",
+                value=v,
+            )
+
+        # Kafka group names have similar restrictions to topic names
+        # but are generally more permissive
+        if len(group_name) > 255:
+            raise ProtocolConfigurationError(
+                f"group name '{group_name}' exceeds maximum length of 255 characters",
+                context=context,
+                parameter="group",
+                value=group_name,
+            )
+
+        # Check for invalid characters (control characters, null bytes)
+        for char in group_name:
+            if ord(char) < 32 or char == "\x7f":
+                raise ProtocolConfigurationError(
+                    f"group name '{group_name}' contains invalid control character",
+                    context=context,
+                    parameter="group",
+                    value=group_name,
+                )
+
+        return group_name
+
     def apply_environment_overrides(self) -> ModelKafkaEventBusConfig:
         """Apply environment variable overrides to configuration.
 
@@ -396,6 +475,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_ENABLE_IDEMPOTENCE": "enable_idempotence",
             "KAFKA_AUTO_OFFSET_RESET": "auto_offset_reset",
             "KAFKA_ENABLE_AUTO_COMMIT": "enable_auto_commit",
+            "KAFKA_DEAD_LETTER_TOPIC": "dead_letter_topic",
         }
 
         # Integer fields for type conversion
@@ -502,6 +582,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             enable_idempotence=True,
             auto_offset_reset="latest",
             enable_auto_commit=True,
+            dead_letter_topic=None,
         )
         return base_config.apply_environment_overrides()
 

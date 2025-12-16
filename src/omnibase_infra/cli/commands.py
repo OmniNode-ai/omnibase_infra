@@ -30,7 +30,7 @@ def validate() -> None:
     default=None,
     help="Maximum allowed violations (default: INFRA_MAX_VIOLATIONS)",
 )
-def validate_architecture_cmd(directory: str, max_violations: Optional[int]) -> None:
+def validate_architecture_cmd(directory: str, max_violations: int | None) -> None:
     """Validate architecture (one-model-per-file)."""
     from omnibase_infra.validation.infra_validators import (
         INFRA_MAX_VIOLATIONS,
@@ -66,7 +66,7 @@ def validate_contracts_cmd(directory: str) -> None:
     default=None,
     help="Enable strict mode (default: INFRA_PATTERNS_STRICT)",
 )
-def validate_patterns_cmd(directory: str, strict: Optional[bool]) -> None:
+def validate_patterns_cmd(directory: str, strict: bool | None) -> None:
     """Validate code patterns and naming conventions."""
     from omnibase_infra.validation.infra_validators import (
         INFRA_PATTERNS_STRICT,
@@ -94,7 +94,7 @@ def validate_patterns_cmd(directory: str, strict: Optional[bool]) -> None:
     help="Enable strict mode (default: INFRA_UNIONS_STRICT)",
 )
 def validate_unions_cmd(
-    directory: str, max_unions: Optional[int], strict: Optional[bool]
+    directory: str, max_unions: int | None, strict: bool | None
 ) -> None:
     """Validate Union type usage."""
     from omnibase_infra.validation.infra_validators import (

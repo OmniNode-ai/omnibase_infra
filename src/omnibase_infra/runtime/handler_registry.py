@@ -148,8 +148,8 @@ class RegistryError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        protocol_type: Optional[str] = None,
-        context: Optional[ModelInfraErrorContext] = None,
+        protocol_type: str | None = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize RegistryError.
@@ -516,8 +516,8 @@ class EventBusBindingRegistry:
 # =============================================================================
 
 # Module-level singleton instances (lazy initialized)
-_handler_registry: Optional[ProtocolBindingRegistry] = None
-_event_bus_registry: Optional[EventBusBindingRegistry] = None
+_handler_registry: ProtocolBindingRegistry | None = None
+_event_bus_registry: EventBusBindingRegistry | None = None
 _singleton_lock: threading.Lock = threading.Lock()
 
 

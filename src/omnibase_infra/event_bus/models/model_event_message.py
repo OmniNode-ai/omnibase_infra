@@ -44,11 +44,11 @@ class ModelEventMessage(BaseModel):
     """
 
     topic: str
-    key: Optional[bytes] = Field(default=None)
+    key: bytes | None = Field(default=None)
     value: bytes
     headers: ModelEventHeaders
-    offset: Optional[str] = Field(default=None)
-    partition: Optional[int] = Field(default=None)
+    offset: str | None = Field(default=None)
+    partition: int | None = Field(default=None)
 
     model_config = ConfigDict(
         frozen=False, extra="forbid", arbitrary_types_allowed=True, from_attributes=True
