@@ -17,12 +17,17 @@ Example Error Scenarios:
     3. Malformed input data structures
 """
 
-from typing import Any
+from typing import Any, cast
 
 from omnibase_core.enums import CoreErrorCode
 from omnibase_core.errors import OnexError
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
+from omnibase_infra.protocols.protocol_plugin_compute import (
+    PluginContext,
+    PluginInputData,
+    PluginOutputData,
+)
 
 
 class PluginJsonNormalizerErrorHandling(PluginComputeBase):
@@ -33,8 +38,8 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
     """
 
     def execute(
-        self, input_data: dict[str, Any], context: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, input_data: PluginInputData, context: PluginContext
+    ) -> PluginOutputData:
         """Execute JSON normalization with comprehensive error handling.
 
         Args:
@@ -74,16 +79,19 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
 
         try:
             # Retrieve JSON data with safe default
-            json_data = input_data.get("json", {})
+            json_data = cast(dict[str, Any], input_data).get("json", {})
 
             # Perform pure deterministic computation
             normalized = self._sort_keys_recursively(json_data)
 
             # Return result with correlation_id for tracing
-            return {
-                "normalized": normalized,
-                "correlation_id": correlation_id,
-            }
+            return cast(
+                PluginOutputData,
+                {
+                    "normalized": normalized,
+                    "correlation_id": correlation_id,
+                },
+            )
 
         except RecursionError as e:
             # Handle deeply nested structures exceeding Python's recursion limit
@@ -148,7 +156,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
         # Primitive values (str, int, float, bool, None) returned unchanged
         return obj
 
-    def validate_input(self, input_data: dict[str, Any]) -> None:
+    def validate_input(self, input_data: PluginInputData) -> None:
         """Validate that input contains JSON-compatible data.
 
         Args:
@@ -185,8 +193,9 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
         Note:
             Missing "json" key is valid - plugin returns empty normalized dict.
         """
-        if "json" in input_data:
-            json_data = input_data["json"]
+        input_dict = cast(dict[str, Any], input_data)
+        if "json" in input_dict:
+            json_data = input_dict["json"]
             # Ensure it's a JSON-compatible type
             if not isinstance(
                 json_data, dict | list | str | int | float | bool | type(None)
