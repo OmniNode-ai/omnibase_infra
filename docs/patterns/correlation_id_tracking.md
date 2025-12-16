@@ -45,7 +45,7 @@ class ModelEventEnvelope:
     correlation_id: UUID
     event_type: str
     timestamp: datetime
-    payload: Any  # Actual event data
+    payload: dict[str, object]  # Event data (use specific type in production)
     source_service: str
     target_service: str | None = None
 
@@ -92,7 +92,7 @@ async def extract_correlation_id(request: Request) -> UUID:
 
 # FastAPI endpoint
 @app.post("/users")
-async def create_user(request: Request, user_data: dict[str, Any]):
+async def create_user(request: Request, user_data: dict[str, str]):
     correlation_id = await extract_correlation_id(request)
 
     try:
@@ -232,7 +232,7 @@ from uuid import UUID
 logger = structlog.get_logger()
 
 async def process_request(
-    request_data: dict[str, Any],
+    request_data: dict[str, object],
     correlation_id: UUID,
 ) -> None:
     """Process request with correlation logging."""

@@ -83,7 +83,7 @@ import asyncio
 import functools
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
@@ -446,7 +446,7 @@ class PolicyRegistry:
     SEMVER_CACHE_SIZE: int = 128
 
     # Cached semver parser function (lazily initialized)
-    _semver_cache: Optional[Callable[[str], tuple[int, int, int, str]]] = None
+    _semver_cache: Callable[[str], tuple[int, int, int, str]] | None = None
 
     # Lock for thread-safe cache initialization
     _semver_cache_lock: threading.Lock = threading.Lock()
@@ -695,8 +695,8 @@ class PolicyRegistry:
     def get(
         self,
         policy_id: str,
-        policy_type: Optional[str | EnumPolicyType] = None,
-        version: Optional[str] = None,
+        policy_type: str | EnumPolicyType | None = None,
+        version: str | None = None,
     ) -> type[ProtocolPolicy]:
         """Get policy class by ID, type, and optional version.
 
@@ -732,7 +732,7 @@ class PolicyRegistry:
             >>> policy_cls = registry.get("retry", version="1.0.0")
         """
         # Normalize policy_type if provided (outside lock for minimal critical section)
-        normalized_type: Optional[str] = None
+        normalized_type: str | None = None
         if policy_type is not None:
             normalized_type = self._normalize_policy_type(policy_type)
 
@@ -1062,7 +1062,7 @@ class PolicyRegistry:
 
     def list_keys(
         self,
-        policy_type: Optional[str | EnumPolicyType] = None,
+        policy_type: str | EnumPolicyType | None = None,
     ) -> list[tuple[str, str, str]]:
         """List registered policy keys as (id, type, version) tuples.
 
@@ -1085,7 +1085,7 @@ class PolicyRegistry:
             [('retry', 'orchestrator', '1.0.0')]
         """
         # Normalize policy_type if provided
-        normalized_type: Optional[str] = None
+        normalized_type: str | None = None
         if policy_type is not None:
             normalized_type = self._normalize_policy_type(policy_type)
 
@@ -1141,8 +1141,8 @@ class PolicyRegistry:
     def is_registered(
         self,
         policy_id: str,
-        policy_type: Optional[str | EnumPolicyType] = None,
-        version: Optional[str] = None,
+        policy_type: str | EnumPolicyType | None = None,
+        version: str | None = None,
     ) -> bool:
         """Check if a policy is registered.
 
@@ -1163,7 +1163,7 @@ class PolicyRegistry:
             False
         """
         # Normalize policy_type if provided
-        normalized_type: Optional[str] = None
+        normalized_type: str | None = None
         if policy_type is not None:
             try:
                 normalized_type = self._normalize_policy_type(policy_type)
@@ -1184,8 +1184,8 @@ class PolicyRegistry:
     def unregister(
         self,
         policy_id: str,
-        policy_type: Optional[str | EnumPolicyType] = None,
-        version: Optional[str] = None,
+        policy_type: str | EnumPolicyType | None = None,
+        version: str | None = None,
     ) -> int:
         """Unregister policy plugins.
 
@@ -1210,7 +1210,7 @@ class PolicyRegistry:
             1
         """
         # Normalize policy_type if provided
-        normalized_type: Optional[str] = None
+        normalized_type: str | None = None
         if policy_type is not None:
             try:
                 normalized_type = self._normalize_policy_type(policy_type)

@@ -6,8 +6,6 @@ This module provides a strongly-typed Pydantic model for optional string
 values, replacing `str | None` union types to comply with ONEX standards.
 """
 
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -37,9 +35,9 @@ class ModelOptionalString(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    value: Optional[str] = Field(default=None, description="Optional string value")
+    value: str | None = Field(default=None, description="Optional string value")
 
-    def get(self) -> Optional[str]:
+    def get(self) -> str | None:
         """Get the optional value.
 
         Returns:

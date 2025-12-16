@@ -134,7 +134,7 @@ from uuid import UUID
 async def execute_query(
     query: str,
     correlation_id: UUID
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     try:
         conn = await asyncpg.connect(
             host=config.db_host,

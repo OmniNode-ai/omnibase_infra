@@ -6,8 +6,6 @@ This module defines error classes specific to container wiring operations,
 providing granular error handling for service registration and resolution.
 """
 
-from typing import Optional
-
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -35,7 +33,7 @@ class ContainerWiringError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize ContainerWiringError.
@@ -74,8 +72,8 @@ class ServiceRegistrationError(ContainerWiringError):
     def __init__(
         self,
         message: str,
-        service_name: Optional[str] = None,
-        context: Optional[ModelInfraErrorContext] = None,
+        service_name: str | None = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize ServiceRegistrationError.
@@ -117,8 +115,8 @@ class ServiceResolutionError(ContainerWiringError):
     def __init__(
         self,
         message: str,
-        service_name: Optional[str] = None,
-        context: Optional[ModelInfraErrorContext] = None,
+        service_name: str | None = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize ServiceResolutionError.
@@ -160,7 +158,7 @@ class ContainerValidationError(ContainerWiringError):
     def __init__(
         self,
         message: str,
-        context: Optional[ModelInfraErrorContext] = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize ContainerValidationError.

@@ -8,9 +8,27 @@ to comply with ONEX standards.
 
 Correlation IDs are used throughout the runtime for request tracing,
 logging, and distributed system observability.
+
+Design Decision (PR #47 Review):
+    This model intentionally duplicates patterns from ModelOptionalUUID rather than
+    using inheritance or generics. This design choice provides:
+
+    1. **Self-contained model**: No dependencies on base classes or mixins
+    2. **Correlation-specific methods**: `get_or_generate()` is specific to correlation IDs
+    3. **ONEX compliance**: Follows "composition over inheritance" principle
+    4. **Future-ready**: Available for strongly-typed correlation ID handling
+       in RuntimeHostProcess and event envelope processing
+
+    While currently not actively used, this model is pre-built for consistent
+    correlation ID handling as the codebase evolves. The trade-off of code
+    duplication vs. generic abstractions was intentionally chosen for clarity
+    and type safety.
+
+    See Also:
+        - ModelOptionalUUID: Similar pattern for generic optional UUIDs
+        - docs/patterns/correlation_id_tracking.md: Correlation ID best practices
 """
 
-from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -41,7 +59,7 @@ class ModelOptionalCorrelationId(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    value: Optional[UUID] = Field(
+    value: UUID | None = Field(
         default=None, description="Optional correlation ID (UUID)"
     )
 
@@ -78,7 +96,7 @@ class ModelOptionalCorrelationId(BaseModel):
         """
         return cls()
 
-    def get(self) -> Optional[UUID]:
+    def get(self) -> UUID | None:
         """Get the optional correlation ID.
 
         Returns:

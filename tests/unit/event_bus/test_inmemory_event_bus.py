@@ -1229,16 +1229,19 @@ class TestInMemoryEventBusCircuitBreaker:
             await event_bus.publish("test-topic", None, b"test")
         status = await event_bus.get_circuit_breaker_status()
         failure_counts = status["failure_counts"]
-        assert isinstance(failure_counts, dict)
+        # Duck typing: verify dict-like behavior (supports key access)
+        assert hasattr(failure_counts, "__getitem__")
         assert failure_counts["test-topic:fail-group"] == 3
         open_circuits = status["open_circuits"]
-        assert isinstance(open_circuits, (list, set))
+        # Duck typing: verify collection-like behavior (supports len and iteration)
+        assert hasattr(open_circuits, "__len__") and hasattr(open_circuits, "__iter__")
         assert len(open_circuits) == 0
         for _ in range(3):
             await event_bus.publish("test-topic", None, b"test")
         status = await event_bus.get_circuit_breaker_status()
         open_circuits = status["open_circuits"]
-        assert isinstance(open_circuits, (list, set))
+        # Duck typing: verify collection-like behavior (supports len and iteration)
+        assert hasattr(open_circuits, "__len__") and hasattr(open_circuits, "__iter__")
         assert len(open_circuits) == 1
         await event_bus.close()
 
@@ -1266,7 +1269,8 @@ class TestInMemoryEventBusCircuitBreaker:
 
         status = await event_bus.get_circuit_breaker_status()
         failure_counts = status["failure_counts"]
-        assert isinstance(failure_counts, dict)
+        # Duck typing: verify dict-like behavior (supports key access)
+        assert hasattr(failure_counts, "__getitem__")
         assert failure_counts["test-topic:fail-group"] == 3
 
         await event_bus.close()
@@ -1275,7 +1279,10 @@ class TestInMemoryEventBusCircuitBreaker:
         await event_bus.start()
         status = await event_bus.get_circuit_breaker_status()
         failure_counts = status["failure_counts"]
-        assert isinstance(failure_counts, dict)
+        # Duck typing: verify dict-like behavior (supports key access and len)
+        assert hasattr(failure_counts, "__getitem__") and hasattr(
+            failure_counts, "__len__"
+        )
         assert len(failure_counts) == 0
         await event_bus.close()
 

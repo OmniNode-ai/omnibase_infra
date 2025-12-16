@@ -260,10 +260,10 @@ db_circuit_breaker = CircuitBreaker(
 async def query_database(
     query: str,
     correlation_id: UUID,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Execute database query with circuit breaker protection."""
 
-    async def _execute_query() -> list[dict[str, Any]]:
+    async def _execute_query() -> list[dict[str, object]]:
         try:
             conn = await asyncpg.connect(
                 host=config.db_host,
@@ -357,10 +357,10 @@ api_circuit_breaker = CircuitBreaker(
 async def call_external_api(
     endpoint: str,
     correlation_id: UUID,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Call external API with circuit breaker protection."""
 
-    async def _api_call() -> dict[str, Any]:
+    async def _api_call() -> dict[str, object]:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -441,7 +441,7 @@ from fastapi import FastAPI
 app = FastAPI()
 
 @app.get("/health/circuit-breakers")
-async def circuit_breaker_health() -> dict[str, Any]:
+async def circuit_breaker_health() -> dict[str, object]:
     """Report circuit breaker health status."""
     status = {}
 

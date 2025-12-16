@@ -21,7 +21,6 @@ Design Note - Code Duplication:
     better testability, and clearer semantics for each optional type.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -52,9 +51,9 @@ class ModelOptionalUUID(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    value: Optional[UUID] = Field(default=None, description="Optional UUID value")
+    value: UUID | None = Field(default=None, description="Optional UUID value")
 
-    def get(self) -> Optional[UUID]:
+    def get(self) -> UUID | None:
         """Get the optional value.
 
         Returns:

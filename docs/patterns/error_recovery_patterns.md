@@ -303,10 +303,10 @@ from omnibase_infra.enums import EnumInfraTransportType
 async def get_user_data(
     user_id: str,
     correlation_id: UUID,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Fetch user data with cache fallback."""
 
-    async def _fetch_from_db() -> dict[str, Any]:
+    async def _fetch_from_db() -> dict[str, object]:
         try:
             query = "SELECT * FROM users WHERE id = $1"
             result = await db.fetchrow(query, user_id)
@@ -323,7 +323,7 @@ async def get_user_data(
                 context=context
             ) from e
 
-    async def _fetch_from_cache() -> dict[str, Any]:
+    async def _fetch_from_cache() -> dict[str, object]:
         # Return potentially stale cached data
         cached = await redis.get(f"user:{user_id}")
         return json.loads(cached) if cached else {}

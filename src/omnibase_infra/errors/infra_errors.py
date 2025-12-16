@@ -25,8 +25,6 @@ All errors:
     - Accept ModelInfraErrorContext for bundled context parameters
 """
 
-from typing import Optional
-
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 

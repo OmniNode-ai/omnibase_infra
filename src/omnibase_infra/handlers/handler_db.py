@@ -11,7 +11,6 @@ All queries MUST use parameterized statements for SQL injection protection.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 from uuid import UUID, uuid4
 
 import asyncpg

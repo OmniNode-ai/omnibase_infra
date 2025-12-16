@@ -47,7 +47,7 @@ import sys
 import time
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 import yaml
 from omnibase_core.container import ModelONEXContainer
@@ -310,8 +310,8 @@ async def bootstrap() -> int:
         ============================================================
     """
     # Initialize runtime and health server to None for cleanup guard
-    runtime: Optional[RuntimeHostProcess] = None
-    health_server: Optional[HealthServer] = None
+    runtime: RuntimeHostProcess | None = None
+    health_server: HealthServer | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 

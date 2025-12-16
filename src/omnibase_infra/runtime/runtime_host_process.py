@@ -39,7 +39,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -128,11 +128,11 @@ class RuntimeHostProcess:
 
     def __init__(
         self,
-        event_bus: Optional[InMemoryEventBus] = None,
+        event_bus: InMemoryEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
-        config: Optional[dict[str, object]] = None,
-        handler_registry: Optional[ProtocolBindingRegistry] = None,
+        config: dict[str, object] | None = None,
+        handler_registry: ProtocolBindingRegistry | None = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -150,12 +150,34 @@ class RuntimeHostProcess:
                       ModelLifecycleSubcontract). Values outside this range are
                       clamped to the nearest bound with a warning logged.
                       Invalid string values fall back to the default with a warning.
-            handler_registry: Optional pre-resolved ProtocolBindingRegistry from container.
-                If provided, uses this registry instead of singleton. This follows
-                ONEX container-based DI patterns for better testability.
+            handler_registry: Optional ProtocolBindingRegistry instance for handler lookup.
+                Type: ProtocolBindingRegistry | None
+
+                Purpose:
+                    Provides the registry that maps handler_type strings (e.g., "http", "db")
+                    to their corresponding ProtocolHandler classes. The registry is queried
+                    during start() to instantiate and initialize all registered handlers.
+
+                Resolution Order:
+                    1. If handler_registry is provided, uses this pre-resolved registry
+                    2. If None, falls back to singleton via get_handler_registry()
+
+                Container Integration:
+                    When using container-based DI (recommended), resolve the registry from
+                    the container and pass it to RuntimeHostProcess:
+
+                    ```python
+                    container = ModelONEXContainer()
+                    wire_infrastructure_services(container)
+                    registry = container.service_registry.resolve_service(ProtocolBindingRegistry)
+                    process = RuntimeHostProcess(handler_registry=registry)
+                    ```
+
+                    This follows ONEX container-based DI patterns for better testability
+                    and explicit dependency management.
         """
         # Handler registry (container-based DI or singleton fallback)
-        self._handler_registry: Optional[ProtocolBindingRegistry] = handler_registry
+        self._handler_registry: ProtocolBindingRegistry | None = handler_registry
 
         # Create or use provided event bus
         self._event_bus: InMemoryEventBus = event_bus or InMemoryEventBus()
@@ -224,7 +246,7 @@ class RuntimeHostProcess:
         self._is_running: bool = False
 
         # Subscription handle (callable to unsubscribe)
-        self._subscription: Optional[Callable[[], Awaitable[None]]] = None
+        self._subscription: Callable[[], Awaitable[None]] | None = None
 
         # Handler registry (handler_type -> handler instance)
         # This will be populated from the singleton registry during start()
@@ -776,7 +798,7 @@ class RuntimeHostProcess:
     def _create_error_response(
         self,
         error: str,
-        correlation_id: Optional[UUID],
+        correlation_id: UUID | None,
     ) -> dict[str, object]:
         """Create a standardized error response envelope.
 
@@ -960,7 +982,7 @@ class RuntimeHostProcess:
             },
         )
 
-    def get_handler(self, handler_type: str) -> Optional[ProtocolHandler]:
+    def get_handler(self, handler_type: str) -> ProtocolHandler | None:
         """Get handler for type, returns None if not registered.
 
         Args:

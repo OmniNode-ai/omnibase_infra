@@ -6,8 +6,6 @@ ProtocolEventMessage from omnibase_spi for use with event bus implementations.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
