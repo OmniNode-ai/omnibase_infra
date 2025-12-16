@@ -105,7 +105,7 @@ Example Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
@@ -146,9 +146,13 @@ logger = logging.getLogger(__name__)
 # 1. Define HANDLER_TYPE_XXX constant in handler_registry.py
 # 2. Import the handler class at the top of this module
 # 3. Add entry below: HANDLER_TYPE_XXX: (XxxHandler, "Description"),
+#
+# NOTE: HttpRestAdapter and DbAdapter use legacy execute(envelope: dict) signature.
+# They will be migrated to ProtocolHandler.execute(request, operation_config) in future.
+# Type ignore comments suppress MyPy errors during MVP phase.
 _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
-    HANDLER_TYPE_HTTP: (HttpRestAdapter, "HTTP REST protocol adapter"),
-    HANDLER_TYPE_DATABASE: (DbAdapter, "PostgreSQL database adapter"),
+    HANDLER_TYPE_HTTP: (HttpRestAdapter, "HTTP REST protocol adapter"),  # type: ignore[dict-item]
+    HANDLER_TYPE_DATABASE: (DbAdapter, "PostgreSQL database adapter"),  # type: ignore[dict-item]
 }
 
 # Known event bus kinds that can be wired

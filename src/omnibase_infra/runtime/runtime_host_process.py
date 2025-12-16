@@ -39,7 +39,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -677,7 +677,9 @@ class RuntimeHostProcess:
         # Execute handler
         try:
             # Handler expected to have async execute(envelope) method
-            response = await handler.execute(envelope)
+            # NOTE: MVP adapters use legacy execute(envelope: dict) signature.
+            # Will migrate to execute(request, operation_config) in future.
+            response = await handler.execute(envelope)  # type: ignore[call-arg]
 
             # Ensure response has correlation_id
             # Make a copy to avoid mutating handler's internal state

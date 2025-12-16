@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 # Context variable for correlation ID propagation across async boundaries
 # This enables correlation ID to be implicitly passed through async call chains
-_correlation_id: ContextVar[Optional[UUID]] = ContextVar("correlation_id", default=None)
+_correlation_id: ContextVar[UUID | None] = ContextVar("correlation_id", default=None)
 
 
 def generate_correlation_id() -> UUID:
@@ -154,7 +154,7 @@ class CorrelationContext:
         ...     # outer_id is restored after inner context exits
     """
 
-    def __init__(self, correlation_id: Optional[UUID] = None) -> None:
+    def __init__(self, correlation_id: UUID | None = None) -> None:
         """Initialize the correlation context.
 
         Args:
@@ -162,7 +162,7 @@ class CorrelationContext:
                 a new UUID4 will be generated when entering the context.
         """
         self._correlation_id = correlation_id or generate_correlation_id()
-        self._token: Optional[Token[Optional[UUID]]] = None
+        self._token: Token[UUID | None] | None = None
 
     @property
     def correlation_id(self) -> UUID:
@@ -184,9 +184,9 @@ class CorrelationContext:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the correlation context and restore the previous correlation ID.
 

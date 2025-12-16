@@ -42,6 +42,7 @@ class ModelDbQueryResponse(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     status: Literal["success", "error"] = Field(
