@@ -96,6 +96,12 @@ if TYPE_CHECKING:
 # Policy Registry
 # =============================================================================
 
+# Semver sorting sentinel value
+# High ASCII value (127) ensures stable sorting when version components are missing.
+# Used in semantic version comparison to pad shorter version tuples for consistent
+# lexicographic sorting (e.g., "1.0" becomes ("1", "0", chr(127)) to sort after "1.0.0-alpha").
+_SEMVER_SORT_SENTINEL = chr(127)
+
 
 class PolicyRegistry:
     """SINGLE SOURCE OF TRUTH for policy plugin registration in omnibase_infra.
@@ -107,8 +113,8 @@ class PolicyRegistry:
     that implement the ProtocolPolicy protocol. ModelPolicyKey provides strong typing
     and replaces the legacy tuple[str, str, str] pattern.
 
-    This class implements the ProtocolRegistryBase[tuple[str, str, str], type[ProtocolPolicy]]
-    interface from omnibase_spi 0.4.0. The external API maintains tuple compatibility
+    TODO(Phase 2): Implement ProtocolRegistryBase[tuple[str, str, str], type[ProtocolPolicy]]
+    interface once it's added to omnibase_spi. The external API maintains tuple compatibility
     while internal operations use ModelPolicyKey for strong typing.
 
     Container Integration:
@@ -158,11 +164,12 @@ class PolicyRegistry:
 
             Primary Operations:
                 - register(): O(1) - Direct dictionary insert with secondary index update
-                - get(policy_id): O(1) best case, O(k) average, O(k*log k) worst case
-                    where k = number of versions for policy_id
+                - get(policy_id): O(1) best case, O(k) average, O(k*log k) filtered worst case
+                    where k = number of matching versions after filtering
                     - Uses secondary index (_policy_id_index) for O(1) policy_id lookup
-                    - Fast path (no filters): Single version → O(1), multiple → O(k)
-                    - Filtered path (type/version): Requires filtering and sorting → O(k*log k)
+                    - Fast path (no filters, single version): O(1) direct lookup
+                    - Multi-version (no filters): O(k) to find max version via comparison
+                    - Filtered path (policy_type + multi-version): O(k*log k) for filter + semver sort
                     - Deferred error generation: Expensive _list_internal() only on error
                     - Cached semver parsing: LRU cache (128 entries) avoids re-parsing
 
@@ -540,9 +547,10 @@ class PolicyRegistry:
         If version is not specified, returns the latest version (lexicographically).
 
         Performance Characteristics:
-            - Best case: O(1) - Direct lookup with policy_id only (single version)
-            - Average case: O(k) where k = number of versions for policy_id
-            - Worst case: O(k*log(k)) when multiple versions require sorting
+            - Best case: O(1) - Direct lookup with policy_id only (single version, no filters)
+            - Average case: O(k) where k = number of matching versions (multi-version, no filters)
+            - Worst case: O(k*log(k)) when policy_type filter applied with multiple versions
+              (requires both filtering candidates and sorting by semver to find latest)
             - Uses secondary index for O(1) policy_id lookup instead of O(n) scan
             - Defers expensive error message generation until actually needed
             - Fast path optimization when no filters applied (common case)
@@ -765,8 +773,8 @@ class PolicyRegistry:
             )
 
         # Empty prerelease sorts after non-empty (release > prerelease)
-        # Use chr(127) for empty to sort after any prerelease string
-        sort_prerelease = prerelease if prerelease else chr(127)
+        # Use sentinel value for empty to sort after any prerelease string
+        sort_prerelease = prerelease if prerelease else _SEMVER_SORT_SENTINEL
 
         return (major, minor, patch, sort_prerelease)
 
@@ -790,7 +798,8 @@ class PolicyRegistry:
     ) -> list[tuple[str, str, str]]:
         """List registered policy keys as (id, type, version) tuples.
 
-        This method implements the ProtocolRegistryBase.list_keys() interface.
+        TODO(Phase 2): This method will implement ProtocolRegistryBase.list_keys()
+        interface once the protocol is added to omnibase_spi.
 
         Args:
             policy_type: Optional filter to list only policies of a specific type.
@@ -940,6 +949,7 @@ class PolicyRegistry:
             except PolicyRegistryError:
                 return 0
 
+        # Thread safety: Lock held during full unregister operation (write operation)
         with self._lock:
             # Performance optimization: Use secondary index
             candidate_keys = self._policy_id_index.get(policy_id, [])
@@ -1110,7 +1120,7 @@ def get_policy_class(
 
         # NEW (preferred):
         from omnibase_infra.runtime.policy_registry import PolicyRegistry
-        registry = container.service_registry.resolve_service(PolicyRegistry)
+        registry = await container.service_registry.resolve_service(PolicyRegistry)
         policy_cls = registry.get("exponential_backoff")
         ```
 
@@ -1167,7 +1177,7 @@ def register_policy(
 
         # NEW (preferred):
         from omnibase_infra.runtime.policy_registry import PolicyRegistry
-        registry = container.service_registry.resolve_service(PolicyRegistry)
+        registry = await container.service_registry.resolve_service(PolicyRegistry)
         registry.register_policy(
             policy_id="retry_backoff",
             policy_class=RetryBackoffPolicy,

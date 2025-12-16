@@ -144,6 +144,9 @@ services:
     # -------------------------------------------------------------------------
     ports:
       - "${RUNTIME_MAIN_PORT:-8085}:8085"
+    # Graceful shutdown configuration - allow 40s for clean shutdown
+    # Runtime default grace period is 30s, plus 10s buffer for Docker
+    stop_grace_period: 40s
     volumes:
       # Persistent logs directory
       - runtime_logs:/app/logs
@@ -201,6 +204,8 @@ services:
     # Consider binding to localhost: "127.0.0.1:${RUNTIME_EFFECTS_PORT:-8086}:8085"
     ports:
       - "${RUNTIME_EFFECTS_PORT:-8086}:8085"
+    # Graceful shutdown configuration - allow 40s for clean shutdown
+    stop_grace_period: 40s
     volumes:
       # Persistent logs directory
       - effects_logs:/app/logs
@@ -237,6 +242,8 @@ services:
       ONEX_INPUT_TOPIC: ${ONEX_WORKER_INPUT_TOPIC:-worker-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_WORKER_OUTPUT_TOPIC:-worker-responses}
       ONEX_GROUP_ID: ${ONEX_WORKER_GROUP_ID:-onex-runtime-workers}
+    # Graceful shutdown configuration - allow 40s for clean shutdown
+    stop_grace_period: 40s
     volumes:
       # Persistent logs directory (shared across workers)
       - worker_logs:/app/logs

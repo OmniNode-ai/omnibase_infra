@@ -593,11 +593,12 @@ class TestDockerRuntime:
             time.sleep(3)  # Allow initialization
 
             # Send SIGTERM via docker stop
+            # Timeout increased to 40s to match runtime's 30s grace period plus buffer
             result = subprocess.run(
-                ["docker", "stop", "-t", "10", container_name],
+                ["docker", "stop", "-t", "40", container_name],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
                 check=False,
             )
 
