@@ -1138,11 +1138,13 @@ class TestInMemoryEventBusCircuitBreaker:
         return InMemoryEventBus(environment="test", group="test-group")
 
     def test_circuit_breaker_threshold_validation(self) -> None:
-        """Test that invalid circuit_breaker_threshold raises ValueError."""
-        with pytest.raises(ValueError, match="positive integer"):
+        """Test that invalid circuit_breaker_threshold raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="positive integer"):
             InMemoryEventBus(circuit_breaker_threshold=0)
 
-        with pytest.raises(ValueError, match="positive integer"):
+        with pytest.raises(ProtocolConfigurationError, match="positive integer"):
             InMemoryEventBus(circuit_breaker_threshold=-1)
 
     @pytest.mark.asyncio

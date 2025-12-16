@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Literal, Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelEventHeaders(BaseModel):
@@ -58,19 +58,19 @@ class ModelEventHeaders(BaseModel):
     source: str
     event_type: str
     schema_version: str = Field(default="1.0.0")
-    destination: Optional[str] = Field(default=None)
-    trace_id: Optional[str] = Field(default=None)
-    span_id: Optional[str] = Field(default=None)
-    parent_span_id: Optional[str] = Field(default=None)
-    operation_name: Optional[str] = Field(default=None)
+    destination: str | None = Field(default=None)
+    trace_id: str | None = Field(default=None)
+    span_id: str | None = Field(default=None)
+    parent_span_id: str | None = Field(default=None)
+    operation_name: str | None = Field(default=None)
     priority: Literal["low", "normal", "high", "critical"] = Field(default="normal")
-    routing_key: Optional[str] = Field(default=None)
-    partition_key: Optional[str] = Field(default=None)
+    routing_key: str | None = Field(default=None)
+    partition_key: str | None = Field(default=None)
     retry_count: int = Field(default=0)
     max_retries: int = Field(default=3)
-    ttl_seconds: Optional[int] = Field(default=None)
+    ttl_seconds: int | None = Field(default=None)
 
-    model_config = {"frozen": True, "extra": "forbid"}
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     async def validate_headers(self) -> bool:
         """Validate that required headers are present and valid.

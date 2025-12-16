@@ -54,7 +54,7 @@ MAX_GRACE_PERIOD_SECONDS = 300
 
 def validate_runtime_config(
     config: dict[str, object],
-    contract_path: Optional[Path] = None,
+    contract_path: Path | None = None,
 ) -> list[str]:
     """Validate runtime configuration against contract schema.
 
@@ -208,7 +208,7 @@ def validate_runtime_config(
 
 def load_and_validate_config(
     config_path: Path,
-    contract_path: Optional[Path] = None,
+    contract_path: Path | None = None,
 ) -> dict[str, object]:
     """Load and validate runtime configuration from a YAML file.
 

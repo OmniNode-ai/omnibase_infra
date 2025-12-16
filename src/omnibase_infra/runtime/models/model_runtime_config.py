@@ -95,18 +95,19 @@ class ModelRuntimeConfig(BaseModel):
         frozen=True,
         extra="ignore",  # Allow extra fields for forward compatibility
         populate_by_name=True,  # Allow both alias and field name for population
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     # Contract metadata (optional, may not be present in minimal configs)
-    contract_version: Optional[str] = Field(
+    contract_version: str | None = Field(
         default=None,
         description="Version of the configuration contract",
     )
-    name: Optional[str] = Field(
+    name: str | None = Field(
         default=None,
         description="Configuration name identifier",
     )
-    description: Optional[str] = Field(
+    description: str | None = Field(
         default=None,
         description="Human-readable description",
     )

@@ -7,14 +7,17 @@ with event bus implementations.
 Exports:
     ModelEventHeaders: Headers for event bus messages implementing ProtocolEventHeaders
     ModelEventMessage: Event bus message implementing ProtocolEventMessage
+    ModelKafkaEventBusConfig: Configuration model for KafkaEventBus
 """
 
 from __future__ import annotations
 
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 
 __all__: list[str] = [
     "ModelEventHeaders",
     "ModelEventMessage",
+    "ModelKafkaEventBusConfig",
 ]

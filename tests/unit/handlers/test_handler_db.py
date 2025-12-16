@@ -24,9 +24,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.handler_db import DbAdapter
 from omnibase_infra.handlers.models import (
-    ModelDbDescribeResponse,
     ModelDbHealthResponse,
-    ModelDbQueryResponse,
 )
 from tests.helpers import filter_handler_warnings
 

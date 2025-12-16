@@ -725,9 +725,8 @@ class RuntimeHostProcess:
         # Execute handler
         try:
             # Handler expected to have async execute(envelope) method
-            # Note: Handlers use legacy signature execute(envelope) instead of
-            # new protocol signature execute(request, operation_config)
-            # TODO(OMN-40): Migrate handlers to new protocol signature
+            # NOTE: MVP adapters use legacy execute(envelope: dict) signature.
+            # TODO(OMN-40): Migrate handlers to new protocol signature execute(request, operation_config)
             response = await handler.execute(envelope)  # type: ignore[call-arg]
 
             # Ensure response has correlation_id

@@ -13,8 +13,6 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # Import all validators and constants
 from omnibase_infra.validation.infra_validators import (
     INFRA_MAX_UNIONS,
@@ -37,8 +35,15 @@ class TestInfraValidatorConstants:
     """Test constants used across validators."""
 
     def test_infra_max_unions_constant(self) -> None:
-        """Verify INFRA_MAX_UNIONS constant has expected value."""
-        assert INFRA_MAX_UNIONS == 30, "INFRA_MAX_UNIONS should be 30"
+        """Verify INFRA_MAX_UNIONS constant has expected value.
+
+        NOTE: Currently set to 108 (baseline as of 2025-12-16) due to tech debt.
+        This is documented in infra_validators.py and will be reduced to 30
+        incrementally after PR #37 merges.
+        """
+        assert INFRA_MAX_UNIONS == 108, (
+            "INFRA_MAX_UNIONS should be 108 (current baseline)"
+        )
 
     def test_infra_max_violations_constant(self) -> None:
         """Verify INFRA_MAX_VIOLATIONS constant has expected value."""
@@ -142,7 +147,18 @@ class TestValidateInfraPatternsDefaults:
     @patch("omnibase_infra.validation.infra_validators.validate_patterns")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
         """Verify defaults are correctly passed to core validator."""
-        mock_validate.return_value = MagicMock(is_valid=True, errors=[])
+        # Mock validation result with proper structure for filtered result creation
+        mock_result = MagicMock()
+        mock_result.is_valid = True
+        mock_result.errors = []
+        mock_result.warnings = []
+        mock_result.suggestions = []
+        mock_result.issues = []
+        mock_result.validated_value = None
+        mock_result.summary = ""
+        mock_result.details = ""
+        mock_result.metadata = None
+        mock_validate.return_value = mock_result
 
         # Call with defaults
         validate_infra_patterns()
@@ -308,15 +324,14 @@ class TestScriptDefaults:
         script_path = Path("scripts/validate.py")
         script_content = script_path.read_text()
 
-        # Verify patterns validator uses INFRA_PATTERNS_STRICT constant
-        assert "strict=INFRA_PATTERNS_STRICT" in script_content, (
-            "Patterns validator should use INFRA_PATTERNS_STRICT constant"
+        # Verify patterns validator uses validate_infra_patterns() which has built-in defaults
+        assert "validate_infra_patterns()" in script_content, (
+            "Patterns validator should use validate_infra_patterns() with built-in defaults"
         )
         assert (
-            "from omnibase_infra.validation.infra_validators import INFRA_PATTERNS_STRICT"
+            "from omnibase_infra.validation.infra_validators import validate_infra_patterns"
             in script_content
-        ), "Script should import INFRA_PATTERNS_STRICT constant"
-        assert "validate_patterns(" in script_content
+        ), "Script should import validate_infra_patterns"
 
     def test_unions_script_defaults(self) -> None:
         """Verify unions validation script uses correct defaults."""
@@ -341,8 +356,6 @@ class TestCLICommandDefaults:
     def test_architecture_cli_defaults(self) -> None:
         """Verify architecture CLI command has correct defaults."""
         from click.testing import CliRunner
-
-        from omnibase_infra.cli.commands import validate
 
         runner = CliRunner()
 

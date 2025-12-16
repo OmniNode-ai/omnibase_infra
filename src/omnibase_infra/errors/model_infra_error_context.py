@@ -42,21 +42,22 @@ class ModelInfraErrorContext(BaseModel):
     model_config = ConfigDict(
         frozen=True,  # Immutable for thread safety
         extra="forbid",  # Strict validation - no extra fields
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
-    transport_type: Optional[EnumInfraTransportType] = Field(
+    transport_type: EnumInfraTransportType | None = Field(
         default=None,
         description="Type of infrastructure transport (HTTP, DATABASE, KAFKA, etc.)",
     )
-    operation: Optional[str] = Field(
+    operation: str | None = Field(
         default=None,
         description="Operation being performed (connect, query, authenticate, etc.)",
     )
-    target_name: Optional[str] = Field(
+    target_name: str | None = Field(
         default=None,
         description="Target resource or endpoint name",
     )
-    correlation_id: Optional[UUID] = Field(
+    correlation_id: UUID | None = Field(
         default=None,
         description="Request correlation ID for distributed tracing",
     )
@@ -64,7 +65,7 @@ class ModelInfraErrorContext(BaseModel):
     @classmethod
     def with_correlation(
         cls,
-        correlation_id: Optional[UUID] = None,
+        correlation_id: UUID | None = None,
         **kwargs: object,
     ) -> "ModelInfraErrorContext":
         """Create context with auto-generated correlation_id if not provided.
