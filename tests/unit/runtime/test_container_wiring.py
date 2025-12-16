@@ -68,7 +68,7 @@ class TestGetPolicyRegistryFromContainer:
         async def raise_error(*args: object, **kwargs: object) -> None:
             raise ValueError("Service not registered")
 
-        mock_container.service_registry.resolve_service = raise_error  # type: ignore[method-assign]
+        mock_container.service_registry.resolve_service = raise_error
 
         with pytest.raises(RuntimeError, match="PolicyRegistry not registered"):
             await get_policy_registry_from_container(mock_container)
@@ -165,7 +165,7 @@ class TestContainerBasedPolicyUsage:
 
         # Step 3: Retrieve and verify policy
         policy_cls = registry.get("test_policy")
-        assert policy_cls is MockPolicy
+        assert policy_cls is MockPolicy  # type: ignore[comparison-overlap]
 
         # Step 4: Instantiate and use policy
         policy = policy_cls()
