@@ -25,7 +25,12 @@ from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
 @pytest.fixture
 def mock_registry() -> ProtocolBindingRegistry:
-    """Create a mock registry with common handler types registered."""
+    """Create a mock registry with common handler types registered.
+
+    Note: This fixture uses direct instantiation for unit testing the
+    envelope validator. For integration tests that need real container-based
+    registries, use container_with_registries from conftest.py.
+    """
     registry = ProtocolBindingRegistry()
 
     # Create a minimal mock handler class

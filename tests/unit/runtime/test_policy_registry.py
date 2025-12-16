@@ -36,6 +36,9 @@ from omnibase_infra.runtime.policy_registry import (
     register_policy,
 )
 
+if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
+
 # =============================================================================
 # Mock Policy Classes for Testing
 # =============================================================================
@@ -168,13 +171,23 @@ class MockPolicyV2:
 
 @pytest.fixture
 def policy_registry() -> PolicyRegistry:
-    """Provide a fresh PolicyRegistry instance for each test."""
+    """Provide a fresh PolicyRegistry instance for each test.
+
+    Note: This fixture uses direct instantiation for unit testing the PolicyRegistry
+    class itself. For integration tests that need container-based access, use
+    container_with_policy_registry or container_with_registries fixtures from
+    conftest.py.
+    """
     return PolicyRegistry()
 
 
 @pytest.fixture
 def populated_policy_registry() -> PolicyRegistry:
-    """Provide a PolicyRegistry with pre-registered policies."""
+    """Provide a PolicyRegistry with pre-registered policies.
+
+    Note: This fixture uses direct instantiation for unit testing the PolicyRegistry
+    class itself. For integration tests, use container-based fixtures.
+    """
     registry = PolicyRegistry()
     registry.register_policy(
         policy_id="sync-orchestrator",
@@ -1728,3 +1741,82 @@ class TestPolicyRegistryInvalidVersions:
 
         latest_cls = policy_registry.get("patch-test")
         assert latest_cls is MockPolicyV2, "1.0.10 > 1.0.9"
+
+
+# =============================================================================
+# Container-Based DI Integration Tests (OMN-868 Phase 3)
+# =============================================================================
+
+
+class TestPolicyRegistryContainerIntegration:
+    """Integration tests using container-based DI patterns (OMN-868 Phase 3).
+
+    These tests demonstrate the container-based access pattern that should be
+    used in production code. Unit tests above use direct instantiation to test
+    the PolicyRegistry class itself, but integration tests should use containers.
+    """
+
+    def test_container_provides_policy_registry_via_mock(
+        self, container_with_policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that container fixture provides PolicyRegistry."""
+        assert isinstance(container_with_policy_registry, PolicyRegistry)
+        assert len(container_with_policy_registry) == 0
+
+    async def test_container_with_registries_provides_policy_registry(
+        self, container_with_registries: ModelONEXContainer
+    ) -> None:
+        """Test that real container fixture provides PolicyRegistry."""
+        # Resolve from container (async in omnibase_core 0.4+)
+        registry: PolicyRegistry = (
+            await container_with_registries.service_registry.resolve_service(
+                PolicyRegistry
+            )
+        )
+        assert isinstance(registry, PolicyRegistry)
+
+    async def test_container_based_policy_registration_workflow(
+        self, container_with_registries: ModelONEXContainer
+    ) -> None:
+        """Test full workflow using container-based DI."""
+        # Step 1: Resolve registry from container
+        registry: PolicyRegistry = (
+            await container_with_registries.service_registry.resolve_service(
+                PolicyRegistry
+            )
+        )
+
+        # Step 2: Register policy
+        registry.register_policy(
+            policy_id="container-test",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.0.0",
+        )
+
+        # Step 3: Verify registration
+        assert registry.is_registered("container-test")
+        policy_cls = registry.get("container-test")
+        assert policy_cls is MockSyncPolicy
+
+    async def test_container_isolation_between_tests(
+        self, container_with_registries: ModelONEXContainer
+    ) -> None:
+        """Test that container provides isolated registry per test."""
+        registry: PolicyRegistry = (
+            await container_with_registries.service_registry.resolve_service(
+                PolicyRegistry
+            )
+        )
+
+        # This test should start with empty registry (no pollution from other tests)
+        assert len(registry) == 0
+
+        # Register a policy
+        registry.register_policy(
+            policy_id="isolation-test",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+        )
+
+        assert len(registry) == 1

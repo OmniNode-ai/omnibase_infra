@@ -106,13 +106,24 @@ class MockAlternativeEventBus:
 
 @pytest.fixture
 def handler_registry() -> ProtocolBindingRegistry:
-    """Provide a fresh ProtocolBindingRegistry instance for each test."""
+    """Provide a fresh ProtocolBindingRegistry instance for each test.
+
+    Note: This fixture uses direct instantiation for unit testing the
+    ProtocolBindingRegistry class itself. For integration tests that need
+    container-based access, use container_with_handler_registry or
+    container_with_registries fixtures from conftest.py.
+    """
     return ProtocolBindingRegistry()
 
 
 @pytest.fixture
 def event_bus_registry() -> EventBusBindingRegistry:
-    """Provide a fresh EventBusBindingRegistry instance for each test."""
+    """Provide a fresh EventBusBindingRegistry instance for each test.
+
+    Note: This fixture uses direct instantiation for unit testing the
+    EventBusBindingRegistry class itself. For integration tests, use
+    container-based patterns.
+    """
     return EventBusBindingRegistry()
 
 

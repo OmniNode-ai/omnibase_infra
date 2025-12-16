@@ -46,6 +46,10 @@ def large_policy_registry() -> PolicyRegistry:
 
     Creates 100 policies with 5 versions each (500 total registrations).
     This simulates a realistic large registry.
+
+    Note: Performance tests use direct instantiation to isolate performance
+    characteristics. Container DI overhead would confound performance measurements.
+    For integration tests, use container-based fixtures from conftest.py.
     """
     registry = PolicyRegistry()
     for i in range(100):

@@ -110,6 +110,26 @@ class PolicyRegistry:
     interface from omnibase_spi 0.4.0. The external API maintains tuple compatibility
     while internal operations use ModelPolicyKey for strong typing.
 
+    Container Integration:
+        PolicyRegistry is designed to be managed by ModelONEXContainer from omnibase_core.
+        Use container_wiring.wire_infrastructure_services() to register PolicyRegistry
+        in the container, then resolve it via:
+
+        ```python
+        from omnibase_core.container import ModelONEXContainer
+        from omnibase_infra.runtime.policy_registry import PolicyRegistry
+
+        # Resolve from container (preferred)
+        registry = container.service_registry.resolve_service(PolicyRegistry)
+
+        # Or use helper function
+        from omnibase_infra.runtime.container_wiring import get_policy_registry_from_container
+        registry = get_policy_registry_from_container(container)
+        ```
+
+        Legacy singleton pattern (get_policy_registry()) maintained for backwards
+        compatibility but deprecated in favor of container-based DI.
+
     Thread Safety:
         All registration operations are protected by a threading.Lock to ensure
         thread-safe access in concurrent environments.
@@ -450,9 +470,19 @@ class PolicyRegistry:
             # Find matching entries from candidates (optimized to reduce allocations)
             # Fast path: no filtering needed (common case - just get latest version)
             if normalized_type is None and version is None:
-                matches: list[tuple[ModelPolicyKey, type[ProtocolPolicy]]] = [
-                    (key, self._registry[key]) for key in candidate_keys
-                ]
+                # Fast path optimization: avoid tuple allocation and batch dict lookups
+                # Only build the matches list if we have multiple versions
+                if len(candidate_keys) == 1:
+                    # Single version - direct return without any allocations
+                    return self._registry[candidate_keys[0]]
+                else:
+                    # Multiple versions - need to find latest
+                    # Use direct key comparison instead of building tuples
+                    latest_key = max(
+                        candidate_keys,
+                        key=lambda k: self._parse_semver(k.version),
+                    )
+                    return self._registry[latest_key]
             else:
                 # Filtered path: apply type and version filters
                 matches = []
@@ -466,32 +496,32 @@ class PolicyRegistry:
                         continue
                     matches.append((key, self._registry[key]))
 
-            if not matches:
-                # Filters eliminated all candidates - build error message
-                filters = [f"policy_id={policy_id!r}"]
-                if policy_type is not None:
-                    filters.append(f"policy_type={policy_type!r}")
-                if version is not None:
-                    filters.append(f"version={version!r}")
+                if not matches:
+                    # Filters eliminated all candidates - build error message
+                    filters = [f"policy_id={policy_id!r}"]
+                    if policy_type is not None:
+                        filters.append(f"policy_type={policy_type!r}")
+                    if version is not None:
+                        filters.append(f"version={version!r}")
 
-                # Defer expensive _list_internal() call until actually raising error
-                registered = self._list_internal()
-                raise PolicyRegistryError(
-                    f"No policy registered matching: {', '.join(filters)}. "
-                    f"Registered policies: {registered}",
-                    policy_id=policy_id,
-                    policy_type=str(policy_type) if policy_type else None,
-                )
+                    # Defer expensive _list_internal() call until actually raising error
+                    registered = self._list_internal()
+                    raise PolicyRegistryError(
+                        f"No policy registered matching: {', '.join(filters)}. "
+                        f"Registered policies: {registered}",
+                        policy_id=policy_id,
+                        policy_type=str(policy_type) if policy_type else None,
+                    )
 
-            # If version not specified and multiple matches, return latest
-            # (using cached semantic version comparison)
-            if version is None and len(matches) > 1:
-                # Sort in-place to avoid allocating a new list
-                matches.sort(
-                    key=lambda x: self._parse_semver(x[0].version), reverse=True
-                )
+                # If version not specified and multiple matches, return latest
+                # (using cached semantic version comparison)
+                if version is None and len(matches) > 1:
+                    # Sort in-place to avoid allocating a new list
+                    matches.sort(
+                        key=lambda x: self._parse_semver(x[0].version), reverse=True
+                    )
 
-            return matches[0][1]
+                return matches[0][1]
 
     @staticmethod
     @functools.lru_cache(maxsize=128)
@@ -835,6 +865,30 @@ _singleton_lock: threading.Lock = threading.Lock()
 def get_policy_registry() -> PolicyRegistry:
     """Get the singleton policy registry instance.
 
+    .. deprecated:: 0.2.0
+        Use container-based DI instead for better testability and ONEX compliance:
+
+        ```python
+        # OLD (deprecated - singleton pattern):
+        from omnibase_infra.runtime.policy_registry import get_policy_registry
+        registry = get_policy_registry()
+
+        # NEW (preferred - container-based DI):
+        from omnibase_core.container import ModelONEXContainer
+        from omnibase_infra.runtime.container_wiring import get_policy_registry_from_container
+
+        def __init__(self, container: ModelONEXContainer):
+            self.policy_registry = get_policy_registry_from_container(container)
+
+        # Or resolve directly:
+        from omnibase_infra.runtime.policy_registry import PolicyRegistry
+        registry = container.service_registry.resolve_service(PolicyRegistry)
+        ```
+
+    This function maintains backwards compatibility for code that hasn't migrated
+    to container-based DI. New code should use ModelONEXContainer to resolve
+    PolicyRegistry for better testability and lifecycle management.
+
     Returns a module-level singleton instance of PolicyRegistry.
     Creates the instance on first call (lazy initialization).
 
@@ -869,7 +923,22 @@ def get_policy_class(
 ) -> type[ProtocolPolicy]:
     """Get policy class from the singleton registry.
 
+    .. deprecated:: 0.2.0
+        Use container-based DI instead:
+
+        ```python
+        # OLD (deprecated):
+        from omnibase_infra.runtime.policy_registry import get_policy_class
+        policy_cls = get_policy_class("exponential_backoff")
+
+        # NEW (preferred):
+        from omnibase_infra.runtime.policy_registry import PolicyRegistry
+        registry = container.service_registry.resolve_service(PolicyRegistry)
+        policy_cls = registry.get("exponential_backoff")
+        ```
+
     Convenience function that wraps get_policy_registry().get().
+    Maintained for backwards compatibility.
 
     Args:
         policy_id: Policy identifier.
@@ -899,7 +968,30 @@ def register_policy(
 ) -> None:
     """Register a policy in the singleton registry.
 
+    .. deprecated:: 0.2.0
+        Use container-based DI instead:
+
+        ```python
+        # OLD (deprecated):
+        from omnibase_infra.runtime.policy_registry import register_policy
+        register_policy(
+            policy_id="retry_backoff",
+            policy_class=RetryBackoffPolicy,
+            policy_type="orchestrator",
+        )
+
+        # NEW (preferred):
+        from omnibase_infra.runtime.policy_registry import PolicyRegistry
+        registry = container.service_registry.resolve_service(PolicyRegistry)
+        registry.register_policy(
+            policy_id="retry_backoff",
+            policy_class=RetryBackoffPolicy,
+            policy_type="orchestrator",
+        )
+        ```
+
     Convenience function that wraps get_policy_registry().register_policy().
+    Maintained for backwards compatibility.
 
     Args:
         policy_id: Unique identifier for the policy.

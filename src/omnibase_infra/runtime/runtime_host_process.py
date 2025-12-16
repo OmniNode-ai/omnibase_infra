@@ -51,11 +51,12 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.runtime.envelope_validator import validate_envelope
-from omnibase_infra.runtime.handler_registry import get_handler_registry
+from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.wiring import wire_default_handlers
 
 if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
     from omnibase_infra.event_bus.models import ModelEventMessage
@@ -84,6 +85,15 @@ class RuntimeHostProcess:
     runtime. It owns an InMemoryEventBus instance, registers handlers via the
     wiring module, and routes incoming envelopes to appropriate handlers.
 
+    Container Integration:
+        RuntimeHostProcess now accepts a ModelONEXContainer parameter for
+        dependency injection. The container provides access to:
+        - ProtocolBindingRegistry: Handler registry for protocol routing
+
+        This follows ONEX container-based DI patterns for better testability
+        and lifecycle management. The legacy singleton pattern is deprecated
+        in favor of container resolution.
+
     Attributes:
         event_bus: The owned InMemoryEventBus instance
         is_running: Whether the process is currently running
@@ -93,10 +103,19 @@ class RuntimeHostProcess:
 
     Example:
         ```python
-        process = RuntimeHostProcess()
+        from omnibase_core.container import ModelONEXContainer
+        from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+
+        # Container-based initialization (preferred)
+        container = ModelONEXContainer()
+        wire_infrastructure_services(container)
+        process = RuntimeHostProcess(container=container)
         await process.start()
         health = await process.health_check()
         await process.stop()
+
+        # Legacy initialization (backwards compatible, no container)
+        process = RuntimeHostProcess()  # Uses singleton registries
         ```
 
     Note:
@@ -110,6 +129,7 @@ class RuntimeHostProcess:
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
         config: Optional[dict[str, object]] = None,
+        handler_registry: Optional[ProtocolBindingRegistry] = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -127,7 +147,15 @@ class RuntimeHostProcess:
                       ModelLifecycleSubcontract). Values outside this range are
                       clamped to the nearest bound with a warning logged.
                       Invalid string values fall back to the default with a warning.
+            handler_registry: Optional pre-resolved ProtocolBindingRegistry from container.
+                If provided, uses this registry instead of singleton. If None, falls back
+                to singleton pattern for backwards compatibility. This approach allows
+                synchronous initialization while supporting container-based DI (container
+                resolution must happen before RuntimeHostProcess instantiation).
         """
+        # Store handler registry (pre-resolved from container or None for singleton fallback)
+        self._handler_registry: Optional[ProtocolBindingRegistry] = handler_registry
+
         # Create or use provided event bus
         self._event_bus: InMemoryEventBus = event_bus or InMemoryEventBus()
 
@@ -406,13 +434,17 @@ class RuntimeHostProcess:
         logger.info("RuntimeHostProcess stopped successfully")
 
     async def _populate_handlers_from_registry(self) -> None:
-        """Populate self._handlers from the singleton handler registry.
+        """Populate self._handlers from handler registry (container or singleton).
 
         This method bridges the gap between the wiring module (which registers
-        handler CLASSES to the singleton registry) and the RuntimeHostProcess
+        handler CLASSES to the registry) and the RuntimeHostProcess
         (which needs handler INSTANCES in self._handlers for routing).
 
-        For each registered handler type in the singleton registry:
+        Registry Resolution:
+            - If handler_registry provided: Uses pre-resolved registry
+            - If no handler_registry: Falls back to singleton get_handler_registry()
+
+        For each registered handler type in the registry:
         1. Skip if handler type is already registered (e.g., by tests)
         2. Get the handler class from the registry
         3. Instantiate the handler class
@@ -425,7 +457,8 @@ class RuntimeHostProcess:
         Note: Handlers already in self._handlers (e.g., injected by tests via
         register_handler() or patch.object()) are preserved and not overwritten.
         """
-        handler_registry = get_handler_registry()
+        # Get handler registry (pre-resolved or singleton)
+        handler_registry = self._get_handler_registry()
         registered_types = handler_registry.list_protocols()
 
         logger.debug(
@@ -509,6 +542,21 @@ class RuntimeHostProcess:
             },
         )
 
+    def _get_handler_registry(self) -> ProtocolBindingRegistry:
+        """Get handler registry (pre-resolved or singleton).
+
+        Returns:
+            ProtocolBindingRegistry instance (pre-resolved from container or singleton).
+        """
+        if self._handler_registry is not None:
+            # Use pre-resolved registry from container
+            return self._handler_registry
+        else:
+            # Backwards compatibility: fall back to singleton pattern
+            from omnibase_infra.runtime.handler_registry import get_handler_registry
+
+            return get_handler_registry()
+
     async def _on_message(self, message: ModelEventMessage) -> None:
         """Handle incoming message from event bus subscription.
 
@@ -587,7 +635,7 @@ class RuntimeHostProcess:
         # Step 1: Validate envelope BEFORE dispatch
         # This validates operation, prefix, payload requirements, and normalizes correlation_id
         try:
-            validate_envelope(envelope, get_handler_registry())
+            validate_envelope(envelope, self._get_handler_registry())
         except EnvelopeValidationError as e:
             # Validation failed - missing operation or payload
             error_response = self._create_error_response(

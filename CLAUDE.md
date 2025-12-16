@@ -50,9 +50,47 @@
 
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
-- **Container Injection** - `def __init__(self, container: ONEXContainer)`
+- **Container Injection** - `def __init__(self, container: ModelONEXContainer)`
 - **Protocol Resolution** - Duck typing through protocols, never isinstance
 - **OnexError Only** - `raise OnexError(...) from e`
+
+### Container-Based Dependency Injection
+
+**All services MUST use ModelONEXContainer for dependency injection.**
+
+```python
+from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+from omnibase_infra.runtime.policy_registry import PolicyRegistry
+
+# Bootstrap container
+container = ModelONEXContainer()
+wire_infrastructure_services(container)
+
+# Resolve services using type interface
+policy_registry = container.service_registry.resolve_service(PolicyRegistry)
+
+# Use in class constructors
+class MyNode:
+    def __init__(self, container: ModelONEXContainer):
+        self.policy_registry = container.service_registry.resolve_service(PolicyRegistry)
+```
+
+**Service Registration Keys:**
+
+| Service | Interface Type | Scope |
+|---------|---------------|-------|
+| PolicyRegistry | `PolicyRegistry` | global |
+
+**Deprecated Patterns:**
+- ❌ `get_policy_registry()` - Module-level singleton (use container instead)
+- ❌ `get_policy_class()` - Singleton-based convenience function
+- ❌ `register_policy()` - Singleton-based registration
+
+**Preferred Patterns:**
+- ✅ `container.service_registry.resolve_service(PolicyRegistry)` - Type-safe resolution
+- ✅ `get_policy_registry_from_container(container)` - Helper function
+- ✅ `wire_infrastructure_services(container)` - Bootstrap all services
 
 ## 🚨 Infrastructure Error Patterns
 
