@@ -4,7 +4,10 @@ This plugin recursively sorts JSON object keys to enable consistent comparison
 and hashing. It demonstrates a pure, deterministic compute plugin with no side effects.
 """
 
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
+
+from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.errors import OnexError
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
@@ -13,8 +16,9 @@ from omnibase_infra.protocols.protocol_plugin_compute import (
     PluginOutputData,
 )
 
-# JSON-compatible type alias for improved readability
-JsonValue = dict[str, Any] | list[Any] | str | int | float | bool | None
+# JSON-compatible type alias using forward reference for recursion
+# Note: This is the standard way to define recursive JSON types in Python
+JsonValue = dict[str, "JsonValue"] | list["JsonValue"] | str | int | float | bool | None
 
 
 class JsonNormalizerInput(TypedDict, total=False):
@@ -52,11 +56,45 @@ class PluginJsonNormalizer(PluginComputeBase):
     def execute(
         self, input_data: PluginInputData, context: PluginContext
     ) -> PluginOutputData:
-        """Execute JSON normalization with type-safe inputs and outputs."""
-        json_data = cast(JsonValue, input_data.get("json", {}))
-        normalized: JsonValue = self._sort_keys_recursively(json_data)
-        output: JsonNormalizerOutput = {"normalized": normalized}
-        return output
+        """Execute JSON normalization with type-safe inputs and outputs.
+
+        Args:
+            input_data: Dictionary containing "json" key with data to normalize
+            context: Execution context (correlation_id, timestamps, etc.)
+
+        Returns:
+            Dictionary with "normalized" key containing sorted JSON
+
+        Raises:
+            OnexError: For all computation failures (with proper error chaining)
+        """
+        correlation_id = context.get("correlation_id")
+
+        try:
+            json_data = cast(JsonValue, input_data.get("json", {}))
+            normalized: JsonValue = self._sort_keys_recursively(json_data)
+            output: JsonNormalizerOutput = {"normalized": normalized}
+            return output
+
+        except RecursionError as e:
+            raise OnexError(
+                message="JSON structure too deeply nested for normalization",
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+                correlation_id=correlation_id,
+                plugin_name=self.__class__.__name__,
+                max_recursion_depth=self.MAX_RECURSION_DEPTH,
+            ) from e
+
+        except Exception as e:
+            raise OnexError(
+                message=f"Unexpected error during JSON normalization: {e}",
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+                correlation_id=correlation_id,
+                plugin_name=self.__class__.__name__,
+                input_keys=list(input_data.keys())
+                if isinstance(input_data, dict)
+                else [],
+            ) from e
 
     def _sort_keys_recursively(self, obj: JsonValue, _depth: int = 0) -> JsonValue:
         """Recursively sort dictionary keys with optimized performance and depth protection.
@@ -120,7 +158,17 @@ class PluginJsonNormalizer(PluginComputeBase):
         return [self._sort_keys_recursively(item, _depth + 1) for item in obj]
 
     def validate_input(self, input_data: PluginInputData) -> None:
-        """Validate input with runtime type checking and type guards."""
+        """Validate input with runtime type checking and type guards.
+
+        Args:
+            input_data: The input data to validate
+
+        Raises:
+            TypeError: If input_data is not a dict
+            ValueError: If "json" key exists but is not JSON-compatible type.
+                Caller should wrap in OnexError with correlation_id.
+            OnexError: If JSON structure exceeds maximum nesting depth
+        """
         if not isinstance(input_data, dict):
             raise TypeError(f"input_data must be dict, got {type(input_data).__name__}")
 
@@ -132,9 +180,18 @@ class PluginJsonNormalizer(PluginComputeBase):
             raise ValueError(
                 f"Input 'json' must be JSON-compatible type, got {type(json_data).__name__}"
             )
-        self._validate_json_structure(json_data)
 
-    def _is_json_compatible(self, value: Any) -> bool:
+        try:
+            self._validate_json_structure(json_data)
+        except RecursionError as e:
+            raise OnexError(
+                message="JSON structure too deeply nested for validation",
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+                plugin_name=self.__class__.__name__,
+                max_recursion_depth=self.MAX_RECURSION_DEPTH,
+            ) from e
+
+    def _is_json_compatible(self, value: object) -> bool:
         """Type guard to check if value is JSON-compatible."""
         return isinstance(value, (dict, list, str, int, float, bool, type(None)))
 

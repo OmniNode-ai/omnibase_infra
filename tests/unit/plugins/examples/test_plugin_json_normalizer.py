@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 import pytest
+from omnibase_core.errors import OnexError
 
 from omnibase_infra.plugins.examples.plugin_json_normalizer import (
     PluginJsonNormalizer,
@@ -267,7 +268,7 @@ class TestPluginJsonNormalizer:
         )
 
     def test_recursion_depth_limit_exceeded(self, plugin: PluginJsonNormalizer) -> None:
-        """Test that deeply nested structures exceeding MAX_RECURSION_DEPTH raise RecursionError.
+        """Test that deeply nested structures exceeding MAX_RECURSION_DEPTH raise OnexError.
 
         This test validates the depth protection mechanism that prevents stack overflow
         on maliciously crafted or malformed JSON with excessive nesting.
@@ -280,12 +281,15 @@ class TestPluginJsonNormalizer:
 
         input_data = {"json": nested}
 
-        with pytest.raises(RecursionError) as exc_info:
+        with pytest.raises(OnexError) as exc_info:
             plugin.execute(input_data, {})
 
-        # Verify error message contains the depth limit
-        assert str(plugin.MAX_RECURSION_DEPTH) in str(exc_info.value)
-        assert "maximum nesting depth" in str(exc_info.value)
+        # Verify error message contains depth-related information
+        error_msg = str(exc_info.value).lower()
+        assert "deeply nested" in error_msg or "too deeply nested" in error_msg
+        # Verify the original RecursionError is chained
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, RecursionError)
 
     def test_recursion_depth_at_limit_succeeds(
         self, plugin: PluginJsonNormalizer
@@ -322,10 +326,12 @@ class TestPluginJsonNormalizer:
 
         input_data = {"json": nested}
 
-        with pytest.raises(RecursionError) as exc_info:
+        with pytest.raises(OnexError) as exc_info:
             plugin.execute(input_data, {})
 
-        assert "maximum nesting depth" in str(exc_info.value)
+        error_msg = str(exc_info.value).lower()
+        assert "deeply nested" in error_msg or "too deeply nested" in error_msg
+        assert isinstance(exc_info.value.__cause__, RecursionError)
 
     def test_validate_input_depth_protection(
         self, plugin: PluginJsonNormalizer
@@ -343,10 +349,12 @@ class TestPluginJsonNormalizer:
 
         input_data: dict[str, Any] = {"json": nested}
 
-        with pytest.raises(RecursionError) as exc_info:
+        with pytest.raises(OnexError) as exc_info:
             plugin.validate_input(input_data)
 
-        assert "maximum nesting depth" in str(exc_info.value)
+        error_msg = str(exc_info.value).lower()
+        assert "deeply nested" in error_msg or "too deeply nested" in error_msg
+        assert isinstance(exc_info.value.__cause__, RecursionError)
 
     def test_validate_input_depth_protection_with_lists(
         self, plugin: PluginJsonNormalizer
@@ -359,7 +367,9 @@ class TestPluginJsonNormalizer:
 
         input_data: dict[str, Any] = {"json": nested}
 
-        with pytest.raises(RecursionError) as exc_info:
+        with pytest.raises(OnexError) as exc_info:
             plugin.validate_input(input_data)
 
-        assert "maximum nesting depth" in str(exc_info.value)
+        error_msg = str(exc_info.value).lower()
+        assert "deeply nested" in error_msg or "too deeply nested" in error_msg
+        assert isinstance(exc_info.value.__cause__, RecursionError)
