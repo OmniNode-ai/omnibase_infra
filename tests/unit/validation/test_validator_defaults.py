@@ -33,8 +33,15 @@ class TestInfraValidatorConstants:
     """Test constants used across validators."""
 
     def test_infra_max_unions_constant(self) -> None:
-        """Verify INFRA_MAX_UNIONS constant has expected value."""
-        assert INFRA_MAX_UNIONS == 30, "INFRA_MAX_UNIONS should be 30"
+        """Verify INFRA_MAX_UNIONS constant has expected value.
+
+        NOTE: Currently set to 108 (baseline as of 2025-12-16) due to tech debt.
+        This is documented in infra_validators.py and will be reduced to 30
+        incrementally after PR #37 merges.
+        """
+        assert INFRA_MAX_UNIONS == 108, (
+            "INFRA_MAX_UNIONS should be 108 (current baseline)"
+        )
 
     def test_infra_max_violations_constant(self) -> None:
         """Verify INFRA_MAX_VIOLATIONS constant has expected value."""

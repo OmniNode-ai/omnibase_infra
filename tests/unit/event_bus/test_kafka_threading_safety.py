@@ -32,6 +32,7 @@ interference or resource contention.
 """
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -47,14 +48,14 @@ class SimulatedProducerError(Exception):
 class TestKafkaEventBusThreadingSafety:
     """Test suite for KafkaEventBus threading safety and race condition fixes."""
 
-    async def test_concurrent_publish_operations_thread_safe(self):
+    async def test_concurrent_publish_operations_thread_safe(self) -> None:
         """Test that concurrent publish operations don't cause race conditions."""
         # Create event bus with mocked producer
         bus = KafkaEventBus.default()
 
         # Mock the producer
         mock_producer = AsyncMock()
-        mock_future = asyncio.Future()
+        mock_future: asyncio.Future[Any] = asyncio.Future()
         mock_future.set_result(Mock(partition=0, offset=0))
         mock_producer.send.return_value = mock_future
 
@@ -68,7 +69,7 @@ class TestKafkaEventBusThreadingSafety:
             await bus.start()
 
             # Now simulate concurrent publish operations from multiple "threads"
-            async def publish_task(i: int):
+            async def publish_task(i: int) -> None:
                 try:
                     await bus.publish(
                         topic="test-topic",
@@ -88,7 +89,7 @@ class TestKafkaEventBusThreadingSafety:
             # Cleanup: Close bus within patch context to ensure proper cleanup order
             await bus.close()
 
-    async def test_initialize_start_race_condition_fixed(self):
+    async def test_initialize_start_race_condition_fixed(self) -> None:
         """Test that initialize() doesn't race with start()."""
         bus = KafkaEventBus.default()
 
@@ -100,7 +101,7 @@ class TestKafkaEventBusThreadingSafety:
             MockProducer.return_value = mock_producer
 
             # Simulate concurrent initialize and config updates
-            async def init_task():
+            async def init_task() -> None:
                 try:
                     await bus.initialize(
                         {
@@ -111,7 +112,7 @@ class TestKafkaEventBusThreadingSafety:
                 except Exception:
                     pass
 
-            async def update_task():
+            async def update_task() -> None:
                 # Try to read environment during initialization
                 _ = bus.environment
 
@@ -125,7 +126,7 @@ class TestKafkaEventBusThreadingSafety:
             # Cleanup: Close bus within patch context to ensure proper cleanup order
             await bus.close()
 
-    async def test_producer_access_during_retry_thread_safe(self):
+    async def test_producer_access_during_retry_thread_safe(self) -> None:
         """Test that producer field access during retry is thread-safe."""
         bus = KafkaEventBus.default()
 
@@ -138,10 +139,10 @@ class TestKafkaEventBusThreadingSafety:
             # Simulate producer that succeeds on both attempts (no timeout)
             call_count = 0
 
-            async def send_success(*args, **kwargs):
+            async def send_success(*args: object, **kwargs: object) -> Any:
                 nonlocal call_count
                 call_count += 1
-                future = asyncio.Future()
+                future: asyncio.Future[Any] = asyncio.Future()
                 future.set_result(Mock(partition=0, offset=0))
                 return future
 
@@ -151,7 +152,7 @@ class TestKafkaEventBusThreadingSafety:
             await bus.start()
 
             # Multiple concurrent publishes should all succeed with thread-safe producer access
-            async def publish_task(i: int):
+            async def publish_task(i: int) -> None:
                 await bus.publish(
                     topic="test-topic",
                     key=f"key-{i}".encode(),
@@ -167,7 +168,7 @@ class TestKafkaEventBusThreadingSafety:
             # Cleanup: Close bus within patch context to ensure proper cleanup order
             await bus.close()
 
-    async def test_concurrent_close_operations_thread_safe(self):
+    async def test_concurrent_close_operations_thread_safe(self) -> None:
         """Test that concurrent close operations don't cause race conditions.
 
         Note: This test verifies idempotent close behavior - calling close()
@@ -194,7 +195,7 @@ class TestKafkaEventBusThreadingSafety:
             assert bus._started is False
             # No additional cleanup needed - close() already called multiple times
 
-    async def test_health_check_during_shutdown_thread_safe(self):
+    async def test_health_check_during_shutdown_thread_safe(self) -> None:
         """Test that health_check() during shutdown is thread-safe.
 
         Note: Uses sleep() for timing coordination which may be affected by
@@ -214,7 +215,7 @@ class TestKafkaEventBusThreadingSafety:
             await bus.start()
 
             # Start shutdown and health check concurrently
-            async def health_task():
+            async def health_task() -> None:
                 """Background task that repeatedly calls health_check."""
                 for _ in range(10):
                     await bus.health_check()
@@ -232,7 +233,7 @@ class TestKafkaEventBusThreadingSafety:
             assert status["started"] is False
             # Cleanup complete - bus already closed within patch context
 
-    async def test_circuit_breaker_concurrent_access_thread_safe(self):
+    async def test_circuit_breaker_concurrent_access_thread_safe(self) -> None:
         """Test that circuit breaker state is thread-safe under concurrent access.
 
         This test verifies thread-safe circuit breaker behavior under concurrent
@@ -251,7 +252,7 @@ class TestKafkaEventBusThreadingSafety:
             MockProducer.return_value = mock_producer
 
             # Simulate producer that always fails
-            async def failing_send(*args, **kwargs):
+            async def failing_send(*args: object, **kwargs: object) -> None:
                 raise SimulatedProducerError("Simulated failure")
 
             mock_producer.send = failing_send
@@ -260,7 +261,7 @@ class TestKafkaEventBusThreadingSafety:
             await bus.start()
 
             # Launch multiple concurrent publish operations that will fail
-            async def failing_publish():
+            async def failing_publish() -> None:
                 """Publish operation that catches and suppresses expected failures."""
                 try:
                     await bus.publish(topic="test", key=None, value=b"test")

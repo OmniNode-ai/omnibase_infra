@@ -927,9 +927,9 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
         # Serialize envelope to JSON bytes
         envelope_dict: object
         if hasattr(envelope, "model_dump"):
-            envelope_dict = envelope.model_dump(mode="json")  # type: ignore[union-attr]
+            envelope_dict = envelope.model_dump(mode="json")
         elif hasattr(envelope, "dict"):
-            envelope_dict = envelope.dict()  # type: ignore[union-attr]
+            envelope_dict = envelope.dict()
         elif isinstance(envelope, dict):
             envelope_dict = envelope
         else:
@@ -1648,7 +1648,7 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             span_id=headers_dict.get("span_id"),
             parent_span_id=headers_dict.get("parent_span_id"),
             operation_name=headers_dict.get("operation_name"),
-            priority=priority,  # type: ignore[arg-type]
+            priority=priority,
             routing_key=headers_dict.get("routing_key"),
             partition_key=headers_dict.get("partition_key"),
             retry_count=retry_count,
