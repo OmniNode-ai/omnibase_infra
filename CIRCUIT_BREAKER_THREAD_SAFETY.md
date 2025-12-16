@@ -2,7 +2,7 @@
 
 ## Overview
 
-The VaultHandler circuit breaker state variables are protected by `threading.RLock` to ensure thread-safe concurrent access in production environments.
+The VaultAdapter circuit breaker state variables are protected by `threading.RLock` to ensure thread-safe concurrent access in production environments.
 
 ## Thread Safety Implementation
 

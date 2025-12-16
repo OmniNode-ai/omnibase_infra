@@ -240,11 +240,11 @@ Unions: FAIL
    ```python
    # Before: Excessive union
    HandlerType = Union[
-       ConsulHandler,
-       KafkaHandler,
-       VaultHandler,
-       PostgresHandler,
-       RedisHandler,
+       ConsulAdapter,
+       KafkaAdapter,
+       VaultAdapter,
+       PostgresAdapter,
+       RedisAdapter,
        # ... 15 more
    ]
 

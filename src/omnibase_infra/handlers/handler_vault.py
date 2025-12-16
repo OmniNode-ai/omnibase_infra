@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from enum import Enum
 from typing import Optional, TypeVar
 from uuid import UUID, uuid4
 
@@ -44,6 +42,7 @@ from omnibase_infra.errors import (
     SecretResolutionError,
 )
 from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -60,21 +59,7 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class CircuitState(str, Enum):
-    """Circuit breaker state machine states.
-
-    States:
-        CLOSED: Normal operation, requests allowed
-        OPEN: Too many failures, blocking requests temporarily
-        HALF_OPEN: Testing if service recovered, allowing limited requests
-    """
-
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
-
-
-class VaultAdapter:
+class VaultAdapter(MixinAsyncCircuitBreaker):
     """HashiCorp Vault adapter using hvac client (MVP: KV v2 secrets engine).
 
     Security Policy - Token Handling:
@@ -103,6 +88,7 @@ class VaultAdapter:
         - All hvac (synchronous) operations run in dedicated thread pool
 
     Circuit Breaker Pattern (Production-Grade):
+        - Uses MixinAsyncCircuitBreaker for consistent circuit breaker implementation
         - Prevents cascading failures to Vault service
         - Three states: CLOSED (normal), OPEN (blocking), HALF_OPEN (testing)
         - Configurable failure_threshold (default: 5 consecutive failures)
@@ -119,7 +105,12 @@ class VaultAdapter:
     """
 
     def __init__(self) -> None:
-        """Initialize VaultAdapter in uninitialized state."""
+        """Initialize VaultAdapter in uninitialized state.
+
+        Note: Circuit breaker is initialized during initialize() call when
+        configuration is available. The mixin's _init_circuit_breaker() method
+        is called there with the actual config values.
+        """
         self._client: Optional[hvac.Client] = None
         self._config: Optional[ModelVaultAdapterConfig] = None
         self._initialized: bool = False
@@ -127,12 +118,8 @@ class VaultAdapter:
         self._executor: Optional[ThreadPoolExecutor] = None
         self._max_workers: int = 0
         self._max_queue_size: int = 0
-        self._queue_semaphore: Optional[threading.Semaphore] = None
-        # Circuit breaker state (thread-safe with RLock for reentrant access)
-        self._circuit_lock: threading.RLock = threading.RLock()
-        self._circuit_state: CircuitState = CircuitState.CLOSED
-        self._circuit_failure_count: int = 0
-        self._circuit_last_failure_time: float = 0.0
+        # Circuit breaker initialized flag - set after _init_circuit_breaker called
+        self._circuit_breaker_initialized: bool = False
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -310,11 +297,20 @@ class VaultAdapter:
                 max_workers=self._max_workers,
                 thread_name_prefix="vault_adapter_",
             )
-            # Use semaphore to limit pending operations in queue
+            # Calculate max queue size
             self._max_queue_size = (
                 self._max_workers * self._config.max_queue_size_multiplier
             )
-            self._queue_semaphore = threading.Semaphore(self._max_queue_size)
+
+            # Initialize circuit breaker using mixin (if enabled)
+            if self._config.circuit_breaker_enabled:
+                self._init_circuit_breaker(
+                    threshold=self._config.circuit_breaker_failure_threshold,
+                    reset_timeout=self._config.circuit_breaker_reset_timeout_seconds,
+                    service_name=f"vault.{self._config.namespace or 'default'}",
+                    transport_type=EnumInfraTransportType.VAULT,
+                )
+                self._circuit_breaker_initialized = True
 
             self._initialized = True
             logger.info(
@@ -375,7 +371,7 @@ class VaultAdapter:
         Cleanup includes:
             - Shutting down thread pool executor (waits for pending tasks)
             - Clearing Vault client connection
-            - Resetting circuit breaker state (thread-safe)
+            - Resetting circuit breaker state (thread-safe via mixin)
         """
         if self._executor is not None:
             # Shutdown thread pool gracefully (wait for pending tasks)
@@ -385,14 +381,14 @@ class VaultAdapter:
             # hvac.Client doesn't have async close, just clear reference
             self._client = None
 
-        # Reset circuit breaker state (thread-safe)
-        with self._circuit_lock:
-            self._circuit_state = CircuitState.CLOSED
-            self._circuit_failure_count = 0
-            self._circuit_last_failure_time = 0.0
+        # Reset circuit breaker state using mixin (thread-safe)
+        if self._circuit_breaker_initialized:
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
         self._initialized = False
         self._config = None
+        self._circuit_breaker_initialized = False
         logger.info("VaultAdapter shutdown complete")
 
     async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
@@ -525,168 +521,6 @@ class VaultAdapter:
             )
             await self.renew_token()
 
-    def _check_circuit_breaker(self, correlation_id: UUID) -> None:
-        """Check circuit breaker state and raise error if circuit is open.
-
-        Circuit breaker state machine:
-            CLOSED -> OPEN: After threshold consecutive failures
-            OPEN -> HALF_OPEN: After reset timeout expires
-            HALF_OPEN -> CLOSED: On successful request
-            HALF_OPEN -> OPEN: On failed request
-
-        Thread Safety:
-            Uses RLock for thread-safe state access and modification.
-
-        Observability:
-            Circuit state transitions are logged at INFO level for monitoring.
-            Use logs to track circuit breaker behavior and adjust thresholds.
-
-        Args:
-            correlation_id: Correlation ID for tracing
-
-        Raises:
-            InfraUnavailableError: If circuit is OPEN
-        """
-        if self._config is None or not self._config.circuit_breaker_enabled:
-            return
-
-        with self._circuit_lock:
-            current_time = time.time()
-
-            # Check if circuit is OPEN
-            if self._circuit_state == CircuitState.OPEN:
-                time_since_failure = current_time - self._circuit_last_failure_time
-
-                # Check if reset timeout has passed
-                if (
-                    time_since_failure
-                    >= self._config.circuit_breaker_reset_timeout_seconds
-                ):
-                    # Transition to HALF_OPEN to test service recovery
-                    self._circuit_state = CircuitState.HALF_OPEN
-                    self._circuit_failure_count = 0
-                    logger.info(
-                        "Circuit breaker transitioning to HALF_OPEN state",
-                        extra={
-                            "circuit_state": self._circuit_state.value,
-                            "time_since_failure_seconds": time_since_failure,
-                            "correlation_id": str(correlation_id),
-                            "namespace": self._config.namespace,
-                        },
-                    )
-                else:
-                    # Circuit still open, reject request
-                    retry_after = int(
-                        self._config.circuit_breaker_reset_timeout_seconds
-                        - time_since_failure
-                    )
-                    ctx = ModelInfraErrorContext(
-                        transport_type=EnumInfraTransportType.VAULT,
-                        operation="circuit_breaker_check",
-                        target_name="vault_adapter",
-                        correlation_id=correlation_id,
-                        namespace=self._config.namespace if self._config else None,
-                    )
-                    raise InfraUnavailableError(
-                        "Circuit breaker is open - Vault temporarily unavailable",
-                        context=ctx,
-                        circuit_state=self._circuit_state.value,
-                        retry_after_seconds=retry_after,
-                    )
-
-    def _record_circuit_success(self, correlation_id: Optional[UUID] = None) -> None:
-        """Record successful operation for circuit breaker.
-
-        On success:
-            - CLOSED: No change
-            - HALF_OPEN: Transition to CLOSED (service recovered)
-            - OPEN: Should not reach here (check prevents execution)
-
-        Thread Safety:
-            Uses RLock for thread-safe state access and modification.
-
-        Args:
-            correlation_id: Optional correlation ID for tracing
-        """
-        if self._config is None or not self._config.circuit_breaker_enabled:
-            return
-
-        with self._circuit_lock:
-            if self._circuit_state == CircuitState.HALF_OPEN:
-                # Service recovered, close circuit
-                self._circuit_state = CircuitState.CLOSED
-                self._circuit_failure_count = 0
-                logger.info(
-                    "Circuit breaker closed - service recovered",
-                    extra={
-                        "circuit_state": self._circuit_state.value,
-                        "failure_count": self._circuit_failure_count,
-                        "correlation_id": str(correlation_id)
-                        if correlation_id
-                        else None,
-                        "namespace": self._config.namespace,
-                    },
-                )
-
-            # Reset failure count on success
-            self._circuit_failure_count = 0
-
-    def _record_circuit_failure(self, correlation_id: Optional[UUID] = None) -> None:
-        """Record failed operation for circuit breaker.
-
-        On failure:
-            - CLOSED: Increment failure count, open if threshold exceeded
-            - HALF_OPEN: Transition back to OPEN (service still failing)
-            - OPEN: Should not reach here (check prevents execution)
-
-        Thread Safety:
-            Uses RLock for thread-safe state access and modification.
-
-        Args:
-            correlation_id: Optional correlation ID for tracing
-        """
-        if self._config is None or not self._config.circuit_breaker_enabled:
-            return
-
-        with self._circuit_lock:
-            self._circuit_failure_count += 1
-            self._circuit_last_failure_time = time.time()
-
-            if self._circuit_state == CircuitState.HALF_OPEN:
-                # Service still failing, reopen circuit
-                self._circuit_state = CircuitState.OPEN
-                logger.warning(
-                    "Circuit breaker reopened - service still failing",
-                    extra={
-                        "circuit_state": self._circuit_state.value,
-                        "failure_count": self._circuit_failure_count,
-                        "threshold": self._config.circuit_breaker_failure_threshold,
-                        "correlation_id": str(correlation_id)
-                        if correlation_id
-                        else None,
-                        "namespace": self._config.namespace,
-                    },
-                )
-            elif self._circuit_state == CircuitState.CLOSED:
-                # Check if threshold exceeded
-                if (
-                    self._circuit_failure_count
-                    >= self._config.circuit_breaker_failure_threshold
-                ):
-                    self._circuit_state = CircuitState.OPEN
-                    logger.warning(
-                        "Circuit breaker opened due to consecutive failures",
-                        extra={
-                            "circuit_state": self._circuit_state.value,
-                            "failure_count": self._circuit_failure_count,
-                            "threshold": self._config.circuit_breaker_failure_threshold,
-                            "correlation_id": str(correlation_id)
-                            if correlation_id
-                            else None,
-                            "namespace": self._config.namespace,
-                        },
-                    )
-
     async def _execute_with_retry(
         self,
         operation: str,
@@ -700,7 +534,7 @@ class VaultAdapter:
             thread pool via loop.run_in_executor(). This prevents blocking the async
             event loop and allows concurrent Vault operations up to max_workers limit.
 
-        Circuit breaker integration:
+        Circuit breaker integration (via MixinAsyncCircuitBreaker):
             - Checks circuit state before execution (raises if OPEN)
             - Records success/failure for circuit state management
             - Allows test request in HALF_OPEN state
@@ -722,8 +556,10 @@ class VaultAdapter:
         if self._config is None:
             raise RuntimeError("Config not initialized")
 
-        # Check circuit breaker before execution
-        self._check_circuit_breaker(correlation_id)
+        # Check circuit breaker before execution (async mixin pattern)
+        if self._circuit_breaker_initialized:
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker(operation, correlation_id)
 
         retry_config = self._config.retry
         last_exception: Optional[Exception] = None
@@ -738,8 +574,10 @@ class VaultAdapter:
                     timeout=self._config.timeout_seconds,
                 )
 
-                # Record success for circuit breaker
-                self._record_circuit_success(correlation_id)
+                # Record success for circuit breaker (async mixin pattern)
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._reset_circuit_breaker()
 
                 return result
 
@@ -747,7 +585,11 @@ class VaultAdapter:
                 last_exception = e
                 # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
-                    self._record_circuit_failure(correlation_id)
+                    if self._circuit_breaker_initialized:
+                        async with self._circuit_breaker_lock:
+                            await self._record_circuit_failure(
+                                operation, correlation_id
+                            )
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
@@ -763,7 +605,9 @@ class VaultAdapter:
 
             except hvac.exceptions.Forbidden as e:
                 # Don't retry authentication failures, record for circuit breaker
-                self._record_circuit_failure(correlation_id)
+                if self._circuit_breaker_initialized:
+                    async with self._circuit_breaker_lock:
+                        await self._record_circuit_failure(operation, correlation_id)
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation=operation,
@@ -794,7 +638,11 @@ class VaultAdapter:
                 last_exception = e
                 # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
-                    self._record_circuit_failure(correlation_id)
+                    if self._circuit_breaker_initialized:
+                        async with self._circuit_breaker_lock:
+                            await self._record_circuit_failure(
+                                operation, correlation_id
+                            )
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
@@ -811,7 +659,11 @@ class VaultAdapter:
                 last_exception = e
                 # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
-                    self._record_circuit_failure(correlation_id)
+                    if self._circuit_breaker_initialized:
+                        async with self._circuit_breaker_lock:
+                            await self._record_circuit_failure(
+                                operation, correlation_id
+                            )
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
@@ -1293,10 +1145,11 @@ class VaultAdapter:
             ttl_remaining = self._token_expires_at - current_time
             token_ttl_remaining = max(0, int(ttl_remaining))
 
-            # Circuit breaker state (thread-safe access)
-            with self._circuit_lock:
-                circuit_state = self._circuit_state.value
-                circuit_failure_count = self._circuit_failure_count
+            # Circuit breaker state (thread-safe access via mixin)
+            if self._circuit_breaker_initialized:
+                async with self._circuit_breaker_lock:
+                    circuit_state = "open" if self._circuit_breaker_open else "closed"
+                    circuit_failure_count = self._circuit_breaker_failures
 
             # Thread pool metrics (safely access internal state)
             thread_pool_max = self._max_workers

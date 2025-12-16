@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
 
@@ -63,6 +63,25 @@ class ModelVaultAdapterConfig(BaseModel):
     url: str = Field(
         description="Vault server URL (e.g., 'https://vault.example.com:8200')",
     )
+
+    @field_validator("url")
+    @classmethod
+    def validate_url_format(cls, v: str) -> str:
+        """Validate that URL has proper format for Vault server."""
+        if not v:
+            msg = "URL cannot be empty"
+            raise ValueError(msg)
+        # Check for valid URL scheme
+        if not v.startswith(("http://", "https://")):
+            msg = "URL must start with http:// or https://"
+            raise ValueError(msg)
+        # Basic structure validation (scheme + host at minimum)
+        parts = v.split("://", 1)
+        if len(parts) != 2 or not parts[1]:
+            msg = "URL must have format: scheme://host[:port]"
+            raise ValueError(msg)
+        return v
+
     token: Optional[SecretStr] = Field(
         default=None,
         description="Authentication token protected from logging",
