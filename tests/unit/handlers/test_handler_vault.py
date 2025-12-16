@@ -719,7 +719,7 @@ class TestVaultAdapterErrorHandling:
                 "correlation_id": uuid4(),
             }
 
-            with pytest.raises(InfraAuthenticationError) as exc_info:
+            with pytest.raises(InfraAuthenticationError):
                 await handler.execute(envelope)
 
             # Should not retry authentication errors
@@ -751,7 +751,7 @@ class TestVaultAdapterErrorHandling:
                 "correlation_id": uuid4(),
             }
 
-            with pytest.raises(SecretResolutionError) as exc_info:
+            with pytest.raises(SecretResolutionError):
                 await handler.execute(envelope)
 
             # Should not retry invalid path errors

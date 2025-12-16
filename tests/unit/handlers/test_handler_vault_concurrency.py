@@ -10,8 +10,6 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
-import time
-from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -444,7 +442,7 @@ class TestVaultAdapterConcurrency:
         vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
-        """Test RLock prevents race conditions in circuit breaker state updates."""
+        """Test asyncio.Lock prevents race conditions in circuit breaker state updates."""
         handler = VaultAdapter()
 
         vault_config["circuit_breaker_failure_threshold"] = 5
