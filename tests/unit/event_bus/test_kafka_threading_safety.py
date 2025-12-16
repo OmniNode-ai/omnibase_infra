@@ -57,7 +57,7 @@ class TestKafkaEventBusThreadingSafety:
             # Verify producer was called (may be less than 10 due to some failures)
             assert mock_producer.send.called
 
-        await bus.close()
+            await bus.close()
 
     async def test_initialize_start_race_condition_fixed(self):
         """Test that initialize() doesn't race with start()."""
@@ -93,7 +93,7 @@ class TestKafkaEventBusThreadingSafety:
             assert bus.environment == "test-env"
             assert bus.group == "test-group"
 
-        await bus.close()
+            await bus.close()
 
     async def test_producer_access_during_retry_thread_safe(self):
         """Test that producer field access during retry is thread-safe."""
@@ -134,7 +134,7 @@ class TestKafkaEventBusThreadingSafety:
             # Verify all publishes succeeded
             assert call_count == 5
 
-        await bus.close()
+            await bus.close()
 
     async def test_concurrent_close_operations_thread_safe(self):
         """Test that concurrent close operations don't cause race conditions."""
@@ -225,4 +225,4 @@ class TestKafkaEventBusThreadingSafety:
             status = await bus.health_check()
             assert status["circuit_state"] == "open"
 
-        await bus.close()
+            await bus.close()

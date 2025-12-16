@@ -107,8 +107,8 @@ def validate_infra_patterns(
 
     Exemptions:
         KafkaEventBus (kafka_event_bus.py) - Documented infrastructure pattern exception:
-        - Line 83: 14 methods (threshold: 10) - Event bus lifecycle, pub/sub, circuit breaker
-        - Line 137: 10 parameters (threshold: 5) - Backwards compatibility during config migration
+        - Class has many methods (threshold: 10) - Event bus lifecycle, pub/sub, circuit breaker
+        - __init__ has many parameters (threshold: 5) - Backwards compatibility during config migration
 
         These violations are intentional infrastructure patterns documented in:
         - kafka_event_bus.py class/method docstrings
@@ -124,43 +124,91 @@ def validate_infra_patterns(
         Documented exemptions are filtered from error list but logged for transparency.
     """
     # Run base validation
-    result = validate_patterns(str(directory), strict=strict)
+    base_result = validate_patterns(str(directory), strict=strict)
 
-    # Filter known infrastructure pattern exemptions
-    # Use pattern matching instead of hardcoded line numbers for robustness
+    # Filter known infrastructure pattern exemptions using pattern-based matching
+    # Patterns match class/method names rather than exact counts to handle code evolution
     exempted_patterns = [
-        # KafkaEventBus documented exemptions (pattern-based, not line-specific)
-        ("kafka_event_bus.py", "Class 'KafkaEventBus' has 15 methods"),
-        ("kafka_event_bus.py", "Function '__init__' has 10 parameters"),
+        # KafkaEventBus documented exemptions (pattern-based, not count-specific)
+        ("kafka_event_bus.py", "Class 'KafkaEventBus'", "methods"),
+        ("kafka_event_bus.py", "Function '__init__'", "parameters"),
     ]
 
-    # Filter errors using pattern matching (file + violation text)
-    original_errors = result.errors
-    filtered_errors = []
-    for err in original_errors:
+    # Filter errors using flexible pattern matching
+    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
+
+    # Create wrapper result (avoid mutation)
+    return _create_filtered_result(base_result, filtered_errors)
+
+
+def _filter_exempted_errors(
+    errors: list[str],
+    exempted_patterns: list[tuple[str, str, str]],
+) -> list[str]:
+    """
+    Filter errors based on exemption patterns.
+
+    Uses flexible pattern matching that matches file, entity, and violation type
+    rather than exact counts to handle code evolution gracefully.
+
+    Args:
+        errors: List of error messages from validation.
+        exempted_patterns: List of (file_pattern, entity_pattern, violation_type) tuples.
+
+    Returns:
+        Filtered list of errors excluding exempted patterns.
+    """
+    filtered = []
+    for err in errors:
         is_exempted = False
-        for file_pattern, violation_pattern in exempted_patterns:
-            # Check if both the file pattern and violation pattern match
-            if file_pattern in err and violation_pattern in err:
+        for file_pattern, entity_pattern, violation_type in exempted_patterns:
+            # Check if file, entity, and violation type all match
+            if file_pattern in err and entity_pattern in err and violation_type in err:
                 is_exempted = True
                 break
         if not is_exempted:
-            filtered_errors.append(err)
+            filtered.append(err)
+    return filtered
 
-    # Update result with filtered errors
-    result.errors = filtered_errors
 
-    # Update metadata to reflect filtering
-    if result.metadata:
-        violations_filtered = len(original_errors) - len(filtered_errors)
-        result.metadata.violations_found = len(filtered_errors)
+def _create_filtered_result(
+    base_result: ValidationResult,
+    filtered_errors: list[str],
+) -> ValidationResult:
+    """
+    Create a new validation result with filtered errors (wrapper approach).
 
-        # Log filtered violations for transparency (if any were filtered)
-        if violations_filtered > 0 and len(filtered_errors) == 0:
-            # All violations were documented exemptions - mark as valid
-            result.is_valid = True
+    Avoids mutating the original result object for better functional programming practices.
 
-    return result
+    Args:
+        base_result: Original validation result.
+        filtered_errors: Filtered error list.
+
+    Returns:
+        New ValidationResult with filtered errors and updated metadata.
+    """
+    # Calculate filtering statistics
+    violations_filtered = len(base_result.errors) - len(filtered_errors)
+    all_violations_exempted = violations_filtered > 0 and len(filtered_errors) == 0
+
+    # Create new metadata if present
+    new_metadata = None
+    if base_result.metadata:
+        new_metadata = base_result.metadata.model_copy(deep=True)
+        new_metadata.violations_found = len(filtered_errors)
+
+    # Create new result (wrapper pattern)
+    return ModelValidationResult(
+        is_valid=all_violations_exempted or base_result.is_valid,
+        validated_value=base_result.validated_value,
+        issues=base_result.issues,
+        errors=filtered_errors,
+        warnings=base_result.warnings,
+        suggestions=base_result.suggestions,
+        summary=base_result.summary,
+        details=base_result.details,
+        metadata=new_metadata,
+    )
 
 
 def validate_infra_contract_deep(

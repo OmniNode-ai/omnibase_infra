@@ -477,6 +477,8 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             logger.debug("KafkaEventBus already started")
             return
 
+        correlation_id = uuid4()
+
         async with self._lock:
             if self._started:
                 return
@@ -484,7 +486,9 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             # Check circuit breaker before attempting connection
             # Note: Circuit breaker requires its own lock to be held
             async with self._circuit_breaker_lock:
-                await self._check_circuit_breaker(operation="start")
+                await self._check_circuit_breaker(
+                    operation="start", correlation_id=correlation_id
+                )
 
             try:
                 # Apply producer configuration from config model
@@ -520,10 +524,17 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             except TimeoutError as e:
                 # Clean up producer on failure to prevent resource leak (thread-safe)
                 async with self._producer_lock:
+                    if self._producer is not None:
+                        try:
+                            await self._producer.stop()
+                        except Exception:
+                            pass  # Best effort cleanup
                     self._producer = None
                 # Record failure (circuit breaker lock required)
                 async with self._circuit_breaker_lock:
-                    await self._record_circuit_failure(operation="start")
+                    await self._record_circuit_failure(
+                        operation="start", correlation_id=correlation_id
+                    )
                 # Sanitize servers for safe logging (remove credentials)
                 sanitized_servers = self._sanitize_bootstrap_servers(
                     self._bootstrap_servers
@@ -532,11 +543,14 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="start",
                     target_name=f"kafka.{self._environment}",
-                    correlation_id=uuid4(),
+                    correlation_id=correlation_id,
                 )
                 logger.warning(
                     f"Timeout connecting to Kafka after {self._timeout_seconds}s",
-                    extra={"environment": self._environment},
+                    extra={
+                        "environment": self._environment,
+                        "correlation_id": str(correlation_id),
+                    },
                 )
                 raise InfraTimeoutError(
                     f"Timeout connecting to Kafka after {self._timeout_seconds}s",
@@ -548,10 +562,17 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
             except Exception as e:
                 # Clean up producer on failure to prevent resource leak (thread-safe)
                 async with self._producer_lock:
+                    if self._producer is not None:
+                        try:
+                            await self._producer.stop()
+                        except Exception:
+                            pass  # Best effort cleanup
                     self._producer = None
                 # Record failure (circuit breaker lock required)
                 async with self._circuit_breaker_lock:
-                    await self._record_circuit_failure(operation="start")
+                    await self._record_circuit_failure(
+                        operation="start", correlation_id=correlation_id
+                    )
                 # Sanitize servers for safe logging (remove credentials)
                 sanitized_servers = self._sanitize_bootstrap_servers(
                     self._bootstrap_servers
@@ -560,13 +581,14 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="start",
                     target_name=f"kafka.{self._environment}",
-                    correlation_id=uuid4(),
+                    correlation_id=correlation_id,
                 )
                 logger.warning(
                     f"Failed to connect to Kafka: {e}",
                     extra={
                         "environment": self._environment,
                         "error": str(e),
+                        "correlation_id": str(correlation_id),
                     },
                 )
                 raise InfraConnectionError(
@@ -793,8 +815,13 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
                 return
 
             except TimeoutError as e:
-                # Clean up producer on failure (thread-safe)
+                # Clean up producer on timeout to prevent resource leak (thread-safe)
                 async with self._producer_lock:
+                    if self._producer is not None:
+                        try:
+                            await self._producer.stop()
+                        except Exception:
+                            pass  # Best effort cleanup
                     self._producer = None
                 last_exception = e
                 async with self._circuit_breaker_lock:
@@ -1364,11 +1391,25 @@ class KafkaEventBus(MixinAsyncCircuitBreaker):
 
         # Parse correlation_id from string to UUID (with fallback to new UUID)
         correlation_id_str = headers_dict.get("correlation_id")
-        correlation_id = UUID(correlation_id_str) if correlation_id_str else uuid4()
+        if correlation_id_str:
+            try:
+                correlation_id = UUID(correlation_id_str)
+            except (ValueError, AttributeError):
+                # Invalid UUID format - generate new one
+                correlation_id = uuid4()
+        else:
+            correlation_id = uuid4()
 
         # Parse message_id from string to UUID (with fallback to new UUID)
         message_id_str = headers_dict.get("message_id")
-        message_id = UUID(message_id_str) if message_id_str else uuid4()
+        if message_id_str:
+            try:
+                message_id = UUID(message_id_str)
+            except (ValueError, AttributeError):
+                # Invalid UUID format - generate new one
+                message_id = uuid4()
+        else:
+            message_id = uuid4()
 
         # Parse timestamp from ISO format string to datetime (with fallback to now)
         timestamp_str = headers_dict.get("timestamp")

@@ -51,7 +51,11 @@ from typing import Optional
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.errors import (
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 
 logger = logging.getLogger(__name__)
@@ -113,11 +117,20 @@ class InMemoryEventBus:
             circuit_breaker_threshold: Number of consecutive failures before circuit opens
 
         Raises:
-            ValueError: If circuit_breaker_threshold is not a positive integer
+            ProtocolConfigurationError: If circuit_breaker_threshold is not a positive integer
         """
         if circuit_breaker_threshold < 1:
-            raise ValueError(
-                f"circuit_breaker_threshold must be a positive integer, got {circuit_breaker_threshold}"
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="init",
+                target_name="inmemory_event_bus",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"circuit_breaker_threshold must be a positive integer, got {circuit_breaker_threshold}",
+                context=context,
+                parameter="circuit_breaker_threshold",
+                value=circuit_breaker_threshold,
             )
         self._environment = environment
         self._group = group

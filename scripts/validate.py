@@ -81,32 +81,10 @@ def run_contracts(verbose: bool = False) -> bool:
 def run_patterns(verbose: bool = False) -> bool:
     """Run pattern validation with infrastructure-specific exemptions."""
     try:
-        from omnibase_core.validation import validate_patterns
+        # Use the infrastructure validator which includes exemption filtering
+        from omnibase_infra.validation.infra_validators import validate_infra_patterns
 
-        from omnibase_infra.validation.infra_validators import INFRA_PATTERNS_STRICT
-
-        result = validate_patterns("src/omnibase_infra/", strict=INFRA_PATTERNS_STRICT)
-
-        # Filter known infrastructure pattern exemptions
-        exempted_patterns = [
-            ("kafka_event_bus.py", "Class 'KafkaEventBus' has 12 methods"),
-            ("kafka_event_bus.py", "Function '__init__' has 10 parameters"),
-        ]
-        original_errors = result.errors
-        filtered_errors = []
-        for err in original_errors:
-            is_exempted = False
-            for file_pattern, violation_pattern in exempted_patterns:
-                if file_pattern in err and violation_pattern in err:
-                    is_exempted = True
-                    break
-            if not is_exempted:
-                filtered_errors.append(err)
-        result.errors = filtered_errors
-        if result.metadata:
-            result.metadata.violations_found = len(filtered_errors)
-            if len(original_errors) > 0 and len(filtered_errors) == 0:
-                result.is_valid = True
+        result = validate_infra_patterns()
 
         if verbose or not result.is_valid:
             print(f"Patterns: {'PASS' if result.is_valid else 'FAIL'}")

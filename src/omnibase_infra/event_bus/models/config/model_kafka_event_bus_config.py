@@ -98,9 +98,13 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +148,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         ```
     """
 
-    model_config = ConfigDict(frozen=False, extra="forbid", from_attributes=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     # Connection settings
     bootstrap_servers: str = Field(
@@ -239,16 +243,83 @@ class ModelKafkaEventBusConfig(BaseModel):
             Validated bootstrap servers string
 
         Raises:
-            ValueError: If bootstrap servers format is invalid
+            ProtocolConfigurationError: If bootstrap servers format is invalid
         """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="validate_config",
+            target_name="kafka_config",
+            correlation_id=uuid4(),
+        )
+
         if v is None:
-            raise ValueError("bootstrap_servers cannot be None")
+            raise ProtocolConfigurationError(
+                "bootstrap_servers cannot be None",
+                context=context,
+                parameter="bootstrap_servers",
+                value=None,
+            )
         if not isinstance(v, str):
-            raise ValueError(
-                f"bootstrap_servers must be a string, got {type(v).__name__}"
+            raise ProtocolConfigurationError(
+                f"bootstrap_servers must be a string, got {type(v).__name__}",
+                context=context,
+                parameter="bootstrap_servers",
+                value=type(v).__name__,
             )
         if not v.strip():
-            raise ValueError("bootstrap_servers cannot be empty")
+            raise ProtocolConfigurationError(
+                "bootstrap_servers cannot be empty",
+                context=context,
+                parameter="bootstrap_servers",
+                value=v,
+            )
+
+        # Validate host:port format for each server
+        servers = v.strip().split(",")
+        for server in servers:
+            server = server.strip()
+            if not server:
+                raise ProtocolConfigurationError(
+                    "bootstrap_servers cannot contain empty entries",
+                    context=context,
+                    parameter="bootstrap_servers",
+                    value=v,
+                )
+            if ":" not in server:
+                raise ProtocolConfigurationError(
+                    f"Invalid bootstrap server format '{server}'. "
+                    "Expected 'host:port' (e.g., 'localhost:9092')",
+                    context=context,
+                    parameter="bootstrap_servers",
+                    value=server,
+                )
+            host, port_str = server.rsplit(":", 1)
+            if not host:
+                raise ProtocolConfigurationError(
+                    f"Invalid bootstrap server format '{server}'. Host cannot be empty",
+                    context=context,
+                    parameter="bootstrap_servers",
+                    value=server,
+                )
+            try:
+                port = int(port_str)
+                if port < 1 or port > 65535:
+                    raise ProtocolConfigurationError(
+                        f"Invalid port {port} in '{server}'. Port must be between 1 and 65535",
+                        context=context,
+                        parameter="bootstrap_servers",
+                        value=server,
+                    )
+            except ValueError as e:
+                raise ProtocolConfigurationError(
+                    f"Invalid port '{port_str}' in '{server}'. Port must be a valid integer",
+                    context=context,
+                    parameter="bootstrap_servers",
+                    value=server,
+                ) from e
+            except ProtocolConfigurationError:
+                raise
+
         return v.strip()
 
     @field_validator("environment", mode="before")
@@ -263,14 +334,36 @@ class ModelKafkaEventBusConfig(BaseModel):
             Validated environment string
 
         Raises:
-            ValueError: If environment is empty or invalid type
+            ProtocolConfigurationError: If environment is empty or invalid type
         """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="validate_config",
+            target_name="kafka_config",
+            correlation_id=uuid4(),
+        )
+
         if v is None:
-            raise ValueError("environment cannot be None")
+            raise ProtocolConfigurationError(
+                "environment cannot be None",
+                context=context,
+                parameter="environment",
+                value=None,
+            )
         if not isinstance(v, str):
-            raise ValueError(f"environment must be a string, got {type(v).__name__}")
+            raise ProtocolConfigurationError(
+                f"environment must be a string, got {type(v).__name__}",
+                context=context,
+                parameter="environment",
+                value=type(v).__name__,
+            )
         if not v.strip():
-            raise ValueError("environment cannot be empty")
+            raise ProtocolConfigurationError(
+                "environment cannot be empty",
+                context=context,
+                parameter="environment",
+                value=v,
+            )
         return v.strip()
 
     def apply_environment_overrides(self) -> ModelKafkaEventBusConfig:
@@ -427,7 +520,7 @@ class ModelKafkaEventBusConfig(BaseModel):
 
         Raises:
             FileNotFoundError: If the YAML file does not exist
-            ValueError: If the YAML content is invalid
+            ProtocolConfigurationError: If the YAML content is invalid
 
         Example YAML:
             ```yaml
@@ -449,7 +542,18 @@ class ModelKafkaEventBusConfig(BaseModel):
             data = {}
 
         if not isinstance(data, dict):
-            raise ValueError(f"YAML content must be a dictionary, got {type(data)}")
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="load_yaml_config",
+                target_name="kafka_config",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"YAML content must be a dictionary, got {type(data)}",
+                context=context,
+                parameter="yaml_content",
+                value=type(data).__name__,
+            )
 
         config = cls(**data)
         return config.apply_environment_overrides()

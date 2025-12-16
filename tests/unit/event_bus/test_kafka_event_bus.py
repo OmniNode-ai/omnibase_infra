@@ -1043,6 +1043,28 @@ class TestKafkaEventBusHeaderConversion:
         assert headers.source == "unknown"
         assert headers.event_type == "unknown"
 
+    def test_kafka_headers_to_model_invalid_uuid(self) -> None:
+        """Test conversion with invalid UUID formats - should generate new UUIDs."""
+        event_bus = KafkaEventBus()
+
+        kafka_headers = [
+            ("correlation_id", b"not-a-valid-uuid"),
+            ("message_id", b"also-invalid"),
+            ("source", b"test-source"),
+            ("event_type", b"test-event"),
+        ]
+
+        headers = event_bus._kafka_headers_to_model(kafka_headers)
+
+        # Should generate new UUIDs when invalid format detected
+        assert headers.correlation_id is not None
+        assert headers.message_id is not None
+        assert str(headers.correlation_id) != "not-a-valid-uuid"
+        assert str(headers.message_id) != "also-invalid"
+        # Other fields should parse correctly
+        assert headers.source == "test-source"
+        assert headers.event_type == "test-event"
+
 
 class TestKafkaEventBusMessageConversion:
     """Test suite for message conversion methods."""
