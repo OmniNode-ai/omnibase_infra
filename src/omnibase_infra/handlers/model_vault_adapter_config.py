@@ -63,11 +63,11 @@ class ModelVaultAdapterConfig(BaseModel):
     url: str = Field(
         description="Vault server URL (e.g., 'https://vault.example.com:8200')",
     )
-    token: SecretStr | None = Field(
+    token: Optional[SecretStr] = Field(
         default=None,
         description="Authentication token protected from logging",
     )
-    namespace: str | None = Field(
+    namespace: Optional[str] = Field(
         default=None,
         description="Vault namespace for multi-tenant isolation",
     )

@@ -120,14 +120,14 @@ class VaultAdapter:
 
     def __init__(self) -> None:
         """Initialize VaultAdapter in uninitialized state."""
-        self._client: hvac.Client | None = None
-        self._config: ModelVaultAdapterConfig | None = None
+        self._client: Optional[hvac.Client] = None
+        self._config: Optional[ModelVaultAdapterConfig] = None
         self._initialized: bool = False
         self._token_expires_at: float = 0.0
-        self._executor: ThreadPoolExecutor | None = None
+        self._executor: Optional[ThreadPoolExecutor] = None
         self._max_workers: int = 0
         self._max_queue_size: int = 0
-        self._queue_semaphore: threading.Semaphore | None = None
+        self._queue_semaphore: Optional[threading.Semaphore] = None
         # Circuit breaker state (thread-safe with RLock for reentrant access)
         self._circuit_lock: threading.RLock = threading.RLock()
         self._circuit_state: CircuitState = CircuitState.CLOSED
@@ -697,7 +697,7 @@ class VaultAdapter:
         self._check_circuit_breaker(correlation_id)
 
         retry_config = self._config.retry
-        last_exception: Exception | None = None
+        last_exception: Optional[Exception] = None
 
         for attempt in range(retry_config.max_attempts):
             try:
