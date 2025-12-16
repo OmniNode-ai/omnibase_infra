@@ -326,3 +326,40 @@ class TestPluginJsonNormalizer:
             plugin.execute(input_data, {})
 
         assert "maximum nesting depth" in str(exc_info.value)
+
+    def test_validate_input_depth_protection(
+        self, plugin: PluginJsonNormalizer
+    ) -> None:
+        """Test that validate_input has depth protection to prevent stack overflow.
+
+        This ensures malicious deeply nested JSON cannot cause stack overflow
+        during input validation before reaching the protected execute path.
+        """
+        # Create structure deeper than MAX_RECURSION_DEPTH
+        depth = plugin.MAX_RECURSION_DEPTH + 5
+        nested: dict[str, Any] = {"deepest": "value"}
+        for i in range(depth - 1):
+            nested = {f"level_{i}": nested}
+
+        input_data: dict[str, Any] = {"json": nested}
+
+        with pytest.raises(RecursionError) as exc_info:
+            plugin.validate_input(input_data)
+
+        assert "maximum nesting depth" in str(exc_info.value)
+
+    def test_validate_input_depth_protection_with_lists(
+        self, plugin: PluginJsonNormalizer
+    ) -> None:
+        """Test validate_input depth protection for nested lists."""
+        depth = plugin.MAX_RECURSION_DEPTH + 5
+        nested: list[Any] = ["deepest"]
+        for _ in range(depth - 1):
+            nested = [nested]
+
+        input_data: dict[str, Any] = {"json": nested}
+
+        with pytest.raises(RecursionError) as exc_info:
+            plugin.validate_input(input_data)
+
+        assert "maximum nesting depth" in str(exc_info.value)

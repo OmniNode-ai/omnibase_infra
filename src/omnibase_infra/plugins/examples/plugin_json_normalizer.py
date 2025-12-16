@@ -138,19 +138,36 @@ class PluginJsonNormalizer(PluginComputeBase):
         """Type guard to check if value is JSON-compatible."""
         return isinstance(value, (dict, list, str, int, float, bool, type(None)))
 
-    def _validate_json_structure(self, obj: JsonValue) -> None:
-        """Recursively validate JSON structure for non-JSON-compatible types."""
+    def _validate_json_structure(self, obj: JsonValue, _depth: int = 0) -> None:
+        """Recursively validate JSON structure for non-JSON-compatible types.
+
+        Args:
+            obj: JSON-compatible object to validate
+            _depth: Internal depth counter for recursion protection. Do not set
+                manually; this is tracked automatically during recursion.
+
+        Raises:
+            ValueError: If non-JSON-compatible types are found
+            RecursionError: If nesting depth exceeds MAX_RECURSION_DEPTH levels
+        """
+        # Depth protection to prevent stack overflow during validation
+        if _depth > self.MAX_RECURSION_DEPTH:
+            raise RecursionError(
+                f"JSON structure exceeds maximum nesting depth of "
+                f"{self.MAX_RECURSION_DEPTH} levels"
+            )
+
         if isinstance(obj, dict):
             for key, value in obj.items():
                 if not self._is_json_compatible(value):
                     raise ValueError(
                         f"Non-JSON-compatible value in dict at key '{key}': {type(value).__name__}"
                     )
-                self._validate_json_structure(value)
+                self._validate_json_structure(value, _depth + 1)
         elif isinstance(obj, list):
             for index, item in enumerate(obj):
                 if not self._is_json_compatible(item):
                     raise ValueError(
                         f"Non-JSON-compatible value in list at index {index}: {type(item).__name__}"
                     )
-                self._validate_json_structure(item)
+                self._validate_json_structure(item, _depth + 1)
