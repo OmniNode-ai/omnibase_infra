@@ -42,31 +42,101 @@ What Plugins CAN Do:
     ✅ Deterministic hashing
     ✅ Deterministic randomness (with seed from input)
 
-Integration with ONEX Compute Nodes:
-    Compute plugins are designed to work with NodeComputeService:
+ONEX 4-Node Architecture Integration:
+    Compute plugins belong exclusively to the COMPUTE layer of ONEX architecture.
+    This separation ensures clear responsibilities and maintainable code.
 
-    ```python
-    from omnibase_infra.plugins import PluginComputeBase
+    Architecture Overview:
+        - EFFECT (NodeEffectService):
+          * External I/O (database, network, filesystem, message bus)
+          * Service integrations (Kafka, Consul, Vault, Redis, PostgreSQL)
+          * Connection pooling and circuit breaker patterns
+          * Examples: postgres_adapter, consul_adapter, kafka_adapter
 
-    # Plugin implementation
-    class MyComputePlugin(PluginComputeBase):
-        def execute(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-            # Pure computation logic
-            result = self._process(input_data, context)
-            return {"result": result}
+        - COMPUTE (NodeComputeService):
+          * Pure data transformations (THIS IS WHERE PLUGINS LIVE)
+          * Deterministic algorithms and business logic
+          * Stateless computation without side effects
+          * Examples: data validation, JSON normalization, aggregation
 
-        def validate_input(self, input_data: dict[str, Any]) -> None:
-            # Optional input validation
-            if "required_field" not in input_data:
-                raise ValueError("required_field missing")
+        - REDUCER (NodeReducerService):
+          * State aggregation from multiple sources
+          * Event sourcing and state reconstruction
+          * Multi-source data consolidation
+          * Examples: infrastructure_reducer, state_aggregator
 
-    # Node integration
-    plugin = MyComputePlugin()
-    result = plugin.execute(
-        input_data={"value": 42, "required_field": "present"},
-        context={"operation": "process"}
-    )
-    ```
+        - ORCHESTRATOR (NodeOrchestratorService):
+          * Workflow coordination across multiple nodes
+          * Multi-step process management
+          * Service orchestration patterns
+          * Examples: infrastructure_orchestrator, workflow_coordinator
+
+    Why Plugins Belong in COMPUTE:
+        1. Determinism: COMPUTE layer requires reproducible outputs
+        2. No Side Effects: EFFECT layer handles all I/O operations
+        3. Testability: Pure functions are trivially testable
+        4. Composability: Plugins combine without coordination complexity
+        5. Scalability: Stateless computation enables horizontal scaling
+
+    Integration with NodeComputeService:
+        ```python
+        from omnibase_infra.plugins import PluginComputeBase
+
+        # Step 1: Implement plugin (pure computation)
+        class DataValidatorPlugin(PluginComputeBase):
+            def execute(
+        self, input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
+                # Pure validation logic (no I/O)
+                is_valid = self._validate_schema(input_data)
+                return {
+                    "valid": is_valid,
+                    "errors": [] if is_valid else self._get_errors(input_data),
+                }
+
+            def validate_input(self, input_data: dict[str, Any]) -> None:
+                if "schema" not in input_data:
+                    raise ValueError("schema field required")
+
+        # Step 2: Integrate with NodeComputeService (I/O wrapper)
+        class ValidationNode(NodeComputeService):
+            def __init__(self, container: ONEXContainer):
+                super().__init__(container)
+                self.plugin = container.resolve(ProtocolPluginCompute)
+
+            async def execute(self, input_model: ModelInput) -> ModelOutput:
+                # Node handles I/O and state management
+                input_data = input_model.model_dump()
+                context = {"correlation_id": input_model.correlation_id}
+
+                # Plugin performs pure computation
+                result = self.plugin.execute(input_data, context)
+
+                # Node handles output persistence (if needed)
+                return ModelOutput(**result)
+        ```
+
+    When to Use Plugin vs Direct Node Implementation:
+        Use PluginComputeBase (COMPUTE layer):
+        ✅ Pure data transformations (JSON normalization, data validation)
+        ✅ Deterministic algorithms (sorting, filtering, aggregation)
+        ✅ Business logic without external dependencies
+        ✅ Reusable computation across multiple nodes
+        ✅ Pluggable behavior that may vary by deployment
+
+        Use Direct Node Implementation:
+        ❌ EFFECT: Operations requiring I/O or external service calls
+        ❌ REDUCER: State aggregation requiring multiple data sources
+        ❌ ORCHESTRATOR: Workflow coordination across multiple nodes
+        ❌ Complex lifecycle (connection pooling, circuit breakers)
+        ❌ Infrastructure service integration (Kafka, Consul, Vault)
+
+    Architectural Benefits:
+        - Clear separation of concerns (I/O vs computation)
+        - Simplified testing (mock I/O, test computation independently)
+        - Enhanced reusability (plugins shared across nodes)
+        - Improved scalability (stateless plugins scale horizontally)
+        - Better maintainability (computation changes don't affect I/O layer)
 
 Thread Safety:
     Plugin implementations should be stateless and thread-safe:
@@ -94,23 +164,82 @@ class PluginComputeBase(ABC):
 
     Subclasses must implement execute() to perform deterministic computation.
 
+    Thread Safety:
+        The base class does NOT enforce thread safety. Plugins MUST be designed
+        to be stateless or use immutable state only.
+
+        Safe Patterns:
+        - ✅ No instance variables modified during execute()
+        - ✅ Configuration set in __init__() and never modified
+        - ✅ All state passed through input_data or context
+        - ✅ Use function-local variables only
+
+        Unsafe Patterns:
+        - ❌ self.counter += 1
+        - ❌ self.results.append(item)
+        - ❌ self.cache[key] = value
+
+    Edge Cases to Handle:
+        Plugins extending this base class should handle these scenarios:
+
+        1. **Empty Inputs**: Handle {} and [] gracefully
+        2. **None Values**: Treat None as empty/default or validate and raise error
+        3. **Missing Keys**: Use .get() with defaults or validate required fields
+        4. **Type Validation**: Check types before processing
+        5. **Large Inputs**: Consider memory limits for inputs >10MB
+        6. **Deep Nesting**: Limit recursion depth to prevent stack overflow
+        7. **Special Float Values**: Handle NaN and Infinity explicitly
+        8. **Unicode**: Handle UTF-8 strings and control characters
+        9. **Circular References**: Track visited objects in recursive algorithms
+        10. **Locale Independence**: Do not rely on system locale
+
+    Common Pitfalls:
+        - Using mutable default arguments: `def foo(x=[])`
+        - Assuming dict key ordering (Python <3.7)
+        - Not handling division by zero
+        - Not validating input types before processing
+        - Modifying input_data or context dictionaries
+        - Using non-deterministic operations (time.time(), random())
+
+    Memory Considerations:
+        For inputs >10MB:
+        - Use streaming/iterators instead of loading all data
+        - Release intermediate results promptly
+        - Consider using generators for large outputs
+        - Monitor memory growth in production
+
     Example:
         ```python
         class MyComputePlugin(PluginComputeBase):
-            def execute(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+            def execute(
+        self, input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
+                # Handle edge cases
+                if not input_data:
+                    return {"result": None, "warning": "Empty input"}
+
+                # Validate required fields
+                if "required_field" not in input_data:
+                    raise ValueError("Missing required_field")
+
+                # Validate types
+                value = input_data.get("required_field")
+                if not isinstance(value, (int, float)):
+                    raise TypeError(f"Expected numeric value, got {type(value).__name__}")
+
                 # Deterministic computation
                 result = self._process(input_data)
                 return {"result": result}
 
             def validate_input(self, input_data: dict[str, Any]) -> None:
-                # Optional: Validate required fields
+                # Optional: Validate required fields upfront
                 if "required_field" not in input_data:
                     raise ValueError("Missing required_field")
-        ```
 
-    Note:
-        The base class does NOT enforce thread safety. Plugins should be
-        designed to be stateless or use immutable state only.
+                # Validate types
+                if not isinstance(input_data["required_field"], (int, float)):
+                    raise TypeError("required_field must be numeric")
+        ```
     """
 
     @abstractmethod
@@ -119,28 +248,137 @@ class PluginComputeBase(ABC):
     ) -> dict[str, Any]:
         """Execute computation. MUST be deterministic.
 
-        Given the same input_data and context, this method MUST return
-        the same result every time it is called.
+            Given the same input_data and context, this method MUST return
+            the same result every time it is called.
 
-        Args:
-            input_data: The input data to process
-            context: Execution context (correlation_id, timestamps, etc.)
+            Args:
+                input_data: The input data to process
+                context: Execution context (correlation_id, timestamps, etc.)
 
-        Returns:
-            Computation result as dictionary
+            Returns:
+                Computation result as dictionary
 
-        Raises:
-            ValueError: If input validation fails
-            OnexError: For computation errors (with proper error chaining)
+            Raises:
+                OnexError: For all computation failures (with proper error chaining)
+                ValueError: If input validation fails (should be wrapped in OnexError)
+                TypeError: If input types are incorrect (should be wrapped in OnexError)
 
-        Note:
-            Implementations MUST NOT:
-            - Access network
-            - Access file system
-            - Query databases
-            - Use random numbers (unless seeded from context)
-            - Use current time (unless passed in context)
-            - Maintain mutable state between calls
+            Error Handling Requirements:
+                All implementations MUST follow ONEX error handling standards:
+
+                1. **OnexError Chaining**: Convert all exceptions to OnexError
+                   ```python
+                   from omnibase_core.errors import OnexError
+                   from omnibase_core.enums import CoreErrorCode
+
+                   try:
+                       result = self._compute(input_data)
+                   except Exception as e:
+                       raise OnexError(
+                           message=f"Computation failed: {e}",
+                           error_code=CoreErrorCode.INTERNAL_ERROR,
+                           correlation_id=context.get("correlation_id", "unknown"),
+                           plugin_name=self.__class__.__name__,
+                       ) from e
+                   ```
+
+                2. **Correlation ID Propagation**: Always extract and propagate correlation_id
+                   ```python
+                   correlation_id = context.get("correlation_id", "unknown")
+                   # Include in all OnexError instances and output
+                   ```
+
+                3. **Never Suppress Errors**: All exceptions must be converted to OnexError
+                   ```python
+                   # NEVER do this:
+                   except Exception:
+                       pass  # ❌ Silent failure prohibited
+
+                   # ALWAYS do this:
+                   except Exception as e:
+                       raise OnexError(...) from e  # ✅ Proper error chaining
+                   ```
+
+                4. **Context Preservation**: Include debugging context in OnexError
+                   ```python
+                   raise OnexError(
+                       message="Validation failed",
+                       error_code=CoreErrorCode.INVALID_INPUT,
+                       correlation_id=correlation_id,
+                       plugin_name=self.__class__.__name__,
+                       input_keys=list(input_data.keys()),  # Additional context
+                       expected_type="list",
+                       actual_type=type(value).__name__,
+                   ) from e
+                   ```
+
+            Common Error Patterns:
+                See ProtocolPluginCompute.execute() documentation for detailed examples:
+                - Input validation errors (missing fields, invalid types)
+                - Computation errors (ZeroDivisionError, overflow, underflow)
+                - Type validation errors (expected vs actual types)
+                - Fallback strategies with graceful degradation
+
+            Edge Cases to Handle:
+                1. **Empty inputs**: `input_data == {}` or `input_data.get("key") == []`
+                2. **None values**: `input_data is None` or `context is None`
+                3. **Missing keys**: Use `.get()` with defaults or validate upfront
+                4. **Type mismatches**: Validate types before processing
+                5. **Division by zero**: Check denominators before division
+                6. **NaN/Infinity**: Use `math.isnan()` and `math.isinf()` checks
+                7. **Deep nesting**: Limit recursion depth (e.g., max_depth=100)
+                8. **Large inputs**: Monitor memory for inputs >10MB
+                9. **Unicode strings**: Handle UTF-8 and control characters
+                10. **Circular references**: Track visited objects with `set()`
+
+            What NOT to Do:
+                Implementations MUST NOT:
+                - ❌ Access network (HTTP, gRPC, WebSocket)
+                - ❌ Access file system (read, write, delete)
+                - ❌ Query databases (SQL, NoSQL)
+                - ❌ Use random numbers (unless seeded from context)
+                - ❌ Use current time (unless passed in context)
+                - ❌ Maintain mutable state between calls
+                - ❌ Modify input_data or context dictionaries
+                - ❌ Use global variables or class-level mutable state
+
+            Example - Handling Edge Cases:
+                ```python
+                def execute(
+            self, input_data: dict[str, Any], context: dict[str, Any]
+        ) -> dict[str, Any]:
+                    # Edge Case 1 & 2: Handle None/empty inputs
+                    if not input_data:
+                        return {"result": None, "warning": "Empty input"}
+
+                    # Edge Case 3: Handle missing keys
+                    values = input_data.get("values", [])
+                    if not values:
+                        return {"result": 0, "count": 0}
+
+                    # Edge Case 4: Validate types
+                    if not all(isinstance(v, (int, float)) for v in values):
+                        raise TypeError("All values must be numeric")
+
+                    # Edge Case 6: Handle NaN/Infinity
+                    import math
+                    clean_values = [v for v in values if not math.isnan(v) and not math.isinf(v)]
+
+                    # Edge Case 5: Division by zero check
+                    count = len(clean_values)
+                    if count == 0:
+                        return {"result": 0, "warning": "All values were NaN/Inf"}
+
+                    # Safe computation
+                    total = sum(clean_values)
+                    average = total / count  # Safe: count > 0
+
+                    return {
+                        "result": average,
+                        "count": count,
+                        "filtered": len(values) - count,
+                    }
+                ```
         """
         ...
 
