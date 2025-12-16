@@ -11,6 +11,10 @@ from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders
 
 
+class SimulatedProducerError(Exception):
+    """Custom exception for simulating producer failures in tests."""
+
+
 @pytest.mark.asyncio
 class TestKafkaEventBusThreadingSafety:
     """Test suite for KafkaEventBus threading safety and race condition fixes."""
@@ -199,7 +203,7 @@ class TestKafkaEventBusThreadingSafety:
 
             # Simulate producer that always fails
             async def failing_send(*args, **kwargs):
-                raise Exception("Simulated failure")
+                raise SimulatedProducerError("Simulated failure")
 
             mock_producer.send = failing_send
             mock_producer.start = AsyncMock()

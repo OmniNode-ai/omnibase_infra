@@ -81,10 +81,9 @@ def run_contracts(verbose: bool = False) -> bool:
 def run_patterns(verbose: bool = False) -> bool:
     """Run pattern validation with infrastructure-specific exemptions."""
     try:
-        from omnibase_infra.validation.infra_validators import (
-            INFRA_PATTERNS_STRICT,
-            validate_infra_patterns,
-        )
+        from omnibase_core.validation import validate_patterns
+
+        from omnibase_infra.validation.infra_validators import INFRA_PATTERNS_STRICT, validate_infra_patterns
 
         result = validate_infra_patterns("src/omnibase_infra/", strict=INFRA_PATTERNS_STRICT)
         if verbose or not result.is_valid:
