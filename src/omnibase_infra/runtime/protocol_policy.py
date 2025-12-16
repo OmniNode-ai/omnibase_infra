@@ -74,6 +74,10 @@ Example Usage:
                 "should_retry": attempt < 10,
             }
 
+        def decide(self, context: dict[str, object]) -> dict[str, object]:
+            '''Alias for evaluate() - delegates to evaluate().'''
+            return self.evaluate(context)
+
     # Type checking works via Protocol
     policy: ProtocolPolicy = ExponentialBackoffPolicy()
     result = policy.evaluate({"attempt": 3, "base_delay_seconds": 1.0})
@@ -99,7 +103,7 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, Union, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from omnibase_infra.enums import EnumPolicyType
 
@@ -185,7 +189,7 @@ class ProtocolPolicy(Protocol):
         ...
 
     @property
-    def policy_type(self) -> Union[Literal["orchestrator", "reducer"], EnumPolicyType]:
+    def policy_type(self) -> Literal["orchestrator", "reducer"] | EnumPolicyType:
         """Policy category indicating usage context.
 
         The policy_type determines where this policy can be used:
@@ -210,7 +214,7 @@ class ProtocolPolicy(Protocol):
 
             # Or for backward compatibility:
             @property
-            def policy_type(self) -> str:
+            def policy_type(self) -> Literal["orchestrator", "reducer"]:
                 return "orchestrator"
             ```
         """

@@ -50,7 +50,7 @@ class ModelEventMessage(BaseModel):
     offset: Optional[str] = Field(default=None)
     partition: Optional[int] = Field(default=None)
 
-    model_config = {"frozen": False, "extra": "forbid", "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "extra": "forbid", "arbitrary_types_allowed": True}
 
     async def ack(self) -> None:
         """Acknowledge message processing.

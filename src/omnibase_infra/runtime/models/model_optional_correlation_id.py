@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelOptionalCorrelationId(BaseModel):
@@ -39,6 +39,8 @@ class ModelOptionalCorrelationId(BaseModel):
         >>> filled.has_value()
         True
     """
+
+    model_config = ConfigDict(frozen=True)
 
     value: Optional[UUID] = Field(
         default=None, description="Optional correlation ID (UUID)"
@@ -84,14 +86,6 @@ class ModelOptionalCorrelationId(BaseModel):
             The UUID value if present, None otherwise.
         """
         return self.value
-
-    def set(self, value: Optional[UUID]) -> None:
-        """Set the correlation ID.
-
-        Args:
-            value: The new UUID value, or None to clear.
-        """
-        self.value = value
 
     def has_value(self) -> bool:
         """Check if correlation ID is present.

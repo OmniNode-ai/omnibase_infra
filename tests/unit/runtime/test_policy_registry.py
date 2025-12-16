@@ -20,9 +20,11 @@ All tests validate:
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
@@ -190,7 +192,7 @@ def populated_policy_registry() -> PolicyRegistry:
 
 
 @pytest.fixture(autouse=True)
-def reset_singletons() -> None:  # type: ignore[misc]
+def reset_singletons() -> Iterator[None]:
     """Reset singleton instances before each test.
 
     This ensures tests are isolated and don't affect each other
@@ -508,6 +510,99 @@ class TestPolicyRegistryVersioning:
         # Get without version should return latest (semantically highest)
         latest_cls = policy_registry.get("versioned-policy")
         assert latest_cls is MockPolicyV2
+
+    def test_invalid_version_format_raises_error_on_registration(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that invalid version formats raise ProtocolConfigurationError at registration.
+
+        Version validation happens during registration via _parse_semver,
+        preventing invalid versions from being registered.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        # Attempt to register with invalid version format
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="version-test-policy",
+                policy_class=MockPolicyV1,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="not-a-version",  # Invalid format - not semver
+            )  # type: ignore[arg-type]
+
+        # Verify error message contains version and guidance
+        assert "not-a-version" in str(exc_info.value)
+        assert "Invalid semantic version format" in str(exc_info.value)
+        assert "Version components must be integers" in str(exc_info.value)
+
+        # Registry should be empty (registration failed)
+        assert len(policy_registry) == 0
+
+    def test_malformed_semver_components_raises_error(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that malformed semantic version components raise errors at registration.
+
+        Versions with non-numeric parts should raise ProtocolConfigurationError
+        immediately during register_policy() call.
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        # Attempt to register with malformed version components
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="malformed-semver",
+                policy_class=MockPolicyV1,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="v1.x.y",  # Non-numeric components
+            )  # type: ignore[arg-type]
+
+        # Verify error message
+        assert "v1.x.y" in str(exc_info.value)
+        assert "Version components must be integers" in str(exc_info.value)
+
+        # Registry should be empty
+        assert len(policy_registry) == 0
+
+    def test_empty_version_string_raises_error(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that empty version strings raise ProtocolConfigurationError at registration."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        # Attempt to register with empty version
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="empty-version",
+                policy_class=MockPolicyV1,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="",  # Empty version
+            )  # type: ignore[arg-type]
+
+        # Verify error message
+        assert "empty version string" in str(exc_info.value).lower()
+
+        # Registry should be empty
+        assert len(policy_registry) == 0
+
+    def test_version_with_too_many_parts_raises_error(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that versions with more than 3 parts raise error."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        # Attempt to register with too many version parts
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="too-many-parts",
+                policy_class=MockPolicyV1,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="1.2.3.4",  # Four parts (invalid)
+            )  # type: ignore[arg-type]
+
+        # Verify error mentions format
+        assert "1.2.3.4" in str(exc_info.value)
+        assert "Invalid semantic version format" in str(exc_info.value)
 
     def test_get_latest_with_double_digit_versions(
         self, policy_registry: PolicyRegistry
@@ -946,6 +1041,47 @@ class TestPolicyRegistryError:
         error = PolicyRegistryError("Test error")
         assert isinstance(error, Exception)
 
+    def test_error_with_enum_policy_type(self) -> None:
+        """Test that PolicyRegistryError accepts EnumPolicyType enum value."""
+        error = PolicyRegistryError(
+            "Policy operation failed",
+            policy_id="test-policy",
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+        )
+        # EnumPolicyType should be converted to string for serialization
+        assert error.model.context.get("policy_type") == "orchestrator"
+        assert error.model.context.get("policy_id") == "test-policy"
+
+    def test_error_with_enum_reducer_policy_type(self) -> None:
+        """Test that PolicyRegistryError accepts EnumPolicyType.REDUCER."""
+        error = PolicyRegistryError(
+            "Reducer policy failed",
+            policy_id="reducer-policy",
+            policy_type=EnumPolicyType.REDUCER,
+        )
+        # EnumPolicyType.REDUCER should be converted to "reducer"
+        assert error.model.context.get("policy_type") == "reducer"
+        assert error.model.context.get("policy_id") == "reducer-policy"
+
+    def test_error_with_string_and_enum_compatibility(self) -> None:
+        """Test that string and enum policy_type produce equivalent errors."""
+        error_with_string = PolicyRegistryError(
+            "Test error",
+            policy_id="test-policy",
+            policy_type="orchestrator",
+        )
+        error_with_enum = PolicyRegistryError(
+            "Test error",
+            policy_id="test-policy",
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+        )
+        # Both should result in the same serialized policy_type
+        assert error_with_string.model.context.get("policy_type") == "orchestrator"
+        assert error_with_enum.model.context.get("policy_type") == "orchestrator"
+        assert error_with_string.model.context.get(
+            "policy_type"
+        ) == error_with_enum.model.context.get("policy_type")
+
 
 # =============================================================================
 # TestPolicyRegistryPolicyTypeNormalization
@@ -978,8 +1114,8 @@ class TestPolicyRegistryPolicyTypeNormalization:
     def test_invalid_policy_type_raises_error(
         self, policy_registry: PolicyRegistry
     ) -> None:
-        """Test that invalid policy type string raises PolicyRegistryError."""
-        with pytest.raises(PolicyRegistryError) as exc_info:
+        """Test that invalid policy type string raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
             policy_registry.register_policy(
                 policy_id="invalid-type",
                 policy_class=MockSyncPolicy,  # type: ignore[arg-type]
@@ -1260,3 +1396,335 @@ class TestPolicyRegistryIntegration:
         assert policy_registry.is_registered("async-workflow")
         policy_cls = policy_registry.get("async-workflow")
         assert policy_cls is MockAsyncPolicy
+
+
+# =============================================================================
+# TestPolicyRegistrySemverCaching
+# =============================================================================
+
+
+class TestPolicyRegistrySemverCaching:
+    """Tests for _parse_semver() caching behavior.
+
+    Validates that the LRU cache improves performance and correctly
+    handles cache hits/misses for version string parsing.
+    """
+
+    def test_parse_semver_returns_consistent_results(self) -> None:
+        """Test that _parse_semver returns consistent results for same input."""
+        # Clear cache to ensure clean state
+        PolicyRegistry._parse_semver.cache_clear()
+
+        # Parse same version multiple times
+        result1 = PolicyRegistry._parse_semver("1.2.3")
+        result2 = PolicyRegistry._parse_semver("1.2.3")
+        result3 = PolicyRegistry._parse_semver("1.2.3")
+
+        # All should return identical tuples
+        assert result1 == result2 == result3
+        assert result1 == (1, 2, 3, chr(127))  # chr(127) for release version
+
+    def test_parse_semver_cache_info_shows_hits(self) -> None:
+        """Test that cache info shows hits for repeated parses."""
+        # Clear cache to ensure clean state
+        PolicyRegistry._parse_semver.cache_clear()
+        initial_info = PolicyRegistry._parse_semver.cache_info()
+        assert initial_info.hits == 0
+        assert initial_info.misses == 0
+
+        # First parse - should be a cache miss
+        PolicyRegistry._parse_semver("1.0.0")
+        info_after_first = PolicyRegistry._parse_semver.cache_info()
+        assert info_after_first.misses == 1
+        assert info_after_first.hits == 0
+
+        # Second parse of same version - should be a cache hit
+        PolicyRegistry._parse_semver("1.0.0")
+        info_after_second = PolicyRegistry._parse_semver.cache_info()
+        assert info_after_second.misses == 1
+        assert info_after_second.hits == 1
+
+        # Third parse - another hit
+        PolicyRegistry._parse_semver("1.0.0")
+        info_after_third = PolicyRegistry._parse_semver.cache_info()
+        assert info_after_third.misses == 1
+        assert info_after_third.hits == 2
+
+    def test_parse_semver_different_versions_cause_misses(self) -> None:
+        """Test that different version strings cause cache misses."""
+        # Clear cache to ensure clean state
+        PolicyRegistry._parse_semver.cache_clear()
+
+        # Parse different versions
+        PolicyRegistry._parse_semver("1.0.0")
+        PolicyRegistry._parse_semver("2.0.0")
+        PolicyRegistry._parse_semver("3.0.0")
+
+        info = PolicyRegistry._parse_semver.cache_info()
+        assert info.misses == 3
+        assert info.hits == 0
+        assert info.currsize == 3  # 3 entries cached
+
+    def test_parse_semver_cache_improves_get_performance(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that caching improves performance for repeated get() calls."""
+        # Register multiple versions of same policy
+        for i in range(10):
+            policy_registry.register_policy(
+                policy_id="perf-test",
+                policy_class=MockPolicyV1,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version=f"{i}.0.0",
+            )  # type: ignore[arg-type]
+
+        # Clear cache to measure baseline
+        PolicyRegistry._parse_semver.cache_clear()
+
+        # First get() will parse all versions (cold cache)
+        _ = policy_registry.get("perf-test")  # Gets latest version
+        first_misses = PolicyRegistry._parse_semver.cache_info().misses
+
+        # Second get() should hit cache (warm cache)
+        _ = policy_registry.get("perf-test")
+        second_misses = PolicyRegistry._parse_semver.cache_info().misses
+
+        # Cache should have been hit (no new misses)
+        assert second_misses == first_misses
+
+    def test_parse_semver_cache_handles_prerelease_versions(self) -> None:
+        """Test that cache correctly handles prerelease version strings."""
+        # Clear cache to ensure clean state
+        PolicyRegistry._parse_semver.cache_clear()
+
+        # Parse prerelease versions
+        result1 = PolicyRegistry._parse_semver("1.0.0-alpha")
+        result2 = PolicyRegistry._parse_semver("1.0.0-beta")
+        result3 = PolicyRegistry._parse_semver("1.0.0")
+
+        # All should be distinct cache entries
+        assert result1 != result2 != result3
+        info = PolicyRegistry._parse_semver.cache_info()
+        assert info.currsize == 3
+
+        # Repeat parse should hit cache
+        result1_repeat = PolicyRegistry._parse_semver("1.0.0-alpha")
+        assert result1_repeat == result1
+        info_after = PolicyRegistry._parse_semver.cache_info()
+        assert info_after.hits == 1
+
+    def test_parse_semver_cache_size_limit(self) -> None:
+        """Test that cache respects maxsize=128 limit."""
+        # Clear cache to ensure clean state
+        PolicyRegistry._parse_semver.cache_clear()
+
+        # Parse 150 unique versions (exceeds maxsize=128)
+        for i in range(150):
+            PolicyRegistry._parse_semver(f"{i}.0.0")
+
+        info = PolicyRegistry._parse_semver.cache_info()
+        # Cache size should not exceed maxsize
+        assert info.currsize <= 128
+
+    def test_parse_semver_cache_lru_eviction(self) -> None:
+        """Test that LRU eviction works correctly."""
+        # Clear cache to ensure clean state
+        PolicyRegistry._parse_semver.cache_clear()
+
+        # Fill cache to capacity with versions 0-127
+        for i in range(128):
+            PolicyRegistry._parse_semver(f"{i}.0.0")
+
+        # Access version "0.0.0" to make it most recently used
+        PolicyRegistry._parse_semver("0.0.0")
+
+        # Add new version to trigger eviction (should evict "1.0.0", not "0.0.0")
+        PolicyRegistry._parse_semver("999.0.0")
+
+        # "0.0.0" should still be in cache (was recently used)
+        PolicyRegistry._parse_semver("0.0.0")
+        info = PolicyRegistry._parse_semver.cache_info()
+        # Last access to "0.0.0" should be a hit
+        assert info.hits > 0
+
+    def test_parse_semver_cache_clear_resets_state(self) -> None:
+        """Test that cache_clear() resets cache state."""
+        # Parse some versions
+        PolicyRegistry._parse_semver("1.0.0")
+        PolicyRegistry._parse_semver("2.0.0")
+        info_before = PolicyRegistry._parse_semver.cache_info()
+        assert info_before.currsize > 0
+
+        # Clear cache
+        PolicyRegistry._parse_semver.cache_clear()
+        info_after = PolicyRegistry._parse_semver.cache_info()
+
+        # Cache should be empty
+        assert info_after.currsize == 0
+        assert info_after.hits == 0
+        assert info_after.misses == 0
+
+
+# =============================================================================
+# TestPolicyRegistryInvalidVersions
+# =============================================================================
+
+
+class TestPolicyRegistryInvalidVersions:
+    """Tests for version validation and error handling.
+
+    This tests the PR #36 review feedback requirement:
+    - Invalid versions should raise ProtocolConfigurationError
+    - No silent fallback to (0, 0, 0)
+    """
+
+    def test_invalid_version_format_empty_string(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that empty version string raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="invalid-version",
+                policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="",
+            )
+        assert "Invalid semantic version format" in str(exc_info.value)
+
+    def test_invalid_version_format_non_numeric(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that non-numeric version components raise ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="invalid-version",
+                policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="abc.def.ghi",
+            )
+        assert "Invalid semantic version format" in str(exc_info.value)
+        assert "must be integers" in str(exc_info.value)
+
+    def test_invalid_version_format_negative_numbers(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that negative version numbers raise ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="invalid-version",
+                policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="1.-1.0",
+            )
+        # Negative numbers cause ValueError in int() conversion
+        assert "Invalid semantic version format" in str(exc_info.value)
+        assert "1.-1.0" in str(exc_info.value)
+
+    def test_invalid_version_format_too_many_parts(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that version with too many parts raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="invalid-version",
+                policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="1.2.3.4",
+            )
+        assert "Invalid semantic version format" in str(exc_info.value)
+
+    def test_valid_version_major_only(self, policy_registry: PolicyRegistry) -> None:
+        """Test that single component version (major only) is valid."""
+        policy_registry.register_policy(
+            policy_id="major-only",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1",
+        )
+        assert policy_registry.is_registered("major-only", version="1")
+
+    def test_valid_version_major_minor(self, policy_registry: PolicyRegistry) -> None:
+        """Test that two component version (major.minor) is valid."""
+        policy_registry.register_policy(
+            policy_id="major-minor",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.2",
+        )
+        assert policy_registry.is_registered("major-minor", version="1.2")
+
+    def test_semver_comparison_edge_case_1_9_vs_1_10(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test the specific PR #36 case: 1.9.0 vs 1.10.0.
+
+        This is the exact bug from the PR review:
+        - Lexicographic: "1.10.0" < "1.9.0" (WRONG - because '1' < '9')
+        - Semantic: 1.10.0 > 1.9.0 (CORRECT)
+        """
+        policy_registry.register_policy(
+            policy_id="version-test",
+            policy_class=MockPolicyV1,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.9.0",
+        )
+        policy_registry.register_policy(
+            policy_id="version-test",
+            policy_class=MockPolicyV2,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.10.0",
+        )
+
+        # Get latest should return 1.10.0 (MockPolicyV2), not 1.9.0
+        latest_cls = policy_registry.get("version-test")
+        assert latest_cls is MockPolicyV2, (
+            "1.10.0 should be considered later than 1.9.0 (semantic versioning)"
+        )
+
+    def test_semver_comparison_minor_version_edge_case(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test edge case: 0.9.0 vs 0.10.0."""
+        policy_registry.register_policy(
+            policy_id="minor-test",
+            policy_class=MockPolicyV1,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="0.9.0",
+        )
+        policy_registry.register_policy(
+            policy_id="minor-test",
+            policy_class=MockPolicyV2,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="0.10.0",
+        )
+
+        latest_cls = policy_registry.get("minor-test")
+        assert latest_cls is MockPolicyV2, "0.10.0 > 0.9.0"
+
+    def test_semver_comparison_patch_version_edge_case(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test edge case: 1.0.9 vs 1.0.10."""
+        policy_registry.register_policy(
+            policy_id="patch-test",
+            policy_class=MockPolicyV1,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.0.9",
+        )
+        policy_registry.register_policy(
+            policy_id="patch-test",
+            policy_class=MockPolicyV2,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.0.10",
+        )
+
+        latest_cls = policy_registry.get("patch-test")
+        assert latest_cls is MockPolicyV2, "1.0.10 > 1.0.9"

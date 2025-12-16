@@ -70,7 +70,7 @@ class ModelEventHeaders(BaseModel):
     max_retries: int = Field(default=3)
     ttl_seconds: Optional[int] = Field(default=None)
 
-    model_config = {"frozen": False, "extra": "forbid"}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     async def validate_headers(self) -> bool:
         """Validate that required headers are present and valid.

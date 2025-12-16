@@ -18,6 +18,7 @@ All tests validate:
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import pytest
@@ -134,7 +135,7 @@ def populated_event_bus_registry() -> EventBusBindingRegistry:
 
 
 @pytest.fixture(autouse=True)
-def reset_singletons() -> None:  # type: ignore[misc]
+def reset_singletons() -> Iterator[None]:
     """Reset singleton instances before each test.
 
     This ensures tests are isolated and don't affect each other

@@ -9,7 +9,7 @@ values, replacing `str | None` union types to comply with ONEX standards.
 from collections.abc import Callable
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelOptionalString(BaseModel):
@@ -36,6 +36,8 @@ class ModelOptionalString(BaseModel):
         'default'
     """
 
+    model_config = ConfigDict(frozen=True)
+
     value: Optional[str] = Field(default=None, description="Optional string value")
 
     def get(self) -> Optional[str]:
@@ -45,14 +47,6 @@ class ModelOptionalString(BaseModel):
             The string value if present, None otherwise.
         """
         return self.value
-
-    def set(self, value: Optional[str]) -> None:
-        """Set the optional value.
-
-        Args:
-            value: The new string value, or None to clear.
-        """
-        self.value = value
 
     def has_value(self) -> bool:
         """Check if value is present.

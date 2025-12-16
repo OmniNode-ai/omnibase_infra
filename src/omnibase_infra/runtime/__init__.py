@@ -3,16 +3,36 @@
 """Runtime module for omnibase_infra.
 
 This module provides the runtime infrastructure for the ONEX infrastructure layer,
-including:
+including three SINGLE SOURCE OF TRUTH registries and the runtime execution host.
 
-- Kernel: Contract-driven bootstrap entrypoint for the ONEX runtime
-- ProtocolBindingRegistry: SINGLE SOURCE OF TRUTH for protocol handler registration
-- EventBusBindingRegistry: Registry for event bus implementations
-- RuntimeHostProcess: The infrastructure-specific runtime host process implementation
-- Wiring functions: Register handlers and event buses with registries
+Core Registries
+---------------
+- **PolicyRegistry**: SINGLE SOURCE OF TRUTH for policy plugin registration
+    - Thread-safe registration by (policy_id, policy_type, version)
+    - Enforces synchronous-by-default execution (async must be explicit)
+    - Supports orchestrator and reducer policy types with version resolution
+    - Pure decision logic plugins (no I/O, no side effects)
+
+- **ProtocolBindingRegistry**: SINGLE SOURCE OF TRUTH for protocol handler registration
+    - Maps handler types to handler implementations
+    - Enables protocol-based dependency injection
+    - Supports HTTP, database, Kafka, Vault, Consul, Valkey/Redis, gRPC handlers
+
+- **EventBusBindingRegistry**: Registry for event bus implementations
+    - Maps event bus kinds to event bus implementations
+    - Supports in-memory and Kafka event buses
+    - Enables event-driven architectures
+
+Runtime Components
+------------------
+- **Kernel**: Contract-driven bootstrap entrypoint for the ONEX runtime
+- **RuntimeHostProcess**: Infrastructure-specific runtime host process implementation
+- **HealthServer**: HTTP health check endpoint for container orchestration
+- **Wiring functions**: Register handlers and event buses with registries
+- **Envelope validation**: Validate event envelope structures
 
 The runtime module serves as the entry point for running infrastructure services
-and configuring the handler ecosystem.
+and configuring the handler and policy ecosystem.
 """
 
 from __future__ import annotations

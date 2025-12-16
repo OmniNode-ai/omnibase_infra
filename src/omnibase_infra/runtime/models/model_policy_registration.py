@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumPolicyType
 
@@ -80,6 +80,28 @@ class ModelPolicyRegistration(BaseModel):
         default=False,
         description="If True, allows async interface (must be explicit for async policies)",
     )
+
+    @field_validator("policy_type")
+    @classmethod
+    def validate_policy_type(cls, v: str | EnumPolicyType) -> str | EnumPolicyType:
+        """Validate policy_type is a valid EnumPolicyType value.
+
+        Args:
+            v: The policy_type value to validate
+
+        Returns:
+            The validated policy_type value
+
+        Raises:
+            ValueError: If policy_type is not a valid EnumPolicyType value
+        """
+        if isinstance(v, EnumPolicyType):
+            return v
+        # If it's a string, validate it's a valid EnumPolicyType value
+        valid_values = {e.value for e in EnumPolicyType}
+        if v not in valid_values:
+            raise ValueError(f"policy_type must be one of {valid_values}, got '{v}'")
+        return v
 
 
 __all__: list[str] = ["ModelPolicyRegistration"]

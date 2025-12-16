@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelOptionalUUID(BaseModel):
@@ -36,6 +36,8 @@ class ModelOptionalUUID(BaseModel):
         False
     """
 
+    model_config = ConfigDict(frozen=True)
+
     value: Optional[UUID] = Field(default=None, description="Optional UUID value")
 
     def get(self) -> Optional[UUID]:
@@ -45,14 +47,6 @@ class ModelOptionalUUID(BaseModel):
             The UUID value if present, None otherwise.
         """
         return self.value
-
-    def set(self, value: Optional[UUID]) -> None:
-        """Set the optional value.
-
-        Args:
-            value: The new UUID value, or None to clear.
-        """
-        self.value = value
 
     def has_value(self) -> bool:
         """Check if value is present.
