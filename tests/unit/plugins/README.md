@@ -1,12 +1,12 @@
-# ComputePlugin Unit Tests
+# PluginCompute Unit Tests
 
-Comprehensive unit tests for the ComputePlugin system (OMN-813 Phase 2b).
+Comprehensive unit tests for the PluginCompute system (OMN-813 Phase 2b).
 
 ## Current Status
 
-**⏸ TESTS PAUSED** - Waiting for implementation dependencies:
-- `ComputePluginBase` abstract base class
-- `JsonNormalizerPlugin` example plugin
+**✅ TESTS ACTIVE** - Implementation complete:
+- `PluginComputeBase` abstract base class
+- `PluginJsonNormalizer` example plugin
 
 ## Test Coverage
 
@@ -31,7 +31,7 @@ The test suite includes 22 comprehensive tests covering:
 - ✅ `test_determinism_across_multiple_calls` - Repeated calls consistency
 - ✅ `test_different_input_produces_different_output` - Input sensitivity
 
-### JsonNormalizerPlugin Functionality (6 tests)
+### PluginJsonNormalizer Functionality (6 tests)
 - ✅ `test_normalizes_simple_dict` - Sorts keys in simple dict
 - ✅ `test_normalizes_nested_dict` - Recursive key sorting
 - ✅ `test_normalizes_dict_with_lists` - Handles lists in dict
@@ -48,22 +48,16 @@ The test suite includes 22 comprehensive tests covering:
 - ✅ `test_context_available_in_execute` - Context parameter in execute()
 - ✅ `test_context_available_in_validation_hooks` - Context in validation hooks
 
-## Activating Tests
+## Running Tests
 
-Once `ComputePluginBase` and `JsonNormalizerPlugin` are implemented:
+Tests are now active and can be run directly:
 
-1. **Remove skip marker** from `test_compute_plugin_base.py`:
-   ```python
-   # Delete or comment out this line:
-   # pytestmark = pytest.mark.skip(reason="Waiting for implementation")
-   ```
-
-2. **Run tests**:
+1. **Run all plugin tests**:
    ```bash
-   poetry run pytest tests/unit/plugins/test_compute_plugin_base.py -v
+   poetry run pytest tests/unit/plugins/test_plugin_compute_base.py -v
    ```
 
-3. **Expected result**: All 22 tests should pass with >90% coverage
+2. **Expected result**: All 22 tests should pass with >90% coverage
 
 ## Test Design Principles
 
@@ -79,12 +73,12 @@ Following ONEX testing standards:
 
 Tests require:
 - `pytest` framework
-- `omnibase_infra.plugins.protocol_compute_plugin` (✅ exists)
-- `omnibase_infra.plugins.compute_plugin_base` (⏸ pending)
-- `omnibase_infra.plugins.examples.json_normalizer_plugin` (⏸ pending)
+- `omnibase_infra.protocols.protocol_plugin_compute` (✅ exists)
+- `omnibase_infra.plugins.plugin_compute_base` (✅ exists)
+- `omnibase_infra.plugins.examples.plugin_json_normalizer` (✅ exists)
 
 ## Related Work
 
 - **OMN-813 Phase 1**: Protocol definition (completed)
-- **OMN-813 Phase 2a**: Base class and example plugin (pending)
-- **OMN-813 Phase 2b**: Unit tests (this file - completed, waiting for activation)
+- **OMN-813 Phase 2a**: Base class and example plugin (completed)
+- **OMN-813 Phase 2b**: Unit tests (completed and active)

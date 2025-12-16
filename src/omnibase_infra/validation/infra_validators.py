@@ -191,12 +191,12 @@ def validate_infra_patterns(
         },
         # Protocol method 'execute' exemption (standard plugin architecture pattern)
         {
-            "file_pattern": r"protocol_compute_plugin\.py",
+            "file_pattern": r"protocol_plugin_compute\.py",
             "violation_pattern": r"Function name 'execute' is too generic",
         },
         # Base class method 'execute' exemption (implements protocol pattern)
         {
-            "file_pattern": r"compute_plugin_base\.py",
+            "file_pattern": r"plugin_compute_base\.py",
             "violation_pattern": r"Function name 'execute' is too generic",
         },
     ]

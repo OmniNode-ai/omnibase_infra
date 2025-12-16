@@ -2,12 +2,12 @@
 # Copyright (c) 2025 OmniNode Team
 """Base class for deterministic compute plugins.
 
-This module provides ComputePluginBase, an abstract base class for implementing
+This module provides PluginComputeBase, an abstract base class for implementing
 deterministic compute plugins that integrate with ONEX Compute nodes. It provides
 validation hooks and enforces the deterministic computation contract.
 
 Architecture:
-    ComputePluginBase implements ProtocolComputePlugin and provides:
+    PluginComputeBase implements ProtocolPluginCompute and provides:
     - Abstract execute() method for plugin-specific logic
     - Optional validation hooks for input/output verification
     - Documentation and examples for plugin developers
@@ -46,10 +46,10 @@ Integration with ONEX Compute Nodes:
     Compute plugins are designed to work with NodeComputeService:
 
     ```python
-    from omnibase_infra.plugins import ComputePluginBase
+    from omnibase_infra.plugins import PluginComputeBase
 
     # Plugin implementation
-    class MyComputePlugin(ComputePluginBase):
+    class MyComputePlugin(PluginComputeBase):
         def execute(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
             # Pure computation logic
             result = self._process(input_data, context)
@@ -75,7 +75,7 @@ Thread Safety:
     - Immutable configuration in __init__() is acceptable
 
 See Also:
-    - src/omnibase_infra/protocols/protocol_compute_plugin.py for protocol definition
+    - src/omnibase_infra/protocols/protocol_plugin_compute.py for protocol definition
     - ONEX 4-node architecture documentation
     - OMN-813 for compute plugin design specification
 """
@@ -86,7 +86,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
-class ComputePluginBase(ABC):
+class PluginComputeBase(ABC):
     """Abstract base class for compute plugins.
 
     Provides optional validation hooks and enforces the execute() contract.
@@ -96,7 +96,7 @@ class ComputePluginBase(ABC):
 
     Example:
         ```python
-        class MyComputePlugin(ComputePluginBase):
+        class MyComputePlugin(PluginComputeBase):
             def execute(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
                 # Deterministic computation
                 result = self._process(input_data)

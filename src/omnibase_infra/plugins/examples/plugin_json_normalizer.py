@@ -6,10 +6,10 @@ and hashing. It demonstrates a pure, deterministic compute plugin with no side e
 
 from typing import Any
 
-from omnibase_infra.plugins.compute_plugin_base import ComputePluginBase
+from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 
 
-class JsonNormalizerPlugin(ComputePluginBase):
+class PluginJsonNormalizer(PluginComputeBase):
     """Normalizes JSON structures for deterministic comparison.
 
     This plugin performs deep key sorting on JSON-compatible data structures,
@@ -29,7 +29,7 @@ class JsonNormalizerPlugin(ComputePluginBase):
 
     Example:
         ```python
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
 
         # Input with arbitrary key order
         input_data = {
@@ -76,7 +76,7 @@ class JsonNormalizerPlugin(ComputePluginBase):
             Dictionary with "normalized" key containing sorted JSON
 
         Example:
-            >>> plugin = JsonNormalizerPlugin()
+            >>> plugin = PluginJsonNormalizer()
             >>> result = plugin.execute({"json": {"b": 2, "a": 1}}, {})
             >>> result["normalized"]
             {"a": 1, "b": 2}

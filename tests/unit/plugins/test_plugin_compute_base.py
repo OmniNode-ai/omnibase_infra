@@ -1,13 +1,13 @@
-"""Unit tests for ComputePlugin base class and protocol conformance.
+"""Unit tests for PluginCompute base class and protocol conformance.
 
 Tests verify:
 - Protocol conformance for base class and example plugins
 - Abstract base class behavior
 - Validation hook execution order
 - Determinism guarantees
-- JsonNormalizerPlugin functionality
+- PluginJsonNormalizer functionality
 
-NOTE: Tests are marked as skipped until ComputePluginBase and JsonNormalizerPlugin
+NOTE: Tests are marked as skipped until PluginComputeBase and PluginJsonNormalizer
 are implemented. Uncomment imports below once implementation is complete.
 """
 
@@ -16,52 +16,53 @@ from typing import Any
 
 import pytest
 
+from omnibase_infra.plugins.examples.plugin_json_normalizer import PluginJsonNormalizer
+
 # Implementations are now complete - imports activated
-from omnibase_infra.plugins.compute_plugin_base import ComputePluginBase
-from omnibase_infra.plugins.examples.json_normalizer_plugin import JsonNormalizerPlugin
-from omnibase_infra.protocols.protocol_compute_plugin import ProtocolComputePlugin
+from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
+from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
 
 
 class TestProtocolConformance:
-    """Test that implementations conform to ProtocolComputePlugin."""
+    """Test that implementations conform to ProtocolPluginCompute."""
 
     def test_protocol_conformance_with_base_class(self) -> None:
-        """ComputePluginBase conforms to ProtocolComputePlugin."""
+        """PluginComputeBase conforms to ProtocolPluginCompute."""
 
         # Arrange: Create concrete implementation of base class
-        class ConcretePlugin(ComputePluginBase):
+        class ConcretePlugin(PluginComputeBase):
             def execute(self, input_data: dict, context: dict) -> dict:
                 return input_data
 
         instance = ConcretePlugin()
 
         # Act & Assert: Verify protocol conformance
-        assert isinstance(instance, ProtocolComputePlugin)
+        assert isinstance(instance, ProtocolPluginCompute)
 
     def test_protocol_conformance_with_example(self) -> None:
-        """JsonNormalizerPlugin conforms to ProtocolComputePlugin."""
+        """PluginJsonNormalizer conforms to ProtocolPluginCompute."""
         # Arrange
-        instance = JsonNormalizerPlugin()
+        instance = PluginJsonNormalizer()
 
         # Act & Assert: Verify protocol conformance
-        assert isinstance(instance, ProtocolComputePlugin)
+        assert isinstance(instance, ProtocolPluginCompute)
 
 
 class TestBaseClassAbstraction:
     """Test abstract base class behavior."""
 
     def test_base_class_is_abstract(self) -> None:
-        """Cannot instantiate ComputePluginBase directly."""
+        """Cannot instantiate PluginComputeBase directly."""
         # Arrange
         # Act & Assert: Attempting to instantiate should raise TypeError
         with pytest.raises(TypeError, match="Can't instantiate abstract class"):
-            ComputePluginBase()  # type: ignore[abstract]
+            PluginComputeBase()  # type: ignore[abstract]
 
     def test_execute_method_is_abstract(self) -> None:
         """Must override execute() method."""
 
         # Arrange: Create class without execute() implementation
-        class IncompletePlugin(ComputePluginBase):
+        class IncompletePlugin(PluginComputeBase):
             pass
 
         # Act & Assert: Attempting to instantiate should raise TypeError
@@ -72,7 +73,7 @@ class TestBaseClassAbstraction:
         """Can use base class without overriding validation hooks."""
 
         # Arrange: Create minimal implementation with only execute()
-        class MinimalPlugin(ComputePluginBase):
+        class MinimalPlugin(PluginComputeBase):
             def execute(self, input_data: dict, context: dict) -> dict:
                 return {"result": "success"}
 
@@ -92,7 +93,7 @@ class TestValidationHooks:
         # Arrange: Track execution order
         execution_order: list[str] = []
 
-        class TrackingPlugin(ComputePluginBase):
+        class TrackingPlugin(PluginComputeBase):
             def validate_input(self, input_data: dict) -> None:
                 execution_order.append("validate_input")
 
@@ -116,7 +117,7 @@ class TestValidationHooks:
         # Arrange: Track execution order
         execution_order: list[str] = []
 
-        class TrackingPlugin(ComputePluginBase):
+        class TrackingPlugin(PluginComputeBase):
             def execute(self, input_data: dict, context: dict) -> dict:
                 execution_order.append("execute")
                 return {"result": "data"}
@@ -139,7 +140,7 @@ class TestValidationHooks:
         """Validation exceptions bubble up to caller when hooks called manually."""
 
         # Arrange: Plugin that raises validation error
-        class ValidatingPlugin(ComputePluginBase):
+        class ValidatingPlugin(PluginComputeBase):
             def validate_input(self, input_data: dict) -> None:
                 if "required_field" not in input_data:
                     raise ValueError("Missing required_field")
@@ -161,7 +162,7 @@ class TestDeterminism:
     def test_same_input_produces_same_output(self) -> None:
         """Same input produces identical output (core determinism)."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input_data = {"json": {"z": 3, "a": 1, "m": 2}}
         context = {"correlation_id": "test-123"}
 
@@ -175,7 +176,7 @@ class TestDeterminism:
     def test_determinism_across_multiple_calls(self) -> None:
         """Repeated calls with same input produce identical results."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input_data = {"json": {"nested": {"z": 1, "a": 2}, "top": "level"}}
         context = {"correlation_id": "test-123"}
 
@@ -188,7 +189,7 @@ class TestDeterminism:
     def test_different_input_produces_different_output(self) -> None:
         """Different inputs produce different outputs."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input1 = {"json": {"key": "value1"}}
         input2 = {"json": {"key": "value2"}}
         context = {"correlation_id": "test-123"}
@@ -201,13 +202,13 @@ class TestDeterminism:
         assert result1 != result2
 
 
-class TestJsonNormalizerPlugin:
-    """Test JsonNormalizerPlugin functionality."""
+class TestPluginJsonNormalizer:
+    """Test PluginJsonNormalizer functionality."""
 
     def test_normalizes_simple_dict(self) -> None:
         """Sorts keys in simple dictionary."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input_data = {"json": {"z": 3, "a": 1, "m": 2}}
         context = {"correlation_id": "test-123"}
 
@@ -223,7 +224,7 @@ class TestJsonNormalizerPlugin:
     def test_normalizes_nested_dict(self) -> None:
         """Recursively sorts keys in nested dictionaries."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input_data = {
             "json": {
                 "outer_z": {"inner_z": 3, "inner_a": 1},
@@ -244,7 +245,7 @@ class TestJsonNormalizerPlugin:
     def test_normalizes_dict_with_lists(self) -> None:
         """Handles lists within dictionaries."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input_data = {"json": {"z": [3, 2, 1], "a": ["x", "y"]}}
         context = {"correlation_id": "test-123"}
 
@@ -260,7 +261,7 @@ class TestJsonNormalizerPlugin:
     def test_normalizes_empty_dict(self) -> None:
         """Handles empty dictionary edge case."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input_data: dict[str, Any] = {"json": {}}
         context = {"correlation_id": "test-123"}
 
@@ -274,7 +275,7 @@ class TestJsonNormalizerPlugin:
     def test_preserves_values(self) -> None:
         """Values unchanged, only keys sorted."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input_data = {
             "json": {
                 "z": {"complex": [1, 2, 3], "value": True},
@@ -297,7 +298,7 @@ class TestJsonNormalizerPlugin:
     def test_deterministic_normalization(self) -> None:
         """Same JSON produces same normalized output."""
         # Arrange
-        plugin = JsonNormalizerPlugin()
+        plugin = PluginJsonNormalizer()
         input_data = {
             "json": {
                 "users": [
@@ -322,14 +323,14 @@ class TestJsonNormalizerPlugin:
 
 
 class TestValidationHookIntegration:
-    """Test validation hooks with JsonNormalizerPlugin."""
+    """Test validation hooks with PluginJsonNormalizer."""
 
     def test_validation_hooks_execute_in_order(self) -> None:
         """Validation hooks must be called manually in correct order."""
         # Arrange: Track execution order
         execution_order: list[str] = []
 
-        class TrackedNormalizer(JsonNormalizerPlugin):
+        class TrackedNormalizer(PluginJsonNormalizer):
             def validate_input(self, input_data: dict[str, Any]) -> None:
                 execution_order.append("validate_input")
                 super().validate_input(input_data)
@@ -360,7 +361,7 @@ class TestValidationHookIntegration:
         """Input validation errors prevent execution when called manually."""
 
         # Arrange: Plugin with strict input validation
-        class StrictNormalizer(JsonNormalizerPlugin):
+        class StrictNormalizer(PluginJsonNormalizer):
             def validate_input(self, input_data: dict[str, Any]) -> None:
                 if not input_data.get("json"):
                     raise ValueError("Input must not be empty")
@@ -375,7 +376,7 @@ class TestValidationHookIntegration:
         """Output validation errors propagate when called manually."""
 
         # Arrange: Plugin with strict output validation
-        class StrictNormalizer(JsonNormalizerPlugin):
+        class StrictNormalizer(PluginJsonNormalizer):
             def validate_output(self, output_data: dict[str, Any]) -> None:
                 normalized = output_data.get("normalized", output_data)
                 if len(normalized) > 5:
@@ -401,7 +402,7 @@ class TestContextPropagation:
         # Arrange
         context_received = {}
 
-        class ContextTrackingPlugin(ComputePluginBase):
+        class ContextTrackingPlugin(PluginComputeBase):
             def execute(self, input_data: dict, context: dict) -> dict:
                 context_received.update(context)
                 return {"correlation_id": context.get("correlation_id")}
@@ -423,7 +424,7 @@ class TestContextPropagation:
         # NOTE: Base class validation hooks don't receive context parameter
         # This test demonstrates that plugins CAN track context if needed
 
-        class ContextAwarePlugin(ComputePluginBase):
+        class ContextAwarePlugin(PluginComputeBase):
             def __init__(self) -> None:
                 self.last_context: dict | None = None
 

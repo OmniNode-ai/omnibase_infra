@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Protocol definition for deterministic compute plugins.
 
-This module defines the ProtocolComputePlugin interface for plugins that perform
+This module defines the ProtocolPluginCompute interface for plugins that perform
 pure data transformations without side effects. This protocol is designed for use
 with ONEX Compute nodes that require deterministic, reproducible operations.
 
@@ -47,11 +47,11 @@ Integration with ONEX Compute Nodes:
 
 Example Usage:
     ```python
-    from omnibase_infra.protocols import ProtocolComputePlugin
+    from omnibase_infra.protocols import ProtocolPluginCompute
     from typing import Protocol, runtime_checkable
 
     @runtime_checkable
-    class ProtocolComputePlugin(Protocol):
+    class ProtocolPluginCompute(Protocol):
         def execute(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
             '''Execute deterministic computation.'''
             ...
@@ -86,11 +86,11 @@ Type Checking:
 
     ```python
     plugin = JsonSchemaValidator()
-    assert isinstance(plugin, ProtocolComputePlugin)  # True
+    assert isinstance(plugin, ProtocolPluginCompute)  # True
     ```
 
 See Also:
-    - src/omnibase_infra/plugins/compute_plugin_base.py for base implementation
+    - src/omnibase_infra/plugins/plugin_compute_base.py for base implementation
     - ONEX 4-node architecture documentation
     - OMN-813 for complete compute plugin design
 """
@@ -101,7 +101,7 @@ from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
-class ProtocolComputePlugin(Protocol):
+class ProtocolPluginCompute(Protocol):
     """Protocol for deterministic compute plugins.
 
     This protocol defines the interface for plugins that perform pure data

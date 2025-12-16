@@ -6,7 +6,7 @@ This module provides the foundation for in-process, deterministic computation
 that complements external effect handlers.
 
 Components:
-    - ComputePluginBase: Abstract base class with validation hooks
+    - PluginComputeBase: Abstract base class with validation hooks
 
 Architecture:
     Compute plugins perform pure computation with NO side effects:
@@ -17,11 +17,11 @@ Architecture:
     - Replayable for debugging and testing
 
 See Also:
-    - omnibase_infra.protocols.ProtocolComputePlugin for protocol definition
+    - omnibase_infra.protocols.ProtocolPluginCompute for protocol definition
 """
 
-from omnibase_infra.plugins.compute_plugin_base import ComputePluginBase
+from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 
 __all__ = [
-    "ComputePluginBase",
+    "PluginComputeBase",
 ]

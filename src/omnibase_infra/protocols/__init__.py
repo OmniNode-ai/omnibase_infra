@@ -6,7 +6,7 @@ This module provides protocol definitions (duck-typed interfaces) for infrastruc
 components in the ONEX ecosystem.
 
 Protocols:
-    - ProtocolComputePlugin: Interface for deterministic compute plugins
+    - ProtocolPluginCompute: Interface for deterministic compute plugins
 
 Architecture:
     Protocols enable duck typing and dependency injection without requiring
@@ -15,11 +15,11 @@ Architecture:
 
 Usage:
     ```python
-    from omnibase_infra.protocols import ProtocolComputePlugin
+    from omnibase_infra.protocols import ProtocolPluginCompute
 
     # Check if class implements protocol
     plugin = MyComputePlugin()
-    assert isinstance(plugin, ProtocolComputePlugin)  # Runtime check
+    assert isinstance(plugin, ProtocolPluginCompute)  # Runtime check
     ```
 
 See Also:
@@ -27,8 +27,8 @@ See Also:
     - ONEX 4-node architecture documentation
 """
 
-from omnibase_infra.protocols.protocol_compute_plugin import ProtocolComputePlugin
+from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
 
 __all__ = [
-    "ProtocolComputePlugin",
+    "ProtocolPluginCompute",
 ]
