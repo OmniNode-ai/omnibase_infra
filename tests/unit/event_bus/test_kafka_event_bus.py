@@ -643,7 +643,9 @@ class TestKafkaEventBusCircuitBreaker:
 
             # Should raise when checking circuit
             async with event_bus._circuit_breaker_lock:
-                with pytest.raises(InfraUnavailableError, match="Circuit breaker is open"):
+                with pytest.raises(
+                    InfraUnavailableError, match="Circuit breaker is open"
+                ):
                     await event_bus._check_circuit_breaker(operation="test")
 
 

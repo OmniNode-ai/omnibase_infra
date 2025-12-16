@@ -89,7 +89,7 @@ def run_patterns(verbose: bool = False) -> bool:
 
         # Filter known infrastructure pattern exemptions
         exempted_patterns = [
-            ("kafka_event_bus.py", "Class 'KafkaEventBus' has 15 methods"),
+            ("kafka_event_bus.py", "Class 'KafkaEventBus' has 12 methods"),
             ("kafka_event_bus.py", "Function '__init__' has 10 parameters"),
         ]
         original_errors = result.errors

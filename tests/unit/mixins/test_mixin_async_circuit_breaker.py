@@ -456,9 +456,7 @@ class TestMixinAsyncCircuitBreakerErrorContext:
     async def test_error_includes_service_name(self) -> None:
         """Test that error includes service_name in context."""
         service_name = "custom-kafka-service"
-        service = TestCircuitBreakerService(
-            threshold=1, service_name=service_name
-        )
+        service = TestCircuitBreakerService(threshold=1, service_name=service_name)
 
         # Open circuit
         await service.record_failure("test_operation")

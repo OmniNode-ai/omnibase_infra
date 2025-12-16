@@ -259,7 +259,7 @@ class MixinAsyncCircuitBreaker:
         )
 
     async def _check_circuit_breaker(
-        self, operation: str, correlation_id: UUID | None = None
+        self, operation: str, correlation_id: Optional[UUID] = None
     ) -> None:
         """Check if circuit breaker allows operation.
 
@@ -345,7 +345,7 @@ class MixinAsyncCircuitBreaker:
                 )
 
     async def _record_circuit_failure(
-        self, operation: str, correlation_id: UUID | None = None
+        self, operation: str, correlation_id: Optional[UUID] = None
     ) -> None:
         """Record a circuit breaker failure and potentially open the circuit.
 
