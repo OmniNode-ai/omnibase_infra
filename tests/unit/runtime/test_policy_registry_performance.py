@@ -293,8 +293,17 @@ class TestPolicyRegistryOptimizationRegression:
         policy_cls = registry.get("test")
         assert policy_cls is MockPolicy
 
-        # Verify it's actually the latest by checking registration count
-        assert len(registry) == 3
+        # Verify it's actually the latest by checking the versions
+        versions = registry.list_versions("test")
+        # Note: list_versions() returns lexicographically sorted strings
+        # (10.0.0 comes before 2.0.0 lexicographically), but get() uses
+        # semantic version comparison internally
+        assert set(versions) == {"1.0.0", "2.0.0", "10.0.0"}
+
+        # Verify we got the semantically latest version (10.0.0)
+        # by checking that we can get it explicitly
+        latest_policy_cls = registry.get("test", version="10.0.0")
+        assert latest_policy_cls is policy_cls
 
     def test_early_exit_raises_correct_error(self) -> None:
         """Verify early exit still raises descriptive error."""

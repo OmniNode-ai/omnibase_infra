@@ -58,6 +58,9 @@ class MockSyncPolicy:
     def evaluate(self, context: dict[str, object]) -> dict[str, object]:
         return {"result": "sync"}
 
+    def decide(self, context: dict[str, object]) -> dict[str, object]:
+        return self.evaluate(context)
+
 
 class MockAsyncPolicy:
     """Mock async policy for testing sync enforcement."""
@@ -73,6 +76,9 @@ class MockAsyncPolicy:
     async def evaluate(self, context: dict[str, object]) -> dict[str, object]:
         return {"result": "async"}
 
+    async def decide(self, context: dict[str, object]) -> dict[str, object]:
+        return await self.evaluate(context)
+
 
 class MockAsyncDecidePolicy:
     """Mock async policy with decide() method."""
@@ -85,8 +91,11 @@ class MockAsyncDecidePolicy:
     def policy_type(self) -> str:
         return "orchestrator"
 
-    async def decide(self, context: dict[str, object]) -> dict[str, object]:
+    async def evaluate(self, context: dict[str, object]) -> dict[str, object]:
         return {"decision": "async"}
+
+    async def decide(self, context: dict[str, object]) -> dict[str, object]:
+        return await self.evaluate(context)
 
 
 class MockAsyncReducePolicy:
@@ -99,6 +108,12 @@ class MockAsyncReducePolicy:
     @property
     def policy_type(self) -> str:
         return "reducer"
+
+    async def evaluate(self, context: dict[str, object]) -> dict[str, object]:
+        return {"reduced": "async"}
+
+    async def decide(self, context: dict[str, object]) -> dict[str, object]:
+        return await self.evaluate(context)
 
     async def reduce(self, states: list[dict[str, object]]) -> dict[str, object]:
         return {"reduced": "async"}
@@ -115,6 +130,12 @@ class MockSyncReducerPolicy:
     def policy_type(self) -> str:
         return "reducer"
 
+    def evaluate(self, context: dict[str, object]) -> dict[str, object]:
+        return {"reduced": "sync"}
+
+    def decide(self, context: dict[str, object]) -> dict[str, object]:
+        return self.evaluate(context)
+
     def reduce(self, states: list[dict[str, object]]) -> dict[str, object]:
         return {"reduced": "sync"}
 
@@ -130,8 +151,11 @@ class MockSyncDecidePolicy:
     def policy_type(self) -> str:
         return "orchestrator"
 
-    def decide(self, context: dict[str, object]) -> dict[str, object]:
+    def evaluate(self, context: dict[str, object]) -> dict[str, object]:
         return {"decision": "sync"}
+
+    def decide(self, context: dict[str, object]) -> dict[str, object]:
+        return self.evaluate(context)
 
 
 class MockPolicyV1:
@@ -148,6 +172,9 @@ class MockPolicyV1:
     def evaluate(self, context: dict[str, object]) -> dict[str, object]:
         return {"version": "1.0.0"}
 
+    def decide(self, context: dict[str, object]) -> dict[str, object]:
+        return self.evaluate(context)
+
 
 class MockPolicyV2:
     """Mock policy version 2 for version testing."""
@@ -162,6 +189,9 @@ class MockPolicyV2:
 
     def evaluate(self, context: dict[str, object]) -> dict[str, object]:
         return {"version": "2.0.0"}
+
+    def decide(self, context: dict[str, object]) -> dict[str, object]:
+        return self.evaluate(context)
 
 
 # =============================================================================

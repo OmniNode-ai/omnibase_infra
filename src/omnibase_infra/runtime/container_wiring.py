@@ -132,7 +132,34 @@ async def wire_infrastructure_services(
         services_registered.append("ProtocolBindingRegistry")
         logger.debug("Registered ProtocolBindingRegistry in container (global scope)")
 
+    except AttributeError as e:
+        # Container missing service_registry or registration method
+        logger.exception(
+            "Container missing required service_registry API",
+            extra={
+                "error": str(e),
+                "error_type": "AttributeError",
+                "hint": "Ensure ModelONEXContainer has service_registry attribute",
+            },
+        )
+        raise RuntimeError(
+            f"Container wiring failed - missing service_registry API: {e}"
+        ) from e
+    except TypeError as e:
+        # Invalid arguments to register_instance
+        logger.exception(
+            "Invalid arguments during service registration",
+            extra={
+                "error": str(e),
+                "error_type": "TypeError",
+                "hint": "Check register_instance() signature compatibility",
+            },
+        )
+        raise RuntimeError(
+            f"Container wiring failed - invalid registration arguments: {e}"
+        ) from e
     except Exception as e:
+        # Generic fallback for unexpected errors
         logger.exception(
             "Failed to register infrastructure services",
             extra={"error": str(e), "error_type": type(e).__name__},
@@ -150,11 +177,16 @@ async def wire_infrastructure_services(
     return {"services": services_registered}
 
 
-def get_policy_registry_from_container(container: ModelONEXContainer) -> PolicyRegistry:
+async def get_policy_registry_from_container(
+    container: ModelONEXContainer,
+) -> PolicyRegistry:
     """Get PolicyRegistry from container.
 
     Resolves PolicyRegistry using ModelONEXContainer.service_registry.resolve_service().
     This is the preferred method for accessing PolicyRegistry in container-based code.
+
+    Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
+    is async in omnibase_core 0.4.x+.
 
     Args:
         container: ONEX container instance with registered PolicyRegistry.
@@ -168,8 +200,8 @@ def get_policy_registry_from_container(container: ModelONEXContainer) -> PolicyR
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
         >>> container = ModelONEXContainer()
-        >>> wire_infrastructure_services(container)
-        >>> registry = get_policy_registry_from_container(container)
+        >>> await wire_infrastructure_services(container)
+        >>> registry = await get_policy_registry_from_container(container)
         >>> isinstance(registry, PolicyRegistry)
         True
 
@@ -179,7 +211,7 @@ def get_policy_registry_from_container(container: ModelONEXContainer) -> PolicyR
         For auto-registration, use get_or_create_policy_registry() instead.
     """
     try:
-        registry: PolicyRegistry = container.service_registry.resolve_service(
+        registry: PolicyRegistry = await container.service_registry.resolve_service(
             PolicyRegistry
         )
         return registry
@@ -194,7 +226,9 @@ def get_policy_registry_from_container(container: ModelONEXContainer) -> PolicyR
         ) from e
 
 
-def get_or_create_policy_registry(container: ModelONEXContainer) -> PolicyRegistry:
+async def get_or_create_policy_registry(
+    container: ModelONEXContainer,
+) -> PolicyRegistry:
     """Get PolicyRegistry from container, creating if not registered.
 
     Helper function for backwards compatibility during migration.
@@ -203,6 +237,9 @@ def get_or_create_policy_registry(container: ModelONEXContainer) -> PolicyRegist
 
     This function is useful during incremental migration when some code paths
     may not have called wire_infrastructure_services() yet.
+
+    Note: This function is async because ModelONEXContainer.service_registry methods
+    (resolve_service and register_instance) are async in omnibase_core 0.4.x+.
 
     Args:
         container: ONEX container instance.
@@ -213,11 +250,11 @@ def get_or_create_policy_registry(container: ModelONEXContainer) -> PolicyRegist
     Example:
         >>> container = ModelONEXContainer()
         >>> # No wiring yet, but this still works
-        >>> registry = get_or_create_policy_registry(container)
+        >>> registry = await get_or_create_policy_registry(container)
         >>> isinstance(registry, PolicyRegistry)
         True
         >>> # Second call returns same instance
-        >>> registry2 = get_or_create_policy_registry(container)
+        >>> registry2 = await get_or_create_policy_registry(container)
         >>> registry is registry2
         True
 
@@ -228,7 +265,7 @@ def get_or_create_policy_registry(container: ModelONEXContainer) -> PolicyRegist
     """
     try:
         # Try to resolve existing PolicyRegistry
-        registry: PolicyRegistry = container.service_registry.resolve_service(
+        registry: PolicyRegistry = await container.service_registry.resolve_service(
             PolicyRegistry
         )
         return registry
@@ -238,7 +275,7 @@ def get_or_create_policy_registry(container: ModelONEXContainer) -> PolicyRegist
 
         try:
             policy_registry = PolicyRegistry()
-            container.service_registry.register_instance(
+            await container.service_registry.register_instance(
                 interface=PolicyRegistry,
                 instance=policy_registry,
                 scope="global",
@@ -261,13 +298,16 @@ def get_or_create_policy_registry(container: ModelONEXContainer) -> PolicyRegist
             ) from e
 
 
-def get_handler_registry_from_container(
+async def get_handler_registry_from_container(
     container: ModelONEXContainer,
 ) -> ProtocolBindingRegistry:
     """Get ProtocolBindingRegistry from container.
 
     Resolves ProtocolBindingRegistry using ModelONEXContainer.service_registry.resolve_service().
     This is the preferred method for accessing ProtocolBindingRegistry in container-based code.
+
+    Note: This function is async because ModelONEXContainer.service_registry.resolve_service()
+    is async in omnibase_core 0.4.x+.
 
     Args:
         container: ONEX container instance with registered ProtocolBindingRegistry.
@@ -281,8 +321,8 @@ def get_handler_registry_from_container(
     Example:
         >>> from omnibase_core.container import ModelONEXContainer
         >>> container = ModelONEXContainer()
-        >>> wire_infrastructure_services(container)
-        >>> registry = get_handler_registry_from_container(container)
+        >>> await wire_infrastructure_services(container)
+        >>> registry = await get_handler_registry_from_container(container)
         >>> isinstance(registry, ProtocolBindingRegistry)
         True
 
@@ -291,8 +331,8 @@ def get_handler_registry_from_container(
         wire_infrastructure_services(). If not, it will raise RuntimeError.
     """
     try:
-        registry: ProtocolBindingRegistry = container.service_registry.resolve_service(
-            ProtocolBindingRegistry
+        registry: ProtocolBindingRegistry = (
+            await container.service_registry.resolve_service(ProtocolBindingRegistry)
         )
         return registry
     except Exception as e:

@@ -39,12 +39,12 @@ def mock_container() -> MagicMock:
     container.get_config.return_value = {}
 
     # Mock service_registry for container-based DI
-    # Note: resolve_service is sync for helper functions (get_policy_registry_from_container)
-    # but register_instance must be async for wire_infrastructure_services().
-    # This hybrid approach supports both patterns.
+    # Note: Both resolve_service and register_instance are async in omnibase_core 0.4.x+
     # For integration tests with real containers, use container_with_registries.
     container.service_registry = MagicMock()
-    container.service_registry.resolve_service = SyncMock()  # Sync for helper functions
+    container.service_registry.resolve_service = (
+        AsyncMock()
+    )  # Async in omnibase_core 0.4+
     container.service_registry.register_instance = AsyncMock(
         return_value="mock-uuid"
     )  # Async for wire functions
@@ -87,7 +87,7 @@ def container_with_policy_registry(mock_container: MagicMock) -> PolicyRegistry:
     registry = PolicyRegistry()
 
     # Configure mock container to return this registry when resolved
-    def resolve_service_side_effect(interface_type: type) -> PolicyRegistry:
+    async def resolve_service_side_effect(interface_type: type) -> PolicyRegistry:
         if interface_type is PolicyRegistry:
             return registry
         raise ValueError(f"Service not registered: {interface_type}")

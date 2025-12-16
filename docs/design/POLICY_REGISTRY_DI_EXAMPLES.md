@@ -206,6 +206,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock
 
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.enums import EnumPolicyType
 from services.retry_service import RetryService
 
 
@@ -247,7 +248,7 @@ async def test_retry_with_policy_success(retry_service, mock_container):
     registry.register_policy(
         policy_id="test_retry",
         policy_class=MockRetryPolicy,
-        policy_type="orchestrator",
+        policy_type=EnumPolicyType.ORCHESTRATOR,
     )
 
     # Test operation that succeeds on 2nd attempt
@@ -286,7 +287,7 @@ async def test_retry_with_policy_failure(retry_service, mock_container):
     registry.register_policy(
         policy_id="no_retry",
         policy_class=MockNoRetryPolicy,
-        policy_type="orchestrator",
+        policy_type=EnumPolicyType.ORCHESTRATOR,
     )
 
     # Test operation that always fails

@@ -119,12 +119,12 @@ class PolicyRegistry:
         from omnibase_core.container import ModelONEXContainer
         from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
-        # Resolve from container (preferred)
-        registry = container.service_registry.resolve_service(PolicyRegistry)
+        # Resolve from container (preferred) - async in omnibase_core 0.4.x+
+        registry = await container.service_registry.resolve_service(PolicyRegistry)
 
-        # Or use helper function
+        # Or use helper function (also async)
         from omnibase_infra.runtime.container_wiring import get_policy_registry_from_container
-        registry = get_policy_registry_from_container(container)
+        registry = await get_policy_registry_from_container(container)
         ```
 
         Legacy singleton pattern (get_policy_registry()) maintained for backwards
@@ -338,11 +338,7 @@ class PolicyRegistry:
 
         # Validate version format (ensures semantic versioning compliance)
         # This calls _parse_semver which will raise ProtocolConfigurationError if invalid
-        try:
-            self._parse_semver(version)
-        except ProtocolConfigurationError:
-            # Re-raise as-is to maintain error context
-            raise
+        self._parse_semver(version)
 
         # Register the policy using ModelPolicyKey
         key = ModelPolicyKey(
@@ -877,12 +873,12 @@ def get_policy_registry() -> PolicyRegistry:
         from omnibase_core.container import ModelONEXContainer
         from omnibase_infra.runtime.container_wiring import get_policy_registry_from_container
 
-        def __init__(self, container: ModelONEXContainer):
-            self.policy_registry = get_policy_registry_from_container(container)
+        async def __init__(self, container: ModelONEXContainer):
+            self.policy_registry = await get_policy_registry_from_container(container)
 
-        # Or resolve directly:
+        # Or resolve directly (async):
         from omnibase_infra.runtime.policy_registry import PolicyRegistry
-        registry = container.service_registry.resolve_service(PolicyRegistry)
+        registry = await container.service_registry.resolve_service(PolicyRegistry)
         ```
 
     This function maintains backwards compatibility for code that hasn't migrated

@@ -49,44 +49,44 @@ class TestWireInfrastructureServices:
 class TestGetPolicyRegistryFromContainer:
     """Test get_policy_registry_from_container() function."""
 
-    def test_resolve_policy_registry_from_container(
+    async def test_resolve_policy_registry_from_container(
         self, container_with_policy_registry: PolicyRegistry, mock_container: MagicMock
     ) -> None:
         """Test resolving PolicyRegistry from container."""
-        registry = get_policy_registry_from_container(mock_container)
+        registry = await get_policy_registry_from_container(mock_container)
 
         assert registry is container_with_policy_registry
         assert isinstance(registry, PolicyRegistry)
 
-    def test_resolve_raises_error_if_not_registered(
+    async def test_resolve_raises_error_if_not_registered(
         self, mock_container: MagicMock
     ) -> None:
         """Test that resolve raises RuntimeError if PolicyRegistry not registered."""
         # Configure mock to raise exception (not side_effect which would return coroutine)
         mock_container.service_registry.resolve_service.return_value = None
 
-        def raise_error(*args: object, **kwargs: object) -> None:
+        async def raise_error(*args: object, **kwargs: object) -> None:
             raise ValueError("Service not registered")
 
         mock_container.service_registry.resolve_service = raise_error  # type: ignore[method-assign]
 
         with pytest.raises(RuntimeError, match="PolicyRegistry not registered"):
-            get_policy_registry_from_container(mock_container)
+            await get_policy_registry_from_container(mock_container)
 
 
 class TestGetOrCreatePolicyRegistry:
     """Test get_or_create_policy_registry() function."""
 
-    def test_returns_existing_registry_if_found(
+    async def test_returns_existing_registry_if_found(
         self, container_with_policy_registry: PolicyRegistry, mock_container: MagicMock
     ) -> None:
         """Test that existing PolicyRegistry is returned if found."""
-        registry = get_or_create_policy_registry(mock_container)
+        registry = await get_or_create_policy_registry(mock_container)
 
         assert registry is container_with_policy_registry
         assert isinstance(registry, PolicyRegistry)
 
-    def test_creates_and_registers_if_not_found(
+    async def test_creates_and_registers_if_not_found(
         self, mock_container: MagicMock
     ) -> None:
         """Test that PolicyRegistry is created and registered if not found."""
@@ -95,7 +95,7 @@ class TestGetOrCreatePolicyRegistry:
             "Service not registered"
         )
 
-        registry = get_or_create_policy_registry(mock_container)
+        registry = await get_or_create_policy_registry(mock_container)
 
         # Verify registry was created
         assert isinstance(registry, PolicyRegistry)
@@ -108,37 +108,37 @@ class TestGetOrCreatePolicyRegistry:
         assert call_kwargs["scope"] == "global"
         assert call_kwargs["metadata"]["auto_registered"] is True
 
-    def test_raises_error_if_registration_fails(
+    async def test_raises_error_if_registration_fails(
         self, mock_container: MagicMock
     ) -> None:
-        """Test that RuntimeError is raised if registration fails.
-
-        Note: get_or_create_policy_registry has a bug - it calls register_instance
-        synchronously but the method is async in omnibase_core 0.4+. This test is
-        disabled until the function is fixed to be async or properly handle the async call.
-        """
-        pytest.skip(
-            "get_or_create_policy_registry has a bug - calls async register_instance synchronously"
+        """Test that RuntimeError is raised if registration fails."""
+        # Configure mock to raise exception on resolve, and on register_instance
+        mock_container.service_registry.resolve_service.side_effect = ValueError(
+            "Service not registered"
         )
+        mock_container.service_registry.register_instance.side_effect = RuntimeError(
+            "Registration failed"
+        )
+
+        with pytest.raises(
+            RuntimeError, match="Failed to create and register PolicyRegistry"
+        ):
+            await get_or_create_policy_registry(mock_container)
 
 
 class TestContainerBasedPolicyUsage:
     """Integration tests demonstrating container-based policy usage."""
 
-    def test_full_container_based_workflow(
+    async def test_full_container_based_workflow(
         self, container_with_policy_registry: PolicyRegistry, mock_container: MagicMock
     ) -> None:
         """Test full workflow: wire -> resolve -> register -> retrieve policy."""
 
-        # Step 1: Resolve registry from container (sync call)
-        registry = get_policy_registry_from_container(mock_container)
+        # Step 1: Resolve registry from container (async call)
+        registry = await get_policy_registry_from_container(mock_container)
         assert registry is container_with_policy_registry
 
         # Step 2: Register a policy
-        from typing import Any
-
-        from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
-
         class MockPolicy:
             """Mock policy for testing."""
 
@@ -150,11 +150,11 @@ class TestContainerBasedPolicyUsage:
             def policy_type(self) -> str:
                 return "orchestrator"
 
-            def evaluate(self, context: Any) -> bool:
-                return True
+            def evaluate(self, context: dict[str, object]) -> dict[str, object]:
+                return {"result": True}
 
-            def decide(self, context: Any) -> Any:
-                return True
+            def decide(self, context: dict[str, object]) -> dict[str, object]:
+                return {"result": True}
 
         registry.register_policy(
             policy_id="test_policy",
@@ -170,17 +170,19 @@ class TestContainerBasedPolicyUsage:
         # Step 4: Instantiate and use policy
         policy = policy_cls()
         result = policy.evaluate({"test": "context"})
-        assert result is True
+        assert result == {"result": True}
 
-    def test_multiple_container_instances_isolated(
+    async def test_multiple_container_instances_isolated(
         self, mock_container: MagicMock
     ) -> None:
         """Test that multiple containers have isolated registries."""
+        from unittest.mock import AsyncMock
+
         # Create first registry
         mock_container.service_registry.resolve_service.side_effect = ValueError(
             "Service not registered"
         )
-        registry1 = get_or_create_policy_registry(mock_container)
+        registry1 = await get_or_create_policy_registry(mock_container)
 
         # Create second mock container
         mock_container2 = MagicMock()
@@ -188,10 +190,10 @@ class TestContainerBasedPolicyUsage:
         mock_container2.service_registry.resolve_service.side_effect = ValueError(
             "Service not registered"
         )
-        mock_container2.service_registry.register_instance = MagicMock(
+        mock_container2.service_registry.register_instance = AsyncMock(
             return_value="mock-uuid-2"
         )
-        registry2 = get_or_create_policy_registry(mock_container2)
+        registry2 = await get_or_create_policy_registry(mock_container2)
 
         # Verify they are different instances
         assert registry1 is not registry2
