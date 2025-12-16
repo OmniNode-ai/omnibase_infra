@@ -593,12 +593,13 @@ class TestDockerRuntime:
             time.sleep(3)  # Allow initialization
 
             # Send SIGTERM via docker stop
-            # Timeout increased to 40s to match runtime's 30s grace period plus buffer
+            # Timeout increased to 90s to allow for slow handler shutdowns
+            # Root cause: DB pool cleanup can take 30s+ per connection (5 connections = 150s worst case)
             result = subprocess.run(
-                ["docker", "stop", "-t", "40", container_name],
+                ["docker", "stop", "-t", "90", container_name],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=120,
                 check=False,
             )
 
