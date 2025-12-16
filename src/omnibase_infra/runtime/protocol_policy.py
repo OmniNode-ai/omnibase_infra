@@ -49,6 +49,7 @@ Policy Types and Use Cases:
 Example Usage:
     ```python
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+    from omnibase_infra.enums import EnumPolicyType
 
     class ExponentialBackoffPolicy:
         '''Policy for calculating exponential backoff delays.'''
@@ -58,8 +59,8 @@ Example Usage:
             return "exponential_backoff_v1"
 
         @property
-        def policy_type(self) -> str:
-            return "orchestrator"
+        def policy_type(self) -> EnumPolicyType:
+            return EnumPolicyType.ORCHESTRATOR  # Recommended for type safety
 
         def evaluate(self, context: dict[str, object]) -> dict[str, object]:
             '''Calculate backoff delay based on retry attempt.'''
@@ -73,7 +74,7 @@ Example Usage:
                 "should_retry": attempt < 10,
             }
 
-    # Type checking works via Protocol (ProtocolPolicy is already @runtime_checkable)
+    # Type checking works via Protocol
     policy: ProtocolPolicy = ExponentialBackoffPolicy()
     result = policy.evaluate({"attempt": 3, "base_delay_seconds": 1.0})
     ```
@@ -98,7 +99,9 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, Union, runtime_checkable
+
+from omnibase_infra.enums import EnumPolicyType
 
 
 @runtime_checkable
@@ -182,12 +185,12 @@ class ProtocolPolicy(Protocol):
         ...
 
     @property
-    def policy_type(self) -> str:
+    def policy_type(self) -> Union[Literal["orchestrator", "reducer"], EnumPolicyType]:
         """Policy category indicating usage context.
 
         The policy_type determines where this policy can be used:
-            - "orchestrator": Workflow coordination and execution control
-            - "reducer": State aggregation and transformation
+            - "orchestrator" or EnumPolicyType.ORCHESTRATOR: Workflow coordination and execution control
+            - "reducer" or EnumPolicyType.REDUCER: State aggregation and transformation
 
         This categorization enables:
             - Type-safe policy lookup by category
@@ -195,15 +198,20 @@ class ProtocolPolicy(Protocol):
             - Clear documentation of policy purpose
 
         Returns:
-            Either "orchestrator" or "reducer" string literal.
+            Either a string literal ("orchestrator" or "reducer") or EnumPolicyType value.
 
         Example:
             ```python
+            from omnibase_infra.enums import EnumPolicyType
+
+            @property
+            def policy_type(self) -> EnumPolicyType:
+                return EnumPolicyType.ORCHESTRATOR  # Recommended
+
+            # Or for backward compatibility:
             @property
             def policy_type(self) -> str:
-                return "orchestrator"  # For workflow control
-                # OR
-                return "reducer"  # For state management
+                return "orchestrator"
             ```
         """
         ...

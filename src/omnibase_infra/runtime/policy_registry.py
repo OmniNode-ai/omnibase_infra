@@ -79,8 +79,9 @@ Integration Points:
 from __future__ import annotations
 
 import asyncio
+import functools
 import threading
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
@@ -144,6 +145,10 @@ class PolicyRegistry:
         # Key: ModelPolicyKey -> policy_class (strong typing replaces tuple pattern)
         self._registry: dict[ModelPolicyKey, type[ProtocolPolicy]] = {}
         self._lock: threading.Lock = threading.Lock()
+
+        # Performance optimization: Secondary indexes for O(1) lookups
+        # Maps policy_id -> list of ModelPolicyKey instances
+        self._policy_id_index: dict[str, list[ModelPolicyKey]] = {}
 
     def _validate_sync_enforcement(
         self,
@@ -260,6 +265,11 @@ class PolicyRegistry:
         )
         with self._lock:
             self._registry[key] = policy_class
+            # Update secondary index for performance optimization
+            if policy_id not in self._policy_id_index:
+                self._policy_id_index[policy_id] = []
+            if key not in self._policy_id_index[policy_id]:
+                self._policy_id_index[policy_id].append(key)
 
     def register_policy(
         self,
@@ -308,7 +318,7 @@ class PolicyRegistry:
     def get(
         self,
         policy_id: str,
-        policy_type: Optional[Union[str, EnumPolicyType]] = None,
+        policy_type: Optional[str | EnumPolicyType] = None,
         version: Optional[str] = None,
     ) -> type[ProtocolPolicy]:
         """Get policy class by ID, type, and optional version.
@@ -341,15 +351,18 @@ class PolicyRegistry:
             normalized_type = self._normalize_policy_type(policy_type)
 
         with self._lock:
-            # Find matching entries
+            # Performance optimization: Use secondary index for O(1) lookup by policy_id
+            # This avoids iterating through all registry entries
+            candidate_keys = self._policy_id_index.get(policy_id, [])
+
+            # Find matching entries from candidates
             matches: list[tuple[ModelPolicyKey, type[ProtocolPolicy]]] = []
-            for key, policy_cls in self._registry.items():
-                if key.policy_id != policy_id:
-                    continue
+            for key in candidate_keys:
                 if normalized_type is not None and key.policy_type != normalized_type:
                     continue
                 if version is not None and key.version != version:
                     continue
+                policy_cls = self._registry[key]
                 matches.append((key, policy_cls))
 
             if not matches:
@@ -377,11 +390,16 @@ class PolicyRegistry:
             return matches[0][1]
 
     @staticmethod
+    @functools.lru_cache(maxsize=128)
     def _parse_semver(version: str) -> tuple[int, int, int, str]:
         """Parse semantic version string into comparable tuple.
 
         Handles versions like "1.0.0", "2.1.3", "1.0.0-alpha".
         Pre-release versions sort before release versions.
+
+        This method is cached using LRU cache to avoid re-parsing the same
+        version strings repeatedly, improving performance for lookups that
+        compare multiple versions.
 
         Args:
             version: Semantic version string (e.g., "1.2.3" or "1.0.0-beta")
@@ -428,7 +446,7 @@ class PolicyRegistry:
 
     def list_keys(
         self,
-        policy_type: Optional[Union[str, EnumPolicyType]] = None,
+        policy_type: Optional[str | EnumPolicyType] = None,
     ) -> list[tuple[str, str, str]]:
         """List registered policy keys as (id, type, version) tuples.
 
@@ -498,15 +516,15 @@ class PolicyRegistry:
             ['1.0.0', '2.0.0']
         """
         with self._lock:
-            versions = {
-                key.version for key in self._registry if key.policy_id == policy_id
-            }
+            # Performance optimization: Use secondary index
+            candidate_keys = self._policy_id_index.get(policy_id, [])
+            versions = {key.version for key in candidate_keys}
             return sorted(versions)
 
     def is_registered(
         self,
         policy_id: str,
-        policy_type: Optional[Union[str, EnumPolicyType]] = None,
+        policy_type: Optional[str | EnumPolicyType] = None,
         version: Optional[str] = None,
     ) -> bool:
         """Check if a policy is registered.
@@ -536,9 +554,9 @@ class PolicyRegistry:
                 return False
 
         with self._lock:
-            for key in self._registry:
-                if key.policy_id != policy_id:
-                    continue
+            # Performance optimization: Use secondary index
+            candidate_keys = self._policy_id_index.get(policy_id, [])
+            for key in candidate_keys:
                 if normalized_type is not None and key.policy_type != normalized_type:
                     continue
                 if version is not None and key.version != version:
@@ -549,7 +567,7 @@ class PolicyRegistry:
     def unregister(
         self,
         policy_id: str,
-        policy_type: Optional[Union[str, EnumPolicyType]] = None,
+        policy_type: Optional[str | EnumPolicyType] = None,
         version: Optional[str] = None,
     ) -> int:
         """Unregister policy plugins.
@@ -583,10 +601,11 @@ class PolicyRegistry:
                 return 0
 
         with self._lock:
+            # Performance optimization: Use secondary index
+            candidate_keys = self._policy_id_index.get(policy_id, [])
             keys_to_remove: list[ModelPolicyKey] = []
-            for key in self._registry:
-                if key.policy_id != policy_id:
-                    continue
+
+            for key in candidate_keys:
                 if normalized_type is not None and key.policy_type != normalized_type:
                     continue
                 if version is not None and key.version != version:
@@ -595,6 +614,15 @@ class PolicyRegistry:
 
             for key in keys_to_remove:
                 del self._registry[key]
+                # Update secondary index
+                self._policy_id_index[policy_id].remove(key)
+
+            # Clean up empty index entries
+            if (
+                policy_id in self._policy_id_index
+                and not self._policy_id_index[policy_id]
+            ):
+                del self._policy_id_index[policy_id]
 
             return len(keys_to_remove)
 
@@ -613,6 +641,7 @@ class PolicyRegistry:
         """
         with self._lock:
             self._registry.clear()
+            self._policy_id_index.clear()
 
     def __len__(self) -> int:
         """Return the number of registered policies.
@@ -692,7 +721,7 @@ def get_policy_registry() -> PolicyRegistry:
 
 def get_policy_class(
     policy_id: str,
-    policy_type: Optional[Union[str, EnumPolicyType]] = None,
+    policy_type: Optional[str | EnumPolicyType] = None,
     version: Optional[str] = None,
 ) -> type[ProtocolPolicy]:
     """Get policy class from the singleton registry.

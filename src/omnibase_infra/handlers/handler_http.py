@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional, Union
+from typing import Optional
 from uuid import UUID, uuid4
 
 import httpx
@@ -544,7 +544,7 @@ class HttpRestAdapter:
         )
 
         # Prepare request content for POST
-        request_content: Optional[Union[bytes, str]] = None
+        request_content: Optional[bytes | str] = None
         request_json: Optional[dict[str, object]] = None
         request_headers = dict(headers)  # Copy to avoid mutating caller's headers
 

@@ -8,7 +8,7 @@ used to register policy plugins with the PolicyRegistry.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -64,7 +64,7 @@ class ModelPolicyRegistration(BaseModel):
         ...,
         description="Policy implementation class that implements ProtocolPolicy",
     )
-    policy_type: Union[str, EnumPolicyType] = Field(
+    policy_type: str | EnumPolicyType = Field(
         ...,
         description="Policy type - either 'orchestrator' or 'reducer'",
     )
