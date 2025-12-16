@@ -189,6 +189,16 @@ def validate_infra_patterns(
             "method_pattern": r"Function '__init__'",
             "violation_pattern": r"has \d+ parameters",
         },
+        # Protocol method 'execute' exemption (standard plugin architecture pattern)
+        {
+            "file_pattern": r"protocol_compute_plugin\.py",
+            "violation_pattern": r"Function name 'execute' is too generic",
+        },
+        # Base class method 'execute' exemption (implements protocol pattern)
+        {
+            "file_pattern": r"compute_plugin_base\.py",
+            "violation_pattern": r"Function name 'execute' is too generic",
+        },
     ]
 
     # Filter errors using regex-based pattern matching
