@@ -15,6 +15,8 @@ Exports:
     InfraTimeoutError: Infrastructure timeout errors
     InfraAuthenticationError: Infrastructure authentication errors
     InfraUnavailableError: Infrastructure resource unavailable errors
+    EnvelopeValidationError: Envelope validation errors (pre-dispatch)
+    UnknownHandlerTypeError: Unknown handler type prefix errors
     PolicyRegistryError: Policy registry operation errors
 
 Correlation ID Assignment:

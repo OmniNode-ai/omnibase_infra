@@ -50,7 +50,10 @@ from omnibase_infra.errors import (
     UnknownHandlerTypeError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.runtime.envelope_validator import validate_envelope
+from omnibase_infra.runtime.envelope_validator import (
+    normalize_correlation_id,
+    validate_envelope,
+)
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.wiring import wire_default_handlers
@@ -614,17 +617,9 @@ class RuntimeHostProcess:
         """
         # Pre-validation: Get correlation_id for error responses if validation fails
         # This handles the case where validation itself throws before normalizing
-        raw_correlation_id = envelope.get("correlation_id")
-        pre_validation_correlation_id: Optional[UUID] = None
-        if isinstance(raw_correlation_id, UUID):
-            pre_validation_correlation_id = raw_correlation_id
-        elif raw_correlation_id is not None:
-            try:
-                pre_validation_correlation_id = UUID(str(raw_correlation_id))
-            except (ValueError, TypeError):
-                pre_validation_correlation_id = uuid4()
-        else:
-            pre_validation_correlation_id = uuid4()
+        pre_validation_correlation_id = normalize_correlation_id(
+            envelope.get("correlation_id")
+        )
 
         # Step 1: Validate envelope BEFORE dispatch
         # This validates operation, prefix, payload requirements, and normalizes correlation_id
