@@ -677,7 +677,10 @@ class RuntimeHostProcess:
         # Execute handler
         try:
             # Handler expected to have async execute(envelope) method
-            response = await handler.execute(envelope)
+            # Note: Handlers use legacy signature execute(envelope) instead of
+            # new protocol signature execute(request, operation_config)
+            # TODO: Migrate handlers to new protocol signature
+            response = await handler.execute(envelope)  # type: ignore[call-arg]
 
             # Ensure response has correlation_id
             # Make a copy to avoid mutating handler's internal state

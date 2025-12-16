@@ -34,11 +34,11 @@ def mock_registry() -> ProtocolBindingRegistry:
             return {"success": True}
 
     # Register common handler types
-    registry.register("http", MockHandler)
-    registry.register("db", MockHandler)
-    registry.register("kafka", MockHandler)
-    registry.register("consul", MockHandler)
-    registry.register("vault", MockHandler)
+    registry.register("http", MockHandler)  # type: ignore[arg-type]
+    registry.register("db", MockHandler)  # type: ignore[arg-type]
+    registry.register("kafka", MockHandler)  # type: ignore[arg-type]
+    registry.register("consul", MockHandler)  # type: ignore[arg-type]
+    registry.register("vault", MockHandler)  # type: ignore[arg-type]
 
     return registry
 

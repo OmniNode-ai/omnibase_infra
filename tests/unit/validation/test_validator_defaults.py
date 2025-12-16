@@ -9,7 +9,9 @@ Validates that:
 """
 
 import inspect
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -492,7 +494,7 @@ class TestDefaultsConsistency:
     def test_directory_defaults_consistency(self) -> None:
         """Verify directory defaults are consistent across entry points."""
         # All validators using INFRA_SRC_PATH should default to same value
-        validators = [
+        validators: list[Callable[..., Any]] = [
             validate_infra_architecture,
             validate_infra_patterns,
             validate_infra_union_usage,

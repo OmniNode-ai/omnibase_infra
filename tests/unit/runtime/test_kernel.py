@@ -418,12 +418,15 @@ class TestBootstrap:
         mock_instance.stop = AsyncMock(side_effect=never_complete)
 
         # Create config with very short grace period for testing
-        from omnibase_infra.runtime.models import ModelRuntimeConfig
+        from omnibase_infra.runtime.models import (
+            ModelRuntimeConfig,
+            ModelShutdownConfig,
+        )
 
         test_config = ModelRuntimeConfig(
-            shutdown={
-                "grace_period_seconds": 0
-            },  # 0 second timeout for instant timeout
+            shutdown=ModelShutdownConfig(
+                grace_period_seconds=0
+            ),  # 0 second timeout for instant timeout
         )
 
         with patch(
@@ -463,10 +466,13 @@ class TestBootstrap:
         mock_instance.stop = AsyncMock()
 
         # Create config with custom grace period
-        from omnibase_infra.runtime.models import ModelRuntimeConfig
+        from omnibase_infra.runtime.models import (
+            ModelRuntimeConfig,
+            ModelShutdownConfig,
+        )
 
         test_config = ModelRuntimeConfig(
-            shutdown={"grace_period_seconds": 45},  # Custom timeout
+            shutdown=ModelShutdownConfig(grace_period_seconds=45),  # Custom timeout
         )
 
         with patch(

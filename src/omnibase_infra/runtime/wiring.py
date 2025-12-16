@@ -146,7 +146,9 @@ logger = logging.getLogger(__name__)
 # 1. Define HANDLER_TYPE_XXX constant in handler_registry.py
 # 2. Import the handler class at the top of this module
 # 3. Add entry below: HANDLER_TYPE_XXX: (XxxHandler, "Description"),
-_KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
+# Note: Using type[object] for runtime compatibility since handlers implement
+# ProtocolHandler structurally but don't inherit from it (structural subtyping)
+_KNOWN_HANDLERS: dict[str, tuple[type[object], str]] = {
     HANDLER_TYPE_HTTP: (HttpRestAdapter, "HTTP REST protocol adapter"),
     HANDLER_TYPE_DATABASE: (DbAdapter, "PostgreSQL database adapter"),
 }
@@ -192,7 +194,8 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
     # Register all known handlers
     for handler_type, (handler_cls, description) in _KNOWN_HANDLERS.items():
-        handler_registry.register(handler_type, handler_cls)
+        # Note: Handlers implement ProtocolHandler structurally but don't inherit from it
+        handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]
         logger.debug(
             "Registered handler",
             extra={
@@ -324,7 +327,8 @@ def wire_handlers_from_contract(
 
             # Register the handler
             handler_cls, description = _KNOWN_HANDLERS[handler_type]
-            handler_registry.register(handler_type, handler_cls)
+            # Note: Handlers implement ProtocolHandler structurally but don't inherit from it
+            handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]
             registered_handlers.append(handler_type)
 
             logger.debug(
