@@ -68,7 +68,7 @@ Integration Points:
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig

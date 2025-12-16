@@ -226,7 +226,9 @@ class TestVaultAdapterConcurrency:
             assert all(result["status"] == "success" for result in results)
 
             # Verify create_or_update_secret was called 30 times (once per request)
-            assert mock_hvac_client.secrets.kv.v2.create_or_update_secret.call_count == 30
+            assert (
+                mock_hvac_client.secrets.kv.v2.create_or_update_secret.call_count == 30
+            )
 
     @pytest.mark.asyncio
     async def test_concurrent_health_checks(
@@ -290,7 +292,7 @@ class TestVaultAdapterConcurrency:
             tasks = [asyncio.create_task(execute_request(i)) for i in range(10)]
 
             # Trigger shutdown mid-execution - use asyncio.wait with timeout for proper synchronization
-            done, pending = await asyncio.wait(tasks, timeout=0.01)
+            _done, pending = await asyncio.wait(tasks, timeout=0.01)
 
             # Shutdown handler while some tasks may still be running
             await handler.shutdown()
@@ -300,7 +302,10 @@ class TestVaultAdapterConcurrency:
                 await asyncio.wait(pending)
 
             # Gather all results
-            results = [task.result() if not task.exception() else task.exception() for task in tasks]
+            results = [
+                task.result() if not task.exception() else task.exception()
+                for task in tasks
+            ]
 
             # Verify handler is shut down
             assert handler._initialized is False

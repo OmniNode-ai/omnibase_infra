@@ -1795,7 +1795,10 @@ class TestVaultAdapterErrorCodeValidation:
         error_mappings = [
             (ProtocolConfigurationError, EnumCoreErrorCode.INVALID_CONFIGURATION),
             (SecretResolutionError, EnumCoreErrorCode.RESOURCE_NOT_FOUND),
-            (InfraConnectionError, EnumCoreErrorCode.SERVICE_UNAVAILABLE),  # Vault transport
+            (
+                InfraConnectionError,
+                EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+            ),  # Vault transport
             (InfraTimeoutError, EnumCoreErrorCode.TIMEOUT_ERROR),
             (InfraAuthenticationError, EnumCoreErrorCode.AUTHENTICATION_ERROR),
             (InfraUnavailableError, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
@@ -1813,10 +1816,12 @@ class TestVaultAdapterErrorCodeValidation:
             elif error_class == InfraConnectionError:
                 # Test via VaultError during connection
                 handler = VaultAdapter()
-                with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+                with patch(
+                    "omnibase_infra.handlers.handler_vault.hvac.Client"
+                ) as MockClient:
                     MockClient.return_value = mock_hvac_client
-                    mock_hvac_client.is_authenticated.side_effect = hvac.exceptions.VaultError(
-                        "Connection error"
+                    mock_hvac_client.is_authenticated.side_effect = (
+                        hvac.exceptions.VaultError("Connection error")
                     )
                     try:
                         await handler.initialize(vault_config)

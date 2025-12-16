@@ -144,11 +144,11 @@ class VaultAdapter:
         """Return thread pool max workers (public API for tests)."""
         return self._max_workers
 
-
     @property
     def max_queue_size(self) -> int:
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
+
     async def initialize(self, config: dict[str, object]) -> None:
         """Initialize Vault client with configuration.
 
@@ -1218,6 +1218,7 @@ class VaultAdapter:
         correlation_id = uuid4()
 
         if self._initialized and self._client is not None:
+
             def health_check_func() -> dict[str, object]:
                 if self._client is None:
                     raise RuntimeError("Client not initialized")
@@ -1233,9 +1234,7 @@ class VaultAdapter:
             )
             # Type checking for healthy status extraction
             initialized_val = health_result.get("initialized", False)
-            healthy = (
-                initialized_val if isinstance(initialized_val, bool) else False
-            )
+            healthy = initialized_val if isinstance(initialized_val, bool) else False
 
         return {
             "healthy": healthy,

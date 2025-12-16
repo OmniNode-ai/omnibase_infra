@@ -47,7 +47,7 @@ import sys
 import time
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import cast
+from typing import Optional, cast
 
 import yaml
 from pydantic import ValidationError

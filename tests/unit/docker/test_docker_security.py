@@ -77,9 +77,9 @@ class TestEnvExampleSecurity:
             keyword for keyword in security_keywords if keyword in content
         ]
 
-        assert (
-            len(found_keywords) >= 2
-        ), f"Missing security warnings (found: {found_keywords})"
+        assert len(found_keywords) >= 2, (
+            f"Missing security warnings (found: {found_keywords})"
+        )
 
     def test_placeholder_patterns_for_secrets(self) -> None:
         """Verify placeholder patterns are used for GitHub tokens and sensitive values.
@@ -103,9 +103,9 @@ class TestEnvExampleSecurity:
             for line in github_token_lines
         )
 
-        assert (
-            has_safe_pattern
-        ), "GITHUB_TOKEN should be commented or use placeholder pattern"
+        assert has_safe_pattern, (
+            "GITHUB_TOKEN should be commented or use placeholder pattern"
+        )
 
     def test_passwords_require_explicit_values(self) -> None:
         """Verify password variables are clearly marked as requiring explicit values.
@@ -150,7 +150,9 @@ class TestEnvExampleSecurity:
                 or "CRITICAL" in section_text
             )
 
-            assert has_warning, f"{var} should have security warning in comments (checked {len(section_lines)} lines)"
+            assert has_warning, (
+                f"{var} should have security warning in comments (checked {len(section_lines)} lines)"
+            )
 
 
 class TestDockerfileSecurity:
@@ -186,9 +188,9 @@ class TestDockerfileSecurity:
             re.search(pattern, content) for pattern in user_creation_patterns
         )
 
-        assert (
-            found_user_creation
-        ), "Dockerfile must create a non-root user with useradd/adduser"
+        assert found_user_creation, (
+            "Dockerfile must create a non-root user with useradd/adduser"
+        )
 
     def test_switches_to_non_root_user(self) -> None:
         """Verify Dockerfile switches to non-root user before running application.
@@ -203,9 +205,9 @@ class TestDockerfileSecurity:
         user_directive_pattern = r"^USER\s+(?!root\b)\w+"
         found_user_directive = re.search(user_directive_pattern, content, re.MULTILINE)
 
-        assert (
-            found_user_directive
-        ), "Dockerfile must switch to non-root user with USER directive"
+        assert found_user_directive, (
+            "Dockerfile must switch to non-root user with USER directive"
+        )
 
     def test_does_not_run_as_root(self) -> None:
         """Verify Dockerfile does not explicitly run as root user.
@@ -335,14 +337,14 @@ class TestDockerComposeSecurity:
         assert "POSTGRES_PASSWORD" in content, "Missing POSTGRES_PASSWORD configuration"
 
         # Should use ${POSTGRES_PASSWORD} pattern (explicit, no default)
-        assert (
-            "${POSTGRES_PASSWORD}" in content
-        ), "POSTGRES_PASSWORD should use ${VAR} syntax"
+        assert "${POSTGRES_PASSWORD}" in content, (
+            "POSTGRES_PASSWORD should use ${VAR} syntax"
+        )
 
         # Should NOT have default value pattern (${VAR:-default})
-        assert (
-            "POSTGRES_PASSWORD:-" not in content
-        ), "POSTGRES_PASSWORD should NOT have default value (security risk)"
+        assert "POSTGRES_PASSWORD:-" not in content, (
+            "POSTGRES_PASSWORD should NOT have default value (security risk)"
+        )
 
     def test_vault_token_requires_explicit_value(self) -> None:
         """Verify VAULT_TOKEN requires explicit value without default.
@@ -360,9 +362,9 @@ class TestDockerComposeSecurity:
         assert "${VAULT_TOKEN}" in content, "VAULT_TOKEN should use ${VAR} syntax"
 
         # Should NOT have default value pattern
-        assert (
-            "VAULT_TOKEN:-" not in content
-        ), "VAULT_TOKEN should NOT have default value (security risk)"
+        assert "VAULT_TOKEN:-" not in content, (
+            "VAULT_TOKEN should NOT have default value (security risk)"
+        )
 
     def test_valkey_password_requires_explicit_value(self) -> None:
         """Verify Valkey password (REDIS_PASSWORD env var) requires explicit value without default.
@@ -381,9 +383,9 @@ class TestDockerComposeSecurity:
         assert "${REDIS_PASSWORD}" in content, "REDIS_PASSWORD should use ${VAR} syntax"
 
         # Should NOT have default value pattern
-        assert (
-            "REDIS_PASSWORD:-" not in content
-        ), "REDIS_PASSWORD should NOT have default value (security risk)"
+        assert "REDIS_PASSWORD:-" not in content, (
+            "REDIS_PASSWORD should NOT have default value (security risk)"
+        )
 
     def test_no_hardcoded_credentials(self) -> None:
         """Verify docker-compose does not contain hardcoded credentials.
@@ -435,9 +437,9 @@ class TestDockerComposeSecurity:
             1 for keyword in security_keywords if keyword in content
         )
 
-        assert (
-            found_security_comments >= 2
-        ), "Missing security documentation in comments"
+        assert found_security_comments >= 2, (
+            "Missing security documentation in comments"
+        )
 
     def test_port_exposure_is_controlled(self) -> None:
         """Verify exposed ports are intentional and documented.
@@ -459,9 +461,9 @@ class TestDockerComposeSecurity:
             has_env_var = re.search(env_var_pattern, content)
 
             # Port should either be configurable or be a standard runtime port
-            assert (
-                has_env_var or port == "8085"
-            ), f"Port {port} should be configurable via environment variable"
+            assert has_env_var or port == "8085", (
+                f"Port {port} should be configurable via environment variable"
+            )
 
     def test_resource_limits_defined(self) -> None:
         """Verify resource limits are defined for security and stability.
@@ -494,9 +496,9 @@ class TestDockerComposeSecurity:
         safe_policies = ["unless-stopped", "on-failure", "no"]
 
         for policy in restart_policies:
-            assert (
-                policy in safe_policies
-            ), f"Unsafe restart policy: {policy} (use unless-stopped or on-failure)"
+            assert policy in safe_policies, (
+                f"Unsafe restart policy: {policy} (use unless-stopped or on-failure)"
+            )
 
 
 class TestDockerSecretsManagement:
@@ -518,9 +520,9 @@ class TestDockerSecretsManagement:
         content = dockerfile.read_text()
 
         # Should use secret mount syntax
-        assert (
-            "mount=type=secret" in content
-        ), "Dockerfile should use BuildKit secret mounts"
+        assert "mount=type=secret" in content, (
+            "Dockerfile should use BuildKit secret mounts"
+        )
 
         # Should reference github_token secret
         assert "github_token" in content, "Missing github_token secret reference"
@@ -537,9 +539,9 @@ class TestDockerSecretsManagement:
         assert "secrets:" in content, "Missing secrets section in docker-compose"
 
         # Should map GITHUB_TOKEN from environment
-        assert (
-            'environment: "GITHUB_TOKEN"' in content
-        ), "Missing GITHUB_TOKEN environment mapping"
+        assert 'environment: "GITHUB_TOKEN"' in content, (
+            "Missing GITHUB_TOKEN environment mapping"
+        )
 
     def test_no_secrets_in_build_args(self) -> None:
         """Verify secrets are not passed via build args.
@@ -555,9 +557,9 @@ class TestDockerSecretsManagement:
         build_args_sections = re.findall(build_args_pattern, content)
 
         for section in build_args_sections:
-            assert (
-                "GITHUB_TOKEN" not in section
-            ), "GITHUB_TOKEN should use secret mount, not build arg"
+            assert "GITHUB_TOKEN" not in section, (
+                "GITHUB_TOKEN should use secret mount, not build arg"
+            )
 
 
 class TestDockerNetworkSecurity:
@@ -607,9 +609,9 @@ class TestDockerNetworkSecurity:
 
         # Should have network references in services
         # Look for services section and verify network usage
-        assert (
-            "omnibase-infra-network" in content
-        ), "Services should reference custom network"
+        assert "omnibase-infra-network" in content, (
+            "Services should reference custom network"
+        )
 
 
 # ============================================================================

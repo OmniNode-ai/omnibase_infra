@@ -640,9 +640,9 @@ class TestProtocolLifecycleExecutorShutdownByPriority:
         # If run in parallel, total time should be close to single handler time (~0.05s)
         # If sequential, it would be ~0.1s
         # Allow some margin for test overhead
-        assert (
-            total_time < 0.15
-        ), f"Parallel shutdown took too long: {total_time}s (expected < 0.15s)"
+        assert total_time < 0.15, (
+            f"Parallel shutdown took too long: {total_time}s (expected < 0.15s)"
+        )
 
         # Verify both were called
         assert handler_a.shutdown_called is True
