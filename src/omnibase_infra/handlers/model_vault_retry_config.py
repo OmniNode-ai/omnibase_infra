@@ -34,6 +34,7 @@ class ModelVaultRetryConfig(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     max_attempts: int = Field(

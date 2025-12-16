@@ -28,6 +28,7 @@ class ModelInfraErrorContext(BaseModel):
         operation: Operation being performed (connect, query, authenticate, etc.)
         target_name: Target resource or endpoint name
         correlation_id: Request correlation ID for distributed tracing
+        namespace: Vault namespace (Enterprise feature) or other service-specific namespace
 
     Example:
         >>> context = ModelInfraErrorContext(
@@ -35,6 +36,7 @@ class ModelInfraErrorContext(BaseModel):
         ...     operation="process_request",
         ...     target_name="api-gateway",
         ...     correlation_id=uuid4(),
+        ...     namespace="engineering",
         ... )
         >>> raise RuntimeHostError("Operation failed", context=context)
     """
@@ -59,6 +61,10 @@ class ModelInfraErrorContext(BaseModel):
     correlation_id: Optional[UUID] = Field(
         default=None,
         description="Request correlation ID for distributed tracing",
+    )
+    namespace: Optional[str] = Field(
+        default=None,
+        description="Vault namespace (Enterprise feature) or other service-specific namespace",
     )
 
     @classmethod

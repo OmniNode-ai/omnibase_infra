@@ -36,6 +36,7 @@ class ModelVaultAdapterConfig(BaseModel):
         timeout_seconds: Operation timeout in seconds (1.0-300.0, default 30.0)
         verify_ssl: Whether to verify SSL certificates (default True)
         token_renewal_threshold_seconds: Token renewal threshold in seconds (default 300.0)
+        default_token_ttl: Default token TTL in seconds when not provided by Vault (default 3600)
         retry: Retry configuration with exponential backoff
 
     Example:
@@ -62,11 +63,11 @@ class ModelVaultAdapterConfig(BaseModel):
     url: str = Field(
         description="Vault server URL (e.g., 'https://vault.example.com:8200')",
     )
-    token: Optional[SecretStr] = Field(
+    token: SecretStr | None = Field(
         default=None,
         description="Vault authentication token (use SecretStr for security)",
     )
-    namespace: Optional[str] = Field(
+    namespace: str | None = Field(
         default=None,
         description="Vault namespace for Vault Enterprise",
     )
@@ -85,6 +86,12 @@ class ModelVaultAdapterConfig(BaseModel):
         ge=0.0,
         description="Token renewal threshold in seconds (renew when TTL below this)",
     )
+    default_token_ttl: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+        description="Default token TTL in seconds when not provided by Vault (minimum 300s)",
+    )
     retry: ModelVaultRetryConfig = Field(
         default_factory=ModelVaultRetryConfig,
         description="Retry configuration with exponential backoff",
@@ -94,6 +101,12 @@ class ModelVaultAdapterConfig(BaseModel):
         ge=1,
         le=100,
         description="Maximum concurrent Vault operations (thread pool size)",
+    )
+    max_queue_size_multiplier: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Queue size multiplier (queue_size = max_workers * multiplier)",
     )
     circuit_breaker_enabled: bool = Field(
         default=True,

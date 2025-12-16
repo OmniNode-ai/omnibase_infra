@@ -125,6 +125,8 @@ class VaultAdapter:
         self._token_expires_at: float = 0.0
         self._executor: Optional[ThreadPoolExecutor] = None
         self._max_workers: int = 0
+        self._max_queue_size: int = 0
+        self._queue_semaphore: Optional[threading.Semaphore] = None
         # Circuit breaker state (thread-safe with RLock for reentrant access)
         self._circuit_lock: threading.RLock = threading.RLock()
         self._circuit_state: CircuitState = CircuitState.CLOSED
@@ -141,6 +143,11 @@ class VaultAdapter:
         """Return thread pool max workers (public API for tests)."""
         return self._max_workers
 
+
+    @property
+    def max_queue_size(self) -> int:
+        """Return maximum queue size (public API for tests)."""
+        return self._max_queue_size
     async def initialize(self, config: dict[str, object]) -> None:
         """Initialize Vault client with configuration.
 
@@ -239,38 +246,46 @@ class VaultAdapter:
             try:
                 token_info = self._client.auth.token.lookup_self()
                 token_data = token_info.get("data", {})
+                token_ttl = None
+
                 if isinstance(token_data, dict):
                     # TTL is in seconds, use it if available
-                    ttl_seconds = token_data.get("ttl", 3600)
+                    ttl_seconds = token_data.get("ttl")
                     if isinstance(ttl_seconds, int) and ttl_seconds > 0:
-                        self._token_expires_at = time.time() + ttl_seconds
-                    else:
-                        # Fallback to default if TTL is 0 or invalid
-                        self._token_expires_at = time.time() + 3600.0
-                else:
-                    # Fallback to default if data is not a dict
-                    self._token_expires_at = time.time() + 3600.0
+                        token_ttl = ttl_seconds
+
+                if token_ttl is None:
+                    # Fallback to config or safe default
+                    token_ttl = self._config.default_token_ttl
+                    logger.warning(
+                        "Token TTL not in Vault response, using fallback",
+                        extra={
+                            "ttl": token_ttl,
+                            "correlation_id": str(init_correlation_id),
+                        },
+                    )
+
+                self._token_expires_at = time.time() + token_ttl
 
                 logger.info(
-                    "Token TTL initialized from Vault",
+                    "Token TTL initialized",
                     extra={
-                        "ttl_seconds": ttl_seconds
-                        if isinstance(ttl_seconds, int)
-                        else 3600,
+                        "ttl_seconds": token_ttl,
                         "correlation_id": str(init_correlation_id),
                     },
                 )
             except Exception as e:
-                # Fallback to default TTL if lookup fails
+                # Fallback to config default TTL if lookup fails
+                token_ttl = self._config.default_token_ttl
                 logger.warning(
-                    "Failed to query token TTL, using default",
+                    "Failed to query token TTL, using fallback",
                     extra={
                         "error_type": type(e).__name__,
-                        "default_ttl_seconds": 3600,
+                        "default_ttl_seconds": token_ttl,
                         "correlation_id": str(init_correlation_id),
                     },
                 )
-                self._token_expires_at = time.time() + 3600.0
+                self._token_expires_at = time.time() + token_ttl
 
             # Create bounded thread pool executor for production safety
             self._max_workers = self._config.max_concurrent_operations
@@ -278,6 +293,11 @@ class VaultAdapter:
                 max_workers=self._max_workers,
                 thread_name_prefix="vault_handler_",
             )
+            # Use semaphore to limit pending operations in queue
+            self._max_queue_size = (
+                self._max_workers * self._config.max_queue_size_multiplier
+            )
+            self._queue_semaphore = threading.Semaphore(self._max_queue_size)
 
             self._initialized = True
             logger.info(
@@ -341,8 +361,6 @@ class VaultAdapter:
             # Shutdown thread pool gracefully (wait for pending tasks)
             self._executor.shutdown(wait=True)
             self._executor = None
-            logger.debug("Thread pool executor shutdown complete")
-
         if self._client is not None:
             # hvac.Client doesn't have async close, just clear reference
             self._client = None
@@ -1063,20 +1081,30 @@ class VaultAdapter:
 
             # Update token expiration tracking
             auth_data = result.get("auth", {})
-            if isinstance(auth_data, dict):
-                lease_duration = auth_data.get("lease_duration", 3600)
-            else:
-                lease_duration = 3600
+            token_ttl = None
 
-            if isinstance(lease_duration, int):
-                self._token_expires_at = time.time() + lease_duration
-            else:
-                self._token_expires_at = time.time() + 3600
+            if isinstance(auth_data, dict):
+                lease_duration = auth_data.get("lease_duration")
+                if isinstance(lease_duration, int) and lease_duration > 0:
+                    token_ttl = lease_duration
+
+            if token_ttl is None:
+                # Fallback to config or safe default
+                token_ttl = self._config.default_token_ttl
+                logger.warning(
+                    "Token TTL not in renewal response, using fallback",
+                    extra={
+                        "ttl": token_ttl,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+            self._token_expires_at = time.time() + token_ttl
 
             logger.info(
                 "Token renewed successfully",
                 extra={
-                    "new_ttl_seconds": lease_duration,
+                    "new_ttl_seconds": token_ttl,
                     "correlation_id": str(correlation_id),
                 },
             )

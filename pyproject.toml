@@ -133,7 +133,6 @@ ignore = [
     "TRY004",    # Exception type preference (technical debt)
     "TRY300",    # Consider else block (technical debt)
     "DTZ005",    # datetime.now() without tz (technical debt)
-    "UP038",     # isinstance with tuple (will be removed in ruff 0.14.x)
     "B008",      # Function call in defaults (technical debt)
     "ARG003",    # Unused class method argument (technical debt)
     "ERA001",    # Commented out code (technical debt)
