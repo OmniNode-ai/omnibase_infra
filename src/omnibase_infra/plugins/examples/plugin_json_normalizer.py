@@ -60,7 +60,9 @@ class PluginJsonNormalizer(PluginComputeBase):
 
         Args:
             input_data: Dictionary containing "json" key with data to normalize
-            context: Execution context (correlation_id, timestamps, etc.)
+            context: Execution context containing:
+                - correlation_id: For error tracing
+                - max_recursion_depth: Optional override for MAX_RECURSION_DEPTH
 
         Returns:
             Dictionary with "normalized" key containing sorted JSON
@@ -70,9 +72,18 @@ class PluginJsonNormalizer(PluginComputeBase):
         """
         correlation_id = context.get("correlation_id")
 
+        # Allow context to override max recursion depth for specific use cases
+        max_depth_override = context.get("max_recursion_depth")
+        if max_depth_override is not None and isinstance(max_depth_override, int):
+            effective_max_depth = max_depth_override
+        else:
+            effective_max_depth = self.MAX_RECURSION_DEPTH
+
         try:
             json_data = cast(JsonValue, input_data.get("json", {}))
-            normalized: JsonValue = self._sort_keys_recursively(json_data)
+            normalized: JsonValue = self._sort_keys_recursively(
+                json_data, _max_depth=effective_max_depth
+            )
             output: JsonNormalizerOutput = {"normalized": normalized}
             return output
 
@@ -82,7 +93,7 @@ class PluginJsonNormalizer(PluginComputeBase):
                 error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
                 plugin_name=self.__class__.__name__,
-                max_recursion_depth=self.MAX_RECURSION_DEPTH,
+                max_recursion_depth=effective_max_depth,
             ) from e
 
         except Exception as e:
@@ -96,7 +107,9 @@ class PluginJsonNormalizer(PluginComputeBase):
                 else [],
             ) from e
 
-    def _sort_keys_recursively(self, obj: JsonValue, _depth: int = 0) -> JsonValue:
+    def _sort_keys_recursively(
+        self, obj: JsonValue, _depth: int = 0, _max_depth: int | None = None
+    ) -> JsonValue:
         """Recursively sort dictionary keys with optimized performance and depth protection.
 
         Performance Characteristics:
@@ -116,31 +129,38 @@ class PluginJsonNormalizer(PluginComputeBase):
 
         Depth Protection:
             To prevent stack overflow on deeply nested structures, recursion depth
-            is limited to MAX_RECURSION_DEPTH (default: 100 levels). This protects
-            against maliciously crafted or malformed JSON that could exhaust the
-            Python call stack.
+            is limited to _max_depth (default: MAX_RECURSION_DEPTH = 100 levels).
+            This protects against maliciously crafted or malformed JSON that could
+            exhaust the Python call stack.
 
         Args:
             obj: JSON-compatible object (dict, list, or primitive)
             _depth: Internal depth counter for recursion protection. Do not set
                 manually; this is tracked automatically during recursion.
+            _max_depth: Maximum allowed recursion depth. If None, uses
+                MAX_RECURSION_DEPTH class attribute. Can be overridden via
+                context["max_recursion_depth"] in execute().
 
         Returns:
             Object with recursively sorted keys (if dict), or original value
 
         Raises:
-            RecursionError: If nesting depth exceeds MAX_RECURSION_DEPTH levels.
+            RecursionError: If nesting depth exceeds maximum allowed depth.
 
         Note:
             - Dicts: Sorted by key name (alphabetically)
             - Lists: Items processed recursively, order preserved
             - Primitives: Returned unchanged (early exit for performance)
         """
+        effective_max = (
+            _max_depth if _max_depth is not None else self.MAX_RECURSION_DEPTH
+        )
+
         # Depth protection to prevent stack overflow on deeply nested structures
-        if _depth > self.MAX_RECURSION_DEPTH:
+        if _depth > effective_max:
             raise RecursionError(
                 f"JSON structure exceeds maximum nesting depth of "
-                f"{self.MAX_RECURSION_DEPTH} levels"
+                f"{effective_max} levels"
             )
 
         # Early exit for primitives (most common case in large structures)
@@ -150,24 +170,50 @@ class PluginJsonNormalizer(PluginComputeBase):
 
         if isinstance(obj, dict):
             return {
-                k: self._sort_keys_recursively(v, _depth + 1)
+                k: self._sort_keys_recursively(v, _depth + 1, _max_depth=effective_max)
                 for k, v in sorted(obj.items())
             }
 
         # Must be a list at this point
-        return [self._sort_keys_recursively(item, _depth + 1) for item in obj]
+        return [
+            self._sort_keys_recursively(item, _depth + 1, _max_depth=effective_max)
+            for item in obj
+        ]
 
     def validate_input(self, input_data: PluginInputData) -> None:
         """Validate input with runtime type checking and type guards.
 
+        This method validates input structure before execution. By protocol design,
+        context is NOT available during validation - only the raw input_data.
+
+        Error Handling Contract:
+            This method raises TypeError/ValueError for validation failures.
+            These are intentionally NOT wrapped in OnexError here because:
+            1. Context (with correlation_id) is not available in validate_input
+            2. The caller (registry/executor) wraps these in OnexError with context
+            3. This follows the ONEX plugin validation hook pattern
+
+            For example, the plugin executor wraps validation errors:
+            ```
+            try:
+                plugin.validate_input(input_data)
+            except (TypeError, ValueError) as e:
+                raise OnexError(
+                    message=str(e),
+                    error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+                    correlation_id=context.get("correlation_id"),
+                ) from e
+            ```
+
         Args:
-            input_data: The input data to validate
+            input_data: The input data to validate (context not available here)
 
         Raises:
-            TypeError: If input_data is not a dict
+            TypeError: If input_data is not a dict. Caller wraps in OnexError.
             ValueError: If "json" key exists but is not JSON-compatible type.
-                Caller should wrap in OnexError with correlation_id.
-            OnexError: If JSON structure exceeds maximum nesting depth
+                Caller wraps in OnexError with correlation_id from context.
+            OnexError: If JSON structure exceeds maximum nesting depth (direct
+                raise since this is an internal error, not a validation error).
         """
         if not isinstance(input_data, dict):
             raise TypeError(f"input_data must be dict, got {type(input_data).__name__}")

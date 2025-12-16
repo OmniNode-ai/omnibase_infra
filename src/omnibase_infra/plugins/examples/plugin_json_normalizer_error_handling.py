@@ -17,9 +17,9 @@ Example Error Scenarios:
     3. Malformed input data structures
 """
 
-from typing import Any, cast
+from typing import cast
 
-from omnibase_core.enums import CoreErrorCode
+from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
 
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
@@ -28,6 +28,10 @@ from omnibase_infra.protocols.protocol_plugin_compute import (
     PluginInputData,
     PluginOutputData,
 )
+
+# JSON-compatible type alias using forward reference for recursion
+# Note: This is the standard way to define recursive JSON types in Python
+JsonValue = dict[str, "JsonValue"] | list["JsonValue"] | str | int | float | bool | None
 
 
 class PluginJsonNormalizerErrorHandling(PluginComputeBase):
@@ -64,7 +68,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
                 deeply_nested = create_deeply_nested_dict(depth=1500)
                 plugin.execute({"json": deeply_nested}, {"correlation_id": uuid4()})
             except OnexError as e:
-                assert e.model.error_code == CoreErrorCode.INTERNAL_ERROR
+                assert e.model.error_code == EnumCoreErrorCode.INTERNAL_ERROR
                 assert e.model.correlation_id is not None
                 assert e.model.details["max_recursion_depth"] == 1000
 
@@ -72,7 +76,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
             try:
                 plugin.execute({"json": valid_data}, {"correlation_id": uuid4()})
             except OnexError as e:
-                assert e.model.error_code == CoreErrorCode.INTERNAL_ERROR
+                assert e.model.error_code == EnumCoreErrorCode.INTERNAL_ERROR
                 assert "input_keys" in e.model.details
             ```
         """
@@ -81,7 +85,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
 
         try:
             # Retrieve JSON data with safe default
-            json_data = cast(dict[str, Any], input_data).get("json", {})
+            json_data = cast(JsonValue, input_data.get("json", {}))
 
             # Perform pure deterministic computation
             normalized = self._sort_keys_recursively(json_data)
@@ -99,7 +103,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
             # Handle deeply nested structures exceeding Python's recursion limit
             raise OnexError(
                 message="JSON structure too deeply nested for normalization",
-                error_code=CoreErrorCode.INTERNAL_ERROR,
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
                 plugin_name=self.__class__.__name__,
                 max_recursion_depth=1000,  # Python's default recursion limit
@@ -110,7 +114,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
             # Handle type errors during sorting (e.g., comparing incompatible types)
             raise OnexError(
                 message=f"Type error during JSON normalization: {e}",
-                error_code=CoreErrorCode.INTERNAL_ERROR,
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
                 plugin_name=self.__class__.__name__,
                 input_keys=list(input_data.keys()),
@@ -120,14 +124,14 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
             # Catch-all for unexpected errors (should not happen in pure computation)
             raise OnexError(
                 message=f"Unexpected error during JSON normalization: {e}",
-                error_code=CoreErrorCode.INTERNAL_ERROR,
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
                 correlation_id=correlation_id,
                 plugin_name=self.__class__.__name__,
                 input_keys=list(input_data.keys()),
                 exception_type=type(e).__name__,
             ) from e
 
-    def _sort_keys_recursively(self, obj: Any) -> Any:
+    def _sort_keys_recursively(self, obj: JsonValue) -> JsonValue:
         """Recursively sort dictionary keys.
 
         Args:
@@ -144,6 +148,9 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
             - Dicts: Sorted by key name (alphabetically)
             - Lists: Items processed recursively, order preserved
             - Primitives: Returned unchanged
+            - This method does not include explicit depth protection unlike
+              the main PluginJsonNormalizer. It relies on Python's default
+              recursion limit for simplicity in this error handling example.
         """
         if isinstance(obj, dict):
             # Sort keys and recursively process values
@@ -175,7 +182,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
         Example Caller Wrapping:
             ```python
             from omnibase_core.errors import OnexError
-            from omnibase_core.enums import CoreErrorCode
+            from omnibase_core.enums import EnumCoreErrorCode
 
             correlation_id = context.get("correlation_id", "unknown")
 
@@ -184,7 +191,7 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
             except ValueError as e:
                 raise OnexError(
                     message=f"Input validation failed: {e}",
-                    error_code=CoreErrorCode.INVALID_INPUT,
+                    error_code=EnumCoreErrorCode.INVALID_INPUT,
                     correlation_id=correlation_id,
                     plugin_name="PluginJsonNormalizerErrorHandling",
                     expected_types=["dict", "list", "str", "int", "float", "bool", "None"],
@@ -195,9 +202,8 @@ class PluginJsonNormalizerErrorHandling(PluginComputeBase):
         Note:
             Missing "json" key is valid - plugin returns empty normalized dict.
         """
-        input_dict = cast(dict[str, Any], input_data)
-        if "json" in input_dict:
-            json_data = input_dict["json"]
+        json_data = input_data.get("json")
+        if json_data is not None:
             # Ensure it's a JSON-compatible type
             if not isinstance(
                 json_data, dict | list | str | int | float | bool | type(None)
