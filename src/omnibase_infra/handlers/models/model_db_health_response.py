@@ -40,6 +40,7 @@ class ModelDbHealthResponse(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     healthy: bool = Field(

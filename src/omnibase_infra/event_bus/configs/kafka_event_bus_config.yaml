@@ -5,11 +5,25 @@
 # ===========================
 # This file provides default configuration for the KafkaEventBus implementation.
 #
-# NOTE: The ${VAR_NAME:-default} syntax in this file is NOT processed by YAML.
-# yaml.safe_load() reads these as literal strings. Environment variable
-# substitution is handled by the apply_environment_overrides() method in
-# ModelKafkaEventBusConfig, which checks for corresponding environment variables
-# and overrides the config values at runtime.
+# IMPORTANT: Environment Variable Substitution Mechanism
+# -------------------------------------------------------
+# The ${VAR_NAME:-default} syntax in this file is NOT processed by yaml.safe_load().
+# YAML reads these as literal strings (e.g., "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}").
+#
+# Environment variable substitution happens AFTER YAML parsing in
+# ModelKafkaEventBusConfig.apply_environment_overrides(), which:
+# 1. Loads this file with yaml.safe_load() (treats ${...} as literal strings)
+# 2. Checks os.environ for matching environment variables (KAFKA_BOOTSTRAP_SERVERS, etc.)
+# 3. Overrides config values if environment variables are set
+# 4. Falls back to the literal defaults from this file if environment variables are not set
+#
+# Example: If KAFKA_BOOTSTRAP_SERVERS="kafka:9092" is set in environment:
+#   - YAML loads: bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+#   - apply_environment_overrides() detects KAFKA_BOOTSTRAP_SERVERS env var
+#   - Final value: "kafka:9092" (from environment, not from ${...} syntax)
+#
+# The ${...} syntax is used for documentation purposes to indicate which
+# environment variables can override each configuration value.
 #
 # The KafkaEventBus implements ProtocolEventBus using Apache Kafka (via aiokafka)
 # for production-grade message delivery with resilience patterns including circuit

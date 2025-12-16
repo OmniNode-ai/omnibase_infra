@@ -42,6 +42,7 @@ class ModelInfraErrorContext(BaseModel):
     model_config = ConfigDict(
         frozen=True,  # Immutable for thread safety
         extra="forbid",  # Strict validation - no extra fields
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     transport_type: Optional[EnumInfraTransportType] = Field(

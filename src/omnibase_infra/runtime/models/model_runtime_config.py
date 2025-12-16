@@ -95,6 +95,7 @@ class ModelRuntimeConfig(BaseModel):
         frozen=True,
         extra="ignore",  # Allow extra fields for forward compatibility
         populate_by_name=True,  # Allow both alias and field name for population
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     # Contract metadata (optional, may not be present in minimal configs)

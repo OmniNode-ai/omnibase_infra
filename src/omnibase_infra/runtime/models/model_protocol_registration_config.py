@@ -43,6 +43,7 @@ class ModelProtocolRegistrationConfig(BaseModel):
         frozen=True,
         extra="forbid",
         populate_by_name=True,  # Allow both alias and field name
+        from_attributes=True,  # Support pytest-xdist compatibility
     )
 
     type: ProtocolName = Field(

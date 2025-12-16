@@ -8,18 +8,89 @@ defaults for production deployment.
 
 Features:
     - Strong typing with comprehensive validation
-    - Environment variable override support
+    - Environment variable override support with type conversion
     - YAML configuration file loading
     - Sensible defaults for production resilience patterns
     - Circuit breaker and retry configuration
+    - Warning logs for invalid environment variable values
 
 Environment Variables:
-    KAFKA_BOOTSTRAP_SERVERS: Kafka bootstrap servers (comma-separated)
-    KAFKA_TIMEOUT_SECONDS: Timeout for Kafka operations
-    KAFKA_ENVIRONMENT: Environment identifier (e.g., "local", "dev", "prod")
-    KAFKA_GROUP: Consumer group identifier
-    KAFKA_MAX_RETRY_ATTEMPTS: Maximum retry attempts for publish operations
-    KAFKA_CIRCUIT_BREAKER_THRESHOLD: Failures before circuit opens
+    All environment variables are optional and fall back to defaults if not set
+    or if parsing fails. Invalid values log warnings and use defaults.
+
+    Connection Settings:
+        KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (comma-separated)
+            Default: "localhost:9092"
+            Example: "kafka1:9092,kafka2:9092"
+
+        KAFKA_ENVIRONMENT: Environment identifier for message routing
+            Default: "local"
+            Example: "dev", "staging", "prod"
+
+        KAFKA_GROUP: Consumer group identifier
+            Default: "default"
+            Example: "my-service-group"
+
+    Timeout and Retry Settings (with validation):
+        KAFKA_TIMEOUT_SECONDS: Timeout for operations (integer, 1-300)
+            Default: 30
+            Example: "60"
+            Warning: Logs warning if not a valid integer, uses default
+
+        KAFKA_MAX_RETRY_ATTEMPTS: Maximum retry attempts (integer, 0-10)
+            Default: 3
+            Example: "5"
+            Warning: Logs warning if not a valid integer, uses default
+
+        KAFKA_RETRY_BACKOFF_BASE: Base exponential backoff delay (float, 0.1-60.0)
+            Default: 1.0
+            Example: "2.0"
+            Warning: Logs warning if not a valid float, uses default
+
+    Circuit Breaker Settings (with validation):
+        KAFKA_CIRCUIT_BREAKER_THRESHOLD: Failures before circuit opens (integer, 1-100)
+            Default: 5
+            Example: "10"
+            Warning: Logs warning if not a valid integer, uses default
+
+        KAFKA_CIRCUIT_BREAKER_RESET_TIMEOUT: Reset timeout in seconds (float, 1.0-3600.0)
+            Default: 30.0
+            Example: "60.0"
+            Warning: Logs warning if not a valid float, uses default
+
+    Consumer Settings:
+        KAFKA_CONSUMER_SLEEP_INTERVAL: Poll interval in seconds (float, 0.01-10.0)
+            Default: 0.1
+            Example: "0.2"
+            Warning: Logs warning if not a valid float, uses default
+
+        KAFKA_AUTO_OFFSET_RESET: Offset reset policy
+            Default: "latest"
+            Options: "earliest", "latest"
+
+        KAFKA_ENABLE_AUTO_COMMIT: Auto-commit consumer offsets (boolean)
+            Default: true
+            True values: "true", "1", "yes", "on" (case-insensitive)
+            False values: "false", "0", "no", "off" (case-insensitive)
+            Warning: Logs warning if unexpected value, treats as False
+
+    Producer Settings:
+        KAFKA_ACKS: Producer acknowledgment policy
+            Default: "all"
+            Options: "all", "1", "0"
+
+        KAFKA_ENABLE_IDEMPOTENCE: Enable idempotent producer (boolean)
+            Default: true
+            True values: "true", "1", "yes", "on" (case-insensitive)
+            False values: "false", "0", "no", "off" (case-insensitive)
+            Warning: Logs warning if unexpected value, treats as False
+
+Parsing Behavior:
+    - Integer/Float fields: Logs warning and uses default if parsing fails
+    - Boolean fields: Logs warning if value not in expected set, treats as False
+    - String fields: No validation, accepts any string value
+    - All warnings include the environment variable name, invalid value, and
+      the field name that will use the default value
 """
 
 from __future__ import annotations
@@ -282,12 +353,28 @@ class ModelKafkaEventBusConfig(BaseModel):
                         )
                         continue
                 elif field_name in bool_fields:
-                    overrides[field_name] = env_value.lower() in (
+                    # Boolean conversion with explicit falsy value handling
+                    # True values: "true", "1", "yes", "on" (case-insensitive)
+                    # False values: All other values (including "false", "0", "no", "off")
+                    parsed_value = env_value.lower() in ("true", "1", "yes", "on")
+                    if env_value.lower() not in (
                         "true",
                         "1",
                         "yes",
                         "on",
-                    )
+                        "false",
+                        "0",
+                        "no",
+                        "off",
+                    ):
+                        logger.warning(
+                            "Boolean environment variable %s='%s' has unexpected value. "
+                            "Valid values are: true/1/yes/on (True) or false/0/no/off (False). "
+                            "Treating as False.",
+                            env_var,
+                            env_value,
+                        )
+                    overrides[field_name] = parsed_value
                 else:
                     overrides[field_name] = env_value
 

@@ -15,11 +15,87 @@ Features:
     - Support for environment/group-based routing
     - Proper producer/consumer lifecycle management
 
+Environment Variables:
+    Configuration can be overridden using environment variables. All variables
+    are optional and fall back to defaults if not set.
+
+    Connection Settings:
+        KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (comma-separated)
+            Default: "localhost:9092"
+            Example: "kafka1:9092,kafka2:9092,kafka3:9092"
+
+        KAFKA_ENVIRONMENT: Environment identifier for message routing
+            Default: "local"
+            Example: "dev", "staging", "prod"
+
+        KAFKA_GROUP: Consumer group identifier
+            Default: "default"
+            Example: "my-service-group"
+
+    Timeout and Retry Settings:
+        KAFKA_TIMEOUT_SECONDS: Timeout for Kafka operations (integer seconds)
+            Default: 30
+            Range: 1-300
+            Example: "60"
+
+        KAFKA_MAX_RETRY_ATTEMPTS: Maximum publish retry attempts
+            Default: 3
+            Range: 0-10
+            Example: "5"
+
+        KAFKA_RETRY_BACKOFF_BASE: Base delay for exponential backoff (float seconds)
+            Default: 1.0
+            Range: 0.1-60.0
+            Example: "2.0"
+
+    Circuit Breaker Settings:
+        KAFKA_CIRCUIT_BREAKER_THRESHOLD: Failures before circuit opens
+            Default: 5
+            Range: 1-100
+            Example: "10"
+
+        KAFKA_CIRCUIT_BREAKER_RESET_TIMEOUT: Seconds before circuit resets
+            Default: 30.0
+            Range: 1.0-3600.0
+            Example: "60.0"
+
+    Consumer Settings:
+        KAFKA_CONSUMER_SLEEP_INTERVAL: Sleep between poll iterations (float seconds)
+            Default: 0.1
+            Range: 0.01-10.0
+            Example: "0.2"
+
+        KAFKA_AUTO_OFFSET_RESET: Offset reset policy
+            Default: "latest"
+            Options: "earliest", "latest"
+
+        KAFKA_ENABLE_AUTO_COMMIT: Auto-commit consumer offsets
+            Default: true
+            Options: "true", "1", "yes", "on" (case-insensitive) = True
+                     All other values = False
+            Example: "false"
+
+    Producer Settings:
+        KAFKA_ACKS: Producer acknowledgment policy
+            Default: "all"
+            Options: "all" (all replicas), "1" (leader only), "0" (no ack)
+
+        KAFKA_ENABLE_IDEMPOTENCE: Enable idempotent producer
+            Default: true
+            Options: "true", "1", "yes", "on" (case-insensitive) = True
+                     All other values = False
+            Example: "true"
+
 Usage:
     ```python
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 
-    bus = KafkaEventBus(bootstrap_servers="localhost:9092", environment="dev", group="test")
+    # Option 1: Use defaults with environment variable overrides
+    bus = KafkaEventBus.default()
+    await bus.start()
+
+    # Option 2: Explicit configuration
+    bus = KafkaEventBus(bootstrap_servers="kafka:9092", environment="dev")
     await bus.start()
 
     # Subscribe to a topic
@@ -905,15 +981,16 @@ class KafkaEventBus:
         if topic in self._consumers:
             return
 
+        # Apply consumer configuration from config model
+        consumer = AIOKafkaConsumer(
+            topic,
+            bootstrap_servers=self._bootstrap_servers,
+            group_id=f"{self._environment}.{group_id}",
+            auto_offset_reset=self._config.auto_offset_reset,
+            enable_auto_commit=self._config.enable_auto_commit,
+        )
+
         try:
-            # Apply consumer configuration from config model
-            consumer = AIOKafkaConsumer(
-                topic,
-                bootstrap_servers=self._bootstrap_servers,
-                group_id=f"{self._environment}.{group_id}",
-                auto_offset_reset=self._config.auto_offset_reset,
-                enable_auto_commit=self._config.enable_auto_commit,
-            )
             await asyncio.wait_for(
                 consumer.start(),
                 timeout=self._timeout_seconds,
@@ -927,19 +1004,45 @@ class KafkaEventBus:
 
             logger.debug(f"Started consumer for topic {topic}")
 
-        except Exception as e:
+        except TimeoutError as e:
+            # Propagate timeout error to surface startup failures
             context = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="start_consumer",
                 target_name=f"kafka.{topic}",
                 correlation_id=uuid4(),
             )
+            sanitized_servers = self._sanitize_bootstrap_servers(
+                self._bootstrap_servers
+            )
+            logger.exception(
+                f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s"
+            )
+            raise InfraTimeoutError(
+                f"Timeout starting consumer for topic {topic} after {self._timeout_seconds}s",
+                context=context,
+                topic=topic,
+                servers=sanitized_servers,
+                timeout_seconds=self._timeout_seconds,
+            ) from e
+
+        except Exception as e:
+            # Propagate connection error to surface startup failures
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="start_consumer",
+                target_name=f"kafka.{topic}",
+                correlation_id=uuid4(),
+            )
+            sanitized_servers = self._sanitize_bootstrap_servers(
+                self._bootstrap_servers
+            )
             logger.exception(f"Failed to start consumer for topic {topic}")
             raise InfraConnectionError(
                 f"Failed to start consumer for topic {topic}",
                 context=context,
                 topic=topic,
-                # bootstrap_servers removed for security (sanitization)
+                servers=sanitized_servers,
             ) from e
 
     async def _stop_consumer_for_topic(self, topic: str) -> None:
@@ -1145,6 +1248,15 @@ class KafkaEventBus:
     def _check_circuit_breaker(self, correlation_id: Optional[UUID] = None) -> None:
         """Check circuit breaker state and raise if open.
 
+        Thread Safety:
+            This method MUST be called while holding self._lock to ensure
+            thread-safe access to circuit breaker state variables:
+            - _circuit_state
+            - _circuit_failure_count
+            - _circuit_last_failure_time
+
+            Callers are responsible for acquiring the lock before calling.
+
         Args:
             correlation_id: Optional correlation ID to propagate from caller.
                 If not provided, a new UUID will be generated.
@@ -1181,7 +1293,17 @@ class KafkaEventBus:
                 )
 
     def _record_circuit_failure(self) -> None:
-        """Record a failure for circuit breaker tracking."""
+        """Record a failure for circuit breaker tracking.
+
+        Thread Safety:
+            This method MUST be called while holding self._lock to ensure
+            thread-safe mutations of circuit breaker state variables:
+            - _circuit_failure_count
+            - _circuit_last_failure_time
+            - _circuit_state
+
+            Callers are responsible for acquiring the lock before calling.
+        """
         self._circuit_failure_count += 1
         self._circuit_last_failure_time = time.time()
 
@@ -1193,7 +1315,16 @@ class KafkaEventBus:
             )
 
     def _reset_circuit_breaker(self) -> None:
-        """Reset circuit breaker on successful operation."""
+        """Reset circuit breaker on successful operation.
+
+        Thread Safety:
+            This method MUST be called while holding self._lock to ensure
+            thread-safe mutations of circuit breaker state variables:
+            - _circuit_state
+            - _circuit_failure_count
+
+            Callers are responsible for acquiring the lock before calling.
+        """
         if self._circuit_state != CircuitState.CLOSED:
             logger.info(
                 f"Circuit breaker reset from {self._circuit_state.value} to closed"
