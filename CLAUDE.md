@@ -538,6 +538,158 @@ The violations are **intentional infrastructure patterns**, not code smells. See
 - `src/omnibase_infra/event_bus/kafka_event_bus.py` - Full design documentation
 - `src/omnibase_infra/validation/infra_validators.py` - Validation notes
 
+### Circuit Breaker Pattern (MixinAsyncCircuitBreaker)
+
+All infrastructure adapters and services should use `MixinAsyncCircuitBreaker` for fault tolerance and automatic recovery.
+
+**When to Use**:
+- External service integrations (Kafka, Consul, Vault, Redis, PostgreSQL)
+- Network operations that can fail transiently
+- Any infrastructure component requiring automatic fault recovery
+- Services with configurable failure thresholds and reset timeouts
+
+**Integration Pattern**:
+```python
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.enums import EnumInfraTransportType
+from uuid import uuid4
+
+class MyInfrastructureAdapter(MixinAsyncCircuitBreaker):
+    def __init__(self, config: MyConfig):
+        # Initialize circuit breaker with service-specific settings
+        self._init_circuit_breaker(
+            circuit_breaker_threshold=5,         # Max failures before opening
+            circuit_breaker_reset_timeout=60.0,  # Seconds until auto-reset
+            service_name=f"my-service.{environment}",
+            transport_type=EnumInfraTransportType.HTTP,  # Or KAFKA, CONSUL, etc.
+        )
+
+        # Main lock for state protection
+        self._lock = asyncio.Lock()
+
+    async def connect(self) -> None:
+        """Connect to external service with circuit breaker protection."""
+        correlation_id = uuid4()
+
+        async with self._lock:
+            # Check circuit breaker before attempting connection
+            await self._check_circuit_breaker("connect", correlation_id)
+
+            try:
+                # Attempt connection
+                await self._do_connect()
+
+                # Circuit breaker auto-resets on successful operations
+
+            except Exception as e:
+                # Record failure (may open circuit)
+                await self._record_circuit_failure("connect", correlation_id)
+                raise
+```
+
+**Thread Safety**:
+- Circuit breaker methods REQUIRE caller to hold `self._lock` (or equivalent)
+- Methods are async and use internal `self._circuit_breaker_lock`
+- Always use `async with self._lock:` before calling circuit breaker methods
+- Never call circuit breaker methods without lock protection
+
+**State Transitions**:
+- **CLOSED**: Normal operation, requests allowed
+- **OPEN**: Too many failures, requests blocked (raises `InfraUnavailableError`)
+- **HALF_OPEN**: After timeout, testing if service recovered
+- **CLOSED**: Service recovered, normal operation resumed
+
+**Error Context**:
+- Blocked requests raise `InfraUnavailableError` with proper `ModelInfraErrorContext`
+- Includes correlation_id, operation, service_name, circuit state
+- Provides retry_after_seconds for clients
+- All errors follow infrastructure error sanitization guidelines
+
+**Configuration Guidelines**:
+```python
+# High-reliability service (strict failure tolerance)
+self._init_circuit_breaker(
+    circuit_breaker_threshold=3,    # Open after 3 failures
+    circuit_breaker_reset_timeout=120.0,  # 2 minutes recovery
+    service_name="critical-service",
+    transport_type=EnumInfraTransportType.DATABASE,
+)
+
+# Best-effort service (lenient failure tolerance)
+self._init_circuit_breaker(
+    circuit_breaker_threshold=10,   # Open after 10 failures
+    circuit_breaker_reset_timeout=30.0,   # 30 seconds recovery
+    service_name="cache-service",
+    transport_type=EnumInfraTransportType.REDIS,
+)
+```
+
+**Integration with Error Recovery**:
+```python
+async def publish_with_retry(self, message: dict) -> None:
+    """Publish message with circuit breaker and retry logic."""
+    correlation_id = uuid4()
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        async with self._lock:
+            # Circuit breaker blocks if too many failures
+            try:
+                await self._check_circuit_breaker("publish", correlation_id)
+            except InfraUnavailableError:
+                # Circuit open - fail fast without retrying
+                raise
+
+            try:
+                # Attempt publish
+                await self._kafka_producer.send(message)
+                return  # Success
+
+            except Exception as e:
+                # Record failure
+                await self._record_circuit_failure("publish", correlation_id)
+
+                if attempt == max_retries - 1:
+                    raise  # Last attempt failed
+
+                # Exponential backoff before retry
+                await asyncio.sleep(2 ** attempt)
+```
+
+**Monitoring and Observability**:
+```python
+# Circuit breaker exposes state for monitoring
+state = self._circuit_breaker_state  # "closed", "open", "half_open"
+failure_count = self._circuit_breaker_failure_count
+last_failure = self._circuit_breaker_last_failure_time
+
+# Log state transitions for operational insights
+if state == "open":
+    logger.warning(
+        "Circuit breaker opened",
+        service_name=self._circuit_breaker_service_name,
+        failure_count=failure_count,
+        correlation_id=correlation_id,
+    )
+```
+
+**Related Work**:
+- Protocol definition: OMN-861 (Phase 2 - omnibase_spi)
+- Implementation: `src/omnibase_infra/mixins/mixin_async_circuit_breaker.py`
+- Example usage: KafkaEventBus integration
+- Error handling: See "Error Recovery Patterns" section above
+
+**Best Practices**:
+- ✅ Always propagate correlation_id through circuit breaker calls
+- ✅ Use descriptive operation names ("connect", "publish", "query")
+- ✅ Configure threshold and timeout based on service characteristics
+- ✅ Monitor circuit breaker state transitions for operational insights
+- ✅ Combine with retry logic for transient failures
+- ✅ Use circuit breaker for fail-fast behavior when service is down
+- ❌ Never call circuit breaker methods without holding lock
+- ❌ Never suppress InfraUnavailableError from circuit breaker
+- ❌ Never use circuit breaker for non-transient errors
+
 ### Service Integration Architecture
 - **Adapter Pattern** - External services wrapped in ONEX adapters (Consul, Kafka, Vault)
 - **Connection Pooling** - Database connections managed through dedicated pool managers
@@ -872,6 +1024,7 @@ Monitor infrastructure operations via web interface:
 - **Monitoring by design**: All infrastructure tools must include observability
 - **Event-driven architecture**: Infrastructure events flow through Kafka adapters
 - **Connection pooling**: Database connections managed through dedicated managers
+- **Circuit breaker pattern**: All service adapters must use `MixinAsyncCircuitBreaker` for fault tolerance
 
 ## 🚀 Infrastructure Migration Plan
 

@@ -144,19 +144,12 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 logger = logging.getLogger(__name__)
 
 
-class CircuitState(str, Enum):
-    """Circuit breaker state machine."""
-
-    CLOSED = "closed"  # Normal operation
-    OPEN = "open"  # Blocking requests
-    HALF_OPEN = "half_open"  # Testing recovery
-
-
-class KafkaEventBus:
+class KafkaEventBus(MixinAsyncCircuitBreaker):
     """Kafka-backed event bus for production message streaming.
 
     Implements ProtocolEventBus interface using Apache Kafka (via aiokafka)
@@ -323,15 +316,19 @@ class KafkaEventBus:
                 parameter="circuit_breaker_threshold",
                 value=effective_threshold,
             )
-        self._circuit_breaker_threshold = effective_threshold
-        self._circuit_breaker_reset_timeout = (
+        effective_reset_timeout = (
             circuit_breaker_reset_timeout
             if circuit_breaker_reset_timeout is not None
             else config.circuit_breaker_reset_timeout
         )
-        self._circuit_state = CircuitState.CLOSED
-        self._circuit_failure_count = 0
-        self._circuit_last_failure_time: float = 0.0
+
+        # Initialize circuit breaker mixin
+        self._init_circuit_breaker(
+            threshold=effective_threshold,
+            reset_timeout=effective_reset_timeout,
+            service_name=f"kafka.{self._environment}",
+            transport_type=EnumInfraTransportType.KAFKA,
+        )
 
         # Kafka producer and consumer
         self._producer: Optional[AIOKafkaProducer] = None
@@ -485,8 +482,9 @@ class KafkaEventBus:
                 return
 
             # Check circuit breaker before attempting connection
-            # No correlation_id available during startup - generate new if needed
-            self._check_circuit_breaker()
+            # Note: Circuit breaker requires its own lock to be held
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker(operation="start")
 
             try:
                 # Apply producer configuration from config model
@@ -503,7 +501,10 @@ class KafkaEventBus:
 
                 self._started = True
                 self._shutdown = False
-                self._reset_circuit_breaker()
+
+                # Reset circuit breaker on success
+                async with self._circuit_breaker_lock:
+                    await self._reset_circuit_breaker()
 
                 logger.info(
                     "KafkaEventBus started",
@@ -520,8 +521,9 @@ class KafkaEventBus:
                 # Clean up producer on failure to prevent resource leak (thread-safe)
                 async with self._producer_lock:
                     self._producer = None
-                # Record failure is already inside _lock context from start()
-                self._record_circuit_failure()
+                # Record failure (circuit breaker lock required)
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(operation="start")
                 # Sanitize servers for safe logging (remove credentials)
                 sanitized_servers = self._sanitize_bootstrap_servers(
                     self._bootstrap_servers
@@ -547,8 +549,9 @@ class KafkaEventBus:
                 # Clean up producer on failure to prevent resource leak (thread-safe)
                 async with self._producer_lock:
                     self._producer = None
-                # Record failure is already inside _lock context from start()
-                self._record_circuit_failure()
+                # Record failure (circuit breaker lock required)
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(operation="start")
                 # Sanitize servers for safe logging (remove credentials)
                 sanitized_servers = self._sanitize_bootstrap_servers(
                     self._bootstrap_servers
@@ -714,8 +717,10 @@ class KafkaEventBus:
             )
 
         # Check circuit breaker - propagate correlation_id from headers (thread-safe)
-        async with self._lock:
-            self._check_circuit_breaker(correlation_id=headers.correlation_id)
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="publish", correlation_id=headers.correlation_id
+            )
 
         # Convert headers to Kafka format
         kafka_headers = self._model_headers_to_kafka(headers)
@@ -774,8 +779,8 @@ class KafkaEventBus:
                 )
 
                 # Success - reset circuit breaker (thread-safe)
-                async with self._lock:
-                    self._reset_circuit_breaker()
+                async with self._circuit_breaker_lock:
+                    await self._reset_circuit_breaker()
 
                 logger.debug(
                     f"Published to topic {topic}",
@@ -792,8 +797,10 @@ class KafkaEventBus:
                 async with self._producer_lock:
                     self._producer = None
                 last_exception = e
-                async with self._lock:
-                    self._record_circuit_failure()
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="publish", correlation_id=headers.correlation_id
+                    )
                 logger.warning(
                     f"Publish timeout (attempt {attempt + 1}/{self._max_retry_attempts + 1})",
                     extra={
@@ -804,8 +811,10 @@ class KafkaEventBus:
 
             except KafkaError as e:
                 last_exception = e
-                async with self._lock:
-                    self._record_circuit_failure()
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="publish", correlation_id=headers.correlation_id
+                    )
                 logger.warning(
                     f"Kafka error on publish (attempt {attempt + 1}/{self._max_retry_attempts + 1}): {e}",
                     extra={
@@ -816,8 +825,10 @@ class KafkaEventBus:
 
             except Exception as e:
                 last_exception = e
-                async with self._lock:
-                    self._record_circuit_failure()
+                async with self._circuit_breaker_lock:
+                    await self._record_circuit_failure(
+                        operation="publish", correlation_id=headers.correlation_id
+                    )
                 logger.warning(
                     f"Publish error (attempt {attempt + 1}/{self._max_retry_attempts + 1}): {e}",
                     extra={
@@ -1215,7 +1226,10 @@ class KafkaEventBus:
             topic_count = len(self._subscribers)
             consumer_count = len(self._consumers)
             started = self._started
-            circuit_state = self._circuit_state.value
+
+        # Get circuit breaker state (thread-safe access)
+        async with self._circuit_breaker_lock:
+            circuit_state = "open" if self._circuit_breaker_open else "closed"
 
         # Check if producer is healthy (thread-safe access)
         producer_healthy = False
@@ -1240,97 +1254,6 @@ class KafkaEventBus:
             "topic_count": topic_count,
             "consumer_count": consumer_count,
         }
-
-    # =========================================================================
-    # Circuit Breaker Methods
-    # =========================================================================
-
-    def _check_circuit_breaker(self, correlation_id: Optional[UUID] = None) -> None:
-        """Check circuit breaker state and raise if open.
-
-        Thread Safety:
-            This method MUST be called while holding self._lock to ensure
-            thread-safe access to circuit breaker state variables:
-            - _circuit_state
-            - _circuit_failure_count
-            - _circuit_last_failure_time
-
-            Callers are responsible for acquiring the lock before calling.
-
-        Args:
-            correlation_id: Optional correlation ID to propagate from caller.
-                If not provided, a new UUID will be generated.
-
-        Raises:
-            InfraUnavailableError: If circuit breaker is open
-        """
-        current_time = time.time()
-
-        if self._circuit_state == CircuitState.OPEN:
-            # Check if reset timeout has passed
-            if (
-                current_time - self._circuit_last_failure_time
-                > self._circuit_breaker_reset_timeout
-            ):
-                self._circuit_state = CircuitState.HALF_OPEN
-                self._circuit_failure_count = 0
-                logger.info("Circuit breaker transitioning to half-open")
-            else:
-                context = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="circuit_check",
-                    target_name=f"kafka.{self._environment}",
-                    correlation_id=correlation_id if correlation_id else uuid4(),
-                )
-                raise InfraUnavailableError(
-                    "Circuit breaker is open - Kafka temporarily unavailable",
-                    context=context,
-                    circuit_state=self._circuit_state.value,
-                    retry_after_seconds=int(
-                        self._circuit_breaker_reset_timeout
-                        - (current_time - self._circuit_last_failure_time)
-                    ),
-                )
-
-    def _record_circuit_failure(self) -> None:
-        """Record a failure for circuit breaker tracking.
-
-        Thread Safety:
-            This method MUST be called while holding self._lock to ensure
-            thread-safe mutations of circuit breaker state variables:
-            - _circuit_failure_count
-            - _circuit_last_failure_time
-            - _circuit_state
-
-            Callers are responsible for acquiring the lock before calling.
-        """
-        self._circuit_failure_count += 1
-        self._circuit_last_failure_time = time.time()
-
-        if self._circuit_failure_count >= self._circuit_breaker_threshold:
-            self._circuit_state = CircuitState.OPEN
-            logger.warning(
-                f"Circuit breaker opened after {self._circuit_failure_count} failures",
-                extra={"environment": self._environment},
-            )
-
-    def _reset_circuit_breaker(self) -> None:
-        """Reset circuit breaker on successful operation.
-
-        Thread Safety:
-            This method MUST be called while holding self._lock to ensure
-            thread-safe mutations of circuit breaker state variables:
-            - _circuit_state
-            - _circuit_failure_count
-
-            Callers are responsible for acquiring the lock before calling.
-        """
-        if self._circuit_state != CircuitState.CLOSED:
-            logger.info(
-                f"Circuit breaker reset from {self._circuit_state.value} to closed"
-            )
-        self._circuit_state = CircuitState.CLOSED
-        self._circuit_failure_count = 0
 
     # =========================================================================
     # Helper Methods

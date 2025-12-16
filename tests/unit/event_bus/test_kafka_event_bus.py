@@ -21,9 +21,10 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
 )
-from omnibase_infra.event_bus.kafka_event_bus import CircuitState, KafkaEventBus
+from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.mixins import CircuitState
 
 
 class TestKafkaEventBusLifecycle:
@@ -317,10 +318,12 @@ class TestKafkaEventBusPublish:
             await event_bus.start()
 
             # Record a failure to open the circuit
-            event_bus._record_circuit_failure()
+            async with event_bus._circuit_breaker_lock:
+                await event_bus._record_circuit_failure(operation="test")
 
             # Verify circuit is open
-            assert event_bus._circuit_state == CircuitState.OPEN
+            async with event_bus._circuit_breaker_lock:
+                assert event_bus._circuit_breaker_open is True
 
             with pytest.raises(InfraUnavailableError, match="Circuit breaker is open"):
                 await event_bus.publish("test-topic", None, b"test")
@@ -500,8 +503,9 @@ class TestKafkaEventBusHealthCheck:
             assert health["circuit_state"] == "closed"
 
             # Record failures to change circuit state
-            kafka_event_bus._circuit_failure_count = 5
-            kafka_event_bus._circuit_state = CircuitState.OPEN
+            async with kafka_event_bus._circuit_breaker_lock:
+                kafka_event_bus._circuit_breaker_failures = 5
+                kafka_event_bus._circuit_breaker_open = True
 
             health = await kafka_event_bus.health_check()
             assert health["circuit_state"] == "open"
@@ -546,18 +550,19 @@ class TestKafkaEventBusCircuitBreaker:
             )
 
             # Record failures
-            event_bus._record_circuit_failure()
-            assert event_bus._circuit_state == CircuitState.CLOSED
-            assert event_bus._circuit_failure_count == 1
+            async with event_bus._circuit_breaker_lock:
+                await event_bus._record_circuit_failure(operation="test")
+                assert event_bus._circuit_breaker_open is False
+                assert event_bus._circuit_breaker_failures == 1
 
-            event_bus._record_circuit_failure()
-            assert event_bus._circuit_state == CircuitState.CLOSED
-            assert event_bus._circuit_failure_count == 2
+                await event_bus._record_circuit_failure(operation="test")
+                assert event_bus._circuit_breaker_open is False
+                assert event_bus._circuit_breaker_failures == 2
 
-            event_bus._record_circuit_failure()
-            # Should be open after 3 failures
-            assert event_bus._circuit_state == CircuitState.OPEN
-            assert event_bus._circuit_failure_count == 3
+                await event_bus._record_circuit_failure(operation="test")
+                # Should be open after 3 failures
+                assert event_bus._circuit_breaker_open is True
+                assert event_bus._circuit_breaker_failures == 3
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_resets_on_success(
@@ -574,15 +579,16 @@ class TestKafkaEventBusCircuitBreaker:
             )
 
             # Record some failures
-            event_bus._record_circuit_failure()
-            event_bus._record_circuit_failure()
-            assert event_bus._circuit_failure_count == 2
+            async with event_bus._circuit_breaker_lock:
+                await event_bus._record_circuit_failure(operation="test")
+                await event_bus._record_circuit_failure(operation="test")
+                assert event_bus._circuit_breaker_failures == 2
 
-            # Reset on success
-            event_bus._reset_circuit_breaker()
+                # Reset on success
+                await event_bus._reset_circuit_breaker()
 
-            assert event_bus._circuit_state == CircuitState.CLOSED
-            assert event_bus._circuit_failure_count == 0
+                assert event_bus._circuit_breaker_open is False
+                assert event_bus._circuit_breaker_failures == 0
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_half_open_state(
@@ -602,15 +608,18 @@ class TestKafkaEventBusCircuitBreaker:
             )
 
             # Open the circuit
-            event_bus._record_circuit_failure()
-            assert event_bus._circuit_state == CircuitState.OPEN
+            async with event_bus._circuit_breaker_lock:
+                await event_bus._record_circuit_failure(operation="test")
+                assert event_bus._circuit_breaker_open is True
 
             # Wait for reset timeout
             await asyncio.sleep(0.15)
 
-            # Check circuit breaker - should transition to half-open
-            event_bus._check_circuit_breaker()
-            assert event_bus._circuit_state == CircuitState.HALF_OPEN
+            # Check circuit breaker - should transition to half-open (circuit closes)
+            async with event_bus._circuit_breaker_lock:
+                await event_bus._check_circuit_breaker(operation="test")
+                # After timeout, circuit transitions from OPEN to HALF_OPEN, which sets _circuit_breaker_open = False
+                assert event_bus._circuit_breaker_open is False
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_blocks_when_open(
@@ -628,12 +637,14 @@ class TestKafkaEventBusCircuitBreaker:
             )
 
             # Open the circuit
-            event_bus._record_circuit_failure()
-            assert event_bus._circuit_state == CircuitState.OPEN
+            async with event_bus._circuit_breaker_lock:
+                await event_bus._record_circuit_failure(operation="test")
+                assert event_bus._circuit_breaker_open is True
 
             # Should raise when checking circuit
-            with pytest.raises(InfraUnavailableError, match="Circuit breaker is open"):
-                event_bus._check_circuit_breaker()
+            async with event_bus._circuit_breaker_lock:
+                with pytest.raises(InfraUnavailableError, match="Circuit breaker is open"):
+                    await event_bus._check_circuit_breaker(operation="test")
 
 
 class TestKafkaEventBusErrors:
