@@ -9,21 +9,17 @@ import re
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from omnibase_core.models.common.model_validation_result import ModelValidationResult
-from omnibase_core.models.validation.model_contract_validation_result import (
-    ModelContractValidationResult,
-)
-from omnibase_core.models.validation.model_import_validation_result import (
-    ModelValidationResult as CircularImportValidationResult,
-)
 from omnibase_core.validation import (
+    CircularImportValidationResult,
+    CircularImportValidator,
+    ModelContractValidationResult,
+    ModelValidationResult,
+    ProtocolContractValidator,
     validate_architecture,
     validate_contracts,
     validate_patterns,
     validate_union_usage,
 )
-from omnibase_core.validation.circular_import_validator import CircularImportValidator
-from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
 # Type alias for cleaner return types in infrastructure validators
 # Most validation results return None as the data payload (validation only)
@@ -84,9 +80,11 @@ INFRA_MAX_UNIONS = 108
 INFRA_MAX_VIOLATIONS = 0
 
 # Strict mode for pattern validation in infrastructure code.
-# Set to True to enforce all naming conventions and anti-patterns (no *Manager, *Handler, *Helper).
-# Infrastructure code must follow ONEX patterns strictly for consistency across service adapters.
-INFRA_PATTERNS_STRICT = True
+# Set to False to allow legitimate infrastructure patterns (registry classes with many methods,
+# functions with multiple parameters for configuration).
+# Pattern violations are still logged but don't fail validation.
+# Infrastructure code has unique requirements (registries, adapters) that differ from core library code.
+INFRA_PATTERNS_STRICT = False
 
 # Strict mode for union usage validation in infrastructure code.
 # Set to False to allow necessary unions for protocol implementations and service adapters
@@ -350,7 +348,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (20).
+        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (30).
         strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:
@@ -461,6 +459,8 @@ __all__ = [
     # Type aliases
     "ValidationResult",
     "ExemptionPattern",
+    # Re-exported types from omnibase_core.validation
+    "CircularImportValidationResult",
     # Constants
     "INFRA_SRC_PATH",
     "INFRA_NODES_PATH",

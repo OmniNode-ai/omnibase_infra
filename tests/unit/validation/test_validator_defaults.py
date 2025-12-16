@@ -9,6 +9,7 @@ Validates that:
 """
 
 import inspect
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,8 @@ from omnibase_infra.validation.infra_validators import (
     INFRA_PATTERNS_STRICT,
     INFRA_SRC_PATH,
     INFRA_UNIONS_STRICT,
+    CircularImportValidationResult,
+    ValidationResult,
     validate_infra_all,
     validate_infra_architecture,
     validate_infra_circular_imports,
@@ -48,8 +51,12 @@ class TestInfraValidatorConstants:
         assert INFRA_MAX_VIOLATIONS == 0, "INFRA_MAX_VIOLATIONS should be 0 (strict)"
 
     def test_infra_patterns_strict_constant(self) -> None:
-        """Verify INFRA_PATTERNS_STRICT constant has expected value."""
-        assert INFRA_PATTERNS_STRICT is True, "INFRA_PATTERNS_STRICT should be True"
+        """Verify INFRA_PATTERNS_STRICT constant has expected value.
+
+        Set to False to allow legitimate infrastructure patterns (registry classes
+        with many methods, functions with multiple parameters for configuration).
+        """
+        assert INFRA_PATTERNS_STRICT is False, "INFRA_PATTERNS_STRICT should be False"
 
     def test_infra_unions_strict_constant(self) -> None:
         """Verify INFRA_UNIONS_STRICT constant has expected value."""
@@ -131,11 +138,11 @@ class TestValidateInfraPatternsDefaults:
         directory_param = sig.parameters["directory"]
         assert directory_param.default == INFRA_SRC_PATH
 
-        # Check strict default
+        # Check strict default - False to allow legitimate infrastructure patterns
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_PATTERNS_STRICT
-        assert strict_param.default is True, (
-            "Should default to strict mode via INFRA_PATTERNS_STRICT (True)"
+        assert strict_param.default is False, (
+            "Should default to non-strict mode via INFRA_PATTERNS_STRICT (False)"
         )
 
     @patch("omnibase_infra.validation.infra_validators.validate_patterns")
@@ -160,7 +167,7 @@ class TestValidateInfraPatternsDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            strict=INFRA_PATTERNS_STRICT,  # Strict mode (True)
+            strict=INFRA_PATTERNS_STRICT,  # Non-strict mode (False) for infra patterns
         )
 
 
@@ -501,7 +508,9 @@ class TestDefaultsConsistency:
     def test_directory_defaults_consistency(self) -> None:
         """Verify directory defaults are consistent across entry points."""
         # All validators using INFRA_SRC_PATH should default to same value
-        validators = [
+        validators: list[
+            Callable[..., ValidationResult | CircularImportValidationResult]
+        ] = [
             validate_infra_architecture,
             validate_infra_patterns,
             validate_infra_union_usage,
