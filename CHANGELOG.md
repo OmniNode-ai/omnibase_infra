@@ -106,7 +106,7 @@ This version represents the MVP (Minimum Viable Product) for ONEX Runtime Host I
 ### Deferred to Beta (v0.2.0)
 
 - KafkaEventBus with backpressure
-- VaultHandler and ConsulHandler
+- VaultAdapter and ConsulAdapter
 - Retry logic and rate limiting
 - Full graceful shutdown with drain
 - Integration tests with real services

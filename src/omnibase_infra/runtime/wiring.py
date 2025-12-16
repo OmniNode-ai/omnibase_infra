@@ -111,10 +111,12 @@ from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
 from omnibase_infra.handlers.handler_db import DbAdapter
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
+from omnibase_infra.handlers.handler_vault import VaultAdapter
 from omnibase_infra.runtime.handler_registry import (
     EVENT_BUS_INMEMORY,
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
+    HANDLER_TYPE_VAULT,
     EventBusBindingRegistry,
     ProtocolBindingRegistry,
     get_event_bus_registry,
@@ -153,6 +155,7 @@ logger = logging.getLogger(__name__)
 _KNOWN_HANDLERS: dict[str, tuple[type[ProtocolHandler], str]] = {
     HANDLER_TYPE_HTTP: (HttpRestAdapter, "HTTP REST protocol adapter"),  # type: ignore[dict-item]
     HANDLER_TYPE_DATABASE: (DbAdapter, "PostgreSQL database adapter"),  # type: ignore[dict-item]
+    HANDLER_TYPE_VAULT: (VaultAdapter, "HashiCorp Vault secret management handler"),  # type: ignore[dict-item]
 }
 
 # Known event bus kinds that can be wired
@@ -172,6 +175,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
     Registered Handlers:
         - HTTP: HttpRestAdapter for HTTP/REST protocol operations
         - DB: DbAdapter for PostgreSQL database operations
+        - VAULT: VaultAdapter for HashiCorp Vault secret management
 
     Registered Event Buses:
         - INMEMORY: InMemoryEventBus for local/testing deployments
@@ -430,7 +434,7 @@ def get_known_event_bus_kinds() -> list[str]:
 def wire_custom_handler(
     handler_type: str,
     handler_cls: type[ProtocolHandler],
-    registry: ProtocolBindingRegistry | None = None,
+    registry: Optional[ProtocolBindingRegistry] = None,
 ) -> None:
     """Register a custom handler class with the registry.
 
@@ -464,7 +468,7 @@ def wire_custom_handler(
 def wire_custom_event_bus(
     bus_kind: str,
     bus_cls: type[ProtocolEventBus],
-    registry: EventBusBindingRegistry | None = None,
+    registry: Optional[EventBusBindingRegistry] = None,
 ) -> None:
     """Register a custom event bus class with the registry.
 

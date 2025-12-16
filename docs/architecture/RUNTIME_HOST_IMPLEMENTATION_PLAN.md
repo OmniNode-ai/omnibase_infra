@@ -1188,7 +1188,7 @@ src/omnibase_infra/
 │   ├── __init__.py
 │   ├── http_handler.py                # HTTP REST handler
 │   ├── db_handler.py                  # PostgreSQL handler
-│   ├── vault_handler.py               # Vault secrets handler
+│   ├── handler_vault.py               # Vault secrets adapter
 │   ├── consul_handler.py              # Consul service discovery handler
 │   └── llm_handler.py                 # LLM API handler (Phase 4)
 ├── event_bus/                         # Event bus implementations (transport)
@@ -1640,10 +1640,10 @@ class KafkaEventBus(ProtocolEventBus):
 
 ### 3.5 Vault Handler (Strongly Typed)
 
-**File**: `src/omnibase_infra/handlers/vault_handler.py`
+**File**: `src/omnibase_infra/handlers/handler_vault.py`
 
 ```python
-"""Vault secrets management protocol handler."""
+"""Vault secrets management protocol adapter."""
 from __future__ import annotations
 
 import logging
@@ -1656,7 +1656,7 @@ from omnibase_core.models.runtime.model_onex_envelope import ModelOnexEnvelope
 from omnibase_core.protocols.protocol_handler import ProtocolHandler
 
 
-class VaultHandler(ProtocolHandler):
+class VaultAdapter(ProtocolHandler):
     """Vault secrets management protocol handler.
 
     Handles secret read/write operations via HashiCorp Vault.
@@ -1799,7 +1799,7 @@ class VaultHandler(ProtocolHandler):
         return ModelOnexEnvelope(
             correlation_id=envelope.correlation_id,
             causation_id=envelope.envelope_id,
-            source_node="vault_handler",
+            source_node="vault_adapter",
             target_node=envelope.source_node,
             handler_type=envelope.handler_type,
             operation=envelope.operation,
@@ -1812,7 +1812,7 @@ class VaultHandler(ProtocolHandler):
         return ModelOnexEnvelope(
             correlation_id=envelope.correlation_id,
             causation_id=envelope.envelope_id,
-            source_node="vault_handler",
+            source_node="vault_adapter",
             target_node=envelope.source_node,
             handler_type=envelope.handler_type,
             operation=envelope.operation,
@@ -1841,7 +1841,7 @@ from omnibase_core.runtime.handlers.local_handler import LocalHandler
 
 from omnibase_infra.handlers.http_handler import HttpHandler
 from omnibase_infra.handlers.db_handler import DbHandler
-from omnibase_infra.handlers.vault_handler import VaultHandler
+from omnibase_infra.handlers.handler_vault import VaultAdapter
 
 if TYPE_CHECKING:
     from omnibase_core.protocols.protocol_handler import ProtocolHandler
@@ -1853,7 +1853,7 @@ HANDLER_REGISTRY: dict[EnumHandlerType, type["ProtocolHandler"]] = {
     EnumHandlerType.LOCAL: LocalHandler,  # Dev/test only
     EnumHandlerType.HTTP: HttpHandler,
     EnumHandlerType.DB: DbHandler,
-    EnumHandlerType.VAULT: VaultHandler,
+    EnumHandlerType.VAULT: VaultAdapter,
     # EnumHandlerType.CONSUL: ConsulHandler,  # TODO: implement
     # EnumHandlerType.LLM: LlmHandler,  # TODO: implement
 }
@@ -2115,7 +2115,7 @@ shutdown_timeout_seconds: 30
 
 - [ ] HttpHandler with `EnumHandlerType.HTTP` return type
 - [ ] DbHandler with `EnumHandlerType.DB` return type
-- [ ] VaultHandler with `EnumHandlerType.VAULT` return type
+- [ ] VaultAdapter with `EnumHandlerType.VAULT` return type
 - [ ] KafkaEventBus implements `ProtocolEventBus` (NOT ProtocolHandler)
 - [ ] `wiring.py` is single source of truth for handler registration
 - [ ] RuntimeHostProcess uses `wiring.py` (no duplicate handler map)
@@ -2135,7 +2135,7 @@ shutdown_timeout_seconds: 30
 1. **LocalHandler echo** (dev/test validation)
 2. **HttpHandler external call** (real HTTP request)
 3. **DbHandler query** (real database query)
-4. **VaultHandler secret** (real Vault operation)
+4. **VaultAdapter secret** (real Vault operation)
 5. **Event bus → NodeRuntime → handler flow** (full integration)
 6. **Multi-node routing** (envelope routing to correct node)
 

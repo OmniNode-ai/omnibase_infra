@@ -916,6 +916,7 @@ class TestContextSerialization:
             "operation": None,
             "target_name": None,
             "correlation_id": None,
+            "namespace": None,
         }
 
     def test_context_to_dict_with_all_fields(self) -> None:

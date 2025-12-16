@@ -89,6 +89,8 @@ class RuntimeHostError(ModelOnexError):
                 structured_context["operation"] = context.operation
             if context.target_name is not None:
                 structured_context["target_name"] = context.target_name
+            if context.namespace is not None:
+                structured_context["namespace"] = context.namespace
             correlation_id = context.correlation_id
 
         # Initialize base error with default error code

@@ -68,4 +68,41 @@ See `docs/` for planning documents:
 
 ## Development
 
+### Pre-commit Hooks Setup
+
+This repository uses pre-commit hooks for automatic code formatting and validation.
+
+**Initial Setup** (run once):
+```bash
+poetry run pre-commit install
+poetry run pre-commit install --hook-type pre-push
+```
+
+**What happens automatically**:
+- On `git commit`: Ruff formatting, file checks, ONEX validations
+- On `git push`: Type checking with mypy
+
+**Manual execution** (optional):
+```bash
+# Run all pre-commit hooks
+poetry run pre-commit run --all-files
+
+# Run specific hook
+poetry run pre-commit run ruff-format --all-files
+
+# Update hook versions
+poetry run pre-commit autoupdate
+```
+
+**Note**: If hooks modify files, you need to re-stage and commit again. This ensures formatting is always applied before code reaches CI.
+
+### Ruff Formatting
+
+Ruff handles both formatting and linting (replaces black + isort):
+- Format code: `poetry run ruff format .`
+- Check and fix linting: `poetry run ruff check --fix .`
+- Both run automatically via pre-commit hooks
+
+### Development Workflow
+
 Follow the patterns in `omniintelligence` repository for ONEX compliance.

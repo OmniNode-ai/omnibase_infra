@@ -83,7 +83,7 @@ runtime:
 - `retry_policy` - Reserved for Beta resilience
 - `rate_limit` - Reserved for Beta throttling
 - `handlers.type: "local"` - LocalHandler forbidden in infra contracts
-- `handlers.type: "vault"` - VaultHandler deferred to Beta
+- `handlers.type: "vault"` - VaultAdapter deferred to Beta
 - `handlers.type: "consul"` - ConsulHandler deferred to Beta
 
 ---
@@ -831,7 +831,7 @@ src/omnibase_infra/
 ```
 
 **Deferred to Beta**:
-- `handlers/vault_handler.py`
+- `handlers/handler_vault.py`
 - `handlers/consul_handler.py`
 - `event_bus/kafka_event_bus.py`
 - `runtime/secret_resolver.py`

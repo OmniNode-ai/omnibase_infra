@@ -7,7 +7,6 @@ encapsulating common structured fields to reduce __init__ parameter count
 while maintaining strong typing per ONEX standards.
 """
 
-from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +27,7 @@ class ModelInfraErrorContext(BaseModel):
         operation: Operation being performed (connect, query, authenticate, etc.)
         target_name: Target resource or endpoint name
         correlation_id: Request correlation ID for distributed tracing
+        namespace: Vault namespace (Enterprise feature) or other service-specific namespace
 
     Example:
         >>> context = ModelInfraErrorContext(
@@ -35,6 +35,7 @@ class ModelInfraErrorContext(BaseModel):
         ...     operation="process_request",
         ...     target_name="api-gateway",
         ...     correlation_id=uuid4(),
+        ...     namespace="engineering",
         ... )
         >>> raise RuntimeHostError("Operation failed", context=context)
     """
@@ -60,6 +61,10 @@ class ModelInfraErrorContext(BaseModel):
     correlation_id: UUID | None = Field(
         default=None,
         description="Request correlation ID for distributed tracing",
+    )
+    namespace: str | None = Field(
+        default=None,
+        description="Vault namespace (Enterprise feature) or other service-specific namespace",
     )
 
     @classmethod
