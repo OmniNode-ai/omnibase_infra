@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-# mypy: disable-error-code="index, operator, arg-type"
 """Unit tests for ConsulHandler.
 
 These tests use mocked consul client to validate ConsulHandler behavior
@@ -28,14 +27,9 @@ from omnibase_infra.errors import (
 from omnibase_infra.handlers.handler_consul import ConsulHandler
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
 
-# Type alias for consul config dict values
-ConsulConfigValue = (
-    str | int | float | bool | dict[str, str | int | float | bool] | None
-)
-
 
 @pytest.fixture
-def consul_config() -> dict[str, ConsulConfigValue]:
+def consul_config() -> dict[str, object]:
     """Provide test Consul configuration."""
     return {
         "host": "consul.example.com",
@@ -156,7 +150,7 @@ class TestConsulHandlerInitialization:
     @pytest.mark.asyncio
     async def test_initialize_success(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful initialization with valid config."""
@@ -199,7 +193,7 @@ class TestConsulHandlerInitialization:
     @pytest.mark.asyncio
     async def test_initialize_with_token(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test initialization with ACL token."""
@@ -220,7 +214,7 @@ class TestConsulHandlerInitialization:
     async def test_initialize_invalid_port(self) -> None:
         """Test initialization fails with invalid port."""
         handler = ConsulHandler()
-        config: dict[str, ConsulConfigValue] = {"port": 0}
+        config: dict[str, object] = {"port": 0}
 
         with pytest.raises((ProtocolConfigurationError, RuntimeHostError)):
             await handler.initialize(config)
@@ -229,7 +223,7 @@ class TestConsulHandlerInitialization:
     async def test_initialize_invalid_scheme(self) -> None:
         """Test initialization fails with invalid scheme."""
         handler = ConsulHandler()
-        config: dict[str, ConsulConfigValue] = {"scheme": "ftp"}
+        config: dict[str, object] = {"scheme": "ftp"}
 
         with pytest.raises((ProtocolConfigurationError, RuntimeHostError)):
             await handler.initialize(config)
@@ -237,7 +231,7 @@ class TestConsulHandlerInitialization:
     @pytest.mark.asyncio
     async def test_initialize_connection_failure(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
     ) -> None:
         """Test initialization fails with connection error."""
         handler = ConsulHandler()
@@ -255,7 +249,7 @@ class TestConsulHandlerInitialization:
     @pytest.mark.asyncio
     async def test_initialize_no_leader(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test initialization fails when cluster has no leader."""
@@ -320,7 +314,7 @@ class TestConsulHandlerKVOperations:
     @pytest.mark.asyncio
     async def test_kv_get_success(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful KV get operation."""
@@ -357,7 +351,7 @@ class TestConsulHandlerKVOperations:
     @pytest.mark.asyncio
     async def test_kv_get_not_found(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV get when key not found."""
@@ -391,7 +385,7 @@ class TestConsulHandlerKVOperations:
     @pytest.mark.asyncio
     async def test_kv_get_recurse(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV get with recurse option."""
@@ -441,7 +435,7 @@ class TestConsulHandlerKVOperations:
     @pytest.mark.asyncio
     async def test_kv_put_success(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful KV put operation."""
@@ -474,7 +468,7 @@ class TestConsulHandlerKVOperations:
     @pytest.mark.asyncio
     async def test_kv_put_with_flags(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV put with flags parameter."""
@@ -502,7 +496,7 @@ class TestConsulHandlerKVOperations:
     @pytest.mark.asyncio
     async def test_kv_operation_missing_key(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV operation fails with missing key."""
@@ -528,7 +522,7 @@ class TestConsulHandlerKVOperations:
     @pytest.mark.asyncio
     async def test_kv_put_missing_value(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test KV put fails with missing value."""
@@ -558,7 +552,7 @@ class TestConsulHandlerServiceOperations:
     @pytest.mark.asyncio
     async def test_register_service_success(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful service registration."""
@@ -595,7 +589,7 @@ class TestConsulHandlerServiceOperations:
     @pytest.mark.asyncio
     async def test_register_service_minimal(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test service registration with minimal parameters."""
@@ -618,6 +612,7 @@ class TestConsulHandlerServiceOperations:
 
             assert response["status"] == "success"
             payload = response["payload"]
+            assert isinstance(payload, dict)
             assert payload["registered"] is True
             # service_id defaults to name when not provided
             assert payload["service_id"] == "my-service"
@@ -625,7 +620,7 @@ class TestConsulHandlerServiceOperations:
     @pytest.mark.asyncio
     async def test_register_service_missing_name(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test service registration fails with missing name."""
@@ -651,7 +646,7 @@ class TestConsulHandlerServiceOperations:
     @pytest.mark.asyncio
     async def test_deregister_service_success(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test successful service deregistration."""
@@ -681,7 +676,7 @@ class TestConsulHandlerServiceOperations:
     @pytest.mark.asyncio
     async def test_deregister_service_missing_id(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test service deregistration fails with missing service_id."""
@@ -711,7 +706,7 @@ class TestConsulHandlerHealthOperations:
     @pytest.mark.asyncio
     async def test_health_check_operation_success(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test health check via execute operation."""
@@ -740,7 +735,7 @@ class TestConsulHandlerHealthOperations:
     @pytest.mark.asyncio
     async def test_handler_health_check_success(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test handler health check returns healthy status."""
@@ -762,7 +757,7 @@ class TestConsulHandlerHealthOperations:
     @pytest.mark.asyncio
     async def test_handler_health_check_unhealthy(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test health check propagates errors."""
@@ -791,7 +786,7 @@ class TestConsulHandlerExecuteRouting:
     @pytest.mark.asyncio
     async def test_execute_routes_to_kv_get(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test execute routes to KV get operation."""
@@ -815,7 +810,7 @@ class TestConsulHandlerExecuteRouting:
     @pytest.mark.asyncio
     async def test_execute_unsupported_operation(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test execute with unsupported operation raises error."""
@@ -857,7 +852,7 @@ class TestConsulHandlerExecuteRouting:
     @pytest.mark.asyncio
     async def test_execute_missing_operation(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test execute fails with missing operation."""
@@ -882,7 +877,7 @@ class TestConsulHandlerExecuteRouting:
     @pytest.mark.asyncio
     async def test_execute_missing_payload(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test execute fails with missing payload."""
@@ -911,7 +906,7 @@ class TestConsulHandlerCorrelationId:
     @pytest.mark.asyncio
     async def test_correlation_id_extraction_uuid(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test correlation ID extraction from UUID."""
@@ -936,7 +931,7 @@ class TestConsulHandlerCorrelationId:
     @pytest.mark.asyncio
     async def test_correlation_id_extraction_string(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test correlation ID extraction from string."""
@@ -950,7 +945,7 @@ class TestConsulHandlerCorrelationId:
 
             test_uuid = uuid4()
             test_uuid_str = str(test_uuid)
-            envelope = {
+            envelope: dict[str, object] = {
                 "operation": "consul.kv_get",
                 "payload": {"key": "test/key"},
                 "correlation_id": test_uuid_str,
@@ -962,7 +957,7 @@ class TestConsulHandlerCorrelationId:
     @pytest.mark.asyncio
     async def test_correlation_id_generation(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test correlation ID is generated when not provided."""
@@ -974,7 +969,7 @@ class TestConsulHandlerCorrelationId:
             MockClient.return_value = mock_consul_client
             await handler.initialize(consul_config)
 
-            envelope = {
+            envelope: dict[str, object] = {
                 "operation": "consul.kv_get",
                 "payload": {"key": "test/key"},
             }
@@ -991,7 +986,7 @@ class TestConsulHandlerDescribe:
     @pytest.mark.asyncio
     async def test_describe(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test describe returns handler metadata."""
@@ -1026,7 +1021,7 @@ class TestConsulHandlerShutdown:
     @pytest.mark.asyncio
     async def test_shutdown(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test handler shutdown releases resources."""
@@ -1054,7 +1049,7 @@ class TestConsulHandlerErrorHandling:
     @pytest.mark.asyncio
     async def test_connection_error_handling(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test connection error is properly wrapped."""
@@ -1083,7 +1078,7 @@ class TestConsulHandlerErrorHandling:
     @pytest.mark.asyncio
     async def test_timeout_error_handling(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test timeout error is properly wrapped."""
@@ -1112,7 +1107,7 @@ class TestConsulHandlerErrorHandling:
     @pytest.mark.asyncio
     async def test_authentication_error_handling(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test authentication error is properly wrapped."""
@@ -1146,7 +1141,7 @@ class TestConsulHandlerRetryLogic:
     @pytest.mark.asyncio
     async def test_retry_on_transient_failure(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test retry logic on transient failures."""
@@ -1180,7 +1175,7 @@ class TestConsulHandlerRetryLogic:
     @pytest.mark.asyncio
     async def test_retry_exhausted(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test retry logic when all attempts exhausted."""
@@ -1218,7 +1213,7 @@ class TestConsulHandlerErrorCodes:
         handler = ConsulHandler()
 
         # Invalid configuration
-        invalid_config: dict[str, ConsulConfigValue] = {
+        invalid_config: dict[str, object] = {
             "timeout_seconds": 400.0,  # Exceeds max
         }
 
@@ -1232,7 +1227,7 @@ class TestConsulHandlerErrorCodes:
     @pytest.mark.asyncio
     async def test_connection_error_code(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test InfraConnectionError has correct error code."""
@@ -1265,7 +1260,7 @@ class TestConsulHandlerErrorCodes:
     @pytest.mark.asyncio
     async def test_authentication_error_code(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test InfraAuthenticationError has correct error code."""
@@ -1302,7 +1297,7 @@ class TestConsulHandlerThreadPool:
     @pytest.mark.asyncio
     async def test_thread_pool_default_size(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test thread pool uses default size when not specified."""
@@ -1323,7 +1318,7 @@ class TestConsulHandlerThreadPool:
     @pytest.mark.asyncio
     async def test_thread_pool_shutdown_on_handler_shutdown(
         self,
-        consul_config: dict[str, ConsulConfigValue],
+        consul_config: dict[str, object],
         mock_consul_client: MagicMock,
     ) -> None:
         """Test thread pool is properly shutdown when handler shuts down."""

@@ -394,8 +394,249 @@ class TestModelConsulHandlerConfigEdgeCases:
         assert ModelConsulRetryConfig.model_config.get("from_attributes") is True
 
 
+class TestModelConsulConfigEquality:
+    """Tests for model equality, hashing, and serialization."""
+
+    def test_retry_config_equality_same_values(self) -> None:
+        """Test retry config equality with identical values."""
+        config1 = ModelConsulRetryConfig(
+            max_attempts=5,
+            initial_delay_seconds=2.0,
+            max_delay_seconds=60.0,
+            exponential_base=2.5,
+        )
+        config2 = ModelConsulRetryConfig(
+            max_attempts=5,
+            initial_delay_seconds=2.0,
+            max_delay_seconds=60.0,
+            exponential_base=2.5,
+        )
+        assert config1 == config2
+
+    def test_retry_config_equality_different_values(self) -> None:
+        """Test retry config inequality with different values."""
+        config1 = ModelConsulRetryConfig(max_attempts=3)
+        config2 = ModelConsulRetryConfig(max_attempts=5)
+        assert config1 != config2
+
+    def test_retry_config_equality_default_values(self) -> None:
+        """Test retry config equality using default values."""
+        config1 = ModelConsulRetryConfig()
+        config2 = ModelConsulRetryConfig()
+        assert config1 == config2
+
+    def test_handler_config_equality_same_values(self) -> None:
+        """Test handler config equality with identical values."""
+        config1 = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+            scheme="https",
+            timeout_seconds=45.0,
+        )
+        config2 = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+            scheme="https",
+            timeout_seconds=45.0,
+        )
+        assert config1 == config2
+
+    def test_handler_config_equality_different_values(self) -> None:
+        """Test handler config inequality with different values."""
+        config1 = ModelConsulHandlerConfig(host="host1.example.com")
+        config2 = ModelConsulHandlerConfig(host="host2.example.com")
+        assert config1 != config2
+
+    def test_handler_config_equality_default_values(self) -> None:
+        """Test handler config equality using default values."""
+        config1 = ModelConsulHandlerConfig()
+        config2 = ModelConsulHandlerConfig()
+        assert config1 == config2
+
+    def test_handler_config_equality_with_nested_retry(self) -> None:
+        """Test handler config equality considering nested retry config."""
+        retry1 = ModelConsulRetryConfig(max_attempts=5)
+        retry2 = ModelConsulRetryConfig(max_attempts=5)
+        config1 = ModelConsulHandlerConfig(retry=retry1)
+        config2 = ModelConsulHandlerConfig(retry=retry2)
+        assert config1 == config2
+
+    def test_handler_config_inequality_with_different_nested_retry(self) -> None:
+        """Test handler config inequality with different nested retry config."""
+        config1 = ModelConsulHandlerConfig(retry=ModelConsulRetryConfig(max_attempts=3))
+        config2 = ModelConsulHandlerConfig(retry=ModelConsulRetryConfig(max_attempts=5))
+        assert config1 != config2
+
+    def test_retry_config_hash_same_values(self) -> None:
+        """Test retry config hash consistency with identical values."""
+        config1 = ModelConsulRetryConfig(max_attempts=5)
+        config2 = ModelConsulRetryConfig(max_attempts=5)
+        assert hash(config1) == hash(config2)
+
+    def test_retry_config_hash_different_values(self) -> None:
+        """Test retry config hash differs with different values."""
+        config1 = ModelConsulRetryConfig(max_attempts=3)
+        config2 = ModelConsulRetryConfig(max_attempts=5)
+        # Different values should (usually) produce different hashes
+        # Note: hash collisions are possible but unlikely for different configs
+        assert hash(config1) != hash(config2)
+
+    def test_handler_config_hash_same_values(self) -> None:
+        """Test handler config hash consistency with identical values."""
+        config1 = ModelConsulHandlerConfig(host="consul.example.com", port=8501)
+        config2 = ModelConsulHandlerConfig(host="consul.example.com", port=8501)
+        assert hash(config1) == hash(config2)
+
+    def test_handler_config_hash_usable_in_set(self) -> None:
+        """Test handler config can be used in sets (hashable)."""
+        config1 = ModelConsulHandlerConfig(host="host1.example.com")
+        config2 = ModelConsulHandlerConfig(host="host2.example.com")
+        config3 = ModelConsulHandlerConfig(host="host1.example.com")
+
+        config_set = {config1, config2, config3}
+        # config1 and config3 are equal, so set should have 2 unique items
+        assert len(config_set) == 2
+
+    def test_retry_config_hash_usable_as_dict_key(self) -> None:
+        """Test retry config can be used as dictionary key (hashable)."""
+        config1 = ModelConsulRetryConfig(max_attempts=3)
+        config2 = ModelConsulRetryConfig(max_attempts=5)
+
+        config_dict = {config1: "fast_retry", config2: "slow_retry"}
+        assert config_dict[config1] == "fast_retry"
+        assert config_dict[config2] == "slow_retry"
+
+    def test_retry_config_str_representation(self) -> None:
+        """Test retry config string representation is meaningful."""
+        config = ModelConsulRetryConfig(
+            max_attempts=5,
+            initial_delay_seconds=2.0,
+        )
+        str_repr = str(config)
+        assert "max_attempts" in str_repr
+        assert "5" in str_repr
+
+    def test_retry_config_repr_representation(self) -> None:
+        """Test retry config repr is valid and recreatable."""
+        config = ModelConsulRetryConfig(max_attempts=5)
+        repr_str = repr(config)
+        assert "ModelConsulRetryConfig" in repr_str
+        assert "max_attempts" in repr_str
+        assert "5" in repr_str
+
+    def test_handler_config_str_representation(self) -> None:
+        """Test handler config string representation is meaningful."""
+        config = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+        )
+        str_repr = str(config)
+        assert "host" in str_repr
+        assert "consul.example.com" in str_repr
+        assert "port" in str_repr
+        assert "8501" in str_repr
+
+    def test_handler_config_repr_representation(self) -> None:
+        """Test handler config repr is valid and recreatable."""
+        config = ModelConsulHandlerConfig(host="consul.example.com")
+        repr_str = repr(config)
+        assert "ModelConsulHandlerConfig" in repr_str
+        assert "host" in repr_str
+        assert "consul.example.com" in repr_str
+
+    def test_handler_config_str_excludes_token_value(self) -> None:
+        """Test handler config string representation excludes token secret."""
+        config = ModelConsulHandlerConfig(token=SecretStr("super-secret-token"))
+        str_repr = str(config)
+        # The actual token value should be hidden
+        assert "super-secret-token" not in str_repr
+        # But token field should be present
+        assert "token" in str_repr
+
+    def test_handler_config_repr_excludes_token_value(self) -> None:
+        """Test handler config repr excludes token secret value."""
+        config = ModelConsulHandlerConfig(token=SecretStr("my-secret-token"))
+        repr_str = repr(config)
+        # The actual token value should be hidden
+        assert "my-secret-token" not in repr_str
+
+    def test_retry_config_model_dump_serialization(self) -> None:
+        """Test retry config model_dump serialization."""
+        config = ModelConsulRetryConfig(
+            max_attempts=5,
+            initial_delay_seconds=2.0,
+            max_delay_seconds=60.0,
+            exponential_base=2.5,
+        )
+        dumped = config.model_dump()
+        assert isinstance(dumped, dict)
+        assert dumped["max_attempts"] == 5
+        assert dumped["initial_delay_seconds"] == 2.0
+        assert dumped["max_delay_seconds"] == 60.0
+        assert dumped["exponential_base"] == 2.5
+
+    def test_handler_config_model_dump_serialization(self) -> None:
+        """Test handler config model_dump serialization."""
+        config = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+            scheme="https",
+        )
+        dumped = config.model_dump()
+        assert isinstance(dumped, dict)
+        assert dumped["host"] == "consul.example.com"
+        assert dumped["port"] == 8501
+        assert dumped["scheme"] == "https"
+        # Nested retry config should also be serialized
+        assert "retry" in dumped
+        assert isinstance(dumped["retry"], dict)
+
+    def test_handler_config_model_dump_json_serialization(self) -> None:
+        """Test handler config JSON serialization."""
+        config = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+        )
+        json_str = config.model_dump_json()
+        assert isinstance(json_str, str)
+        assert "consul.example.com" in json_str
+        assert "8501" in json_str
+
+    def test_retry_config_model_dump_json_serialization(self) -> None:
+        """Test retry config JSON serialization."""
+        config = ModelConsulRetryConfig(max_attempts=7)
+        json_str = config.model_dump_json()
+        assert isinstance(json_str, str)
+        assert "7" in json_str
+
+    def test_handler_config_roundtrip_serialization(self) -> None:
+        """Test handler config can be serialized and deserialized."""
+        original = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+            scheme="https",
+            timeout_seconds=45.0,
+        )
+        dumped = original.model_dump()
+        restored = ModelConsulHandlerConfig(**dumped)
+        assert original == restored
+
+    def test_retry_config_roundtrip_serialization(self) -> None:
+        """Test retry config can be serialized and deserialized."""
+        original = ModelConsulRetryConfig(
+            max_attempts=7,
+            initial_delay_seconds=3.0,
+            max_delay_seconds=90.0,
+            exponential_base=2.5,
+        )
+        dumped = original.model_dump()
+        restored = ModelConsulRetryConfig(**dumped)
+        assert original == restored
+
+
 __all__: list[str] = [
     "TestModelConsulRetryConfig",
     "TestModelConsulHandlerConfig",
     "TestModelConsulHandlerConfigEdgeCases",
+    "TestModelConsulConfigEquality",
 ]
