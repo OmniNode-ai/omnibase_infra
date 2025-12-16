@@ -46,8 +46,8 @@ from omnibase_infra.handlers.model_vault_handler_config import ModelVaultAdapter
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MOUNT_POINT: str = "secret"
-_SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
+DEFAULT_MOUNT_POINT: str = "secret"
+SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
     {
         "vault.read_secret",
         "vault.write_secret",
@@ -179,7 +179,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -192,7 +192,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -204,7 +204,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -227,7 +227,7 @@ class VaultAdapter:
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation="initialize",
-                    target_name="vault_handler",
+                    target_name="vault_adapter",
                     correlation_id=init_correlation_id,
                 )
                 raise InfraAuthenticationError(
@@ -235,8 +235,40 @@ class VaultAdapter:
                     context=ctx,
                 )
 
-            # Initialize token expiration tracking
-            self._token_expires_at = time.time() + 3600.0  # Default 1 hour TTL
+            # Initialize token expiration tracking by querying actual TTL from Vault
+            try:
+                token_info = self._client.auth.token.lookup_self()
+                token_data = token_info.get("data", {})
+                if isinstance(token_data, dict):
+                    # TTL is in seconds, use it if available
+                    ttl_seconds = token_data.get("ttl", 3600)
+                    if isinstance(ttl_seconds, int) and ttl_seconds > 0:
+                        self._token_expires_at = time.time() + ttl_seconds
+                    else:
+                        # Fallback to default if TTL is 0 or invalid
+                        self._token_expires_at = time.time() + 3600.0
+                else:
+                    # Fallback to default if data is not a dict
+                    self._token_expires_at = time.time() + 3600.0
+
+                logger.info(
+                    "Token TTL initialized from Vault",
+                    extra={
+                        "ttl_seconds": ttl_seconds if isinstance(ttl_seconds, int) else 3600,
+                        "correlation_id": str(init_correlation_id),
+                    },
+                )
+            except Exception as e:
+                # Fallback to default TTL if lookup fails
+                logger.warning(
+                    "Failed to query token TTL, using default",
+                    extra={
+                        "error_type": type(e).__name__,
+                        "default_ttl_seconds": 3600,
+                        "correlation_id": str(init_correlation_id),
+                    },
+                )
+                self._token_expires_at = time.time() + 3600.0
 
             # Create bounded thread pool executor for production safety
             self._max_workers = self._config.max_concurrent_operations
@@ -265,7 +297,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=init_correlation_id,
             )
             raise InfraAuthenticationError(
@@ -276,7 +308,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=init_correlation_id,
             )
             raise InfraConnectionError(
@@ -287,7 +319,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="initialize",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
@@ -301,7 +333,7 @@ class VaultAdapter:
         Cleanup includes:
             - Shutting down thread pool executor (waits for pending tasks)
             - Clearing Vault client connection
-            - Resetting circuit breaker state
+            - Resetting circuit breaker state (thread-safe)
         """
         if self._executor is not None:
             # Shutdown thread pool gracefully (wait for pending tasks)
@@ -313,10 +345,11 @@ class VaultAdapter:
             # hvac.Client doesn't have async close, just clear reference
             self._client = None
 
-        # Reset circuit breaker state
-        self._circuit_state = CircuitState.CLOSED
-        self._circuit_failure_count = 0
-        self._circuit_last_failure_time = 0.0
+        # Reset circuit breaker state (thread-safe)
+        with self._circuit_lock:
+            self._circuit_state = CircuitState.CLOSED
+            self._circuit_failure_count = 0
+            self._circuit_last_failure_time = 0.0
 
         self._initialized = False
         self._config = None
@@ -346,7 +379,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="execute",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -359,7 +392,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="execute",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -367,16 +400,16 @@ class VaultAdapter:
                 context=ctx,
             )
 
-        if operation not in _SUPPORTED_OPERATIONS:
+        if operation not in SUPPORTED_OPERATIONS:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation=operation,
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
                 f"Operation '{operation}' not supported in MVP. "
-                f"Available: {', '.join(sorted(_SUPPORTED_OPERATIONS))}",
+                f"Available: {', '.join(sorted(SUPPORTED_OPERATIONS))}",
                 context=ctx,
             )
 
@@ -385,7 +418,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation=operation,
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -477,7 +510,10 @@ class VaultAdapter:
                 time_since_failure = current_time - self._circuit_last_failure_time
 
                 # Check if reset timeout has passed
-                if time_since_failure >= self._config.circuit_breaker_reset_timeout_seconds:
+                if (
+                    time_since_failure
+                    >= self._config.circuit_breaker_reset_timeout_seconds
+                ):
                     # Transition to HALF_OPEN to test service recovery
                     self._circuit_state = CircuitState.HALF_OPEN
                     self._circuit_failure_count = 0
@@ -497,7 +533,7 @@ class VaultAdapter:
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation="circuit_breaker_check",
-                        target_name="vault_handler",
+                        target_name="vault_adapter",
                         correlation_id=correlation_id,
                     )
                     raise InfraUnavailableError(
@@ -612,12 +648,7 @@ class VaultAdapter:
         for attempt in range(retry_config.max_attempts):
             try:
                 # hvac is synchronous, wrap in custom thread executor
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    # No running loop, create new one (should not happen in async context)
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                loop = asyncio.get_running_loop()
 
                 result = await asyncio.wait_for(
                     loop.run_in_executor(self._executor, func),
@@ -637,7 +668,7 @@ class VaultAdapter:
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
-                        target_name="vault_handler",
+                        target_name="vault_adapter",
                         correlation_id=correlation_id,
                     )
                     raise InfraTimeoutError(
@@ -652,7 +683,7 @@ class VaultAdapter:
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation=operation,
-                    target_name="vault_handler",
+                    target_name="vault_adapter",
                     correlation_id=correlation_id,
                 )
                 raise InfraAuthenticationError(
@@ -665,7 +696,7 @@ class VaultAdapter:
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation=operation,
-                    target_name="vault_handler",
+                    target_name="vault_adapter",
                     correlation_id=correlation_id,
                 )
                 raise SecretResolutionError(
@@ -681,7 +712,7 @@ class VaultAdapter:
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
-                        target_name="vault_handler",
+                        target_name="vault_adapter",
                         correlation_id=correlation_id,
                     )
                     raise InfraUnavailableError(
@@ -697,7 +728,7 @@ class VaultAdapter:
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
-                        target_name="vault_handler",
+                        target_name="vault_adapter",
                         correlation_id=correlation_id,
                     )
                     raise InfraConnectionError(
@@ -750,7 +781,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.read_secret",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -758,9 +789,9 @@ class VaultAdapter:
                 context=ctx,
             )
 
-        mount_point = payload.get("mount_point", _DEFAULT_MOUNT_POINT)
+        mount_point = payload.get("mount_point", DEFAULT_MOUNT_POINT)
         if not isinstance(mount_point, str):
-            mount_point = _DEFAULT_MOUNT_POINT
+            mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
             raise RuntimeError("Client not initialized")
@@ -816,7 +847,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -829,7 +860,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.write_secret",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -837,9 +868,9 @@ class VaultAdapter:
                 context=ctx,
             )
 
-        mount_point = payload.get("mount_point", _DEFAULT_MOUNT_POINT)
+        mount_point = payload.get("mount_point", DEFAULT_MOUNT_POINT)
         if not isinstance(mount_point, str):
-            mount_point = _DEFAULT_MOUNT_POINT
+            mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
             raise RuntimeError("Client not initialized")
@@ -847,10 +878,12 @@ class VaultAdapter:
         def write_func() -> dict[str, object]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, object] = self._client.secrets.kv.v2.create_or_update_secret(
-                path=path,
-                secret=data,
-                mount_point=mount_point,
+            result: dict[str, object] = (
+                self._client.secrets.kv.v2.create_or_update_secret(
+                    path=path,
+                    secret=data,
+                    mount_point=mount_point,
+                )
             )
             return result
 
@@ -893,7 +926,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.delete_secret",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -901,9 +934,9 @@ class VaultAdapter:
                 context=ctx,
             )
 
-        mount_point = payload.get("mount_point", _DEFAULT_MOUNT_POINT)
+        mount_point = payload.get("mount_point", DEFAULT_MOUNT_POINT)
         if not isinstance(mount_point, str):
-            mount_point = _DEFAULT_MOUNT_POINT
+            mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
             raise RuntimeError("Client not initialized")
@@ -949,7 +982,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.list_secrets",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -957,9 +990,9 @@ class VaultAdapter:
                 context=ctx,
             )
 
-        mount_point = payload.get("mount_point", _DEFAULT_MOUNT_POINT)
+        mount_point = payload.get("mount_point", DEFAULT_MOUNT_POINT)
         if not isinstance(mount_point, str):
-            mount_point = _DEFAULT_MOUNT_POINT
+            mount_point = DEFAULT_MOUNT_POINT
 
         if self._client is None:
             raise RuntimeError("Client not initialized")
@@ -1005,7 +1038,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.renew_token",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise RuntimeHostError(
@@ -1052,7 +1085,7 @@ class VaultAdapter:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.VAULT,
                 operation="vault.renew_token",
-                target_name="vault_handler",
+                target_name="vault_adapter",
                 correlation_id=correlation_id,
             )
             raise InfraAuthenticationError(
@@ -1090,31 +1123,41 @@ class VaultAdapter:
     async def health_check(self) -> dict[str, object]:
         """Return handler health status.
 
+        Uses thread pool executor and retry logic for consistency with other operations.
+        Includes circuit breaker protection and exponential backoff on transient failures.
+
         Returns:
             Health status dict with handler state information
         """
         healthy = False
+        correlation_id = uuid4()
+
         if self._initialized and self._client is not None:
             try:
-                # Synchronous hvac health check using thread pool for consistency
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    # No running loop, create new one (should not happen in async context)
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
 
-                health_result = await loop.run_in_executor(
-                    self._executor,
-                    self._client.sys.read_health_status,
+                def health_check_func() -> dict[str, object]:
+                    if self._client is None:
+                        raise RuntimeError("Client not initialized")
+                    result: dict[str, object] = self._client.sys.read_health_status()
+                    return result
+
+                # Use thread pool executor with retry logic for consistency
+                health_result = await self._execute_with_retry(
+                    "vault.health_check",
+                    health_check_func,
+                    correlation_id,
                 )
-                healthy = health_result.get("initialized", False)
+                # Type checking for healthy status extraction
+                initialized_val = health_result.get("initialized", False)
+                healthy = initialized_val if isinstance(initialized_val, bool) else False
+
             except Exception as e:
                 logger.warning(
                     "Health check failed",
                     extra={
                         "error_type": type(e).__name__,
                         "error": str(e),
+                        "correlation_id": str(correlation_id),
                     },
                 )
                 healthy = False
@@ -1154,7 +1197,7 @@ class VaultAdapter:
         """
         return {
             "handler_type": self.handler_type.value,
-            "supported_operations": sorted(_SUPPORTED_OPERATIONS),
+            "supported_operations": sorted(SUPPORTED_OPERATIONS),
             "timeout_seconds": self._config.timeout_seconds if self._config else 30.0,
             "initialized": self._initialized,
             "version": "0.1.0-mvp",

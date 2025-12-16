@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -55,6 +55,13 @@ def mock_hvac_client() -> MagicMock:
     client.is_authenticated.return_value = True
     client.secrets.kv.v2 = MagicMock()
     client.auth.token = MagicMock()
+    # Mock token lookup response with TTL
+    client.auth.token.lookup_self.return_value = {
+        "data": {
+            "ttl": 3600,  # 1 hour TTL in seconds
+            "renewable": True,
+        }
+    }
     client.sys = MagicMock()
     return client
 
@@ -155,12 +162,13 @@ class TestVaultAdapterInitialization:
         assert config.timeout_seconds == 30.0
 
         # Invalid timeout (too high)
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError) as exc_info:
             ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 timeout_seconds=400.0,  # Max is 300.0
             )
+        assert "timeout_seconds" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_secretstr_prevents_token_logging(self) -> None:
@@ -793,12 +801,14 @@ class TestVaultAdapterThreadPool:
 
             executor = handler._executor
             assert executor is not None
-            assert not executor._shutdown
 
             await handler.shutdown()
 
             assert handler._executor is None
-            assert executor._shutdown is True
+            # Verify executor was shut down by attempting to submit a task
+            # Shutdown executors raise RuntimeError on submit()
+            with pytest.raises(RuntimeError, match="cannot schedule new futures"):
+                executor.submit(lambda: None)
 
     @pytest.mark.asyncio
     async def test_operations_use_thread_pool(
@@ -858,20 +868,22 @@ class TestVaultAdapterThreadPool:
         assert config.max_concurrent_operations == 50
 
         # Invalid: below minimum (< 1)
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError) as exc_info:
             ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 max_concurrent_operations=0,
             )
+        assert "max_concurrent_operations" in str(exc_info.value)
 
         # Invalid: above maximum (> 100)
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError) as exc_info:
             ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 max_concurrent_operations=150,
             )
+        assert "max_concurrent_operations" in str(exc_info.value)
 
 
 class TestVaultAdapterCircuitBreaker:
@@ -992,21 +1004,31 @@ class TestVaultAdapterCircuitBreaker:
 
             assert handler._circuit_state == CircuitState.OPEN
 
-            # Wait for reset timeout
-            await asyncio.sleep(1.1)
+            # Mock time.time() to simulate timeout passage instead of sleeping
+            import time
 
-            # Now configure success response
-            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
-            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
-                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
-            }
+            original_time = time.time
+            mock_time_offset = 0.0
 
-            # Next request should transition to HALF_OPEN then succeed
-            response = await handler.execute(envelope)
+            def mock_time():
+                return original_time() + mock_time_offset
 
-            assert response["status"] == "success"
-            # Circuit should now be CLOSED (recovered)
-            assert handler._circuit_state == CircuitState.CLOSED
+            with patch("time.time", side_effect=mock_time):
+                # Advance time by more than reset timeout
+                mock_time_offset = 2.0
+
+                # Now configure success response
+                mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+                mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                    "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+                }
+
+                # Next request should transition to HALF_OPEN then succeed
+                response = await handler.execute(envelope)
+
+                assert response["status"] == "success"
+                # Circuit should now be CLOSED (recovered)
+                assert handler._circuit_state == CircuitState.CLOSED
 
     @pytest.mark.asyncio
     async def test_circuit_closes_on_success_in_half_open_state(
@@ -1041,22 +1063,32 @@ class TestVaultAdapterCircuitBreaker:
                 with pytest.raises(InfraConnectionError):
                     await handler.execute(envelope)
 
-            # Wait for timeout
-            await asyncio.sleep(1.1)
+            # Mock time.time() to simulate timeout passage instead of sleeping
+            import time
 
-            # Success response
-            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
-            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
-                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
-            }
+            original_time = time.time
+            mock_time_offset = 0.0
 
-            response = await handler.execute(envelope)
+            def mock_time():
+                return original_time() + mock_time_offset
 
-            from omnibase_infra.handlers.handler_vault import CircuitState
+            with patch("time.time", side_effect=mock_time):
+                # Advance time by more than reset timeout
+                mock_time_offset = 2.0
 
-            assert response["status"] == "success"
-            assert handler._circuit_state == CircuitState.CLOSED
-            assert handler._circuit_failure_count == 0
+                # Success response
+                mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+                mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                    "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+                }
+
+                response = await handler.execute(envelope)
+
+                from omnibase_infra.handlers.handler_vault import CircuitState
+
+                assert response["status"] == "success"
+                assert handler._circuit_state == CircuitState.CLOSED
+                assert handler._circuit_failure_count == 0
 
     @pytest.mark.asyncio
     async def test_circuit_reopens_on_failure_in_half_open_state(
@@ -1090,17 +1122,27 @@ class TestVaultAdapterCircuitBreaker:
                 with pytest.raises(InfraConnectionError):
                     await handler.execute(envelope)
 
-            # Wait for timeout (transitions to HALF_OPEN)
-            await asyncio.sleep(1.1)
+            # Mock time.time() to simulate timeout passage instead of sleeping
+            import time
 
-            # Next request still fails
-            with pytest.raises(InfraConnectionError):
-                await handler.execute(envelope)
+            original_time = time.time
+            mock_time_offset = 0.0
 
-            from omnibase_infra.handlers.handler_vault import CircuitState
+            def mock_time():
+                return original_time() + mock_time_offset
 
-            # Circuit should reopen
-            assert handler._circuit_state == CircuitState.OPEN
+            with patch("time.time", side_effect=mock_time):
+                # Advance time by more than reset timeout (transitions to HALF_OPEN)
+                mock_time_offset = 2.0
+
+                # Next request still fails
+                with pytest.raises(InfraConnectionError):
+                    await handler.execute(envelope)
+
+                from omnibase_infra.handlers.handler_vault import CircuitState
+
+                # Circuit should reopen
+                assert handler._circuit_state == CircuitState.OPEN
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_can_be_disabled(
@@ -1202,33 +1244,37 @@ class TestVaultAdapterCircuitBreaker:
         assert config.circuit_breaker_reset_timeout_seconds == 60.0
 
         # Invalid: threshold below minimum (< 1)
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError) as exc_info:
             ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_failure_threshold=0,
             )
+        assert "circuit_breaker_failure_threshold" in str(exc_info.value)
 
         # Invalid: threshold above maximum (> 20)
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError) as exc_info:
             ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_failure_threshold=25,
             )
+        assert "circuit_breaker_failure_threshold" in str(exc_info.value)
 
         # Invalid: timeout below minimum (< 1.0)
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError) as exc_info:
             ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_reset_timeout_seconds=0.5,
             )
+        assert "circuit_breaker_reset_timeout_seconds" in str(exc_info.value)
 
         # Invalid: timeout above maximum (> 300.0)
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError) as exc_info:
             ModelVaultAdapterConfig(
                 url="https://vault.example.com:8200",
                 token=SecretStr("s.test1234"),
                 circuit_breaker_reset_timeout_seconds=400.0,
             )
+        assert "circuit_breaker_reset_timeout_seconds" in str(exc_info.value)
