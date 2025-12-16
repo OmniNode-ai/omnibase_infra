@@ -18,8 +18,6 @@ All tests validate:
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -54,37 +52,33 @@ from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
 # Mock Classes for Testing
 # =============================================================================
 
-# Note: Mock handlers are simple classes that serve as unique types for registry.
-# They don't need to be fully functional - the registry only needs to store and
-# retrieve them. We use # type: ignore[arg-type] on registration calls.
-
 
 class MockHttpHandler:
-    """Mock HTTP handler for testing - simple class for registry type distinction."""
+    """Mock HTTP handler for testing."""
 
 
 class MockDbHandler:
-    """Mock database handler for testing - simple class for registry type distinction."""
+    """Mock database handler for testing."""
 
 
 class MockKafkaHandler:
-    """Mock Kafka handler for testing - simple class for registry type distinction."""
+    """Mock Kafka handler for testing."""
 
 
 class MockVaultHandler:
-    """Mock Vault handler for testing - simple class for registry type distinction."""
+    """Mock Vault handler for testing."""
 
 
 class MockConsulHandler:
-    """Mock Consul handler for testing - simple class for registry type distinction."""
+    """Mock Consul handler for testing."""
 
 
 class MockValkeyHandler:
-    """Mock Valkey handler for testing - simple class for registry type distinction."""
+    """Mock Valkey handler for testing."""
 
 
 class MockGrpcHandler:
-    """Mock gRPC handler for testing - simple class for registry type distinction."""
+    """Mock gRPC handler for testing."""
 
 
 class MockInMemoryEventBus:
@@ -106,24 +100,13 @@ class MockAlternativeEventBus:
 
 @pytest.fixture
 def handler_registry() -> ProtocolBindingRegistry:
-    """Provide a fresh ProtocolBindingRegistry instance for each test.
-
-    Note: This fixture uses direct instantiation for unit testing the
-    ProtocolBindingRegistry class itself. For integration tests that need
-    container-based access, use container_with_handler_registry or
-    container_with_registries fixtures from conftest.py.
-    """
+    """Provide a fresh ProtocolBindingRegistry instance for each test."""
     return ProtocolBindingRegistry()
 
 
 @pytest.fixture
 def event_bus_registry() -> EventBusBindingRegistry:
-    """Provide a fresh EventBusBindingRegistry instance for each test.
-
-    Note: This fixture uses direct instantiation for unit testing the
-    EventBusBindingRegistry class itself. For integration tests, use
-    container-based patterns.
-    """
+    """Provide a fresh EventBusBindingRegistry instance for each test."""
     return EventBusBindingRegistry()
 
 
@@ -131,9 +114,9 @@ def event_bus_registry() -> EventBusBindingRegistry:
 def populated_handler_registry() -> ProtocolBindingRegistry:
     """Provide a ProtocolBindingRegistry with pre-registered handlers."""
     registry = ProtocolBindingRegistry()
-    registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
-    registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)  # type: ignore[arg-type]
-    registry.register(HANDLER_TYPE_KAFKA, MockKafkaHandler)  # type: ignore[arg-type]
+    registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+    registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
+    registry.register(HANDLER_TYPE_KAFKA, MockKafkaHandler)
     return registry
 
 
@@ -141,12 +124,12 @@ def populated_handler_registry() -> ProtocolBindingRegistry:
 def populated_event_bus_registry() -> EventBusBindingRegistry:
     """Provide an EventBusBindingRegistry with pre-registered buses."""
     registry = EventBusBindingRegistry()
-    registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
+    registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
     return registry
 
 
 @pytest.fixture(autouse=True)
-def reset_singletons() -> Iterator[None]:
+def reset_singletons() -> None:  # type: ignore[misc]
     """Reset singleton instances before each test.
 
     This ensures tests are isolated and don't affect each other
@@ -181,7 +164,7 @@ class TestHandlerRegistryBasics:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test registering a handler successfully."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         assert handler_registry.is_registered(HANDLER_TYPE_HTTP)
         assert len(handler_registry) == 1
 
@@ -189,9 +172,9 @@ class TestHandlerRegistryBasics:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test registering multiple handlers."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_KAFKA, MockKafkaHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
+        handler_registry.register(HANDLER_TYPE_KAFKA, MockKafkaHandler)
         assert len(handler_registry) == 3
         assert handler_registry.is_registered(HANDLER_TYPE_HTTP)
         assert handler_registry.is_registered(HANDLER_TYPE_DATABASE)
@@ -201,7 +184,7 @@ class TestHandlerRegistryBasics:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test retrieving a registered handler class."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         handler_cls = handler_registry.get(HANDLER_TYPE_HTTP)
         assert handler_cls is MockHttpHandler
 
@@ -238,8 +221,8 @@ class TestHandlerRegistryListProtocols:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test list_protocols returns registered protocol types."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
         protocols = handler_registry.list_protocols()
         assert HANDLER_TYPE_HTTP in protocols
         assert HANDLER_TYPE_DATABASE in protocols
@@ -249,9 +232,9 @@ class TestHandlerRegistryListProtocols:
     ) -> None:
         """Test list_protocols returns protocols in alphabetical order."""
         # Register in non-alphabetical order
-        handler_registry.register(HANDLER_TYPE_KAFKA, MockKafkaHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_KAFKA, MockKafkaHandler)
+        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         protocols = handler_registry.list_protocols()
         # Should be sorted
         assert protocols == sorted(protocols)
@@ -264,7 +247,7 @@ class TestHandlerRegistryIsRegistered:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test is_registered returns True for registered handlers."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         assert handler_registry.is_registered(HANDLER_TYPE_HTTP) is True
 
     def test_is_registered_false(
@@ -277,7 +260,7 @@ class TestHandlerRegistryIsRegistered:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test is_registered returns False after handler is unregistered."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         handler_registry.unregister(HANDLER_TYPE_HTTP)
         assert handler_registry.is_registered(HANDLER_TYPE_HTTP) is False
 
@@ -289,7 +272,7 @@ class TestHandlerRegistryContains:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test 'in' operator works for registered handlers."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         assert HANDLER_TYPE_HTTP in handler_registry
 
     def test_not_contains_unregistered_handler(
@@ -315,8 +298,8 @@ class TestHandlerRegistryOverwrite:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test that registering same protocol type overwrites existing handler."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_HTTP, MockDbHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+        handler_registry.register(HANDLER_TYPE_HTTP, MockDbHandler)
         # Should now return the new handler
         handler_cls = handler_registry.get(HANDLER_TYPE_HTTP)
         assert handler_cls is MockDbHandler
@@ -327,9 +310,9 @@ class TestHandlerRegistryOverwrite:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test that overwriting one handler doesn't affect others."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_HTTP, MockKafkaHandler)  # type: ignore[arg-type]  # Overwrite
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
+        handler_registry.register(HANDLER_TYPE_HTTP, MockKafkaHandler)  # Overwrite
 
         assert handler_registry.get(HANDLER_TYPE_HTTP) is MockKafkaHandler
         assert handler_registry.get(HANDLER_TYPE_DATABASE) is MockDbHandler
@@ -342,7 +325,7 @@ class TestHandlerRegistryUnregister:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test unregistering an existing handler returns True."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         result = handler_registry.unregister(HANDLER_TYPE_HTTP)
         assert result is True
         assert HANDLER_TYPE_HTTP not in handler_registry
@@ -358,7 +341,7 @@ class TestHandlerRegistryUnregister:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test that unregistering twice is safe and returns False second time."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         assert handler_registry.unregister(HANDLER_TYPE_HTTP) is True
         assert handler_registry.unregister(HANDLER_TYPE_HTTP) is False
 
@@ -404,17 +387,17 @@ class TestHandlerRegistryLen:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test len() returns correct count after registrations."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         assert len(handler_registry) == 1
-        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
         assert len(handler_registry) == 2
 
     def test_len_after_unregister(
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test len() decreases after unregistration."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
         handler_registry.unregister(HANDLER_TYPE_HTTP)
         assert len(handler_registry) == 1
 
@@ -464,7 +447,7 @@ class TestHandlerRegistryThreadSafety:
         self, handler_registry: ProtocolBindingRegistry
     ) -> None:
         """Test concurrent reads and writes don't cause data corruption."""
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
 
         errors: list[Exception] = []
 
@@ -480,7 +463,7 @@ class TestHandlerRegistryThreadSafety:
         def write_handler() -> None:
             try:
                 for _ in range(100):
-                    handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+                    handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
             except Exception as e:
                 errors.append(e)
 
@@ -513,14 +496,14 @@ class TestEventBusRegistryBasics:
         self, event_bus_registry: EventBusBindingRegistry
     ) -> None:
         """Test registering an event bus successfully."""
-        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
         assert event_bus_registry.is_registered(EVENT_BUS_INMEMORY)
 
     def test_get_registered_event_bus(
         self, event_bus_registry: EventBusBindingRegistry
     ) -> None:
         """Test retrieving a registered event bus class."""
-        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
         bus_cls = event_bus_registry.get(EVENT_BUS_INMEMORY)
         assert bus_cls is MockInMemoryEventBus
 
@@ -547,8 +530,8 @@ class TestEventBusRegistryListBusKinds:
         self, event_bus_registry: EventBusBindingRegistry
     ) -> None:
         """Test list_bus_kinds returns registered bus kinds."""
-        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
-        event_bus_registry.register(EVENT_BUS_KAFKA, MockKafkaEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
+        event_bus_registry.register(EVENT_BUS_KAFKA, MockKafkaEventBus)
         kinds = event_bus_registry.list_bus_kinds()
         assert EVENT_BUS_INMEMORY in kinds
         assert EVENT_BUS_KAFKA in kinds
@@ -561,7 +544,7 @@ class TestEventBusRegistryIsRegistered:
         self, event_bus_registry: EventBusBindingRegistry
     ) -> None:
         """Test is_registered returns True for registered bus."""
-        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
         assert event_bus_registry.is_registered(EVENT_BUS_INMEMORY) is True
 
     def test_is_registered_bus_false(
@@ -578,9 +561,9 @@ class TestEventBusRegistryDuplicateRaises:
         self, event_bus_registry: EventBusBindingRegistry
     ) -> None:
         """Test that registering same bus_kind twice raises RuntimeHostError."""
-        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
         with pytest.raises(RuntimeHostError) as exc_info:
-            event_bus_registry.register(EVENT_BUS_INMEMORY, MockAlternativeEventBus)  # type: ignore[arg-type]
+            event_bus_registry.register(EVENT_BUS_INMEMORY, MockAlternativeEventBus)
         assert EVENT_BUS_INMEMORY in str(exc_info.value)
         assert "already registered" in str(exc_info.value)
 
@@ -588,9 +571,9 @@ class TestEventBusRegistryDuplicateRaises:
         self, event_bus_registry: EventBusBindingRegistry
     ) -> None:
         """Test that failed duplicate registration preserves original."""
-        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
         with pytest.raises(RuntimeHostError):
-            event_bus_registry.register(EVENT_BUS_INMEMORY, MockAlternativeEventBus)  # type: ignore[arg-type]
+            event_bus_registry.register(EVENT_BUS_INMEMORY, MockAlternativeEventBus)
         # Original should still be there
         bus_cls = event_bus_registry.get(EVENT_BUS_INMEMORY)
         assert bus_cls is MockInMemoryEventBus
@@ -599,9 +582,9 @@ class TestEventBusRegistryDuplicateRaises:
         self, event_bus_registry: EventBusBindingRegistry
     ) -> None:
         """Test that duplicate error includes existing class name in context."""
-        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
         with pytest.raises(RuntimeHostError) as exc_info:
-            event_bus_registry.register(EVENT_BUS_INMEMORY, MockAlternativeEventBus)  # type: ignore[arg-type]
+            event_bus_registry.register(EVENT_BUS_INMEMORY, MockAlternativeEventBus)
         # Error should have existing_class in context
         error = exc_info.value
         assert error.model.context.get("existing_class") == "MockInMemoryEventBus"
@@ -659,7 +642,7 @@ class TestHandlerRegistrySingleton:
     def test_singleton_state_persists(self) -> None:
         """Test that modifications to singleton persist across calls."""
         registry1 = get_handler_registry()
-        registry1.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        registry1.register(HANDLER_TYPE_HTTP, MockHttpHandler)
 
         registry2 = get_handler_registry()
         assert registry2.is_registered(HANDLER_TYPE_HTTP)
@@ -756,7 +739,7 @@ class TestGetHandlerClass:
     def test_get_handler_class_uses_singleton(self) -> None:
         """Test that get_handler_class uses singleton registry."""
         # Register via singleton
-        get_handler_registry().register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        get_handler_registry().register(HANDLER_TYPE_HTTP, MockHttpHandler)
         # Retrieve via convenience function
         handler_cls = get_handler_class(HANDLER_TYPE_HTTP)
         assert handler_cls is MockHttpHandler
@@ -939,7 +922,7 @@ class TestHandlerRegistryIntegration:
     ) -> None:
         """Test complete workflow: register, get, unregister, re-register."""
         # Register
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
         assert handler_registry.get(HANDLER_TYPE_HTTP) is MockHttpHandler
 
         # Unregister
@@ -948,7 +931,7 @@ class TestHandlerRegistryIntegration:
             handler_registry.get(HANDLER_TYPE_HTTP)
 
         # Re-register with different handler
-        handler_registry.register(HANDLER_TYPE_HTTP, MockDbHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockDbHandler)
         assert handler_registry.get(HANDLER_TYPE_HTTP) is MockDbHandler
 
     def test_all_handler_types_registration(
@@ -965,7 +948,7 @@ class TestHandlerRegistryIntegration:
             (HANDLER_TYPE_GRPC, MockGrpcHandler),
         ]
         for proto, cls in handlers:
-            handler_registry.register(proto, cls)  # type: ignore[arg-type]
+            handler_registry.register(proto, cls)
 
         assert len(handler_registry) == len(handlers)
         for proto, cls in handlers:
@@ -980,7 +963,7 @@ class TestEventBusRegistryIntegration:
     ) -> None:
         """Test complete workflow for event bus registration."""
         # Register
-        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_INMEMORY, MockInMemoryEventBus)
         assert event_bus_registry.get(EVENT_BUS_INMEMORY) is MockInMemoryEventBus
 
         # List
@@ -989,10 +972,10 @@ class TestEventBusRegistryIntegration:
 
         # Verify duplicate raises
         with pytest.raises(RuntimeHostError):
-            event_bus_registry.register(EVENT_BUS_INMEMORY, MockAlternativeEventBus)  # type: ignore[arg-type]
+            event_bus_registry.register(EVENT_BUS_INMEMORY, MockAlternativeEventBus)
 
         # Register different kind
-        event_bus_registry.register(EVENT_BUS_KAFKA, MockKafkaEventBus)  # type: ignore[arg-type]
+        event_bus_registry.register(EVENT_BUS_KAFKA, MockKafkaEventBus)
         assert event_bus_registry.get(EVENT_BUS_KAFKA) is MockKafkaEventBus
         assert len(event_bus_registry.list_bus_kinds()) == 2
 
@@ -1023,7 +1006,7 @@ class TestOperationPrefixRouting:
         Operations like "lolnope.query" MUST fail with RegistryError.
         """
         # Register only http
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
 
         # Unknown prefixes must raise RegistryError
         unknown_prefixes = ["lolnope", "unknown", "nonexistent", "fake"]
@@ -1111,8 +1094,8 @@ class TestOperationPrefixRouting:
         'lolnope.query' would be split to extract 'lolnope' prefix.
         """
         # Setup: Register only valid prefixes
-        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)  # type: ignore[arg-type]
-        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)  # type: ignore[arg-type]
+        handler_registry.register(HANDLER_TYPE_HTTP, MockHttpHandler)
+        handler_registry.register(HANDLER_TYPE_DATABASE, MockDbHandler)
 
         # Invalid operations that must fail
         invalid_operations = [

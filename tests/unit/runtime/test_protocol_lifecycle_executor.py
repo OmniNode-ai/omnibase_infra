@@ -446,9 +446,7 @@ class TestProtocolLifecycleExecutorHealthCheck:
 
         assert handler_type == "slow"
         assert health_result["healthy"] is False
-        error_msg = health_result.get("error", "")
-        assert isinstance(error_msg, str)
-        assert "timeout" in error_msg.lower()
+        assert "timeout" in health_result.get("error", "").lower()
 
     @pytest.mark.asyncio
     async def test_check_handler_health_error(
@@ -468,9 +466,7 @@ class TestProtocolLifecycleExecutorHealthCheck:
 
         assert handler_type == "failing"
         assert health_result["healthy"] is False
-        error_msg = health_result.get("error", "")
-        assert isinstance(error_msg, str)
-        assert "Health check failed" in error_msg
+        assert "Health check failed" in health_result.get("error", "")
 
     @pytest.mark.asyncio
     async def test_check_handler_health_no_method(
@@ -490,9 +486,7 @@ class TestProtocolLifecycleExecutorHealthCheck:
 
         assert handler_type == "no_health"
         assert health_result["healthy"] is True
-        note_msg = health_result.get("note", "")
-        assert isinstance(note_msg, str)
-        assert "no health_check method" in note_msg
+        assert "no health_check method" in health_result.get("note", "")
 
     @pytest.mark.asyncio
     async def test_check_handler_health_uses_default_timeout(

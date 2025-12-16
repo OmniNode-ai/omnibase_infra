@@ -416,9 +416,7 @@ class EnvelopeValidationError(RuntimeHostError):
     Used for:
     - Missing required fields (operation)
     - Missing required payload for data operations
-
-    Note: Invalid correlation_id formats are normalized (not rejected).
-    Invalid UUIDs are replaced with newly generated UUIDs during validation.
+    - Invalid correlation_id format
 
     This is a pre-dispatch validation error, NOT a handler-specific error.
     Handlers should NOT use this error class.

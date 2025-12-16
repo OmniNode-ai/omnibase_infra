@@ -27,49 +27,6 @@ from omnibase_infra.errors import (
 if TYPE_CHECKING:
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
-
-def normalize_correlation_id(raw_value: object) -> UUID:
-    """Normalize a correlation ID value to a UUID.
-
-    Handles multiple input types and ensures a valid UUID is always returned:
-    - If already a UUID, returns it unchanged
-    - If a valid UUID string, parses and returns the UUID
-    - If invalid/missing/wrong type, generates a new UUID
-
-    This is the single source of truth for correlation ID normalization
-    across the runtime infrastructure.
-
-    Args:
-        raw_value: The raw correlation_id value from an envelope.
-            Can be UUID, str, None, or any other type.
-
-    Returns:
-        A valid UUID - either the normalized input or a newly generated one.
-
-    Example:
-        >>> from uuid import UUID
-        >>> normalize_correlation_id(None)  # Returns new UUID
-        UUID('...')
-        >>> normalize_correlation_id("invalid")  # Returns new UUID
-        UUID('...')
-        >>> existing = UUID("12345678-1234-5678-1234-567812345678")
-        >>> normalize_correlation_id(existing) == existing
-        True
-        >>> normalize_correlation_id(str(existing)) == existing
-        True
-    """
-    if isinstance(raw_value, UUID):
-        return raw_value
-    if isinstance(raw_value, str):
-        try:
-            return UUID(raw_value)
-        except ValueError:
-            # Invalid UUID string - generate new one
-            return uuid4()
-    # None or unknown type - generate new one
-    return uuid4()
-
-
 # Operations that REQUIRE payload to be present and non-empty
 PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
     {
@@ -79,7 +36,6 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
         # HTTP operations with body
         "http.post",
         "http.put",
-        "http.patch",
         # Kafka operations
         "kafka.produce",
         # Consul operations
@@ -167,13 +123,25 @@ def validate_envelope(
             )
 
     # 4. Normalize correlation_id to UUID (MUTATES envelope)
-    envelope["correlation_id"] = normalize_correlation_id(
-        envelope.get("correlation_id")
-    )
+    correlation_id = envelope.get("correlation_id")
+    if correlation_id is not None:
+        if isinstance(correlation_id, UUID):
+            pass  # Already a UUID, keep it
+        elif isinstance(correlation_id, str):
+            try:
+                envelope["correlation_id"] = UUID(correlation_id)
+            except ValueError:
+                # Invalid UUID string - generate new one
+                envelope["correlation_id"] = uuid4()
+        else:
+            # Unknown type - generate new one
+            envelope["correlation_id"] = uuid4()
+    else:
+        # No correlation_id - generate new one
+        envelope["correlation_id"] = uuid4()
 
 
 __all__: list[str] = [
-    "normalize_correlation_id",
     "PAYLOAD_REQUIRED_OPERATIONS",
     "validate_envelope",
 ]

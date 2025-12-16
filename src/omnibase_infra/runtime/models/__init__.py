@@ -12,12 +12,6 @@ Exports:
     ModelLoggingConfig: Logging configuration model
     ModelShutdownConfig: Shutdown configuration model
     ModelRuntimeConfig: Top-level runtime configuration model
-    ModelOptionalString: Wrapper for optional string values
-    ModelOptionalUUID: Wrapper for optional UUID values
-    ModelOptionalCorrelationId: Wrapper for optional correlation ID values
-    ModelPolicyTypeFilter: Wrapper for policy type filter values
-    ModelPolicyRegistration: Policy registration parameters model
-    ModelPolicyKey: Strongly-typed policy registry key model
 """
 
 from omnibase_infra.runtime.models.model_enabled_protocols_config import (
@@ -25,16 +19,6 @@ from omnibase_infra.runtime.models.model_enabled_protocols_config import (
 )
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
 from omnibase_infra.runtime.models.model_logging_config import ModelLoggingConfig
-from omnibase_infra.runtime.models.model_optional_correlation_id import (
-    ModelOptionalCorrelationId,
-)
-from omnibase_infra.runtime.models.model_optional_string import ModelOptionalString
-from omnibase_infra.runtime.models.model_optional_uuid import ModelOptionalUUID
-from omnibase_infra.runtime.models.model_policy_key import ModelPolicyKey
-from omnibase_infra.runtime.models.model_policy_registration import (
-    ModelPolicyRegistration,
-)
-from omnibase_infra.runtime.models.model_policy_type_filter import ModelPolicyTypeFilter
 from omnibase_infra.runtime.models.model_protocol_registration_config import (
     ModelProtocolRegistrationConfig,
 )
@@ -48,10 +32,4 @@ __all__: list[str] = [
     "ModelLoggingConfig",
     "ModelShutdownConfig",
     "ModelRuntimeConfig",
-    "ModelOptionalString",
-    "ModelOptionalUUID",
-    "ModelOptionalCorrelationId",
-    "ModelPolicyTypeFilter",
-    "ModelPolicyRegistration",
-    "ModelPolicyKey",
 ]

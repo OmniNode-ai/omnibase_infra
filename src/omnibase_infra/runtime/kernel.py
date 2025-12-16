@@ -50,7 +50,6 @@ from pathlib import Path
 from typing import Optional, cast
 
 import yaml
-from omnibase_core.container import ModelONEXContainer
 from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -60,7 +59,6 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
 from omnibase_infra.runtime.health_server import DEFAULT_HTTP_PORT, HealthServer
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
@@ -256,14 +254,12 @@ async def bootstrap() -> int:
         1. Determine contracts directory from CONTRACTS_DIR environment variable
         2. Load and validate runtime configuration from contracts or environment
         3. Create and initialize InMemoryEventBus for event-driven architecture
-        4. Create ModelONEXContainer and wire infrastructure services (async)
-        5. Resolve ProtocolBindingRegistry from container (async)
-        6. Instantiate RuntimeHostProcess with validated configuration and pre-resolved registry
-        7. Setup graceful shutdown signal handlers (SIGINT, SIGTERM)
-        8. Start runtime and HTTP health server for Docker/Kubernetes health probes
-        9. Run runtime until shutdown signal received
-        10. Perform graceful shutdown with configurable timeout
-        11. Clean up resources in finally block to prevent resource leaks
+        4. Instantiate RuntimeHostProcess with validated configuration
+        5. Start HTTP health server for Docker/Kubernetes health probes
+        6. Register signal handlers for graceful shutdown (SIGINT, SIGTERM)
+        7. Run runtime until shutdown signal received
+        8. Perform graceful shutdown with configurable timeout
+        9. Clean up resources in finally block to prevent resource leaks
 
     Error Handling:
         - Configuration errors: Logged with full context and correlation_id
@@ -362,29 +358,7 @@ async def bootstrap() -> int:
             },
         )
 
-        # 4. Create and wire container for dependency injection
-        container_start_time = time.time()
-        container = ModelONEXContainer()
-        wire_summary = await wire_infrastructure_services(container)
-        container_duration = time.time() - container_start_time
-        logger.debug(
-            "Container wired in %.3fs (correlation_id=%s)",
-            container_duration,
-            correlation_id,
-            extra={
-                "duration_seconds": container_duration,
-                "services": wire_summary["services"],
-            },
-        )
-
-        # 5. Resolve ProtocolBindingRegistry from container
-        from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
-
-        handler_registry: ProtocolBindingRegistry = (
-            await container.service_registry.resolve_service(ProtocolBindingRegistry)
-        )
-
-        # 6. Create runtime host process with config and pre-resolved registry
+        # 4. Create runtime host process with config
         # RuntimeHostProcess accepts config as dict; cast model_dump() result to
         # dict[str, object] to avoid implicit Any typing (Pydantic's model_dump()
         # returns dict[str, Any] but all our model fields are strongly typed)
@@ -394,7 +368,6 @@ async def bootstrap() -> int:
             input_topic=config.input_topic,
             output_topic=config.output_topic,
             config=cast(dict[str, object], config.model_dump()),
-            handler_registry=handler_registry,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
@@ -408,7 +381,7 @@ async def bootstrap() -> int:
             },
         )
 
-        # 7. Setup graceful shutdown
+        # 5. Setup graceful shutdown
         shutdown_event = asyncio.Event()
         loop = asyncio.get_running_loop()
 
@@ -452,7 +425,7 @@ async def bootstrap() -> int:
 
             signal.signal(signal.SIGINT, windows_handler)
 
-        # 8. Start runtime and health server
+        # 6. Start runtime and health server
         runtime_start_time = time.time()
         logger.info(
             "Starting ONEX runtime... (correlation_id=%s)",
@@ -469,7 +442,7 @@ async def bootstrap() -> int:
             },
         )
 
-        # 9. Start HTTP health server for Docker/K8s probes
+        # 7. Start HTTP health server for Docker/K8s probes
         # Port can be configured via ONEX_HTTP_PORT environment variable
         http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
         try:
@@ -538,7 +511,6 @@ async def bootstrap() -> int:
                 "bootstrap_duration_seconds": bootstrap_duration,
                 "config_load_seconds": config_duration,
                 "event_bus_create_seconds": event_bus_duration,
-                "container_wire_seconds": container_duration,
                 "runtime_create_seconds": runtime_create_duration,
                 "runtime_start_seconds": runtime_start_duration,
                 "health_start_seconds": health_start_duration,

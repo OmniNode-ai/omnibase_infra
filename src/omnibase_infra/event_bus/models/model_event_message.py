@@ -51,7 +51,7 @@ class ModelEventMessage(BaseModel):
     partition: int | None = Field(default=None)
 
     model_config = ConfigDict(
-        frozen=True, extra="forbid", arbitrary_types_allowed=True, from_attributes=True
+        frozen=False, extra="forbid", arbitrary_types_allowed=True, from_attributes=True
     )
 
     async def ack(self) -> None:

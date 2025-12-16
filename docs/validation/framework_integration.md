@@ -44,7 +44,7 @@ def validate_infra_architecture(
 Most validators return `ModelValidationResult[None]`:
 
 ```python
-from omnibase_core.validation import ModelValidationResult
+from omnibase_core.models.common.model_validation_result import ModelValidationResult
 
 class ModelValidationResult[T](BaseModel):
     is_valid: bool
@@ -63,9 +63,9 @@ ValidationResult = ModelValidationResult[None]
 Import validator uses specialized result model:
 
 ```python
-from omnibase_core.validation import CircularImportValidationResult
+from omnibase_core.models.model_import_validation_result import ModelValidationResult
 
-class CircularImportValidationResult(BaseModel):
+class ModelValidationResult(BaseModel):
     has_circular_imports: bool
     circular_imports: list[str]
     import_errors: list[ModelImportError]

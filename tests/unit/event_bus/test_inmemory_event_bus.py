@@ -1228,18 +1228,12 @@ class TestInMemoryEventBusCircuitBreaker:
         for _ in range(3):
             await event_bus.publish("test-topic", None, b"test")
         status = await event_bus.get_circuit_breaker_status()
-        failure_counts = status["failure_counts"]
-        assert isinstance(failure_counts, dict)
-        assert failure_counts["test-topic:fail-group"] == 3
-        open_circuits = status["open_circuits"]
-        assert isinstance(open_circuits, (list, set))
-        assert len(open_circuits) == 0
+        assert status["failure_counts"]["test-topic:fail-group"] == 3
+        assert len(status["open_circuits"]) == 0
         for _ in range(3):
             await event_bus.publish("test-topic", None, b"test")
         status = await event_bus.get_circuit_breaker_status()
-        open_circuits = status["open_circuits"]
-        assert isinstance(open_circuits, (list, set))
-        assert len(open_circuits) == 1
+        assert len(status["open_circuits"]) == 1
         await event_bus.close()
 
     @pytest.mark.asyncio
@@ -1265,18 +1259,14 @@ class TestInMemoryEventBusCircuitBreaker:
             await event_bus.publish("test-topic", None, b"test")
 
         status = await event_bus.get_circuit_breaker_status()
-        failure_counts = status["failure_counts"]
-        assert isinstance(failure_counts, dict)
-        assert failure_counts["test-topic:fail-group"] == 3
+        assert status["failure_counts"]["test-topic:fail-group"] == 3
 
         await event_bus.close()
 
         # After close and restart, circuit breaker state should be cleared
         await event_bus.start()
         status = await event_bus.get_circuit_breaker_status()
-        failure_counts = status["failure_counts"]
-        assert isinstance(failure_counts, dict)
-        assert len(failure_counts) == 0
+        assert len(status["failure_counts"]) == 0
         await event_bus.close()
 
 

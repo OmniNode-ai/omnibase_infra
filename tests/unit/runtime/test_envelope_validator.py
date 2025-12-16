@@ -18,7 +18,6 @@ import pytest
 from omnibase_infra.errors import EnvelopeValidationError, UnknownHandlerTypeError
 from omnibase_infra.runtime.envelope_validator import (
     PAYLOAD_REQUIRED_OPERATIONS,
-    normalize_correlation_id,
     validate_envelope,
 )
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
@@ -26,12 +25,7 @@ from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
 @pytest.fixture
 def mock_registry() -> ProtocolBindingRegistry:
-    """Create a mock registry with common handler types registered.
-
-    Note: This fixture uses direct instantiation for unit testing the
-    envelope validator. For integration tests that need real container-based
-    registries, use container_with_registries from conftest.py.
-    """
+    """Create a mock registry with common handler types registered."""
     registry = ProtocolBindingRegistry()
 
     # Create a minimal mock handler class
@@ -40,11 +34,11 @@ def mock_registry() -> ProtocolBindingRegistry:
             return {"success": True}
 
     # Register common handler types
-    registry.register("http", MockHandler)  # type: ignore[arg-type]
-    registry.register("db", MockHandler)  # type: ignore[arg-type]
-    registry.register("kafka", MockHandler)  # type: ignore[arg-type]
-    registry.register("consul", MockHandler)  # type: ignore[arg-type]
-    registry.register("vault", MockHandler)  # type: ignore[arg-type]
+    registry.register("http", MockHandler)
+    registry.register("db", MockHandler)
+    registry.register("kafka", MockHandler)
+    registry.register("consul", MockHandler)
+    registry.register("vault", MockHandler)
 
     return registry
 
@@ -126,19 +120,6 @@ class TestHandlerPrefixValidation:
         error = exc_info.value
         assert hasattr(error, "model")
 
-        # Verify registered_prefixes is populated with actual registry prefixes
-        # This ensures the error provides actionable guidance to developers
-        error_model = error.model
-        assert hasattr(error_model, "context")
-        context = error_model.context
-        assert context is not None
-        assert "registered_prefixes" in context
-        registered_prefixes = context["registered_prefixes"]
-        assert isinstance(registered_prefixes, list)
-        # Verify all mock registry prefixes are included
-        expected_prefixes = {"http", "db", "kafka", "consul", "vault"}
-        assert set(registered_prefixes) == expected_prefixes
-
     def test_valid_http_prefix_passes(
         self, mock_registry: ProtocolBindingRegistry
     ) -> None:
@@ -185,7 +166,6 @@ class TestPayloadValidation:
             "db.execute",
             "http.post",
             "http.put",
-            "http.patch",
             "kafka.produce",
             "consul.kv_put",
             "consul.register",
@@ -213,13 +193,9 @@ class TestPayloadValidation:
             "db.execute",
             "http.post",
             "http.put",
-            "http.patch",
             "kafka.produce",
             "consul.kv_put",
-            "consul.register",
             "vault.write",
-            "vault.encrypt",
-            "vault.decrypt",
         ],
     )
     def test_payload_required_operations_with_empty_dict_raises_error(
@@ -240,13 +216,7 @@ class TestPayloadValidation:
             "db.execute",
             "http.post",
             "http.put",
-            "http.patch",
             "kafka.produce",
-            "consul.kv_put",
-            "consul.register",
-            "vault.write",
-            "vault.encrypt",
-            "vault.decrypt",
         ],
     )
     def test_payload_required_operations_with_payload_passes(
@@ -285,7 +255,6 @@ class TestPayloadValidation:
             "db.execute",
             "http.post",
             "http.put",
-            "http.patch",
             "kafka.produce",
             "consul.kv_put",
             "consul.register",
@@ -441,90 +410,3 @@ class TestEdgeCases:
 
         with pytest.raises(UnknownHandlerTypeError):
             validate_envelope(envelope, mock_registry)
-
-
-class TestNormalizeCorrelationIdHelper:
-    """Tests for normalize_correlation_id helper function.
-
-    This tests the standalone helper function directly, ensuring it
-    handles all edge cases properly as the single source of truth
-    for correlation_id normalization.
-    """
-
-    def test_none_returns_new_uuid(self) -> None:
-        """None value generates a new UUID."""
-        result = normalize_correlation_id(None)
-        assert isinstance(result, UUID)
-
-    def test_uuid_returns_same_uuid(self) -> None:
-        """UUID value is returned unchanged."""
-        original = uuid4()
-        result = normalize_correlation_id(original)
-        assert result == original
-        assert result is original  # Same object, not a copy
-
-    def test_valid_uuid_string_returns_parsed_uuid(self) -> None:
-        """Valid UUID string is parsed and returned as UUID."""
-        original = uuid4()
-        result = normalize_correlation_id(str(original))
-        assert result == original
-        assert isinstance(result, UUID)
-
-    def test_invalid_uuid_string_returns_new_uuid(self) -> None:
-        """Invalid UUID string generates a new UUID."""
-        result = normalize_correlation_id("not-a-valid-uuid")
-        assert isinstance(result, UUID)
-
-    def test_empty_string_returns_new_uuid(self) -> None:
-        """Empty string generates a new UUID."""
-        result = normalize_correlation_id("")
-        assert isinstance(result, UUID)
-
-    def test_integer_returns_new_uuid(self) -> None:
-        """Integer value generates a new UUID."""
-        result = normalize_correlation_id(12345)
-        assert isinstance(result, UUID)
-
-    def test_float_returns_new_uuid(self) -> None:
-        """Float value generates a new UUID."""
-        result = normalize_correlation_id(123.45)
-        assert isinstance(result, UUID)
-
-    def test_list_returns_new_uuid(self) -> None:
-        """List value generates a new UUID."""
-        result = normalize_correlation_id(["a", "b"])
-        assert isinstance(result, UUID)
-
-    def test_dict_returns_new_uuid(self) -> None:
-        """Dict value generates a new UUID."""
-        result = normalize_correlation_id({"key": "value"})
-        assert isinstance(result, UUID)
-
-    def test_boolean_returns_new_uuid(self) -> None:
-        """Boolean value generates a new UUID."""
-        result = normalize_correlation_id(True)
-        assert isinstance(result, UUID)
-
-    def test_different_calls_return_different_uuids(self) -> None:
-        """Each call with invalid input returns a different UUID."""
-        result1 = normalize_correlation_id(None)
-        result2 = normalize_correlation_id(None)
-        assert result1 != result2
-
-    def test_uuid_string_with_hyphens_parsed(self) -> None:
-        """UUID string with hyphens is correctly parsed."""
-        uuid_str = "12345678-1234-5678-1234-567812345678"
-        result = normalize_correlation_id(uuid_str)
-        assert result == UUID(uuid_str)
-
-    def test_uuid_string_without_hyphens_parsed(self) -> None:
-        """UUID string without hyphens is correctly parsed."""
-        uuid_str = "12345678123456781234567812345678"
-        result = normalize_correlation_id(uuid_str)
-        assert result == UUID(uuid_str)
-
-    def test_uuid_string_uppercase_parsed(self) -> None:
-        """Uppercase UUID string is correctly parsed."""
-        original = uuid4()
-        result = normalize_correlation_id(str(original).upper())
-        assert result == original

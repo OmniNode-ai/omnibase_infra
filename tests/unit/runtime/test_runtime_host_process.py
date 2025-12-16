@@ -688,7 +688,7 @@ class TestRuntimeHostProcessLifecycle:
         async def failing_shutdown() -> None:
             raise RuntimeError("Simulated shutdown failure")
 
-        failing_handler.shutdown = failing_shutdown  # type: ignore[method-assign]
+        failing_handler.shutdown = failing_shutdown
 
         # Patch _populate_handlers_from_registry to prevent auto-population
         async def noop_populate() -> None:
@@ -1219,9 +1219,7 @@ class TestRuntimeHostProcessHealthCheck:
                 # Should still be running
                 assert health["is_running"] is True
                 # Failed handlers should be reported
-                failed_handlers = health["failed_handlers"]
-                assert isinstance(failed_handlers, dict)
-                assert "test_handler" in failed_handlers
+                assert "test_handler" in health["failed_handlers"]
             finally:
                 await process.stop()
 
@@ -1274,14 +1272,10 @@ class TestRuntimeHostProcessHealthCheck:
 
                     # Should include handlers key
                     assert "handlers" in health
-                    handlers = health["handlers"]
-                    assert isinstance(handlers, dict)
                     # Should include http handler health
-                    assert "http" in handlers
-                    http_handler_health = handlers["http"]
-                    assert isinstance(http_handler_health, dict)
+                    assert "http" in health["handlers"]
                     # Handler should be healthy (initialized=True)
-                    assert http_handler_health["healthy"] is True
+                    assert health["handlers"]["http"]["healthy"] is True
                     # Overall health should be True
                     assert health["healthy"] is True
                 finally:
@@ -1312,12 +1306,8 @@ class TestRuntimeHostProcessHealthCheck:
                 try:
                     health = await process.health_check()
 
-                    handlers = health["handlers"]
-                    assert isinstance(handlers, dict)
-                    http_handler_health = handlers["http"]
-                    assert isinstance(http_handler_health, dict)
                     # Handler should be unhealthy
-                    assert http_handler_health["healthy"] is False
+                    assert health["handlers"]["http"]["healthy"] is False
                     # Overall health should be False due to unhealthy handler
                     assert health["healthy"] is False
                     # Process should still be running
@@ -1354,18 +1344,12 @@ class TestRuntimeHostProcessHealthCheck:
                     # Should not crash
                     health = await process.health_check()
 
-                    handlers = health["handlers"]
-                    assert isinstance(handlers, dict)
                     # Error handler should be reported as unhealthy
-                    assert "error" in handlers
-                    error_handler_health = handlers["error"]
-                    assert isinstance(error_handler_health, dict)
-                    assert error_handler_health["healthy"] is False
+                    assert "error" in health["handlers"]
+                    assert health["handlers"]["error"]["healthy"] is False
                     # Error message should be captured
-                    assert "error" in error_handler_health
-                    error_msg = error_handler_health["error"]
-                    assert isinstance(error_msg, str)
-                    assert "Health check failed" in error_msg
+                    assert "error" in health["handlers"]["error"]
+                    assert "Health check failed" in health["handlers"]["error"]["error"]
                     # Overall health should be False
                     assert health["healthy"] is False
                 finally:
@@ -1398,18 +1382,14 @@ class TestRuntimeHostProcessHealthCheck:
                 try:
                     health = await process.health_check()
 
-                    handlers = health["handlers"]
-                    assert isinstance(handlers, dict)
                     # Simple handler should be reported as healthy
-                    assert "simple" in handlers
-                    simple_handler_health = handlers["simple"]
-                    assert isinstance(simple_handler_health, dict)
-                    assert simple_handler_health["healthy"] is True
+                    assert "simple" in health["handlers"]
+                    assert health["handlers"]["simple"]["healthy"] is True
                     # Should have note about no health_check method
-                    assert "note" in simple_handler_health
-                    note_msg = simple_handler_health["note"]
-                    assert isinstance(note_msg, str)
-                    assert "no health_check method" in note_msg
+                    assert "note" in health["handlers"]["simple"]
+                    assert (
+                        "no health_check method" in health["handlers"]["simple"]["note"]
+                    )
                     # Overall health should be True
                     assert health["healthy"] is True
                 finally:
@@ -1447,19 +1427,13 @@ class TestRuntimeHostProcessHealthCheck:
                 try:
                     health = await process.health_check()
 
-                    handlers_health = health["handlers"]
-                    assert isinstance(handlers_health, dict)
                     # Both handlers should be reported
-                    assert "healthy" in handlers_health
-                    assert "unhealthy" in handlers_health
-                    healthy_handler_health = handlers_health["healthy"]
-                    unhealthy_handler_health = handlers_health["unhealthy"]
-                    assert isinstance(healthy_handler_health, dict)
-                    assert isinstance(unhealthy_handler_health, dict)
+                    assert "healthy" in health["handlers"]
+                    assert "unhealthy" in health["handlers"]
                     # Healthy handler should report healthy
-                    assert healthy_handler_health["healthy"] is True
+                    assert health["handlers"]["healthy"]["healthy"] is True
                     # Unhealthy handler should report unhealthy
-                    assert unhealthy_handler_health["healthy"] is False
+                    assert health["handlers"]["unhealthy"]["healthy"] is False
                     # Overall health should be False (due to unhealthy handler)
                     assert health["healthy"] is False
                 finally:
