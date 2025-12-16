@@ -135,6 +135,28 @@ class ModelVaultHandlerConfig(BaseModel):
         default_factory=ModelVaultRetryConfig,
         description="Retry configuration with exponential backoff",
     )
+    max_concurrent_operations: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum concurrent Vault operations (thread pool size)",
+    )
+    circuit_breaker_enabled: bool = Field(
+        default=True,
+        description="Enable circuit breaker pattern for error recovery",
+    )
+    circuit_breaker_failure_threshold: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of consecutive failures before opening circuit",
+    )
+    circuit_breaker_reset_timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=300.0,
+        description="Seconds to wait before attempting to close opened circuit",
+    )
 
 
 __all__: list[str] = [

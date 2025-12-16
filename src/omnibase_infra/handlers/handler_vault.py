@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
+from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -51,6 +53,19 @@ _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({
 })
 
 
+class CircuitState(str, Enum):
+    """Circuit breaker state machine states.
+
+    States:
+        CLOSED: Normal operation, requests allowed
+        OPEN: Too many failures, blocking requests temporarily
+        HALF_OPEN: Testing if service recovered, allowing limited requests
+    """
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
 class VaultHandler:
     """HashiCorp Vault handler using hvac client (MVP: KV v2 secrets engine).
 
@@ -73,11 +88,26 @@ class VaultHandler:
         - Failed renewal raises InfraAuthenticationError
         - Token expiration tracking uses self._token_expires_at
 
+    Thread Pool Management (Production-Grade):
+        - Bounded ThreadPoolExecutor prevents resource exhaustion
+        - Configurable max_concurrent_operations (default: 10, max: 100)
+        - Thread pool gracefully shutdown on handler.shutdown()
+        - All hvac (synchronous) operations run in dedicated thread pool
+
+    Circuit Breaker Pattern (Production-Grade):
+        - Prevents cascading failures to Vault service
+        - Three states: CLOSED (normal), OPEN (blocking), HALF_OPEN (testing)
+        - Configurable failure_threshold (default: 5 consecutive failures)
+        - Configurable reset_timeout (default: 30 seconds)
+        - Raises InfraUnavailableError when circuit is OPEN
+        - Can be disabled via circuit_breaker_enabled=False
+
     Retry Logic:
         - All operations use exponential backoff retry logic
         - Retry configuration from ModelVaultRetryConfig
         - Backoff calculation: initial_backoff * (exponential_base ** attempt)
         - Max backoff capped at max_backoff_seconds
+        - Circuit breaker checked before retry execution
     """
 
     def __init__(self) -> None:
@@ -86,6 +116,11 @@ class VaultHandler:
         self._config: ModelVaultHandlerConfig | None = None
         self._initialized: bool = False
         self._token_expires_at: float = 0.0
+        self._executor: ThreadPoolExecutor | None = None
+        # Circuit breaker state (thread-safe with single writer pattern)
+        self._circuit_state: CircuitState = CircuitState.CLOSED
+        self._circuit_failure_count: int = 0
+        self._circuit_last_failure_time: float = 0.0
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -189,6 +224,12 @@ class VaultHandler:
             # Initialize token expiration tracking
             self._token_expires_at = time.time() + 3600.0  # Default 1 hour TTL
 
+            # Create bounded thread pool executor for production safety
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._config.max_concurrent_operations,
+                thread_name_prefix="vault_handler_",
+            )
+
             self._initialized = True
             logger.info(
                 "VaultHandler initialized",
@@ -197,6 +238,8 @@ class VaultHandler:
                     "namespace": self._config.namespace,
                     "timeout_seconds": self._config.timeout_seconds,
                     "verify_ssl": self._config.verify_ssl,
+                    "max_concurrent_operations": self._config.max_concurrent_operations,
+                    "circuit_breaker_enabled": self._config.circuit_breaker_enabled,
                 },
             )
 
@@ -238,10 +281,28 @@ class VaultHandler:
             ) from e
 
     async def shutdown(self) -> None:
-        """Close Vault client and release resources."""
+        """Close Vault client and release resources.
+
+        Cleanup includes:
+            - Shutting down thread pool executor (waits for pending tasks)
+            - Clearing Vault client connection
+            - Resetting circuit breaker state
+        """
+        if self._executor is not None:
+            # Shutdown thread pool gracefully (wait for pending tasks)
+            self._executor.shutdown(wait=True)
+            self._executor = None
+            logger.debug("Thread pool executor shutdown complete")
+
         if self._client is not None:
             # hvac.Client doesn't have async close, just clear reference
             self._client = None
+
+        # Reset circuit breaker state
+        self._circuit_state = CircuitState.CLOSED
+        self._circuit_failure_count = 0
+        self._circuit_last_failure_time = 0.0
+
         self._initialized = False
         self._config = None
         logger.info("VaultHandler shutdown complete")
@@ -372,13 +433,127 @@ class VaultHandler:
             )
             await self.renew_token()
 
+    def _check_circuit_breaker(self, correlation_id: UUID) -> None:
+        """Check circuit breaker state and raise error if circuit is open.
+
+        Circuit breaker state machine:
+            CLOSED -> OPEN: After threshold consecutive failures
+            OPEN -> HALF_OPEN: After reset timeout expires
+            HALF_OPEN -> CLOSED: On successful request
+            HALF_OPEN -> OPEN: On failed request
+
+        Args:
+            correlation_id: Correlation ID for tracing
+
+        Raises:
+            InfraUnavailableError: If circuit is OPEN
+        """
+        if self._config is None or not self._config.circuit_breaker_enabled:
+            return
+
+        current_time = time.time()
+
+        # Check if circuit is OPEN
+        if self._circuit_state == CircuitState.OPEN:
+            time_since_failure = current_time - self._circuit_last_failure_time
+
+            # Check if reset timeout has passed
+            if time_since_failure >= self._config.circuit_breaker_reset_timeout_seconds:
+                # Transition to HALF_OPEN to test service recovery
+                self._circuit_state = CircuitState.HALF_OPEN
+                self._circuit_failure_count = 0
+                logger.info(
+                    "Circuit breaker transitioning to HALF_OPEN state",
+                    extra={
+                        "time_since_failure_seconds": time_since_failure,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+            else:
+                # Circuit still open, reject request
+                retry_after = int(
+                    self._config.circuit_breaker_reset_timeout_seconds - time_since_failure
+                )
+                ctx = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.VAULT,
+                    operation="circuit_breaker_check",
+                    target_name="vault_handler",
+                    correlation_id=correlation_id,
+                )
+                raise InfraUnavailableError(
+                    "Circuit breaker is open - Vault temporarily unavailable",
+                    context=ctx,
+                    circuit_state=self._circuit_state.value,
+                    retry_after_seconds=retry_after,
+                )
+
+    def _record_circuit_success(self) -> None:
+        """Record successful operation for circuit breaker.
+
+        On success:
+            - CLOSED: No change
+            - HALF_OPEN: Transition to CLOSED (service recovered)
+            - OPEN: Should not reach here (check prevents execution)
+        """
+        if self._config is None or not self._config.circuit_breaker_enabled:
+            return
+
+        if self._circuit_state == CircuitState.HALF_OPEN:
+            # Service recovered, close circuit
+            self._circuit_state = CircuitState.CLOSED
+            self._circuit_failure_count = 0
+            logger.info("Circuit breaker closed - service recovered")
+
+        # Reset failure count on success
+        self._circuit_failure_count = 0
+
+    def _record_circuit_failure(self) -> None:
+        """Record failed operation for circuit breaker.
+
+        On failure:
+            - CLOSED: Increment failure count, open if threshold exceeded
+            - HALF_OPEN: Transition back to OPEN (service still failing)
+            - OPEN: Should not reach here (check prevents execution)
+        """
+        if self._config is None or not self._config.circuit_breaker_enabled:
+            return
+
+        self._circuit_failure_count += 1
+        self._circuit_last_failure_time = time.time()
+
+        if self._circuit_state == CircuitState.HALF_OPEN:
+            # Service still failing, reopen circuit
+            self._circuit_state = CircuitState.OPEN
+            logger.warning(
+                "Circuit breaker reopened - service still failing",
+                extra={
+                    "failure_count": self._circuit_failure_count,
+                },
+            )
+        elif self._circuit_state == CircuitState.CLOSED:
+            # Check if threshold exceeded
+            if self._circuit_failure_count >= self._config.circuit_breaker_failure_threshold:
+                self._circuit_state = CircuitState.OPEN
+                logger.warning(
+                    "Circuit breaker opened due to consecutive failures",
+                    extra={
+                        "failure_count": self._circuit_failure_count,
+                        "threshold": self._config.circuit_breaker_failure_threshold,
+                    },
+                )
+
     async def _execute_with_retry(
         self,
         operation: str,
         func: Any,
         correlation_id: UUID,
     ) -> Any:
-        """Execute operation with exponential backoff retry logic.
+        """Execute operation with exponential backoff retry logic and circuit breaker.
+
+        Circuit breaker integration:
+            - Checks circuit state before execution (raises if OPEN)
+            - Records success/failure for circuit state management
+            - Allows test request in HALF_OPEN state
 
         Args:
             operation: Operation name for logging
@@ -392,26 +567,36 @@ class VaultHandler:
             InfraTimeoutError: If all retries exhausted or operation times out
             InfraConnectionError: If connection fails
             InfraAuthenticationError: If authentication fails
+            InfraUnavailableError: If circuit breaker is OPEN
         """
         if self._config is None:
             raise RuntimeError("Config not initialized")
+
+        # Check circuit breaker before execution
+        self._check_circuit_breaker(correlation_id)
 
         retry_config = self._config.retry
         last_exception: Exception | None = None
 
         for attempt in range(retry_config.max_attempts):
             try:
-                # hvac is synchronous, wrap in thread executor
+                # hvac is synchronous, wrap in custom thread executor
                 loop = asyncio.get_event_loop()
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(None, func),
+                    loop.run_in_executor(self._executor, func),
                     timeout=self._config.timeout_seconds,
                 )
+
+                # Record success for circuit breaker
+                self._record_circuit_success()
+
                 return result
 
             except TimeoutError as e:
                 last_exception = e
+                # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
+                    self._record_circuit_failure()
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
@@ -425,7 +610,8 @@ class VaultHandler:
                     ) from e
 
             except hvac.exceptions.Forbidden as e:
-                # Don't retry authentication failures
+                # Don't retry authentication failures, record for circuit breaker
+                self._record_circuit_failure()
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation=operation,
@@ -438,7 +624,7 @@ class VaultHandler:
                 ) from e
 
             except hvac.exceptions.InvalidPath as e:
-                # Don't retry invalid path errors
+                # Don't retry invalid path errors (not a circuit breaker failure)
                 ctx = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.VAULT,
                     operation=operation,
@@ -452,7 +638,9 @@ class VaultHandler:
 
             except hvac.exceptions.VaultDown as e:
                 last_exception = e
+                # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
+                    self._record_circuit_failure()
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,
@@ -466,7 +654,9 @@ class VaultHandler:
 
             except Exception as e:
                 last_exception = e
+                # Only record circuit failure on final retry attempt
                 if attempt == retry_config.max_attempts - 1:
+                    self._record_circuit_failure()
                     ctx = ModelInfraErrorContext(
                         transport_type=EnumInfraTransportType.VAULT,
                         operation=operation,

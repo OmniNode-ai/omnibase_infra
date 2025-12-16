@@ -733,3 +733,494 @@ class TestVaultHandlerShutdown:
             assert handler._initialized is False
             assert handler._client is None
             assert handler._config is None
+
+
+class TestVaultHandlerThreadPool:
+    """Test VaultHandler thread pool functionality."""
+
+    @pytest.mark.asyncio
+    async def test_thread_pool_created_with_config_size(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test thread pool is created with configured size."""
+        handler = VaultHandler()
+
+        # Set custom thread pool size
+        vault_config["max_concurrent_operations"] = 15
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            await handler.initialize(vault_config)
+
+            assert handler._executor is not None
+            assert handler._executor._max_workers == 15
+
+    @pytest.mark.asyncio
+    async def test_thread_pool_default_size(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test thread pool uses default size when not specified."""
+        handler = VaultHandler()
+
+        # Remove max_concurrent_operations to test default
+        vault_config.pop("max_concurrent_operations", None)
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            await handler.initialize(vault_config)
+
+            assert handler._executor is not None
+            assert handler._executor._max_workers == 10  # Default value
+
+    @pytest.mark.asyncio
+    async def test_thread_pool_shutdown_on_handler_shutdown(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test thread pool is properly shutdown when handler shuts down."""
+        handler = VaultHandler()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            await handler.initialize(vault_config)
+
+            executor = handler._executor
+            assert executor is not None
+            assert not executor._shutdown
+
+            await handler.shutdown()
+
+            assert handler._executor is None
+            assert executor._shutdown is True
+
+    @pytest.mark.asyncio
+    async def test_operations_use_thread_pool(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test operations execute in thread pool executor."""
+        handler = VaultHandler()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            await handler.initialize(vault_config)
+
+            # Spy on executor to verify it's used
+            original_executor = handler._executor
+            with patch.object(
+                asyncio.get_event_loop(), "run_in_executor"
+            ) as mock_run_in_executor:
+                mock_run_in_executor.return_value = asyncio.Future()
+                mock_run_in_executor.return_value.set_result(
+                    {"data": {"data": {"key": "value"}, "metadata": {"version": 1}}}
+                )
+
+                envelope = {
+                    "operation": "vault.read_secret",
+                    "payload": {"path": "myapp/config"},
+                    "correlation_id": uuid4(),
+                }
+
+                await handler.execute(envelope)
+
+                # Verify run_in_executor was called with our executor
+                assert mock_run_in_executor.call_count >= 1
+                # First call should use our custom executor
+                call_args = mock_run_in_executor.call_args_list[0]
+                assert call_args[0][0] == original_executor
+
+    @pytest.mark.asyncio
+    async def test_config_validates_thread_pool_bounds(self) -> None:
+        """Test config validation enforces thread pool size bounds."""
+        from omnibase_infra.handlers.model_vault_handler_config import (
+            ModelVaultHandlerConfig,
+        )
+
+        # Valid: within bounds (1-100)
+        config = ModelVaultHandlerConfig(
+            url="https://vault.example.com:8200",
+            token=SecretStr("s.test1234"),
+            max_concurrent_operations=50,
+        )
+        assert config.max_concurrent_operations == 50
+
+        # Invalid: below minimum (< 1)
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            ModelVaultHandlerConfig(
+                url="https://vault.example.com:8200",
+                token=SecretStr("s.test1234"),
+                max_concurrent_operations=0,
+            )
+
+        # Invalid: above maximum (> 100)
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            ModelVaultHandlerConfig(
+                url="https://vault.example.com:8200",
+                token=SecretStr("s.test1234"),
+                max_concurrent_operations=150,
+            )
+
+
+class TestVaultHandlerCircuitBreaker:
+    """Test VaultHandler circuit breaker functionality."""
+
+    @pytest.mark.asyncio
+    async def test_circuit_opens_after_threshold_failures(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test circuit opens after threshold consecutive failures."""
+        handler = VaultHandler()
+
+        # Configure circuit breaker with low threshold for testing
+        vault_config["circuit_breaker_failure_threshold"] = 2
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            # Make all requests fail
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # First 2 attempts should fail with connection error (3 retries each)
+            for _ in range(2):
+                with pytest.raises(InfraConnectionError):
+                    await handler.execute(envelope)
+
+            # Circuit should now be OPEN
+            from omnibase_infra.handlers.handler_vault import CircuitState
+            assert handler._circuit_state == CircuitState.OPEN
+            assert handler._circuit_failure_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_circuit_blocks_requests_when_open(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test circuit blocks requests when OPEN."""
+        handler = VaultHandler()
+
+        vault_config["circuit_breaker_failure_threshold"] = 2
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Trigger circuit open
+            for _ in range(2):
+                with pytest.raises(InfraConnectionError):
+                    await handler.execute(envelope)
+
+            # Next request should be blocked by circuit breaker
+            with pytest.raises(InfraUnavailableError) as exc_info:
+                await handler.execute(envelope)
+
+            assert "circuit breaker is open" in str(exc_info.value).lower()
+            # Should include retry_after in context
+            assert "retry_after_seconds" in str(exc_info.value.model)
+
+    @pytest.mark.asyncio
+    async def test_circuit_transitions_to_half_open_after_timeout(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test circuit transitions to HALF_OPEN after reset timeout."""
+        handler = VaultHandler()
+
+        # Minimum timeout for testing (1.0 seconds)
+        vault_config["circuit_breaker_failure_threshold"] = 2
+        vault_config["circuit_breaker_reset_timeout_seconds"] = 1.0
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Open circuit
+            for _ in range(2):
+                with pytest.raises(InfraConnectionError):
+                    await handler.execute(envelope)
+
+            from omnibase_infra.handlers.handler_vault import CircuitState
+            assert handler._circuit_state == CircuitState.OPEN
+
+            # Wait for reset timeout
+            await asyncio.sleep(1.1)
+
+            # Now configure success response
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            # Next request should transition to HALF_OPEN then succeed
+            response = await handler.execute(envelope)
+
+            assert response["status"] == "success"
+            # Circuit should now be CLOSED (recovered)
+            assert handler._circuit_state == CircuitState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_circuit_closes_on_success_in_half_open_state(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test circuit closes on successful request in HALF_OPEN state."""
+        handler = VaultHandler()
+
+        vault_config["circuit_breaker_failure_threshold"] = 2
+        vault_config["circuit_breaker_reset_timeout_seconds"] = 1.0
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            # Start with failures
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Open circuit
+            for _ in range(2):
+                with pytest.raises(InfraConnectionError):
+                    await handler.execute(envelope)
+
+            # Wait for timeout
+            await asyncio.sleep(1.1)
+
+            # Success response
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            response = await handler.execute(envelope)
+
+            from omnibase_infra.handlers.handler_vault import CircuitState
+            assert response["status"] == "success"
+            assert handler._circuit_state == CircuitState.CLOSED
+            assert handler._circuit_failure_count == 0
+
+    @pytest.mark.asyncio
+    async def test_circuit_reopens_on_failure_in_half_open_state(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test circuit reopens on failed request in HALF_OPEN state."""
+        handler = VaultHandler()
+
+        vault_config["circuit_breaker_failure_threshold"] = 2
+        vault_config["circuit_breaker_reset_timeout_seconds"] = 1.0
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Open circuit
+            for _ in range(2):
+                with pytest.raises(InfraConnectionError):
+                    await handler.execute(envelope)
+
+            # Wait for timeout (transitions to HALF_OPEN)
+            await asyncio.sleep(1.1)
+
+            # Next request still fails
+            with pytest.raises(InfraConnectionError):
+                await handler.execute(envelope)
+
+            from omnibase_infra.handlers.handler_vault import CircuitState
+            # Circuit should reopen
+            assert handler._circuit_state == CircuitState.OPEN
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_can_be_disabled(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test circuit breaker can be disabled via config."""
+        handler = VaultHandler()
+
+        # Disable circuit breaker
+        vault_config["circuit_breaker_enabled"] = False
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Even after many failures, circuit should not open
+            for _ in range(10):
+                with pytest.raises(InfraConnectionError):
+                    await handler.execute(envelope)
+
+            from omnibase_infra.handlers.handler_vault import CircuitState
+            # Circuit should remain CLOSED (disabled)
+            assert handler._circuit_state == CircuitState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_resets_on_shutdown(
+        self,
+        vault_config: dict[str, object],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test circuit breaker state resets on handler shutdown."""
+        handler = VaultHandler()
+
+        vault_config["circuit_breaker_failure_threshold"] = 2
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Open circuit with 2 failed operations
+            for _ in range(2):
+                with pytest.raises(InfraConnectionError):
+                    await handler.execute(envelope)
+
+            from omnibase_infra.handlers.handler_vault import CircuitState
+            # Circuit should be OPEN after threshold failures
+            assert handler._circuit_state == CircuitState.OPEN
+            assert handler._circuit_failure_count >= 2
+
+            # Shutdown handler
+            await handler.shutdown()
+
+            # Circuit state should be reset
+            assert handler._circuit_state == CircuitState.CLOSED
+            assert handler._circuit_failure_count == 0
+            assert handler._circuit_last_failure_time == 0.0
+
+    @pytest.mark.asyncio
+    async def test_config_validates_circuit_breaker_bounds(self) -> None:
+        """Test config validation enforces circuit breaker parameter bounds."""
+        from omnibase_infra.handlers.model_vault_handler_config import (
+            ModelVaultHandlerConfig,
+        )
+
+        # Valid: within bounds
+        config = ModelVaultHandlerConfig(
+            url="https://vault.example.com:8200",
+            token=SecretStr("s.test1234"),
+            circuit_breaker_failure_threshold=10,
+            circuit_breaker_reset_timeout_seconds=60.0,
+        )
+        assert config.circuit_breaker_failure_threshold == 10
+        assert config.circuit_breaker_reset_timeout_seconds == 60.0
+
+        # Invalid: threshold below minimum (< 1)
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            ModelVaultHandlerConfig(
+                url="https://vault.example.com:8200",
+                token=SecretStr("s.test1234"),
+                circuit_breaker_failure_threshold=0,
+            )
+
+        # Invalid: threshold above maximum (> 20)
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            ModelVaultHandlerConfig(
+                url="https://vault.example.com:8200",
+                token=SecretStr("s.test1234"),
+                circuit_breaker_failure_threshold=25,
+            )
+
+        # Invalid: timeout below minimum (< 1.0)
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            ModelVaultHandlerConfig(
+                url="https://vault.example.com:8200",
+                token=SecretStr("s.test1234"),
+                circuit_breaker_reset_timeout_seconds=0.5,
+            )
+
+        # Invalid: timeout above maximum (> 300.0)
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            ModelVaultHandlerConfig(
+                url="https://vault.example.com:8200",
+                token=SecretStr("s.test1234"),
+                circuit_breaker_reset_timeout_seconds=400.0,
+            )
