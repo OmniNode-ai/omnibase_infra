@@ -73,9 +73,9 @@ class TestValidateInfraArchitectureDefaults:
         # Check max_violations default (strict mode)
         max_violations_param = sig.parameters["max_violations"]
         assert max_violations_param.default == INFRA_MAX_VIOLATIONS
-        assert max_violations_param.default == 0, (
-            "Should default to strict mode via INFRA_MAX_VIOLATIONS (0)"
-        )
+        assert (
+            max_violations_param.default == 0
+        ), "Should default to strict mode via INFRA_MAX_VIOLATIONS (0)"
 
     @patch("omnibase_infra.validation.infra_validators.validate_architecture")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
@@ -129,9 +129,9 @@ class TestValidateInfraPatternsDefaults:
         # Check strict default
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_PATTERNS_STRICT
-        assert strict_param.default is True, (
-            "Should default to strict mode via INFRA_PATTERNS_STRICT (True)"
-        )
+        assert (
+            strict_param.default is True
+        ), "Should default to strict mode via INFRA_PATTERNS_STRICT (True)"
 
     @patch("omnibase_infra.validation.infra_validators.validate_patterns")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
@@ -161,16 +161,16 @@ class TestValidateInfraUnionUsageDefaults:
 
         # Check max_unions default
         max_unions_param = sig.parameters["max_unions"]
-        assert max_unions_param.default == INFRA_MAX_UNIONS, (
-            f"Should default to INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS})"
-        )
+        assert (
+            max_unions_param.default == INFRA_MAX_UNIONS
+        ), f"Should default to INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS})"
 
         # Check strict default
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_UNIONS_STRICT
-        assert strict_param.default is False, (
-            "Should default to non-strict mode via INFRA_UNIONS_STRICT (False)"
-        )
+        assert (
+            strict_param.default is False
+        ), "Should default to non-strict mode via INFRA_UNIONS_STRICT (False)"
 
     @patch("omnibase_infra.validation.infra_validators.validate_union_usage")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
@@ -280,9 +280,9 @@ class TestScriptDefaults:
         script_content = script_path.read_text()
 
         # Verify architecture validator uses INFRA_MAX_VIOLATIONS constant
-        assert "max_violations=INFRA_MAX_VIOLATIONS" in script_content, (
-            "Architecture validator should use INFRA_MAX_VIOLATIONS constant"
-        )
+        assert (
+            "max_violations=INFRA_MAX_VIOLATIONS" in script_content
+        ), "Architecture validator should use INFRA_MAX_VIOLATIONS constant"
         assert (
             "from omnibase_infra.validation.infra_validators import INFRA_MAX_VIOLATIONS"
             in script_content
@@ -303,9 +303,9 @@ class TestScriptDefaults:
         script_content = script_path.read_text()
 
         # Verify patterns validator uses INFRA_PATTERNS_STRICT constant
-        assert "strict=INFRA_PATTERNS_STRICT" in script_content, (
-            "Patterns validator should use INFRA_PATTERNS_STRICT constant"
-        )
+        assert (
+            "strict=INFRA_PATTERNS_STRICT" in script_content
+        ), "Patterns validator should use INFRA_PATTERNS_STRICT constant"
         assert (
             "from omnibase_infra.validation.infra_validators import INFRA_PATTERNS_STRICT"
             in script_content
@@ -318,14 +318,14 @@ class TestScriptDefaults:
         script_content = script_path.read_text()
 
         # Verify unions validator uses INFRA_MAX_UNIONS constant
-        assert "INFRA_MAX_UNIONS" in script_content, (
-            "Unions validator should import and use INFRA_MAX_UNIONS constant"
-        )
+        assert (
+            "INFRA_MAX_UNIONS" in script_content
+        ), "Unions validator should import and use INFRA_MAX_UNIONS constant"
         assert "max_unions=INFRA_MAX_UNIONS" in script_content
         # Verify unions validator uses INFRA_UNIONS_STRICT constant
-        assert "INFRA_UNIONS_STRICT" in script_content, (
-            "Unions validator should import and use INFRA_UNIONS_STRICT constant"
-        )
+        assert (
+            "INFRA_UNIONS_STRICT" in script_content
+        ), "Unions validator should import and use INFRA_UNIONS_STRICT constant"
         assert "strict=INFRA_UNIONS_STRICT" in script_content
 
 
@@ -347,9 +347,9 @@ class TestCLICommandDefaults:
         for decorator in validate_architecture_cmd.params:
             if decorator.name == "max_violations":
                 # CLI uses None by default and resolves to INFRA_MAX_VIOLATIONS in code
-                assert decorator.default is None, (
-                    "CLI max_violations should default to None (resolved to INFRA_MAX_VIOLATIONS)"
-                )
+                assert (
+                    decorator.default is None
+                ), "CLI max_violations should default to None (resolved to INFRA_MAX_VIOLATIONS)"
             elif decorator.name == "directory":
                 assert decorator.default == "src/omnibase_infra/"
 
@@ -370,9 +370,9 @@ class TestCLICommandDefaults:
         for decorator in validate_patterns_cmd.params:
             if decorator.name == "strict":
                 # CLI uses None by default and resolves to INFRA_PATTERNS_STRICT in code
-                assert decorator.default is None, (
-                    "CLI strict should default to None (resolved to INFRA_PATTERNS_STRICT)"
-                )
+                assert (
+                    decorator.default is None
+                ), "CLI strict should default to None (resolved to INFRA_PATTERNS_STRICT)"
             elif decorator.name == "directory":
                 assert decorator.default == "src/omnibase_infra/"
 
@@ -384,14 +384,14 @@ class TestCLICommandDefaults:
         for decorator in validate_unions_cmd.params:
             if decorator.name == "max_unions":
                 # CLI uses None by default and resolves to INFRA_MAX_UNIONS in code
-                assert decorator.default is None, (
-                    "CLI max_unions should default to None (resolved to INFRA_MAX_UNIONS)"
-                )
+                assert (
+                    decorator.default is None
+                ), "CLI max_unions should default to None (resolved to INFRA_MAX_UNIONS)"
             elif decorator.name == "strict":
                 # CLI uses None by default and resolves to INFRA_UNIONS_STRICT in code
-                assert decorator.default is None, (
-                    "CLI strict should default to None (resolved to INFRA_UNIONS_STRICT)"
-                )
+                assert (
+                    decorator.default is None
+                ), "CLI strict should default to None (resolved to INFRA_UNIONS_STRICT)"
             elif decorator.name == "directory":
                 assert decorator.default == "src/omnibase_infra/"
 
@@ -432,9 +432,9 @@ class TestDefaultsConsistency:
         for param in validate_architecture_cmd.params:
             if param.name == "max_violations":
                 cli_default = param.default
-        assert cli_default is None, (
-            "CLI should use None and resolve to INFRA_MAX_VIOLATIONS"
-        )
+        assert (
+            cli_default is None
+        ), "CLI should use None and resolve to INFRA_MAX_VIOLATIONS"
 
         # Script uses constant (verified in test_architecture_script_defaults)
 
@@ -451,9 +451,9 @@ class TestDefaultsConsistency:
         for param in validate_patterns_cmd.params:
             if param.name == "strict":
                 cli_default = param.default
-        assert cli_default is None, (
-            "CLI should use None and resolve to INFRA_PATTERNS_STRICT"
-        )
+        assert (
+            cli_default is None
+        ), "CLI should use None and resolve to INFRA_PATTERNS_STRICT"
 
         # Script uses constant (verified in test_patterns_script_defaults)
 
@@ -479,9 +479,9 @@ class TestDefaultsConsistency:
         for param in validate_unions_cmd.params:
             if param.name == "strict":
                 cli_default = param.default
-        assert cli_default is None, (
-            "CLI should use None and resolve to INFRA_UNIONS_STRICT"
-        )
+        assert (
+            cli_default is None
+        ), "CLI should use None and resolve to INFRA_UNIONS_STRICT"
 
         # Script uses constant (verified in test_unions_script_defaults)
 
@@ -498,9 +498,9 @@ class TestDefaultsConsistency:
         for validator in validators:
             sig = inspect.signature(validator)
             dir_param = sig.parameters["directory"]
-            assert dir_param.default == INFRA_SRC_PATH, (
-                f"{validator.__name__} should default to INFRA_SRC_PATH"
-            )
+            assert (
+                dir_param.default == INFRA_SRC_PATH
+            ), f"{validator.__name__} should default to INFRA_SRC_PATH"
 
         # Contract validator should default to INFRA_NODES_PATH
         sig = inspect.signature(validate_infra_contracts)

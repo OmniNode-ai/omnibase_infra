@@ -201,9 +201,9 @@ class TestDockerBuild:
             assert first_result.returncode == 0, "First build failed"
 
             # Verify cache mount usage in Dockerfile
-            assert "mount=type=cache" in dockerfile_path.read_text(), (
-                "Dockerfile should use BuildKit cache mounts"
-            )
+            assert (
+                "mount=type=cache" in dockerfile_path.read_text()
+            ), "Dockerfile should use BuildKit cache mounts"
 
         finally:
             subprocess.run(
@@ -419,9 +419,9 @@ class TestDockerSecurity:
             )
 
             # test -e returns 0 if file exists, 1 if not
-            assert result.returncode == 1, (
-                f"Sensitive file/directory exists in image: {path}"
-            )
+            assert (
+                result.returncode == 1
+            ), f"Sensitive file/directory exists in image: {path}"
 
 
 # =============================================================================
@@ -891,9 +891,9 @@ class TestDockerResourceLimits:
         """Verify docker-compose defines resource reservations."""
         content = compose_file_path.read_text()
 
-        assert "reservations:" in content, (
-            "docker-compose should define resource reservations"
-        )
+        assert (
+            "reservations:" in content
+        ), "docker-compose should define resource reservations"
 
 
 # =============================================================================

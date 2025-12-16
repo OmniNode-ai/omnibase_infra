@@ -12,6 +12,7 @@ Adapters are responsible for:
 Available Adapters:
 - HttpRestAdapter: HTTP/REST protocol adapter (MVP: GET, POST only)
 - DbAdapter: PostgreSQL database adapter (MVP: query, execute only)
+- VaultAdapter: HashiCorp Vault secret management adapter (MVP: KV v2 secrets)
 
 Response Models:
 - ModelDbQueryPayload: Database query result payload
@@ -22,6 +23,7 @@ Response Models:
 
 from omnibase_infra.handlers.handler_db import DbAdapter
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
+from omnibase_infra.handlers.handler_vault import VaultAdapter
 from omnibase_infra.handlers.models import (
     ModelDbDescribeResponse,
     ModelDbHealthResponse,
@@ -32,6 +34,7 @@ from omnibase_infra.handlers.models import (
 __all__: list[str] = [
     "DbAdapter",
     "HttpRestAdapter",
+    "VaultAdapter",
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
     "ModelDbHealthResponse",

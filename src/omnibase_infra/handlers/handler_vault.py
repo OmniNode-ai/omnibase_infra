@@ -254,7 +254,9 @@ class VaultAdapter:
                 logger.info(
                     "Token TTL initialized from Vault",
                     extra={
-                        "ttl_seconds": ttl_seconds if isinstance(ttl_seconds, int) else 3600,
+                        "ttl_seconds": ttl_seconds
+                        if isinstance(ttl_seconds, int)
+                        else 3600,
                         "correlation_id": str(init_correlation_id),
                     },
                 )
@@ -1149,7 +1151,9 @@ class VaultAdapter:
                 )
                 # Type checking for healthy status extraction
                 initialized_val = health_result.get("initialized", False)
-                healthy = initialized_val if isinstance(initialized_val, bool) else False
+                healthy = (
+                    initialized_val if isinstance(initialized_val, bool) else False
+                )
 
             except Exception as e:
                 logger.warning(
