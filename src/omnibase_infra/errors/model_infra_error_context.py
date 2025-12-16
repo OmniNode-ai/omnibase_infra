@@ -7,7 +7,6 @@ encapsulating common structured fields to reduce __init__ parameter count
 while maintaining strong typing per ONEX standards.
 """
 
-from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -63,7 +62,7 @@ class ModelInfraErrorContext(BaseModel):
         default=None,
         description="Request correlation ID for distributed tracing",
     )
-    namespace: Optional[str] = Field(
+    namespace: str | None = Field(
         default=None,
         description="Vault namespace (Enterprise feature) or other service-specific namespace",
     )
