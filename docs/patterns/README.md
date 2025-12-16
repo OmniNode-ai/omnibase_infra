@@ -15,6 +15,9 @@ This directory contains detailed implementation guides and best practices for ON
 ### Architecture
 - **[Container Dependency Injection](./container_dependency_injection.md)** - Service registration, resolution, and testing patterns
 
+### Security
+- **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
+
 ## Quick Reference
 
 ### Error Scenarios
@@ -37,6 +40,8 @@ This directory contains detailed implementation guides and best practices for ON
 | Inject dependencies | [Container DI](./container_dependency_injection.md) | Constructor Injection |
 | Handle cache fallback | [Error Recovery](./error_recovery_patterns.md) | Graceful Degradation |
 | Refresh expired tokens | [Error Recovery](./error_recovery_patterns.md) | Credential Refresh |
+| Understand policy security | [Policy Registry Trust Model](./policy_registry_trust_model.md) | Trust Assumptions |
+| Implement policy allowlist | [Policy Registry Trust Model](./policy_registry_trust_model.md) | Security Mitigations |
 
 ### Transport Types
 
@@ -76,6 +81,11 @@ Container Dependency Injection
     ├── Service management and resolution
     ├── Used by: All infrastructure services
     └── References: Bootstrap, testing patterns
+
+Policy Registry Trust Model
+    ├── Documents security boundaries for policy registration
+    ├── Depends on: Container DI (for registry resolution)
+    └── References: PolicyRegistry, ProtocolPolicy
 ```
 
 ## Usage Examples

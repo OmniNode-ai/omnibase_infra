@@ -34,14 +34,15 @@ Policy plugins MUST NOT:
 
 Example Usage:
     ```python
-    from omnibase_infra.runtime.policy_registry import (
-        PolicyRegistry,
-        ModelPolicyRegistration,
-        get_policy_registry,
-    )
+    from omnibase_core.container import ModelONEXContainer
+    from omnibase_infra.runtime.policy_registry import PolicyRegistry, ModelPolicyRegistration
+    from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
     from omnibase_infra.enums import EnumPolicyType
 
-    registry = get_policy_registry()
+    # Container-based DI (preferred)
+    container = ModelONEXContainer()
+    await wire_infrastructure_services(container)
+    registry = await container.service_registry.resolve_service(PolicyRegistry)
 
     # Register a synchronous policy using the model (preferred)
     registration = ModelPolicyRegistration(
@@ -81,7 +82,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
-import warnings
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
 from omnibase_infra.enums import EnumPolicyType
@@ -133,9 +134,6 @@ class PolicyRegistry:
         from omnibase_infra.runtime.container_wiring import get_policy_registry_from_container
         registry = await get_policy_registry_from_container(container)
         ```
-
-        Legacy singleton pattern (get_policy_registry()) maintained for backwards
-        compatibility but deprecated in favor of container-based DI.
 
     Thread Safety:
         All registration operations are protected by a threading.Lock to ensure
@@ -274,10 +272,156 @@ class PolicyRegistry:
                 - Alert if registry empty (indicates bootstrap failure)
                 - Alert if registry size changes unexpectedly (> 20% delta)
 
+    Trust Model and Security Considerations:
+
+        PolicyRegistry performs LIMITED validation on registered policy classes.
+        This section documents what guarantees exist and what the caller is
+        responsible for.
+
+        VALIDATED (by PolicyRegistry):
+            - Async method detection: Policies with async methods (reduce, decide,
+              evaluate) must explicitly set deterministic_async=True. This prevents
+              accidental async policy registration that could cause runtime issues.
+            - Policy type validation: policy_type must be a valid EnumPolicyType
+              value ("orchestrator" or "reducer"). Invalid types raise PolicyRegistryError.
+            - Version format validation: version must be valid semver format
+              (e.g., "1.0.0", "1.2.3-beta"). Invalid formats raise ProtocolConfigurationError.
+            - Non-empty policy_id: Validated via ModelPolicyRegistration Pydantic model.
+            - Thread-safe registration: Registration operations are protected by lock.
+
+        NOT VALIDATED (caller's responsibility):
+            - Policy class correctness: The registry does not verify that a policy
+              class correctly implements ProtocolPolicy methods. A class missing
+              required methods will only fail at runtime when invoked.
+            - Policy class safety: No static analysis, sandboxing, or security
+              scanning is performed. Malicious code in a policy class will execute
+              with the same privileges as the host process.
+            - Policy behavior: The registry cannot validate that policy decision
+              logic is correct, deterministic, or free of bugs.
+            - Policy dependencies: Import-time side effects, malicious dependencies,
+              or resource-intensive imports are not prevented.
+            - Runtime behavior: Policies that hang, exhaust memory, raise unexpected
+              exceptions, or violate timeouts are not sandboxed.
+            - Idempotency: The registry does not verify that policies are idempotent
+              or safe to retry.
+
+        Trust Assumptions:
+            1. Policy classes come from TRUSTED sources only:
+               - Internal codebase modules
+               - Vetted first-party packages
+               - Audited third-party packages
+            2. Policy classes do not execute arbitrary code on registration:
+               - No __init_subclass__ side effects
+               - No metaclass execution during class reference
+               - No import-time network calls or file I/O
+            3. Policy instances are created and used within the same trust boundary:
+               - No cross-tenant policy sharing
+               - No user-provided policy classes at runtime
+            4. Policy implementers follow the purity contract:
+               - No I/O operations (file, network, database)
+               - No side effects (state mutation outside return values)
+               - No external service calls
+               - No runtime logging (use structured outputs only)
+
+        For High-Security Environments:
+            If deploying PolicyRegistry in environments with stricter security
+            requirements, consider implementing additional safeguards:
+
+            - Code Review: Mandatory review for all policy implementations before
+              registration approval.
+
+            - Static Analysis: Run linters and security scanners on policy modules
+              before allowing registration:
+              ```python
+              # Example: Pre-registration validation hook
+              def validate_policy_module(module_path: str) -> bool:
+                  # Run bandit, semgrep, or custom security checks
+                  result = run_security_scan(module_path)
+                  return result.passed
+              ```
+
+            - Allowlist Pattern: Maintain an explicit allowlist of approved policy_ids
+              and reject registration attempts for unlisted policies:
+              ```python
+              APPROVED_POLICIES = {"exponential_backoff", "rate_limiter", "retry_strategy"}
+
+              def register_with_allowlist(registration: ModelPolicyRegistration) -> None:
+                  if registration.policy_id not in APPROVED_POLICIES:
+                      raise PolicyRegistryError(
+                          f"Policy '{registration.policy_id}' not in approved list",
+                          policy_id=registration.policy_id,
+                      )
+                  registry.register(registration)
+              ```
+
+            - Sandboxing: Execute policy code in isolated environments (not built
+              into PolicyRegistry, requires external infrastructure):
+              - Process isolation (subprocess with resource limits)
+              - Container isolation (Docker with security profiles)
+              - WASM isolation (for extreme security requirements)
+
+            - Runtime Monitoring: Instrument policy execution with timeouts and
+              resource monitoring:
+              ```python
+              async def execute_policy_with_limits(
+                  policy: ProtocolPolicy,
+                  context: dict,
+                  timeout_seconds: float = 1.0,
+              ) -> PolicyResult:
+                  try:
+                      return await asyncio.wait_for(
+                          policy.evaluate(context),
+                          timeout=timeout_seconds,
+                      )
+                  except asyncio.TimeoutError:
+                      raise PolicyRegistryError(
+                          f"Policy '{policy.policy_id}' exceeded timeout",
+                          policy_id=policy.policy_id,
+                      )
+              ```
+
+        Safe Usage Patterns:
+
+            DO:
+                - Register policies from known, reviewed source modules
+                - Use container-based DI for better lifecycle management
+                - Document policy dependencies and requirements
+                - Test policies in isolation before registration
+                - Monitor policy execution metrics (latency, error rates)
+
+            DON'T:
+                - Register policy classes provided by untrusted users
+                - Allow dynamic policy class construction from user input
+                - Skip code review for new policy implementations
+                - Assume policies are safe because they're in the registry
+                - Share registries across trust boundaries
+
+        See Also:
+            - docs/patterns/policy_registry_trust_model.md for detailed security guide
+            - ProtocolPolicy for interface requirements
+            - ModelPolicyRegistration for registration model validation
+
     Attributes:
         _registry: Internal dictionary mapping ModelPolicyKey instances to policy classes
         _lock: Threading lock for thread-safe registration operations
         _policy_id_index: Secondary index for O(1) policy_id lookup
+        SEMVER_CACHE_SIZE: Class variable for configuring LRU cache size (default: 128)
+
+    Class-Level Configuration:
+        The semver parsing cache size can be configured for large deployments:
+
+        ```python
+        # Option 1: Set class attribute before first use
+        PolicyRegistry.SEMVER_CACHE_SIZE = 256
+
+        # Option 2: Use configure method (recommended)
+        PolicyRegistry.configure_semver_cache(maxsize=256)
+
+        # Must be done BEFORE any registry operations
+        registry = PolicyRegistry()
+        ```
+
+        For testing, use _reset_semver_cache() to clear and reconfigure.
 
     Example:
         >>> from omnibase_infra.runtime.models import ModelPolicyRegistration
@@ -292,6 +436,20 @@ class PolicyRegistry:
         >>> print(registry.list_keys())
         [('retry_backoff', 'orchestrator', '1.0.0')]
     """
+
+    # ==========================================================================
+    # Class-level semver cache configuration
+    # ==========================================================================
+
+    # Semver cache size - can be overridden via class attribute before first parse
+    # or via configure_semver_cache() method
+    SEMVER_CACHE_SIZE: int = 128
+
+    # Cached semver parser function (lazily initialized)
+    _semver_cache: Optional[Callable[[str], tuple[int, int, int, str]]] = None
+
+    # Lock for thread-safe cache initialization
+    _semver_cache_lock: threading.Lock = threading.Lock()
 
     # Methods to check for async validation
     _ASYNC_CHECK_METHODS: tuple[str, ...] = ("reduce", "decide", "evaluate")
@@ -656,9 +814,162 @@ class PolicyRegistry:
 
                 return matches[0][1]
 
-    @staticmethod
-    @functools.lru_cache(maxsize=128)
-    def _parse_semver(version: str) -> tuple[int, int, int, str]:
+    # ==========================================================================
+    # Semver Cache Configuration Methods
+    # ==========================================================================
+
+    @classmethod
+    def configure_semver_cache(cls, maxsize: int) -> None:
+        """Configure semver cache size. Must be called before first parse.
+
+        This method allows configuring the LRU cache size for semver parsing
+        in large deployments with many policy versions. For most deployments,
+        the default of 128 entries is sufficient.
+
+        When to Increase Cache Size:
+            - Very large deployments with > 100 unique policy versions
+            - High-frequency lookups across many version combinations
+            - Observed cache eviction causing performance regression
+
+        Args:
+            maxsize: Maximum cache entries (default: 128).
+                     Recommended range: 64-512 for most deployments.
+                     Each entry uses ~100 bytes.
+
+        Raises:
+            RuntimeError: If cache already initialized (first parse already occurred)
+
+        Example:
+            >>> # Configure before any registry operations
+            >>> PolicyRegistry.configure_semver_cache(maxsize=256)
+            >>> registry = PolicyRegistry()
+
+        Note:
+            For testing purposes, use _reset_semver_cache() to clear the cache
+            and allow reconfiguration.
+        """
+        with cls._semver_cache_lock:
+            if cls._semver_cache is not None:
+                raise RuntimeError(
+                    "Cannot reconfigure semver cache after first use. "
+                    "Set PolicyRegistry.SEMVER_CACHE_SIZE before creating any "
+                    "registry instances, or use _reset_semver_cache() for testing."
+                )
+            cls.SEMVER_CACHE_SIZE = maxsize
+
+    @classmethod
+    def _reset_semver_cache(cls) -> None:
+        """Reset semver cache. For testing only.
+
+        Clears the cached semver parser, allowing reconfiguration of cache size.
+        This should only be used in test fixtures to ensure test isolation.
+
+        Thread Safety:
+            This method is thread-safe and uses the class-level lock.
+
+        Example:
+            >>> # In test fixture
+            >>> PolicyRegistry._reset_semver_cache()
+            >>> PolicyRegistry.SEMVER_CACHE_SIZE = 64
+            >>> # Now cache will be initialized with size 64 on next use
+        """
+        with cls._semver_cache_lock:
+            cls._semver_cache = None
+
+    @classmethod
+    def _get_semver_parser(cls) -> Callable[[str], tuple[int, int, int, str]]:
+        """Get or create the semver parser with configured cache size.
+
+        This method implements lazy initialization of the LRU-cached semver parser.
+        The cache size is determined by SEMVER_CACHE_SIZE at initialization time.
+
+        Thread Safety:
+            Uses double-checked locking pattern for thread-safe lazy initialization.
+
+        Returns:
+            Cached semver parsing function.
+
+        Performance:
+            - First call: Creates LRU-cached function (one-time cost)
+            - Subsequent calls: Returns cached function reference (O(1))
+        """
+        # Fast path: cache already initialized
+        if cls._semver_cache is not None:
+            return cls._semver_cache
+
+        # Slow path: initialize with lock
+        with cls._semver_cache_lock:
+            # Double-check after acquiring lock
+            if cls._semver_cache is not None:
+                return cls._semver_cache
+
+            # Create LRU-cached parser with configured size
+            @functools.lru_cache(maxsize=cls.SEMVER_CACHE_SIZE)
+            def _parse_semver_impl(version: str) -> tuple[int, int, int, str]:
+                """Parse semantic version string into comparable tuple.
+
+                Implementation moved here to support configurable cache size.
+                See _parse_semver docstring for full documentation.
+                """
+                # Validate non-empty version string
+                if not version or not version.strip():
+                    raise ProtocolConfigurationError(
+                        "Invalid semantic version format: empty version string",
+                        version=version,
+                    )
+
+                # Split off prerelease suffix (e.g., "1.0.0-alpha" -> "1.0.0", "alpha")
+                if "-" in version:
+                    version_part, prerelease = version.split("-", 1)
+                else:
+                    version_part, prerelease = version, ""
+
+                # Parse major.minor.patch
+                parts = version_part.split(".")
+
+                # Validate version format (must have 1-3 parts, no empty parts)
+                if (
+                    len(parts) < 1
+                    or len(parts) > 3
+                    or any(not p.strip() for p in parts)
+                ):
+                    raise ProtocolConfigurationError(
+                        f"Invalid semantic version format: '{version}'. "
+                        f"Expected format: 'major.minor.patch' or "
+                        f"'major.minor.patch-prerelease'",
+                        version=version,
+                    )
+
+                try:
+                    major = int(parts[0])
+                    minor = int(parts[1]) if len(parts) > 1 else 0
+                    patch = int(parts[2]) if len(parts) > 2 else 0
+                except (ValueError, IndexError) as e:
+                    raise ProtocolConfigurationError(
+                        f"Invalid semantic version format: '{version}'. "
+                        f"Version components must be integers (e.g., '1.2.3')",
+                        version=version,
+                    ) from e
+
+                # Validate non-negative integers
+                if major < 0 or minor < 0 or patch < 0:
+                    raise ProtocolConfigurationError(
+                        f"Invalid semantic version format: '{version}'. "
+                        f"Version components must be non-negative integers",
+                        version=version,
+                    )
+
+                # Empty prerelease sorts after non-empty (release > prerelease)
+                # Use sentinel value for empty to sort after any prerelease string
+                sort_prerelease = prerelease if prerelease else _SEMVER_SORT_SENTINEL
+
+                return (major, minor, patch, sort_prerelease)
+
+            cls._semver_cache = _parse_semver_impl
+            return cls._semver_cache
+
+    @classmethod
+    def _parse_semver(cls, version: str) -> tuple[int, int, int, str]:
         """Parse semantic version string into comparable tuple with INTEGER components.
 
         This method implements SEMANTIC VERSION SORTING, not lexicographic sorting.
@@ -666,12 +977,12 @@ class PolicyRegistry:
 
         Why This Matters (PR #36 feedback):
             Lexicographic sorting (string comparison):
-                "1.10.0" < "1.9.0" ❌ WRONG (because '1' < '9' in strings)
-                "10.0.0" < "2.0.0" ❌ WRONG (because '1' < '2' in strings)
+                "1.10.0" < "1.9.0" WRONG (because '1' < '9' in strings)
+                "10.0.0" < "2.0.0" WRONG (because '1' < '2' in strings)
 
             Semantic version sorting (integer comparison):
-                1.10.0 > 1.9.0 ✅ CORRECT (because 10 > 9 as integers)
-                10.0.0 > 2.0.0 ✅ CORRECT (because 10 > 2 as integers)
+                1.10.0 > 1.9.0 CORRECT (because 10 > 9 as integers)
+                10.0.0 > 2.0.0 CORRECT (because 10 > 2 as integers)
 
         Implementation:
             - Parses version components as INTEGERS (not strings)
@@ -681,7 +992,7 @@ class PolicyRegistry:
 
         Supported Formats:
             - Full: "1.2.3", "1.2.3-beta"
-            - Partial: "1" → (1, 0, 0), "1.2" → (1, 2, 0)
+            - Partial: "1" -> (1, 0, 0), "1.2" -> (1, 2, 0)
             - Prerelease: "1.0.0-alpha", "2.1.0-rc.1"
 
         Validation:
@@ -691,12 +1002,15 @@ class PolicyRegistry:
             - Rejects >3 version parts (e.g., "1.2.3.4")
 
         Performance:
-            This method is cached using LRU cache (maxsize=128) to avoid re-parsing
-            the same version strings repeatedly, improving performance for lookups
-            that compare multiple versions.
+            This method uses an LRU cache with configurable size (default: 128)
+            to avoid re-parsing the same version strings repeatedly, improving
+            performance for lookups that compare multiple versions.
 
-            Cache Size Rationale:
-                128 entries balances memory vs performance for typical workloads:
+            Cache Size Configuration:
+                For large deployments, configure before first use:
+                    PolicyRegistry.configure_semver_cache(maxsize=256)
+
+            Cache Size Rationale (default 128):
                 - Typical registry: 10-50 unique policy versions
                 - Peak scenarios: 50-100 versions across multiple policy types
                 - Each cache entry: ~100 bytes (string key + tuple value)
@@ -717,9 +1031,9 @@ class PolicyRegistry:
 
         Examples:
             >>> PolicyRegistry._parse_semver("1.9.0")
-            (1, 9, 0, '\x7f')
+            (1, 9, 0, '\\x7f')
             >>> PolicyRegistry._parse_semver("1.10.0")
-            (1, 10, 0, '\x7f')
+            (1, 10, 0, '\\x7f')
             >>> PolicyRegistry._parse_semver("1.10.0") > PolicyRegistry._parse_semver("1.9.0")
             True
             >>> PolicyRegistry._parse_semver("10.0.0") > PolicyRegistry._parse_semver("2.0.0")
@@ -729,54 +1043,8 @@ class PolicyRegistry:
             >>> PolicyRegistry._parse_semver("1.0.0-alpha") < PolicyRegistry._parse_semver("1.0.0")
             True
         """
-        # Validate non-empty version string
-        if not version or not version.strip():
-            raise ProtocolConfigurationError(
-                "Invalid semantic version format: empty version string",
-                version=version,
-            )
-
-        # Split off any prerelease suffix (e.g., "1.0.0-alpha" -> "1.0.0", "alpha")
-        if "-" in version:
-            version_part, prerelease = version.split("-", 1)
-        else:
-            version_part, prerelease = version, ""
-
-        # Parse major.minor.patch
-        parts = version_part.split(".")
-
-        # Validate version format (must have 1-3 parts, no empty parts)
-        if len(parts) < 1 or len(parts) > 3 or any(not p.strip() for p in parts):
-            raise ProtocolConfigurationError(
-                f"Invalid semantic version format: '{version}'. "
-                f"Expected format: 'major.minor.patch' or 'major.minor.patch-prerelease'",
-                version=version,
-            )
-
-        try:
-            major = int(parts[0])
-            minor = int(parts[1]) if len(parts) > 1 else 0
-            patch = int(parts[2]) if len(parts) > 2 else 0
-        except (ValueError, IndexError) as e:
-            raise ProtocolConfigurationError(
-                f"Invalid semantic version format: '{version}'. "
-                f"Version components must be integers (e.g., '1.2.3')",
-                version=version,
-            ) from e
-
-        # Validate non-negative integers
-        if major < 0 or minor < 0 or patch < 0:
-            raise ProtocolConfigurationError(
-                f"Invalid semantic version format: '{version}'. "
-                f"Version components must be non-negative integers",
-                version=version,
-            )
-
-        # Empty prerelease sorts after non-empty (release > prerelease)
-        # Use sentinel value for empty to sort after any prerelease string
-        sort_prerelease = prerelease if prerelease else _SEMVER_SORT_SENTINEL
-
-        return (major, minor, patch, sort_prerelease)
+        parser = cls._get_semver_parser()
+        return parser(version)
 
     def _list_internal(self) -> list[tuple[str, str, str]]:
         """Internal list method (assumes lock is held).
@@ -1031,200 +1299,6 @@ class PolicyRegistry:
 
 
 # =============================================================================
-# Module-Level Singleton Registry
-# =============================================================================
-
-# Module-level singleton instance (lazy initialized)
-_policy_registry: Optional[PolicyRegistry] = None
-_singleton_lock: threading.Lock = threading.Lock()
-
-
-def get_policy_registry() -> PolicyRegistry:
-    """Get the singleton policy registry instance.
-
-    .. deprecated:: 0.2.0
-        Use container-based DI instead for better testability and ONEX compliance:
-
-        ```python
-        # OLD (deprecated - singleton pattern):
-        from omnibase_infra.runtime.policy_registry import get_policy_registry
-        registry = get_policy_registry()
-
-        # NEW (preferred - container-based DI):
-        from omnibase_core.container import ModelONEXContainer
-        from omnibase_infra.runtime.container_wiring import get_policy_registry_from_container
-
-        async def __init__(self, container: ModelONEXContainer):
-            self.policy_registry = await get_policy_registry_from_container(container)
-
-        # Or resolve directly (async):
-        from omnibase_infra.runtime.policy_registry import PolicyRegistry
-        registry = await container.service_registry.resolve_service(PolicyRegistry)
-        ```
-
-    This function maintains backwards compatibility for code that hasn't migrated
-    to container-based DI. New code should use ModelONEXContainer to resolve
-    PolicyRegistry for better testability and lifecycle management.
-
-    Returns a module-level singleton instance of PolicyRegistry.
-    Creates the instance on first call (lazy initialization).
-
-    Returns:
-        PolicyRegistry: The singleton policy registry instance.
-
-    Example:
-        >>> registry = get_policy_registry()
-        >>> registry.register("retry", RetryPolicy, EnumPolicyType.ORCHESTRATOR)
-        >>> same_registry = get_policy_registry()
-        >>> same_registry is registry
-        True
-    """
-    warnings.warn(
-        "get_policy_registry() is deprecated since omnibase_infra 0.2.0 and will be "
-        "removed in 0.3.0. Use container-based dependency injection instead:\n"
-        "  registry = await container.service_registry.resolve_service(PolicyRegistry)\n"
-        "Or use the helper function:\n"
-        "  from omnibase_infra.runtime.container_wiring import get_policy_registry_from_container\n"
-        "  registry = await get_policy_registry_from_container(container)",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    global _policy_registry  # noqa: PLW0603
-    if _policy_registry is None:
-        with _singleton_lock:
-            # Double-check locking pattern
-            if _policy_registry is None:
-                _policy_registry = PolicyRegistry()
-    return _policy_registry
-
-
-# =============================================================================
-# Convenience Functions
-# =============================================================================
-
-
-def get_policy_class(
-    policy_id: str,
-    policy_type: Optional[str | EnumPolicyType] = None,
-    version: Optional[str] = None,
-) -> type[ProtocolPolicy]:
-    """Get policy class from the singleton registry.
-
-    .. deprecated:: 0.2.0
-        Use container-based DI instead:
-
-        ```python
-        # OLD (deprecated):
-        from omnibase_infra.runtime.policy_registry import get_policy_class
-        policy_cls = get_policy_class("exponential_backoff")
-
-        # NEW (preferred):
-        from omnibase_infra.runtime.policy_registry import PolicyRegistry
-        registry = await container.service_registry.resolve_service(PolicyRegistry)
-        policy_cls = registry.get("exponential_backoff")
-        ```
-
-    Convenience function that wraps get_policy_registry().get().
-    Maintained for backwards compatibility.
-
-    Args:
-        policy_id: Policy identifier.
-        policy_type: Optional policy type filter.
-        version: Optional version filter.
-
-    Returns:
-        Policy class registered for the configuration.
-
-    Raises:
-        PolicyRegistryError: If no matching policy is found.
-
-    Example:
-        >>> from omnibase_infra.runtime.policy_registry import get_policy_class
-        >>> policy_cls = get_policy_class("exponential_backoff")
-        >>> policy = policy_cls()
-    """
-    warnings.warn(
-        "get_policy_class() is deprecated since omnibase_infra 0.2.0 and will be "
-        "removed in 0.3.0. Use container-based dependency injection instead:\n"
-        "  registry = await container.service_registry.resolve_service(PolicyRegistry)\n"
-        "  policy_cls = registry.get(policy_id)",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return get_policy_registry().get(policy_id, policy_type, version)
-
-
-def register_policy(
-    policy_id: str,
-    policy_class: type[ProtocolPolicy],
-    policy_type: str | EnumPolicyType,
-    version: str = "1.0.0",
-    deterministic_async: bool = False,
-) -> None:
-    """Register a policy in the singleton registry.
-
-    .. deprecated:: 0.2.0
-        Use container-based DI instead:
-
-        ```python
-        # OLD (deprecated):
-        from omnibase_infra.runtime.policy_registry import register_policy
-        register_policy(
-            policy_id="retry_backoff",
-            policy_class=RetryBackoffPolicy,
-            policy_type="orchestrator",
-        )
-
-        # NEW (preferred):
-        from omnibase_infra.runtime.policy_registry import PolicyRegistry
-        registry = await container.service_registry.resolve_service(PolicyRegistry)
-        registry.register_policy(
-            policy_id="retry_backoff",
-            policy_class=RetryBackoffPolicy,
-            policy_type="orchestrator",
-        )
-        ```
-
-    Convenience function that wraps get_policy_registry().register_policy().
-    Maintained for backwards compatibility.
-
-    Args:
-        policy_id: Unique identifier for the policy.
-        policy_class: The policy class to register.
-        policy_type: Whether this is orchestrator or reducer policy.
-        version: Semantic version string (default: "1.0.0").
-        deterministic_async: If True, allows async interface.
-
-    Raises:
-        PolicyRegistryError: If policy has async methods and
-                           deterministic_async=False.
-
-    Example:
-        >>> from omnibase_infra.runtime.policy_registry import register_policy
-        >>> register_policy(
-        ...     policy_id="retry_backoff",
-        ...     policy_class=RetryBackoffPolicy,
-        ...     policy_type="orchestrator",
-        ... )
-    """
-    warnings.warn(
-        "register_policy() is deprecated since omnibase_infra 0.2.0 and will be "
-        "removed in 0.3.0. Use container-based dependency injection instead:\n"
-        "  registry = await container.service_registry.resolve_service(PolicyRegistry)\n"
-        "  registry.register_policy(policy_id, policy_class, policy_type)",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    get_policy_registry().register_policy(
-        policy_id=policy_id,
-        policy_class=policy_class,
-        policy_type=policy_type,
-        version=version,
-        deterministic_async=deterministic_async,
-    )
-
-
-# =============================================================================
 # Module Exports
 # =============================================================================
 
@@ -1234,9 +1308,4 @@ __all__: list[str] = [
     # Models
     "ModelPolicyRegistration",
     "ModelPolicyKey",
-    # Singleton accessor
-    "get_policy_registry",
-    # Convenience functions
-    "get_policy_class",
-    "register_policy",
 ]

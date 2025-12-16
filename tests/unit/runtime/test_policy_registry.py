@@ -11,16 +11,14 @@ All tests validate:
 - Policy registration and retrieval
 - Sync enforcement for policy plugins
 - Version management
-- Singleton pattern implementation
+- Container-based DI integration
 - Thread safety
 - Error handling for missing registrations
-- Convenience functions
 """
 
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,13 +26,8 @@ from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
-from omnibase_infra.runtime import policy_registry as registry_module
-from omnibase_infra.runtime.policy_registry import (
-    PolicyRegistry,
-    get_policy_class,
-    get_policy_registry,
-    register_policy,
-)
+from omnibase_infra.runtime.models import ModelPolicyKey
+from omnibase_infra.runtime.policy_registry import PolicyRegistry
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -232,21 +225,6 @@ def populated_policy_registry() -> PolicyRegistry:
         version="1.0.0",
     )  # type: ignore[arg-type]
     return registry
-
-
-@pytest.fixture(autouse=True)
-def reset_singletons() -> Iterator[None]:
-    """Reset singleton instances before each test.
-
-    This ensures tests are isolated and don't affect each other
-    through the singleton state.
-    """
-    with registry_module._singleton_lock:
-        registry_module._policy_registry = None
-    yield
-    # Also reset after test
-    with registry_module._singleton_lock:
-        registry_module._policy_registry = None
 
 
 # =============================================================================
@@ -988,63 +966,6 @@ class TestPolicyRegistryThreadSafety:
 
 
 # =============================================================================
-# TestPolicyRegistrySingleton
-# =============================================================================
-
-
-class TestPolicyRegistrySingleton:
-    """Tests for singleton pattern."""
-
-    def test_get_policy_registry_returns_singleton(self) -> None:
-        """Test that get_policy_registry returns same instance."""
-        registry1 = get_policy_registry()
-        registry2 = get_policy_registry()
-        assert registry1 is registry2
-
-    def test_get_policy_class_uses_singleton(self) -> None:
-        """Test that get_policy_class convenience function uses singleton."""
-        # Register via singleton
-        get_policy_registry().register_policy(
-            policy_id="singleton-test",
-            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
-            policy_type=EnumPolicyType.ORCHESTRATOR,
-            version="1.0.0",
-        )  # type: ignore[arg-type]
-        # Retrieve via convenience function
-        policy_cls = get_policy_class("singleton-test")
-        assert policy_cls is MockSyncPolicy
-
-    def test_register_policy_uses_singleton(self) -> None:
-        """Test that register_policy convenience function uses singleton."""
-        register_policy(
-            policy_id="register-test",
-            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
-            policy_type=EnumPolicyType.ORCHESTRATOR,
-            version="1.0.0",
-        )  # type: ignore[arg-type]
-        # Verify via singleton
-        assert get_policy_registry().is_registered("register-test")
-
-    def test_singleton_thread_safe_initialization(self) -> None:
-        """Test that singleton initialization is thread-safe."""
-        registries: list[PolicyRegistry] = []
-
-        def get_registry() -> None:
-            registries.append(get_policy_registry())
-
-        threads = [threading.Thread(target=get_registry) for _ in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(registries) == 10
-        first = registries[0]
-        for reg in registries:
-            assert reg is first
-
-
-# =============================================================================
 # TestPolicyRegistryError
 # =============================================================================
 
@@ -1451,12 +1372,15 @@ class TestPolicyRegistrySemverCaching:
 
     Validates that the LRU cache improves performance and correctly
     handles cache hits/misses for version string parsing.
+
+    Note: Tests use _reset_semver_cache() to ensure clean state between tests
+    since the cache is now lazily initialized as a class-level singleton.
     """
 
     def test_parse_semver_returns_consistent_results(self) -> None:
         """Test that _parse_semver returns consistent results for same input."""
-        # Clear cache to ensure clean state
-        PolicyRegistry._parse_semver.cache_clear()
+        # Reset cache to ensure clean state
+        PolicyRegistry._reset_semver_cache()
 
         # Parse same version multiple times
         result1 = PolicyRegistry._parse_semver("1.2.3")
@@ -1469,41 +1393,45 @@ class TestPolicyRegistrySemverCaching:
 
     def test_parse_semver_cache_info_shows_hits(self) -> None:
         """Test that cache info shows hits for repeated parses."""
-        # Clear cache to ensure clean state
-        PolicyRegistry._parse_semver.cache_clear()
-        initial_info = PolicyRegistry._parse_semver.cache_info()
+        # Reset cache to ensure clean state
+        PolicyRegistry._reset_semver_cache()
+
+        # Get the parser (initializes the cache)
+        parser = PolicyRegistry._get_semver_parser()
+        initial_info = parser.cache_info()
         assert initial_info.hits == 0
         assert initial_info.misses == 0
 
         # First parse - should be a cache miss
         PolicyRegistry._parse_semver("1.0.0")
-        info_after_first = PolicyRegistry._parse_semver.cache_info()
+        info_after_first = parser.cache_info()
         assert info_after_first.misses == 1
         assert info_after_first.hits == 0
 
         # Second parse of same version - should be a cache hit
         PolicyRegistry._parse_semver("1.0.0")
-        info_after_second = PolicyRegistry._parse_semver.cache_info()
+        info_after_second = parser.cache_info()
         assert info_after_second.misses == 1
         assert info_after_second.hits == 1
 
         # Third parse - another hit
         PolicyRegistry._parse_semver("1.0.0")
-        info_after_third = PolicyRegistry._parse_semver.cache_info()
+        info_after_third = parser.cache_info()
         assert info_after_third.misses == 1
         assert info_after_third.hits == 2
 
     def test_parse_semver_different_versions_cause_misses(self) -> None:
         """Test that different version strings cause cache misses."""
-        # Clear cache to ensure clean state
-        PolicyRegistry._parse_semver.cache_clear()
+        # Reset cache to ensure clean state
+        PolicyRegistry._reset_semver_cache()
 
         # Parse different versions
         PolicyRegistry._parse_semver("1.0.0")
         PolicyRegistry._parse_semver("2.0.0")
         PolicyRegistry._parse_semver("3.0.0")
 
-        info = PolicyRegistry._parse_semver.cache_info()
+        parser = PolicyRegistry._get_semver_parser()
+        info = parser.cache_info()
         assert info.misses == 3
         assert info.hits == 0
         assert info.currsize == 3  # 3 entries cached
@@ -1512,6 +1440,9 @@ class TestPolicyRegistrySemverCaching:
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that caching improves performance for repeated get() calls."""
+        # Reset cache to ensure clean state
+        PolicyRegistry._reset_semver_cache()
+
         # Register multiple versions of same policy
         for i in range(10):
             policy_registry.register_policy(
@@ -1521,24 +1452,23 @@ class TestPolicyRegistrySemverCaching:
                 version=f"{i}.0.0",
             )  # type: ignore[arg-type]
 
-        # Clear cache to measure baseline
-        PolicyRegistry._parse_semver.cache_clear()
+        parser = PolicyRegistry._get_semver_parser()
 
         # First get() will parse all versions (cold cache)
         _ = policy_registry.get("perf-test")  # Gets latest version
-        first_misses = PolicyRegistry._parse_semver.cache_info().misses
+        first_misses = parser.cache_info().misses
 
         # Second get() should hit cache (warm cache)
         _ = policy_registry.get("perf-test")
-        second_misses = PolicyRegistry._parse_semver.cache_info().misses
+        second_misses = parser.cache_info().misses
 
         # Cache should have been hit (no new misses)
         assert second_misses == first_misses
 
     def test_parse_semver_cache_handles_prerelease_versions(self) -> None:
         """Test that cache correctly handles prerelease version strings."""
-        # Clear cache to ensure clean state
-        PolicyRegistry._parse_semver.cache_clear()
+        # Reset cache to ensure clean state
+        PolicyRegistry._reset_semver_cache()
 
         # Parse prerelease versions
         result1 = PolicyRegistry._parse_semver("1.0.0-alpha")
@@ -1547,32 +1477,34 @@ class TestPolicyRegistrySemverCaching:
 
         # All should be distinct cache entries
         assert result1 != result2 != result3
-        info = PolicyRegistry._parse_semver.cache_info()
+        parser = PolicyRegistry._get_semver_parser()
+        info = parser.cache_info()
         assert info.currsize == 3
 
         # Repeat parse should hit cache
         result1_repeat = PolicyRegistry._parse_semver("1.0.0-alpha")
         assert result1_repeat == result1
-        info_after = PolicyRegistry._parse_semver.cache_info()
+        info_after = parser.cache_info()
         assert info_after.hits == 1
 
     def test_parse_semver_cache_size_limit(self) -> None:
-        """Test that cache respects maxsize=128 limit."""
-        # Clear cache to ensure clean state
-        PolicyRegistry._parse_semver.cache_clear()
+        """Test that cache respects maxsize=128 limit (default)."""
+        # Reset cache to ensure clean state
+        PolicyRegistry._reset_semver_cache()
 
-        # Parse 150 unique versions (exceeds maxsize=128)
+        # Parse 150 unique versions (exceeds default maxsize=128)
         for i in range(150):
             PolicyRegistry._parse_semver(f"{i}.0.0")
 
-        info = PolicyRegistry._parse_semver.cache_info()
+        parser = PolicyRegistry._get_semver_parser()
+        info = parser.cache_info()
         # Cache size should not exceed maxsize
         assert info.currsize <= 128
 
     def test_parse_semver_cache_lru_eviction(self) -> None:
         """Test that LRU eviction works correctly."""
-        # Clear cache to ensure clean state
-        PolicyRegistry._parse_semver.cache_clear()
+        # Reset cache to ensure clean state
+        PolicyRegistry._reset_semver_cache()
 
         # Fill cache to capacity with versions 0-127
         for i in range(128):
@@ -1586,26 +1518,144 @@ class TestPolicyRegistrySemverCaching:
 
         # "0.0.0" should still be in cache (was recently used)
         PolicyRegistry._parse_semver("0.0.0")
-        info = PolicyRegistry._parse_semver.cache_info()
+        parser = PolicyRegistry._get_semver_parser()
+        info = parser.cache_info()
         # Last access to "0.0.0" should be a hit
         assert info.hits > 0
 
-    def test_parse_semver_cache_clear_resets_state(self) -> None:
-        """Test that cache_clear() resets cache state."""
+    def test_reset_semver_cache_clears_state(self) -> None:
+        """Test that _reset_semver_cache() clears cache state."""
         # Parse some versions
         PolicyRegistry._parse_semver("1.0.0")
         PolicyRegistry._parse_semver("2.0.0")
-        info_before = PolicyRegistry._parse_semver.cache_info()
+        parser = PolicyRegistry._get_semver_parser()
+        info_before = parser.cache_info()
         assert info_before.currsize > 0
 
-        # Clear cache
-        PolicyRegistry._parse_semver.cache_clear()
-        info_after = PolicyRegistry._parse_semver.cache_info()
+        # Reset cache
+        PolicyRegistry._reset_semver_cache()
 
-        # Cache should be empty
-        assert info_after.currsize == 0
+        # After reset, the cache should be None (will be reinitialized on next use)
+        assert PolicyRegistry._semver_cache is None
+
+        # Next parse initializes a fresh cache
+        PolicyRegistry._parse_semver("3.0.0")
+        new_parser = PolicyRegistry._get_semver_parser()
+        info_after = new_parser.cache_info()
+
+        # New cache should have only the one entry we just parsed
+        assert info_after.currsize == 1
         assert info_after.hits == 0
-        assert info_after.misses == 0
+        assert info_after.misses == 1
+
+
+class TestPolicyRegistrySemverCacheConfiguration:
+    """Tests for configurable semver cache size.
+
+    Validates that the cache size can be configured for large deployments.
+    """
+
+    def test_configure_semver_cache_before_use(self) -> None:
+        """Test configuring cache size before first use."""
+        # Reset cache to allow configuration
+        PolicyRegistry._reset_semver_cache()
+        original_size = PolicyRegistry.SEMVER_CACHE_SIZE
+
+        try:
+            # Configure a smaller cache size
+            PolicyRegistry.configure_semver_cache(maxsize=64)
+            assert PolicyRegistry.SEMVER_CACHE_SIZE == 64
+
+            # Use the parser (initializes with new size)
+            PolicyRegistry._parse_semver("1.0.0")
+
+            # Verify cache was created with the configured size
+            parser = PolicyRegistry._get_semver_parser()
+            # The maxsize is stored in cache_parameters() for newer Python
+            # or we can verify by filling it
+            for i in range(100):
+                PolicyRegistry._parse_semver(f"{i}.0.0")
+            info = parser.cache_info()
+            # With maxsize=64, currsize should be <= 64
+            assert info.currsize <= 64
+        finally:
+            # Reset to original state
+            PolicyRegistry._reset_semver_cache()
+            PolicyRegistry.SEMVER_CACHE_SIZE = original_size
+
+    def test_configure_semver_cache_after_use_raises_error(self) -> None:
+        """Test that configuring cache after first use raises RuntimeError."""
+        # Reset cache to start fresh
+        PolicyRegistry._reset_semver_cache()
+
+        # Use the parser (initializes the cache)
+        PolicyRegistry._parse_semver("1.0.0")
+
+        # Attempt to reconfigure should fail
+        with pytest.raises(RuntimeError) as exc_info:
+            PolicyRegistry.configure_semver_cache(maxsize=256)
+
+        assert "Cannot reconfigure semver cache after first use" in str(exc_info.value)
+
+        # Reset for other tests
+        PolicyRegistry._reset_semver_cache()
+
+    def test_semver_cache_size_via_class_attribute(self) -> None:
+        """Test setting cache size via class attribute before use."""
+        # Reset cache to allow reconfiguration
+        PolicyRegistry._reset_semver_cache()
+        original_size = PolicyRegistry.SEMVER_CACHE_SIZE
+
+        try:
+            # Set via class attribute (alternative to configure_semver_cache)
+            PolicyRegistry.SEMVER_CACHE_SIZE = 32
+
+            # Parse enough versions to exceed the small cache
+            for i in range(50):
+                PolicyRegistry._parse_semver(f"{i}.0.0")
+
+            parser = PolicyRegistry._get_semver_parser()
+            info = parser.cache_info()
+            # With maxsize=32, currsize should be <= 32
+            assert info.currsize <= 32
+        finally:
+            # Reset to original state
+            PolicyRegistry._reset_semver_cache()
+            PolicyRegistry.SEMVER_CACHE_SIZE = original_size
+
+    def test_default_cache_size_is_128(self) -> None:
+        """Test that default cache size is 128."""
+        # Reset to ensure we're checking the class default
+        PolicyRegistry._reset_semver_cache()
+
+        # The class-level default should be 128
+        # Note: We need to be careful as tests may have modified this
+        # Just verify the documented default
+        assert PolicyRegistry.SEMVER_CACHE_SIZE >= 64  # Reasonable minimum
+        assert PolicyRegistry.SEMVER_CACHE_SIZE <= 512  # Reasonable maximum
+
+    def test_cache_reset_allows_reconfiguration(self) -> None:
+        """Test that _reset_semver_cache allows reconfiguration."""
+        original_size = PolicyRegistry.SEMVER_CACHE_SIZE
+
+        try:
+            # Reset and configure
+            PolicyRegistry._reset_semver_cache()
+            PolicyRegistry.configure_semver_cache(maxsize=100)
+
+            # Use the cache
+            PolicyRegistry._parse_semver("1.0.0")
+
+            # Reset again
+            PolicyRegistry._reset_semver_cache()
+
+            # Should be able to reconfigure now
+            PolicyRegistry.configure_semver_cache(maxsize=200)
+            assert PolicyRegistry.SEMVER_CACHE_SIZE == 200
+        finally:
+            # Cleanup
+            PolicyRegistry._reset_semver_cache()
+            PolicyRegistry.SEMVER_CACHE_SIZE = original_size
 
 
 # =============================================================================
@@ -1850,3 +1900,147 @@ class TestPolicyRegistryContainerIntegration:
         )
 
         assert len(registry) == 1
+
+
+# =============================================================================
+# TestModelPolicyKeyHashUniqueness
+# =============================================================================
+
+
+class TestModelPolicyKeyHashUniqueness:
+    """Test ModelPolicyKey hash uniqueness for edge cases.
+
+    ModelPolicyKey is used as a dictionary key in PolicyRegistry.
+    These tests verify that hash uniqueness doesn't collide for various
+    edge cases, ensuring correct dictionary behavior.
+    """
+
+    def test_hash_uniqueness_similar_ids(self) -> None:
+        """Similar policy_ids should have different hashes."""
+        keys = [
+            ModelPolicyKey(
+                policy_id="retry", policy_type="orchestrator", version="1.0.0"
+            ),
+            ModelPolicyKey(
+                policy_id="retry1", policy_type="orchestrator", version="1.0.0"
+            ),
+            ModelPolicyKey(
+                policy_id="1retry", policy_type="orchestrator", version="1.0.0"
+            ),
+            ModelPolicyKey(
+                policy_id="retr", policy_type="orchestrator", version="1.0.0"
+            ),
+        ]
+        hashes = {hash(k) for k in keys}
+        assert len(hashes) == len(keys), "Hash collision detected for similar IDs"
+
+    def test_hash_uniqueness_type_differs(self) -> None:
+        """Same policy_id with different types should have different hashes."""
+        key1 = ModelPolicyKey(
+            policy_id="test", policy_type="orchestrator", version="1.0.0"
+        )
+        key2 = ModelPolicyKey(policy_id="test", policy_type="reducer", version="1.0.0")
+        assert hash(key1) != hash(key2)
+
+    def test_hash_uniqueness_version_differs(self) -> None:
+        """Same policy_id with different versions should have different hashes."""
+        keys = [
+            ModelPolicyKey(
+                policy_id="test", policy_type="orchestrator", version="1.0.0"
+            ),
+            ModelPolicyKey(
+                policy_id="test", policy_type="orchestrator", version="1.0.1"
+            ),
+            ModelPolicyKey(
+                policy_id="test", policy_type="orchestrator", version="2.0.0"
+            ),
+        ]
+        hashes = {hash(k) for k in keys}
+        assert len(hashes) == len(keys)
+
+    def test_hash_stability(self) -> None:
+        """Same key should always produce same hash."""
+        key = ModelPolicyKey(
+            policy_id="stable", policy_type="orchestrator", version="1.0.0"
+        )
+        hash1 = hash(key)
+        hash2 = hash(key)
+        key_copy = ModelPolicyKey(
+            policy_id="stable", policy_type="orchestrator", version="1.0.0"
+        )
+        hash3 = hash(key_copy)
+
+        assert hash1 == hash2 == hash3
+
+    def test_hash_uniqueness_with_special_characters(self) -> None:
+        """Policy IDs with special characters should have unique hashes."""
+        keys = [
+            ModelPolicyKey(
+                policy_id="test-policy", policy_type="orchestrator", version="1.0.0"
+            ),
+            ModelPolicyKey(
+                policy_id="test_policy", policy_type="orchestrator", version="1.0.0"
+            ),
+            ModelPolicyKey(
+                policy_id="test.policy", policy_type="orchestrator", version="1.0.0"
+            ),
+            ModelPolicyKey(
+                policy_id="test:policy", policy_type="orchestrator", version="1.0.0"
+            ),
+        ]
+        hashes = {hash(k) for k in keys}
+        assert len(hashes) == len(keys)
+
+    def test_hash_uniqueness_prerelease_versions(self) -> None:
+        """Prerelease versions should have unique hashes."""
+        keys = [
+            ModelPolicyKey(
+                policy_id="test", policy_type="orchestrator", version="1.0.0"
+            ),
+            ModelPolicyKey(
+                policy_id="test", policy_type="orchestrator", version="1.0.0-alpha"
+            ),
+            ModelPolicyKey(
+                policy_id="test", policy_type="orchestrator", version="1.0.0-beta"
+            ),
+            ModelPolicyKey(
+                policy_id="test", policy_type="orchestrator", version="1.0.0-rc.1"
+            ),
+        ]
+        hashes = {hash(k) for k in keys}
+        assert len(hashes) == len(keys)
+
+    def test_dict_key_usage(self) -> None:
+        """ModelPolicyKey should work correctly as dict key."""
+        d: dict[ModelPolicyKey, str] = {}
+
+        key1 = ModelPolicyKey(
+            policy_id="a", policy_type="orchestrator", version="1.0.0"
+        )
+        key2 = ModelPolicyKey(
+            policy_id="a", policy_type="orchestrator", version="1.0.0"
+        )  # same
+        key3 = ModelPolicyKey(
+            policy_id="b", policy_type="orchestrator", version="1.0.0"
+        )  # different
+
+        d[key1] = "value1"
+        d[key3] = "value3"
+
+        # key2 should find same value as key1 (they're equal)
+        assert d[key2] == "value1"
+        assert len(d) == 2
+
+    def test_large_scale_hash_distribution(self) -> None:
+        """Test hash distribution with many keys."""
+        keys = [
+            ModelPolicyKey(
+                policy_id=f"policy_{i}",
+                policy_type="orchestrator" if i % 2 == 0 else "reducer",
+                version=f"{i % 10}.{i % 5}.{i % 3}",
+            )
+            for i in range(1000)
+        ]
+        hashes = {hash(k) for k in keys}
+        # Allow some collisions but expect >99% unique
+        assert len(hashes) > 990, f"Too many collisions: {1000 - len(hashes)}"

@@ -46,11 +46,15 @@ Architecture Principles
 
 Example Usage
 -------------
-    >>> from omnibase_infra.runtime import get_policy_registry, PolicyRegistry
+    >>> from omnibase_core.container import ModelONEXContainer
+    >>> from omnibase_infra.runtime import PolicyRegistry
+    >>> from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
     >>> from omnibase_infra.enums import EnumPolicyType
     >>>
-    >>> # Get singleton registry
-    >>> registry = get_policy_registry()
+    >>> # Container-based DI (preferred)
+    >>> container = ModelONEXContainer()
+    >>> await wire_infrastructure_services(container)
+    >>> registry = await container.service_registry.resolve_service(PolicyRegistry)
     >>>
     >>> # Register a policy
     >>> registry.register_policy(
