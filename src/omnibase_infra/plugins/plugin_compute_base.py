@@ -155,6 +155,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from omnibase_infra.protocols.protocol_plugin_compute import (
+    PluginContext,
+    PluginInputData,
+    PluginOutputData,
+)
+
 
 class PluginComputeBase(ABC):
     """Abstract base class for compute plugins.
@@ -244,8 +250,8 @@ class PluginComputeBase(ABC):
 
     @abstractmethod
     def execute(
-        self, input_data: dict[str, Any], context: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, input_data: PluginInputData, context: PluginContext
+    ) -> PluginOutputData:
         """Execute computation. MUST be deterministic.
 
             Given the same input_data and context, this method MUST return
@@ -382,7 +388,7 @@ class PluginComputeBase(ABC):
         """
         ...
 
-    def validate_input(self, input_data: dict[str, Any]) -> None:
+    def validate_input(self, input_data: PluginInputData) -> None:
         """Optional input validation hook.
 
         Override this method to validate input_data before execution.
@@ -396,7 +402,7 @@ class PluginComputeBase(ABC):
         """
         return  # Default: no validation
 
-    def validate_output(self, output: dict[str, Any]) -> None:
+    def validate_output(self, output: PluginOutputData) -> None:
         """Optional output validation hook.
 
         Override this method to validate computation results after execution.
