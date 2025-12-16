@@ -459,6 +459,8 @@ __all__ = [
     # Type aliases
     "ValidationResult",
     "ExemptionPattern",
+    # Re-exported types from omnibase_core.validation
+    "CircularImportValidationResult",
     # Constants
     "INFRA_SRC_PATH",
     "INFRA_NODES_PATH",

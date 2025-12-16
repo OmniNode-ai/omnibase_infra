@@ -239,6 +239,14 @@ async def test_retry_with_policy_success(retry_service, mock_container):
     registry = mock_container.resolve.return_value
 
     class MockRetryPolicy:
+        @property
+        def policy_id(self) -> str:
+            return "test_retry"
+
+        @property
+        def policy_type(self) -> EnumPolicyType:
+            return EnumPolicyType.ORCHESTRATOR
+
         def evaluate(self, context):
             return {
                 "should_retry": True,
@@ -281,6 +289,14 @@ async def test_retry_with_policy_failure(retry_service, mock_container):
     registry = mock_container.resolve.return_value
 
     class MockNoRetryPolicy:
+        @property
+        def policy_id(self) -> str:
+            return "no_retry"
+
+        @property
+        def policy_type(self) -> EnumPolicyType:
+            return EnumPolicyType.ORCHESTRATOR
+
         def evaluate(self, context):
             # Stop retrying after 2 attempts
             return {"should_retry": context["attempts"] < 2}
@@ -338,6 +354,14 @@ def test_full_container_lifecycle():
 
     # 3. Register policy
     class TestPolicy:
+        @property
+        def policy_id(self) -> str:
+            return "test_policy"
+
+        @property
+        def policy_type(self) -> EnumPolicyType:
+            return EnumPolicyType.ORCHESTRATOR
+
         def evaluate(self, context):
             return {"result": "test"}
 

@@ -215,15 +215,18 @@ class ProtocolPolicy(Protocol):
             ```python
             from omnibase_infra.enums import EnumPolicyType
 
+            # Option 1: Using EnumPolicyType (Recommended)
             @property
             def policy_type(self) -> EnumPolicyType:
-                return EnumPolicyType.ORCHESTRATOR  # Recommended
+                return EnumPolicyType.ORCHESTRATOR
 
-            # Or for backward compatibility:
+            # Option 2: Using string literal (for backward compatibility)
             @property
             def policy_type(self) -> Literal["orchestrator", "reducer"]:
                 return "orchestrator"
             ```
+
+            Note: Choose ONE of the above options, not both.
         """
         ...
 

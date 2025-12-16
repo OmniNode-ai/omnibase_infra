@@ -230,11 +230,15 @@ class TestPolicyRegistryPerformance:
 
         Tests that sorting multiple versions to find latest is performant.
         Uses cached semver parsing to avoid redundant work.
+
+        Also verifies that the correct (semantically latest) version is returned.
+        The fixture registers versions 0.0.0 through 4.0.0, so 4.0.0 should be
+        returned as the latest.
         """
         # Measure lookup with 5 versions (requires sorting)
         start_time = time.perf_counter()
         for _ in range(1000):
-            _ = large_policy_registry.get("policy_10")
+            policy_cls = large_policy_registry.get("policy_10")
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
         # With 5 versions, sorting overhead should be minimal
@@ -242,6 +246,23 @@ class TestPolicyRegistryPerformance:
         assert elapsed_ms < 150, (
             f"1000 lookups with sorting took {elapsed_ms:.2f}ms (expected < 150ms)"
         )
+
+        # CRITICAL: Verify the correct version was returned (PR #36 feedback)
+        # The fixture registers versions 0.0.0 through 4.0.0
+        # Semantic versioning should return 4.0.0 as latest
+        assert policy_cls is MockPolicy, f"Expected MockPolicy but got {policy_cls}"
+
+        # Verify that list_versions confirms all expected versions exist
+        versions = large_policy_registry.list_versions("policy_10")
+        expected_versions = {"0.0.0", "1.0.0", "2.0.0", "3.0.0", "4.0.0"}
+        assert set(versions) == expected_versions, (
+            f"Expected versions {expected_versions} but got {set(versions)}"
+        )
+
+        # Verify explicit version lookup returns 4.0.0 (semantically latest)
+        # This confirms semantic sorting, not lexicographic
+        explicit_policy = large_policy_registry.get("policy_10", version="4.0.0")
+        assert explicit_policy is MockPolicy
 
     def test_concurrent_get_performance(
         self, large_policy_registry: PolicyRegistry
@@ -276,6 +297,13 @@ class TestPolicyRegistryPerformance:
         # All operations should succeed
         assert len(errors) == 0, f"Concurrent access errors: {errors}"
         assert len(results) == 1000, "Not all operations completed"
+
+        # CRITICAL: Verify all lookups returned the correct policy class
+        # This ensures concurrent access doesn't corrupt version resolution
+        assert all(results), (
+            f"Some lookups returned wrong policy class. "
+            f"Pass rate: {sum(results)}/{len(results)}"
+        )
 
         # Concurrent access should complete in reasonable time
         # 10 threads * 100 lookups = 1000 total lookups
