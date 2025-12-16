@@ -6,7 +6,6 @@ This module provides a strongly-typed Pydantic model for optional string
 values, replacing `str | None` union types to comply with ONEX standards.
 """
 
-from collections.abc import Callable
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -66,20 +65,6 @@ class ModelOptionalString(BaseModel):
             The stored value if present, otherwise the default.
         """
         return self.value if self.value is not None else default
-
-    def map(self, func: Callable[[str], str]) -> "ModelOptionalString":
-        """Apply function to value if present.
-
-        Args:
-            func: Function to apply to the value.
-
-        Returns:
-            A new ModelOptionalString with the transformed value,
-            or self if value is None.
-        """
-        if self.value is not None:
-            return ModelOptionalString(value=func(self.value))
-        return self
 
     def __bool__(self) -> bool:
         """Boolean representation based on value presence.

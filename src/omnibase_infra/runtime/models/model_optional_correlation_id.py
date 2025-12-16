@@ -10,7 +10,6 @@ Correlation IDs are used throughout the runtime for request tracing,
 logging, and distributed system observability.
 """
 
-from collections.abc import Callable
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -119,20 +118,6 @@ class ModelOptionalCorrelationId(BaseModel):
         if self.value is not None:
             return self
         return ModelOptionalCorrelationId.generate()
-
-    def map(self, func: Callable[[UUID], UUID]) -> "ModelOptionalCorrelationId":
-        """Apply function to correlation ID if present.
-
-        Args:
-            func: Function to apply to the UUID value.
-
-        Returns:
-            A new ModelOptionalCorrelationId with the transformed value,
-            or self if value is None.
-        """
-        if self.value is not None:
-            return ModelOptionalCorrelationId(value=func(self.value))
-        return self
 
     def __bool__(self) -> bool:
         """Boolean representation based on value presence.

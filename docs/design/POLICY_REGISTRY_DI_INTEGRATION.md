@@ -337,6 +337,7 @@ def register_default_policies() -> None:
         policy_id="exponential_backoff",
         policy_class=ExponentialBackoffPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
+        version="1.0.0",
     )
 ```
 
@@ -482,6 +483,7 @@ def test_policy_registration_via_container(mock_container, registry_in_container
         policy_id="test_policy",
         policy_class=MockSyncPolicy,
         policy_type="orchestrator",
+        version="1.0.0",
     )
 
     assert registry.is_registered("test_policy")
@@ -604,6 +606,7 @@ def test_policy_registry_lifecycle_with_container():
         policy_id="test_policy",
         policy_class=MockSyncPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
+        version="1.0.0",
     )
 
     # Verify resolution
@@ -670,6 +673,7 @@ registry.register_policy(
     policy_id="exponential_backoff",
     policy_class=ExponentialBackoffPolicy,
     policy_type=EnumPolicyType.ORCHESTRATOR,
+    version="1.0.0",
 )
 
 # Singleton-based (deprecated, backwards compatibility)

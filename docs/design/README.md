@@ -106,7 +106,7 @@ For questions about this design:
 
 ### Changelog
 
-- **2025-01-16**: Initial design documents created for ONM-812
+- **2025-12-16**: Initial design documents created for ONM-812
   - POLICY_REGISTRY_DI_SUMMARY.md
   - POLICY_REGISTRY_DI_INTEGRATION.md
   - POLICY_REGISTRY_DI_EXAMPLES.md

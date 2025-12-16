@@ -17,9 +17,11 @@ from omnibase_infra.enums import EnumPolicyType
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
 
+    # Type alias for policy class - uses TYPE_CHECKING to avoid circular import
     PolicyClass = type[ProtocolPolicy]
 else:
-    PolicyClass = type
+    # At runtime, use generic type to avoid import
+    PolicyClass = type  # type: ignore[assignment,misc]
 
 
 class ModelPolicyRegistration(BaseModel):

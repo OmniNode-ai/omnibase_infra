@@ -4,9 +4,23 @@
 
 This module provides a strongly-typed Pydantic model for optional UUID
 values, replacing `UUID | None` union types to comply with ONEX standards.
+
+Design Note - Code Duplication:
+    The optional wrapper models (ModelOptionalUUID, ModelOptionalString,
+    ModelOptionalCorrelationId) contain similar methods (get(), has_value(),
+    get_or_default(), __bool__()). This duplication is intentional to comply
+    with ONEX principles:
+
+    1. Each model is self-contained and independently testable
+    2. No inheritance or mixin dependencies (composition over inheritance)
+    3. Explicit behavior for each type without generic base classes
+    4. Each model can evolve independently without breaking others
+    5. Clear type signatures without generic type parameters
+
+    While this creates some duplication, it provides stronger type safety,
+    better testability, and clearer semantics for each optional type.
 """
 
-from collections.abc import Callable
 from typing import Optional
 from uuid import UUID
 
@@ -66,20 +80,6 @@ class ModelOptionalUUID(BaseModel):
             The stored value if present, otherwise the default.
         """
         return self.value if self.value is not None else default
-
-    def map(self, func: Callable[[UUID], UUID]) -> "ModelOptionalUUID":
-        """Apply function to value if present.
-
-        Args:
-            func: Function to apply to the UUID value.
-
-        Returns:
-            A new ModelOptionalUUID with the transformed value,
-            or self if value is None.
-        """
-        if self.value is not None:
-            return ModelOptionalUUID(value=func(self.value))
-        return self
 
     def __bool__(self) -> bool:
         """Boolean representation based on value presence.

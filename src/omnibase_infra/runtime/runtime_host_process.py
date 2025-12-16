@@ -385,7 +385,7 @@ class RuntimeHostProcess:
             may be lost. For production use cases requiring graceful shutdown,
             a drain period should be implemented.
 
-        TODO(OMN-XXX): Implement graceful shutdown with configurable drain period:
+        TODO(OMN-39): Implement graceful shutdown with configurable drain period:
             - Add drain_timeout_seconds parameter (default: 30)
             - Wait for in-flight messages to complete before unsubscribing
             - Track pending message count for shutdown readiness
@@ -727,7 +727,7 @@ class RuntimeHostProcess:
             # Handler expected to have async execute(envelope) method
             # Note: Handlers use legacy signature execute(envelope) instead of
             # new protocol signature execute(request, operation_config)
-            # TODO: Migrate handlers to new protocol signature
+            # TODO(OMN-40): Migrate handlers to new protocol signature
             response = await handler.execute(envelope)  # type: ignore[call-arg]
 
             # Ensure response has correlation_id

@@ -81,6 +81,12 @@ Error Sanitization Guidelines:
         )
 """
 
+from omnibase_infra.errors.error_container_wiring import (
+    ContainerValidationError,
+    ContainerWiringError,
+    ServiceRegistrationError,
+    ServiceResolutionError,
+)
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.infra_errors import (
     EnvelopeValidationError,
@@ -109,4 +115,9 @@ __all__: list[str] = [
     "EnvelopeValidationError",
     "UnknownHandlerTypeError",
     "PolicyRegistryError",
+    # Container wiring errors
+    "ContainerWiringError",
+    "ServiceRegistrationError",
+    "ServiceResolutionError",
+    "ContainerValidationError",
 ]

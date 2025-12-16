@@ -85,20 +85,20 @@ Example Usage:
 
 Integration with PolicyRegistry:
     ```python
-    from omnibase_infra.runtime.policy_registry import PolicyRegistry, ModelPolicyRegistration
+    from omnibase_infra.runtime.policy_registry import PolicyRegistry
     from omnibase_infra.enums import EnumPolicyType
 
     registry = PolicyRegistry()
-    registration = ModelPolicyRegistration(
+    registry.register_policy(
         policy_id="exponential_backoff_v1",
         policy_class=ExponentialBackoffPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
         version="1.0.0",
     )
-    registry.register(registration)
 
     # Retrieve and use policy
-    policy = registry.get("exponential_backoff_v1")
+    policy_cls = registry.get("exponential_backoff_v1")
+    policy = policy_cls()
     decision = policy.evaluate(context)
     ```
 

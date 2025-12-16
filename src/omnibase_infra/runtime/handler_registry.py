@@ -186,7 +186,7 @@ class ProtocolBindingRegistry:
     "http", "db", "kafka") to handler classes that implement the ProtocolHandler
     protocol.
 
-    TODO(OMN-880): Migrate handler signature from tuple[str, str] to structured model.
+    TODO(OMN-40): Migrate handler signature from tuple[str, str] to structured model.
         Current implementation uses bare strings for protocol types. Should migrate
         to ModelHandlerKey(handler_type: str, handler_kind: str) for consistency
         with PolicyRegistry's ModelPolicyKey pattern and improved type safety.
@@ -670,7 +670,7 @@ def register_handlers_from_config(
             continue
 
         if config.type and config.protocol_class:
-            # TODO: Resolve handler class from name using importlib
+            # TODO(OMN-41): Resolve handler class from name using importlib
             # For now, just validate config structure is correct
             # The actual handler instantiation will be done by RuntimeHostProcess
             pass

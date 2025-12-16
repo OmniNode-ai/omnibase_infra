@@ -522,33 +522,75 @@ class PolicyRegistry:
     @staticmethod
     @functools.lru_cache(maxsize=128)
     def _parse_semver(version: str) -> tuple[int, int, int, str]:
-        """Parse semantic version string into comparable tuple.
+        """Parse semantic version string into comparable tuple with INTEGER components.
 
-        Handles versions like "1.0.0", "2.1.3", "1.0.0-alpha".
-        Pre-release versions sort before release versions.
+        This method implements SEMANTIC VERSION SORTING, not lexicographic sorting.
+        This is critical for correct "latest version" selection.
 
-        This method is cached using LRU cache (maxsize=128) to avoid re-parsing
-        the same version strings repeatedly, improving performance for lookups
-        that compare multiple versions.
+        Why This Matters (PR #36 feedback):
+            Lexicographic sorting (string comparison):
+                "1.10.0" < "1.9.0" ❌ WRONG (because '1' < '9' in strings)
+                "10.0.0" < "2.0.0" ❌ WRONG (because '1' < '2' in strings)
 
-        Cache Size Rationale:
-            128 entries balances memory vs performance for typical workloads:
-            - Typical registry: 10-50 unique policy versions
-            - Peak scenarios: 50-100 versions across multiple policy types
-            - Each cache entry: ~100 bytes (string key + tuple value)
-            - Total memory: ~12.8KB worst case (negligible overhead)
-            - Hit rate: >95% for repeated get() calls with version comparisons
-            - Eviction: Rare in practice, LRU ensures least-used versions purged
+            Semantic version sorting (integer comparison):
+                1.10.0 > 1.9.0 ✅ CORRECT (because 10 > 9 as integers)
+                10.0.0 > 2.0.0 ✅ CORRECT (because 10 > 2 as integers)
+
+        Implementation:
+            - Parses version components as INTEGERS (not strings)
+            - Returns tuple (major: int, minor: int, patch: int, prerelease: str)
+            - Python's tuple comparison then works correctly: (1, 10, 0) > (1, 9, 0)
+            - Prerelease versions sort before release: "1.0.0-alpha" < "1.0.0"
+
+        Supported Formats:
+            - Full: "1.2.3", "1.2.3-beta"
+            - Partial: "1" → (1, 0, 0), "1.2" → (1, 2, 0)
+            - Prerelease: "1.0.0-alpha", "2.1.0-rc.1"
+
+        Validation:
+            - Rejects empty strings
+            - Rejects non-numeric components
+            - Rejects negative numbers
+            - Rejects >3 version parts (e.g., "1.2.3.4")
+
+        Performance:
+            This method is cached using LRU cache (maxsize=128) to avoid re-parsing
+            the same version strings repeatedly, improving performance for lookups
+            that compare multiple versions.
+
+            Cache Size Rationale:
+                128 entries balances memory vs performance for typical workloads:
+                - Typical registry: 10-50 unique policy versions
+                - Peak scenarios: 50-100 versions across multiple policy types
+                - Each cache entry: ~100 bytes (string key + tuple value)
+                - Total memory: ~12.8KB worst case (negligible overhead)
+                - Hit rate: >95% for repeated get() calls with version comparisons
+                - Eviction: Rare in practice, LRU ensures least-used versions purged
 
         Args:
             version: Semantic version string (e.g., "1.2.3" or "1.0.0-beta")
 
         Returns:
             Tuple of (major, minor, patch, prerelease) for comparison.
+            Components are INTEGERS (not strings) for correct semantic sorting.
             Prerelease is empty string for release versions (sorts after prereleases).
 
         Raises:
             ProtocolConfigurationError: If version format is invalid
+
+        Examples:
+            >>> PolicyRegistry._parse_semver("1.9.0")
+            (1, 9, 0, '\x7f')
+            >>> PolicyRegistry._parse_semver("1.10.0")
+            (1, 10, 0, '\x7f')
+            >>> PolicyRegistry._parse_semver("1.10.0") > PolicyRegistry._parse_semver("1.9.0")
+            True
+            >>> PolicyRegistry._parse_semver("10.0.0") > PolicyRegistry._parse_semver("2.0.0")
+            True
+            >>> PolicyRegistry._parse_semver("1.0.0-alpha")
+            (1, 0, 0, 'alpha')
+            >>> PolicyRegistry._parse_semver("1.0.0-alpha") < PolicyRegistry._parse_semver("1.0.0")
+            True
         """
         # Validate non-empty version string
         if not version or not version.strip():

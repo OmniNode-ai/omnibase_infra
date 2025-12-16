@@ -8,10 +8,12 @@ including three SINGLE SOURCE OF TRUTH registries and the runtime execution host
 Core Registries
 ---------------
 - **PolicyRegistry**: SINGLE SOURCE OF TRUTH for policy plugin registration
+    - Container-based dependency injection support (preferred) or singleton accessor (legacy)
     - Thread-safe registration by (policy_id, policy_type, version)
     - Enforces synchronous-by-default execution (async must be explicit)
     - Supports orchestrator and reducer policy types with version resolution
     - Pure decision logic plugins (no I/O, no side effects)
+    - Integrates with ModelOnexContainer for DI pattern
 
 - **ProtocolBindingRegistry**: SINGLE SOURCE OF TRUTH for protocol handler registration
     - Maps handler types to handler implementations

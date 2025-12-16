@@ -249,6 +249,7 @@ async def test_retry_with_policy_success(retry_service, mock_container):
         policy_id="test_retry",
         policy_class=MockRetryPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
+        version="1.0.0",
     )
 
     # Test operation that succeeds on 2nd attempt
@@ -288,6 +289,7 @@ async def test_retry_with_policy_failure(retry_service, mock_container):
         policy_id="no_retry",
         policy_class=MockNoRetryPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
+        version="1.0.0",
     )
 
     # Test operation that always fails
@@ -343,6 +345,7 @@ def test_full_container_lifecycle():
         policy_id="test_policy",
         policy_class=TestPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
+        version="1.0.0",
     )
 
     # 4. Verify resolution
@@ -391,6 +394,7 @@ def register_default_policies():
         policy_id="exponential_backoff",
         policy_class=ExponentialBackoffPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
+        version="1.0.0",
     )
 
     # Or use convenience function
@@ -398,6 +402,7 @@ def register_default_policies():
         policy_id="linear_backoff",
         policy_class=LinearBackoffPolicy,
         policy_type=EnumPolicyType.ORCHESTRATOR,
+        version="1.0.0",
     )
 ```
 
