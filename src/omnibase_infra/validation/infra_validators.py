@@ -32,10 +32,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Maximum allowed complex union types in infrastructure code.
 # Infrastructure code has many typed handlers (Consul, Kafka, Vault, PostgreSQL adapters)
 # which require typed unions for protocol implementations and message routing.
-# Set to 60 to accommodate modern Python 3.10+ syntax (X | None for optional types)
+# Set to 30 to accommodate modern Python 3.10+ syntax (X | None for optional types)
 # plus infrastructure service integration patterns including RuntimeHostProcess and
 # handler wiring while preventing overly complex union types.
-INFRA_MAX_UNIONS = 60
+INFRA_MAX_UNIONS = 30
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -147,7 +147,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (20).
+        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (30).
         strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:
