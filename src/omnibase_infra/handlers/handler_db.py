@@ -61,7 +61,7 @@ class DbAdapter:
         See CLAUDE.md "Error Sanitization Guidelines" for the full security policy
         on what information is safe vs unsafe to include in errors and logs.
 
-    TODO(Beta): Consider implementing circuit breaker pattern for connection
+    TODO(OMN-42): Consider implementing circuit breaker pattern for connection
     resilience. See CLAUDE.md "Error Recovery Patterns" for implementation guidance.
     """
 
