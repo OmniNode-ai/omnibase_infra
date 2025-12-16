@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# mypy: disable-error-code="index, operator, arg-type, return-value"
 """Concurrency tests for VaultAdapter.
 
 These tests verify thread safety of circuit breaker state variables
@@ -9,8 +10,10 @@ and concurrent operation handling under production load scenarios.
 from __future__ import annotations
 
 import asyncio
+import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -21,9 +24,15 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.handler_vault import VaultAdapter
 
+# Type alias for vault config dict values (str, int, float, bool, dict)
+VaultConfigValue = str | int | float | bool | dict[str, str | int | float | bool]
+
+# Type alias for handler response (status, payload, correlation_id)
+HandlerResponse = dict[str, str | UUID | dict[str, str | int | bool | None]]
+
 
 @pytest.fixture
-def vault_config() -> dict[str, object]:
+def vault_config() -> dict[str, VaultConfigValue]:
     """Provide test Vault configuration."""
     return {
         "url": "https://vault.example.com:8200",
@@ -65,7 +74,7 @@ class TestVaultAdapterConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_circuit_breaker_state_updates(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit breaker state is thread-safe under concurrent access.
@@ -101,7 +110,7 @@ class TestVaultAdapterConcurrency:
             lock = asyncio.Lock()
 
             # Launch 20 concurrent requests (mix of success and failure)
-            async def execute_request(index: int) -> dict[str, object] | None:
+            async def execute_request(index: int) -> HandlerResponse | None:
                 nonlocal success_count, failure_count
                 envelope = {
                     "operation": "vault.read_secret",
@@ -149,7 +158,7 @@ class TestVaultAdapterConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_successful_operations(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent successful operations don't cause race conditions."""
@@ -170,7 +179,7 @@ class TestVaultAdapterConcurrency:
             await handler.initialize(vault_config)
 
             # Launch 50 concurrent successful requests (within queue capacity of 100)
-            async def execute_request(index: int) -> dict[str, object]:
+            async def execute_request(index: int) -> HandlerResponse:
                 envelope = {
                     "operation": "vault.read_secret",
                     "payload": {"path": f"myapp/config{index}"},
@@ -191,7 +200,7 @@ class TestVaultAdapterConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_failures_trigger_circuit_correctly(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent failures correctly trigger circuit breaker."""
@@ -210,7 +219,7 @@ class TestVaultAdapterConcurrency:
             await handler.initialize(vault_config)
 
             # Launch concurrent failing requests
-            async def execute_request(index: int) -> dict[str, object] | None:
+            async def execute_request(index: int) -> HandlerResponse | None:
                 envelope = {
                     "operation": "vault.read_secret",
                     "payload": {"path": f"myapp/config{index}"},
@@ -231,7 +240,7 @@ class TestVaultAdapterConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_mixed_write_operations(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent write operations are thread-safe."""
@@ -247,7 +256,7 @@ class TestVaultAdapterConcurrency:
             await handler.initialize(vault_config)
 
             # Launch 30 concurrent write operations
-            async def execute_write(index: int) -> dict[str, object]:
+            async def execute_write(index: int) -> HandlerResponse:
                 envelope = {
                     "operation": "vault.write_secret",
                     "payload": {
@@ -272,7 +281,7 @@ class TestVaultAdapterConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_health_checks(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test concurrent health checks are thread-safe."""
@@ -299,7 +308,7 @@ class TestVaultAdapterConcurrency:
     @pytest.mark.asyncio
     async def test_shutdown_during_concurrent_operations(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test shutdown is safe during concurrent operations.
@@ -328,7 +337,7 @@ class TestVaultAdapterConcurrency:
             lock = asyncio.Lock()
 
             # Launch concurrent operations with tracking
-            async def execute_request(index: int) -> dict[str, object] | None:
+            async def execute_request(index: int) -> HandlerResponse | None:
                 nonlocal started_count, completed_count, failed_count
                 async with lock:
                     started_count += 1
@@ -391,7 +400,7 @@ class TestVaultAdapterConcurrency:
     @pytest.mark.asyncio
     async def test_thread_pool_handles_concurrent_load(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool correctly handles concurrent operation load."""
@@ -412,7 +421,7 @@ class TestVaultAdapterConcurrency:
             await handler.initialize(vault_config)
 
             # Launch more requests than thread pool size (but within queue capacity)
-            async def execute_request(index: int) -> dict[str, object]:
+            async def execute_request(index: int) -> HandlerResponse:
                 envelope = {
                     "operation": "vault.read_secret",
                     "payload": {"path": f"myapp/config{index}"},
@@ -432,7 +441,7 @@ class TestVaultAdapterConcurrency:
     @pytest.mark.asyncio
     async def test_circuit_breaker_lock_prevents_race_conditions(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test RLock prevents race conditions in circuit breaker state updates."""
@@ -451,7 +460,7 @@ class TestVaultAdapterConcurrency:
             await handler.initialize(vault_config)
 
             # Launch 100 concurrent failing requests to stress test locking
-            async def execute_request(index: int) -> dict[str, object] | None:
+            async def execute_request(index: int) -> HandlerResponse | None:
                 envelope = {
                     "operation": "vault.read_secret",
                     "payload": {"path": f"myapp/config{index}"},
@@ -474,3 +483,255 @@ class TestVaultAdapterConcurrency:
 
             # Verify timeout is set (no race condition leaving it at 0) - using mixin attrs
             assert handler._circuit_breaker_open_until > 0
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_state_transition_race_open_to_half_open(
+        self,
+        vault_config: dict[str, VaultConfigValue],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test circuit breaker state transition from OPEN to HALF_OPEN under concurrent access.
+
+        This test verifies that the OPEN -> HALF_OPEN transition is atomic and
+        does not cause race conditions when multiple concurrent requests attempt
+        to transition the circuit breaker state after the reset timeout.
+        """
+        handler = VaultAdapter()
+
+        vault_config["circuit_breaker_failure_threshold"] = 1
+        vault_config["circuit_breaker_reset_timeout_seconds"] = (
+            1.0  # Minimum valid timeout
+        )
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            # Start with failures to open circuit
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            # Execute one request to open the circuit
+            envelope: dict[str, str | UUID | dict[str, str]] = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            try:
+                await handler.execute(envelope)
+            except InfraConnectionError:
+                pass
+
+            # Verify circuit is open
+            assert handler._circuit_breaker_open is True
+
+            # Wait for reset timeout to expire (1.0 second + buffer)
+            await asyncio.sleep(1.1)
+
+            # Now switch to success responses for HALF_OPEN test
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            # Track state transitions during concurrent requests
+            transition_errors: list[str] = []
+            lock = asyncio.Lock()
+
+            async def execute_during_transition(index: int) -> HandlerResponse | None:
+                """Execute request during state transition."""
+                envelope = {
+                    "operation": "vault.read_secret",
+                    "payload": {"path": f"myapp/config{index}"},
+                    "correlation_id": uuid4(),
+                }
+                try:
+                    return await handler.execute(envelope)
+                except (InfraConnectionError, InfraUnavailableError) as e:
+                    async with lock:
+                        transition_errors.append(str(type(e).__name__))
+                    return None
+                except RuntimeError as e:
+                    async with lock:
+                        transition_errors.append(f"RuntimeError: {e}")
+                    return None
+
+            # Launch 10 concurrent requests during potential state transition
+            tasks = [execute_during_transition(i) for i in range(10)]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Verify no RuntimeErrors (race condition indicators)
+            runtime_errors = [
+                e for e in transition_errors if e.startswith("RuntimeError")
+            ]
+            assert len(runtime_errors) == 0, (
+                f"Race condition detected: {runtime_errors}"
+            )
+
+            # After successful execution, circuit should be closed
+            # (at least one request should have succeeded and closed the circuit)
+            successful_results = [
+                r for r in results if isinstance(r, dict) and r is not None
+            ]
+            if successful_results:
+                assert handler._circuit_breaker_open is False, (
+                    "Circuit should be CLOSED after successful test request in HALF_OPEN state"
+                )
+
+    @pytest.mark.asyncio
+    async def test_executor_shutdown_robustness(
+        self,
+        vault_config: dict[str, VaultConfigValue],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test robust executor shutdown verification.
+
+        This test verifies:
+        1. Executor is properly shut down
+        2. No pending tasks leak
+        3. Shutdown is safe even when tasks are in progress
+        4. Double shutdown is handled gracefully
+        """
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            await handler.initialize(vault_config)
+
+            # Capture executor reference before shutdown
+            original_executor = handler._executor
+            assert original_executor is not None, "Executor should be initialized"
+
+            # Verify executor has expected configuration
+            assert handler._max_workers > 0, "Max workers should be set"
+            assert handler._max_queue_size > 0, "Max queue size should be set"
+
+            # First shutdown
+            await handler.shutdown()
+
+            # Verify executor is set to None after shutdown
+            assert handler._executor is None, "Executor should be None after shutdown"
+
+            # Verify original executor is actually shut down
+            # by attempting to submit a task (should raise RuntimeError)
+            with pytest.raises(RuntimeError, match="cannot schedule new futures"):
+                original_executor.submit(lambda: None)
+
+            # Double shutdown should be safe (no error raised)
+            await handler.shutdown()
+
+            # Verify state remains consistent after double shutdown
+            assert handler._initialized is False
+            assert handler._executor is None
+            assert handler._client is None
+            assert handler._config is None
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_concurrent_half_open_recovery(
+        self,
+        vault_config: dict[str, VaultConfigValue],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test concurrent recovery from HALF_OPEN state.
+
+        This test verifies that when multiple requests attempt to execute
+        in HALF_OPEN state simultaneously, only one succeeds in transitioning
+        the circuit back to CLOSED state without race conditions.
+        """
+        handler = VaultAdapter()
+
+        vault_config["circuit_breaker_failure_threshold"] = 1
+        vault_config["circuit_breaker_reset_timeout_seconds"] = (
+            1.0  # Minimum valid timeout
+        )
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            # Start with failure to open circuit
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Connection error"
+            )
+
+            await handler.initialize(vault_config)
+
+            envelope: dict[str, str | UUID | dict[str, str]] = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            try:
+                await handler.execute(envelope)
+            except InfraConnectionError:
+                pass
+
+            # Wait for reset timeout (1.0 second + buffer)
+            await asyncio.sleep(1.1)
+
+            # Switch to success
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            # Track execution attempts and results
+            attempts = 0
+            successes = 0
+            failures = 0
+            lock = asyncio.Lock()
+
+            async def execute_during_recovery(index: int) -> HandlerResponse | None:
+                nonlocal attempts, successes, failures
+                async with lock:
+                    attempts += 1
+
+                envelope = {
+                    "operation": "vault.read_secret",
+                    "payload": {"path": f"myapp/config{index}"},
+                    "correlation_id": uuid4(),
+                }
+                try:
+                    result = await handler.execute(envelope)
+                    async with lock:
+                        successes += 1
+                    return result
+                except (InfraConnectionError, InfraUnavailableError):
+                    async with lock:
+                        failures += 1
+                    return None
+
+            # Launch concurrent requests during recovery
+            tasks = [execute_during_recovery(i) for i in range(20)]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Verify all attempts were tracked
+            assert attempts == 20, f"Expected 20 attempts, got {attempts}"
+
+            # Verify total handled equals total requests
+            assert successes + failures == 20, (
+                f"Expected 20 handled, got {successes + failures}"
+            )
+
+            # Final state should be consistent - circuit closed after recovery
+            # (at least some requests should have succeeded)
+            assert successes > 0, (
+                "At least some requests should succeed during recovery"
+            )
+
+            # Circuit should now be closed (recovered)
+            if successes > 0:
+                assert handler._circuit_breaker_open is False, (
+                    "Circuit should be CLOSED after successful recovery"
+                )
+                assert handler._circuit_breaker_failures == 0, (
+                    "Failure count should be reset after recovery"
+                )

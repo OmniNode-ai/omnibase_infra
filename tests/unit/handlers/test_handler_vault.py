@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# mypy: disable-error-code="index, operator, arg-type"
 """Unit tests for VaultAdapter.
 
 These tests use mocked hvac client to validate VaultAdapter behavior
@@ -9,10 +10,13 @@ without requiring actual Vault server infrastructure.
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+import hvac.exceptions
 import pytest
+from omnibase_core.enums import EnumCoreErrorCode
 from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.errors import (
@@ -20,15 +24,19 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ProtocolConfigurationError,
     RuntimeHostError,
     SecretResolutionError,
 )
 from omnibase_infra.handlers.handler_vault import VaultAdapter
 from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
 
+# Type alias for vault config dict values (str, int, float, bool, dict)
+VaultConfigValue = str | int | float | bool | dict[str, str | int | float | bool]
+
 
 @pytest.fixture
-def vault_config() -> dict[str, object]:
+def vault_config() -> dict[str, VaultConfigValue]:
     """Provide test Vault configuration."""
     return {
         "url": "https://vault.example.com:8200",
@@ -70,7 +78,7 @@ class TestVaultAdapterInitialization:
     @pytest.mark.asyncio
     async def test_initialize_success(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful initialization with valid config."""
@@ -92,7 +100,7 @@ class TestVaultAdapterInitialization:
     async def test_initialize_missing_url(self) -> None:
         """Test initialization fails with missing URL."""
         handler = VaultAdapter()
-        config: dict[str, object] = {"token": "s.test1234"}
+        config: dict[str, VaultConfigValue] = {"token": "s.test1234"}
 
         with pytest.raises(RuntimeHostError) as exc_info:
             await handler.initialize(config)
@@ -104,7 +112,7 @@ class TestVaultAdapterInitialization:
     async def test_initialize_missing_token(self) -> None:
         """Test initialization fails with missing token."""
         handler = VaultAdapter()
-        config: dict[str, object] = {"url": "https://vault.example.com:8200"}
+        config: dict[str, VaultConfigValue] = {"url": "https://vault.example.com:8200"}
 
         with pytest.raises(RuntimeHostError) as exc_info:
             await handler.initialize(config)
@@ -114,7 +122,7 @@ class TestVaultAdapterInitialization:
     @pytest.mark.asyncio
     async def test_initialize_authentication_failure(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test initialization fails with authentication failure."""
@@ -132,7 +140,7 @@ class TestVaultAdapterInitialization:
     @pytest.mark.asyncio
     async def test_initialize_connection_failure(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
     ) -> None:
         """Test initialization fails with connection error."""
         handler = VaultAdapter()
@@ -188,7 +196,7 @@ class TestVaultAdapterOperations:
     @pytest.mark.asyncio
     async def test_read_secret_success(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret read operation."""
@@ -230,7 +238,7 @@ class TestVaultAdapterOperations:
     @pytest.mark.asyncio
     async def test_write_secret_success(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret write operation."""
@@ -267,7 +275,7 @@ class TestVaultAdapterOperations:
     @pytest.mark.asyncio
     async def test_delete_secret_success(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret deletion."""
@@ -295,7 +303,7 @@ class TestVaultAdapterOperations:
     @pytest.mark.asyncio
     async def test_list_secrets_success(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful secret listing."""
@@ -328,7 +336,7 @@ class TestVaultAdapterOperations:
     @pytest.mark.asyncio
     async def test_operation_missing_path(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operation fails with missing path."""
@@ -356,7 +364,7 @@ class TestVaultAdapterTokenRenewal:
     @pytest.mark.asyncio
     async def test_renew_token_success(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test successful token renewal."""
@@ -386,7 +394,7 @@ class TestVaultAdapterTokenRenewal:
     @pytest.mark.asyncio
     async def test_renew_token_operation_envelope(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test token renewal via envelope operation."""
@@ -418,6 +426,167 @@ class TestVaultAdapterTokenRenewal:
             assert payload["renewable"] is True
             assert payload["lease_duration"] == 3600
 
+    @pytest.mark.asyncio
+    async def test_token_renewal_threshold_edge_case_exactly_at_threshold(
+        self,
+        vault_config: dict[str, VaultConfigValue],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test token renewal boundary condition logging and behavior.
+
+        This edge case tests the boundary condition where time_until_expiry
+        is close to or at token_renewal_threshold_seconds. The implementation
+        uses strict less-than comparison: needs_renewal = (time_until_expiry < threshold).
+
+        Since there's always some execution time between setting _token_expires_at
+        and checking it, this test verifies the logging captures edge case detection
+        and that the comparison logic is working as expected (>= threshold means
+        no renewal, < threshold means renewal).
+
+        Note: We set time_until_expiry slightly above threshold to ensure no renewal,
+        as the strict < comparison should prevent renewal when exactly at threshold.
+        """
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            # Set default renewal threshold from fixture (300.0 seconds)
+            threshold = 300.0
+            vault_config["token_renewal_threshold_seconds"] = threshold
+
+            # Mock token lookup to return TTL above threshold
+            mock_hvac_client.auth.token.lookup_self.return_value = {
+                "data": {"ttl": int(threshold) + 10, "renewable": True}
+            }
+
+            await handler.initialize(vault_config)
+
+            # Set _token_expires_at to be slightly ABOVE threshold to ensure
+            # time_until_expiry >= threshold (accounting for execution time)
+            current_time = time.time()
+            # Add 1 second buffer to account for any execution time
+            handler._token_expires_at = current_time + threshold + 1.0
+
+            # Mock the renewal call (should NOT be called)
+            mock_hvac_client.auth.token.renew_self.return_value = {
+                "auth": {"renewable": True, "lease_duration": 3600}
+            }
+
+            # Set up a successful read operation
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            envelope: dict[str, str | UUID | dict[str, str]] = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Execute should NOT trigger renewal when above threshold
+            response = await handler.execute(envelope)
+
+            assert response["status"] == "success"
+            # Verify renewal was NOT called (above threshold)
+            mock_hvac_client.auth.token.renew_self.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_token_renewal_threshold_edge_case_just_below_threshold(
+        self,
+        vault_config: dict[str, VaultConfigValue],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test token renewal triggers when just below threshold.
+
+        This tests that renewal DOES trigger when time_until_expiry is
+        just below the threshold (e.g., threshold - 1 second).
+        """
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            threshold = 300.0
+            vault_config["token_renewal_threshold_seconds"] = threshold
+
+            await handler.initialize(vault_config)
+
+            # Set _token_expires_at to be just below threshold
+            current_time = time.time()
+            handler._token_expires_at = current_time + (threshold - 1.0)
+
+            # Mock the renewal call
+            mock_hvac_client.auth.token.renew_self.return_value = {
+                "auth": {"renewable": True, "lease_duration": 3600}
+            }
+
+            # Set up a successful read operation
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            envelope: dict[str, str | UUID | dict[str, str]] = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Execute should trigger renewal when below threshold
+            response = await handler.execute(envelope)
+
+            assert response["status"] == "success"
+            # Verify renewal WAS called (below threshold)
+            mock_hvac_client.auth.token.renew_self.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_token_renewal_threshold_edge_case_just_above_threshold(
+        self,
+        vault_config: dict[str, VaultConfigValue],
+        mock_hvac_client: MagicMock,
+    ) -> None:
+        """Test token renewal does NOT trigger when just above threshold.
+
+        This tests that renewal does NOT trigger when time_until_expiry is
+        just above the threshold (e.g., threshold + 1 second).
+        """
+        handler = VaultAdapter()
+
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+
+            threshold = 300.0
+            vault_config["token_renewal_threshold_seconds"] = threshold
+
+            await handler.initialize(vault_config)
+
+            # Set _token_expires_at to be just above threshold
+            current_time = time.time()
+            handler._token_expires_at = current_time + (threshold + 1.0)
+
+            # Mock the renewal call (should NOT be called)
+            mock_hvac_client.auth.token.renew_self.return_value = {
+                "auth": {"renewable": True, "lease_duration": 3600}
+            }
+
+            # Set up a successful read operation
+            mock_hvac_client.secrets.kv.v2.read_secret_version.return_value = {
+                "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
+            }
+
+            envelope: dict[str, str | UUID | dict[str, str]] = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # Execute should NOT trigger renewal when above threshold
+            response = await handler.execute(envelope)
+
+            assert response["status"] == "success"
+            # Verify renewal was NOT called (above threshold)
+            mock_hvac_client.auth.token.renew_self.assert_not_called()
+
 
 class TestVaultAdapterRetryLogic:
     """Test VaultAdapter retry logic with exponential backoff."""
@@ -425,7 +594,7 @@ class TestVaultAdapterRetryLogic:
     @pytest.mark.asyncio
     async def test_retry_on_transient_failure(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test retry logic on transient failures."""
@@ -462,7 +631,7 @@ class TestVaultAdapterRetryLogic:
     @pytest.mark.asyncio
     async def test_retry_exhausted(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test retry logic when all attempts exhausted."""
@@ -493,7 +662,7 @@ class TestVaultAdapterRetryLogic:
     @pytest.mark.asyncio
     async def test_timeout_error(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operation timeout raises InfraTimeoutError."""
@@ -527,7 +696,7 @@ class TestVaultAdapterErrorHandling:
     @pytest.mark.asyncio
     async def test_authentication_error(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test authentication error handling."""
@@ -559,7 +728,7 @@ class TestVaultAdapterErrorHandling:
     @pytest.mark.asyncio
     async def test_secret_not_found(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test secret not found error handling."""
@@ -591,7 +760,7 @@ class TestVaultAdapterErrorHandling:
     @pytest.mark.asyncio
     async def test_vault_unavailable(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test Vault server unavailable error."""
@@ -627,7 +796,7 @@ class TestVaultAdapterHealthCheck:
     @pytest.mark.asyncio
     async def test_health_check_healthy(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test health check returns healthy status."""
@@ -652,7 +821,7 @@ class TestVaultAdapterHealthCheck:
     @pytest.mark.asyncio
     async def test_health_check_unhealthy(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test health check propagates errors instead of returning unhealthy."""
@@ -676,7 +845,7 @@ class TestVaultAdapterHealthCheck:
     @pytest.mark.asyncio
     async def test_health_check_operation_envelope(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test health check via envelope operation."""
@@ -712,7 +881,7 @@ class TestVaultAdapterDescribe:
     @pytest.mark.asyncio
     async def test_describe(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test describe returns handler metadata."""
@@ -742,7 +911,7 @@ class TestVaultAdapterShutdown:
     @pytest.mark.asyncio
     async def test_shutdown(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test handler shutdown releases resources."""
@@ -768,7 +937,7 @@ class TestVaultAdapterThreadPool:
     @pytest.mark.asyncio
     async def test_thread_pool_created_with_config_size(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool is created with configured size."""
@@ -787,7 +956,7 @@ class TestVaultAdapterThreadPool:
     @pytest.mark.asyncio
     async def test_thread_pool_default_size(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool uses default size when not specified."""
@@ -806,7 +975,7 @@ class TestVaultAdapterThreadPool:
     @pytest.mark.asyncio
     async def test_thread_pool_shutdown_on_handler_shutdown(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test thread pool is properly shutdown when handler shuts down."""
@@ -830,7 +999,7 @@ class TestVaultAdapterThreadPool:
     @pytest.mark.asyncio
     async def test_operations_use_thread_pool(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test operations execute in thread pool executor."""
@@ -909,7 +1078,7 @@ class TestVaultAdapterCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_opens_after_threshold_failures(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit opens after threshold consecutive failures."""
@@ -946,7 +1115,7 @@ class TestVaultAdapterCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_blocks_requests_when_open(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit blocks requests when OPEN."""
@@ -985,7 +1154,7 @@ class TestVaultAdapterCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_transitions_to_half_open_after_timeout(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit transitions to HALF_OPEN after reset timeout."""
@@ -1047,7 +1216,7 @@ class TestVaultAdapterCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_closes_on_success_in_half_open_state(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit closes on successful request in HALF_OPEN state."""
@@ -1106,7 +1275,7 @@ class TestVaultAdapterCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_reopens_on_failure_in_half_open_state(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit reopens on failed request in HALF_OPEN state.
@@ -1166,7 +1335,7 @@ class TestVaultAdapterCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_breaker_can_be_disabled(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit breaker can be disabled via config."""
@@ -1202,7 +1371,7 @@ class TestVaultAdapterCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_breaker_resets_on_shutdown(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test circuit breaker state resets on handler shutdown."""
@@ -1330,7 +1499,10 @@ class TestVaultAdapterErrorCodes:
         handler = VaultAdapter()
 
         # Config with empty URL - this fails Pydantic validation
-        config: dict[str, object] = {"url": "", "token": "s.test1234"}  # Empty URL
+        config: dict[str, VaultConfigValue] = {
+            "url": "",
+            "token": "s.test1234",
+        }  # Empty URL
 
         with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
             MockClient.return_value = mock_hvac_client
@@ -1346,7 +1518,7 @@ class TestVaultAdapterErrorCodes:
     @pytest.mark.asyncio
     async def test_infra_authentication_error_code(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test InfraAuthenticationError has correct error code."""
@@ -1379,7 +1551,7 @@ class TestVaultAdapterErrorCodes:
     @pytest.mark.asyncio
     async def test_secret_resolution_error_code(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test SecretResolutionError has correct error code."""
@@ -1416,7 +1588,7 @@ class TestVaultAdapterBoundedQueue:
     @pytest.mark.asyncio
     async def test_queue_size_configured_from_multiplier(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test queue size is calculated from multiplier."""
@@ -1436,7 +1608,7 @@ class TestVaultAdapterBoundedQueue:
     @pytest.mark.asyncio
     async def test_queue_size_default_multiplier(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test queue size uses default multiplier when not specified."""
@@ -1501,7 +1673,7 @@ class TestVaultAdapterErrorCodeValidation:
         handler = VaultAdapter()
 
         # Invalid configuration (missing required field)
-        invalid_config: dict[str, object] = {
+        invalid_config: dict[str, VaultConfigValue] = {
             # Missing 'url' and 'token'
         }
 
@@ -1516,7 +1688,7 @@ class TestVaultAdapterErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_connection_error_uses_service_unavailable_code(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test InfraConnectionError for Vault uses SERVICE_UNAVAILABLE error code."""
@@ -1544,7 +1716,7 @@ class TestVaultAdapterErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_authentication_error_uses_authentication_error_code(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test InfraAuthenticationError uses AUTHENTICATION_ERROR code."""
@@ -1569,7 +1741,7 @@ class TestVaultAdapterErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_timeout_error_uses_timeout_error_code(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test InfraTimeoutError uses TIMEOUT_ERROR code."""
@@ -1605,7 +1777,7 @@ class TestVaultAdapterErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_unavailable_error_uses_service_unavailable_code(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test InfraUnavailableError uses SERVICE_UNAVAILABLE code."""
@@ -1651,7 +1823,7 @@ class TestVaultAdapterErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_secret_resolution_error_uses_resource_not_found_code(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test SecretResolutionError uses RESOURCE_NOT_FOUND code."""
@@ -1688,7 +1860,7 @@ class TestVaultAdapterErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_error_context_includes_namespace(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test all error contexts include Vault namespace per PR #38 feedback."""
@@ -1719,7 +1891,7 @@ class TestVaultAdapterErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_health_check_propagates_errors(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
         """Test health_check propagates errors instead of swallowing them per PR #38."""
@@ -1743,180 +1915,155 @@ class TestVaultAdapterErrorCodeValidation:
     @pytest.mark.asyncio
     async def test_all_error_codes_are_mapped_correctly(
         self,
-        vault_config: dict[str, object],
+        vault_config: dict[str, VaultConfigValue],
         mock_hvac_client: MagicMock,
     ) -> None:
-        """Comprehensive test verifying all error types use correct error codes."""
-        import hvac.exceptions
-        from omnibase_core.enums import EnumCoreErrorCode
+        """Comprehensive test verifying all error types use correct error codes.
 
-        from omnibase_infra.errors import (
-            InfraAuthenticationError,
-            InfraConnectionError,
-            InfraTimeoutError,
-            InfraUnavailableError,
-            ProtocolConfigurationError,
-            SecretResolutionError,
+        This test validates that each infrastructure error type is raised with
+        the correct EnumCoreErrorCode per the error mapping table in CLAUDE.md.
+        Uses pytest.raises to ensure errors are actually raised.
+        """
+        # Track verified error types to ensure all are tested
+        verified_errors: list[str] = []
+
+        # 1. Test ProtocolConfigurationError -> INVALID_CONFIGURATION
+        handler = VaultAdapter()
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize({})
+        assert (
+            exc_info.value.model.error_code == EnumCoreErrorCode.INVALID_CONFIGURATION
         )
+        verified_errors.append("ProtocolConfigurationError")
 
-        # Test matrix: (error_class, expected_code)
-        error_mappings = [
-            (ProtocolConfigurationError, EnumCoreErrorCode.INVALID_CONFIGURATION),
-            (SecretResolutionError, EnumCoreErrorCode.RESOURCE_NOT_FOUND),
-            (
-                InfraConnectionError,
-                EnumCoreErrorCode.SERVICE_UNAVAILABLE,
-            ),  # Vault transport
-            (InfraTimeoutError, EnumCoreErrorCode.TIMEOUT_ERROR),
-            (InfraAuthenticationError, EnumCoreErrorCode.AUTHENTICATION_ERROR),
-            (InfraUnavailableError, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
+        # 2. Test InfraConnectionError -> SERVICE_UNAVAILABLE (Vault transport)
+        handler = VaultAdapter()
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            mock_hvac_client.is_authenticated.side_effect = hvac.exceptions.VaultError(
+                "Connection error"
+            )
+            with pytest.raises(InfraConnectionError) as exc_info:
+                await handler.initialize(vault_config)
+            assert (
+                exc_info.value.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+            )
+            verified_errors.append("InfraConnectionError")
+            # Reset for next test
+            mock_hvac_client.is_authenticated.side_effect = None
+            mock_hvac_client.is_authenticated.return_value = True
+
+        # 3. Test SecretResolutionError -> RESOURCE_NOT_FOUND
+        handler = VaultAdapter()
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            await handler.initialize(vault_config)
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
+                hvac.exceptions.InvalidPath("Secret not found")
+            )
+
+            envelope: dict[str, str | UUID | dict[str, str]] = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "nonexistent/path"},
+                "correlation_id": uuid4(),
+            }
+            with pytest.raises(SecretResolutionError) as exc_info:
+                await handler.execute(envelope)
+            assert (
+                exc_info.value.model.error_code == EnumCoreErrorCode.RESOURCE_NOT_FOUND
+            )
+            verified_errors.append("SecretResolutionError")
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+
+        # 4. Test InfraTimeoutError -> TIMEOUT_ERROR
+        handler = VaultAdapter()
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            await handler.initialize(vault_config)
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
+                TimeoutError("Operation timed out")
+            )
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+            with pytest.raises(InfraTimeoutError) as exc_info:
+                await handler.execute(envelope)
+            assert exc_info.value.model.error_code == EnumCoreErrorCode.TIMEOUT_ERROR
+            verified_errors.append("InfraTimeoutError")
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+
+        # 5. Test InfraAuthenticationError -> AUTHENTICATION_ERROR
+        handler = VaultAdapter()
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            await handler.initialize(vault_config)
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
+                hvac.exceptions.Forbidden("Permission denied")
+            )
+
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+            with pytest.raises(InfraAuthenticationError) as exc_info:
+                await handler.execute(envelope)
+            assert (
+                exc_info.value.model.error_code
+                == EnumCoreErrorCode.AUTHENTICATION_ERROR
+            )
+            verified_errors.append("InfraAuthenticationError")
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+
+        # 6. Test InfraUnavailableError -> SERVICE_UNAVAILABLE (circuit breaker)
+        handler = VaultAdapter()
+        with patch("omnibase_infra.handlers.handler_vault.hvac.Client") as MockClient:
+            MockClient.return_value = mock_hvac_client
+            # Configure for quick circuit breaker trigger
+            test_config = dict(vault_config)
+            test_config["circuit_breaker_enabled"] = True
+            test_config["circuit_breaker_failure_threshold"] = 1
+
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = Exception(
+                "Vault down"
+            )
+
+            await handler.initialize(test_config)
+            envelope = {
+                "operation": "vault.read_secret",
+                "payload": {"path": "myapp/config"},
+                "correlation_id": uuid4(),
+            }
+
+            # First call opens circuit
+            with pytest.raises(InfraConnectionError):
+                await handler.execute(envelope)
+
+            # Second call hits open circuit
+            with pytest.raises(InfraUnavailableError) as exc_info:
+                await handler.execute(envelope)
+            assert (
+                exc_info.value.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
+            )
+            verified_errors.append("InfraUnavailableError")
+            mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+
+        # Verify all 6 error types were tested
+        expected_errors = [
+            "ProtocolConfigurationError",
+            "InfraConnectionError",
+            "SecretResolutionError",
+            "InfraTimeoutError",
+            "InfraAuthenticationError",
+            "InfraUnavailableError",
         ]
-
-        for error_class, expected_code in error_mappings:
-            # Validate error code is correctly mapped
-            if error_class == ProtocolConfigurationError:
-                # Test via invalid config
-                handler = VaultAdapter()
-                try:
-                    await handler.initialize({})
-                except error_class as e:
-                    assert e.model.error_code == expected_code, (
-                        f"{error_class.__name__} should have {expected_code}"
-                    )
-
-            elif error_class == InfraConnectionError:
-                # Test via VaultError during connection
-                handler = VaultAdapter()
-                with patch(
-                    "omnibase_infra.handlers.handler_vault.hvac.Client"
-                ) as MockClient:
-                    MockClient.return_value = mock_hvac_client
-                    mock_hvac_client.is_authenticated.side_effect = (
-                        hvac.exceptions.VaultError("Connection error")
-                    )
-                    try:
-                        await handler.initialize(vault_config)
-                    except error_class as e:
-                        assert e.model.error_code == expected_code, (
-                            f"{error_class.__name__} should have {expected_code}"
-                        )
-                    finally:
-                        # Reset for next test
-                        mock_hvac_client.is_authenticated.side_effect = None
-                        mock_hvac_client.is_authenticated.return_value = True
-
-            elif error_class == SecretResolutionError:
-                # Test via InvalidPath error
-                handler = VaultAdapter()
-                with patch(
-                    "omnibase_infra.handlers.handler_vault.hvac.Client"
-                ) as MockClient:
-                    MockClient.return_value = mock_hvac_client
-                    mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
-                        hvac.exceptions.InvalidPath("Secret not found")
-                    )
-
-                    await handler.initialize(vault_config)
-                    envelope = {
-                        "operation": "vault.read_secret",
-                        "payload": {"path": "nonexistent/path"},
-                        "correlation_id": uuid4(),
-                    }
-                    try:
-                        await handler.execute(envelope)
-                    except error_class as e:
-                        assert e.model.error_code == expected_code, (
-                            f"{error_class.__name__} should have {expected_code}"
-                        )
-                    finally:
-                        mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
-
-            elif error_class == InfraTimeoutError:
-                # Test via TimeoutError
-                handler = VaultAdapter()
-                with patch(
-                    "omnibase_infra.handlers.handler_vault.hvac.Client"
-                ) as MockClient:
-                    MockClient.return_value = mock_hvac_client
-                    mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
-                        TimeoutError("Operation timed out")
-                    )
-
-                    await handler.initialize(vault_config)
-                    envelope = {
-                        "operation": "vault.read_secret",
-                        "payload": {"path": "myapp/config"},
-                        "correlation_id": uuid4(),
-                    }
-                    try:
-                        await handler.execute(envelope)
-                    except error_class as e:
-                        assert e.model.error_code == expected_code, (
-                            f"{error_class.__name__} should have {expected_code}"
-                        )
-                    finally:
-                        mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
-
-            elif error_class == InfraAuthenticationError:
-                # Test via Forbidden error
-                handler = VaultAdapter()
-                with patch(
-                    "omnibase_infra.handlers.handler_vault.hvac.Client"
-                ) as MockClient:
-                    MockClient.return_value = mock_hvac_client
-                    mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
-                        hvac.exceptions.Forbidden("Permission denied")
-                    )
-
-                    await handler.initialize(vault_config)
-                    envelope = {
-                        "operation": "vault.read_secret",
-                        "payload": {"path": "myapp/config"},
-                        "correlation_id": uuid4(),
-                    }
-                    try:
-                        await handler.execute(envelope)
-                    except error_class as e:
-                        assert e.model.error_code == expected_code, (
-                            f"{error_class.__name__} should have {expected_code}"
-                        )
-                    finally:
-                        mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
-
-            elif error_class == InfraUnavailableError:
-                # Test via circuit breaker open
-                handler = VaultAdapter()
-                with patch(
-                    "omnibase_infra.handlers.handler_vault.hvac.Client"
-                ) as MockClient:
-                    MockClient.return_value = mock_hvac_client
-                    # Configure for quick circuit breaker trigger
-                    test_config = vault_config.copy()
-                    test_config["circuit_breaker_enabled"] = True
-                    test_config["circuit_breaker_failure_threshold"] = 1
-
-                    mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = (
-                        Exception("Vault down")
-                    )
-
-                    await handler.initialize(test_config)
-                    envelope = {
-                        "operation": "vault.read_secret",
-                        "payload": {"path": "myapp/config"},
-                        "correlation_id": uuid4(),
-                    }
-                    # First call opens circuit
-                    try:
-                        await handler.execute(envelope)
-                    except InfraConnectionError:
-                        pass
-
-                    # Second call hits open circuit
-                    try:
-                        await handler.execute(envelope)
-                    except error_class as e:
-                        assert e.model.error_code == expected_code, (
-                            f"{error_class.__name__} should have {expected_code}"
-                        )
-                    finally:
-                        mock_hvac_client.secrets.kv.v2.read_secret_version.side_effect = None
+        assert sorted(verified_errors) == sorted(expected_errors), (
+            f"Not all error types were verified. "
+            f"Expected: {expected_errors}, Got: {verified_errors}"
+        )

@@ -53,6 +53,45 @@ This project follows a **ZERO BACKWARDS COMPATIBILITY** policy:
 - **snake_case files** - All filenames: `model_user_data.py`
 - **One model per file** - Each file contains exactly one `Model*` class
 
+### Type Annotation Conventions
+
+**Nullable Types: Use `X | None` (PEP 604) over `Optional[X]`**
+
+ONEX prefers the modern PEP 604 union syntax for nullable types. This is cleaner, more explicit, and aligns with Python 3.10+ best practices.
+
+```python
+# PREFERRED - PEP 604 union syntax
+def get_user(id: str) -> User | None:
+    """Return user or None if not found."""
+    ...
+
+def process_data(value: str | None = None) -> Result:
+    """Process data with optional value."""
+    ...
+
+# Complex unions - also use pipe syntax
+def parse_input(data: str | int | None) -> ParsedResult:
+    """Parse string, int, or None input."""
+    ...
+
+# NOT PREFERRED - Optional syntax
+from typing import Optional, Union
+
+def get_user(id: str) -> Optional[User]:  # Avoid this
+    ...
+
+def parse_input(data: Optional[Union[str, int]]) -> ParsedResult:  # Avoid this
+    ...
+```
+
+**Rationale**:
+- `X | None` is visually clearer and more explicit about what the type represents
+- Reduces import clutter (no need for `from typing import Optional`)
+- Consistent with modern Python type annotation patterns
+- `Optional[X]` can be misleading - it suggests the parameter is optional, not that it can be None
+
+**Exception**: When maintaining compatibility with older codebases or when `typing.Optional` is already imported for other purposes, using `Optional` is acceptable but not preferred.
+
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
 - **Container Injection** - All dependencies injected via container: `def __init__(self, container: ONEXContainer)`
@@ -557,40 +596,41 @@ from uuid import uuid4
 class MyInfrastructureAdapter(MixinAsyncCircuitBreaker):
     def __init__(self, config: MyConfig):
         # Initialize circuit breaker with service-specific settings
+        # This creates self._circuit_breaker_lock automatically
         self._init_circuit_breaker(
-            circuit_breaker_threshold=5,         # Max failures before opening
-            circuit_breaker_reset_timeout=60.0,  # Seconds until auto-reset
+            threshold=5,                    # Max failures before opening
+            reset_timeout=60.0,             # Seconds until auto-reset
             service_name=f"my-service.{environment}",
             transport_type=EnumInfraTransportType.HTTP,  # Or KAFKA, CONSUL, etc.
         )
-
-        # Main lock for state protection
-        self._lock = asyncio.Lock()
 
     async def connect(self) -> None:
         """Connect to external service with circuit breaker protection."""
         correlation_id = uuid4()
 
-        async with self._lock:
-            # Check circuit breaker before attempting connection
+        # Check circuit breaker before operation (caller-held lock pattern)
+        async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("connect", correlation_id)
 
-            try:
-                # Attempt connection
-                await self._do_connect()
+        try:
+            # Attempt connection (outside lock for I/O operations)
+            await self._do_connect()
 
-                # Circuit breaker auto-resets on successful operations
+            # Record success (resets circuit breaker)
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
 
-            except Exception as e:
-                # Record failure (may open circuit)
+        except Exception as e:
+            # Record failure (may open circuit)
+            async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("connect", correlation_id)
-                raise
+            raise
 ```
 
 **Thread Safety**:
-- Circuit breaker methods REQUIRE caller to hold `self._lock` (or equivalent)
-- Methods are async and use internal `self._circuit_breaker_lock`
-- Always use `async with self._lock:` before calling circuit breaker methods
+- Circuit breaker methods REQUIRE caller to hold `self._circuit_breaker_lock`
+- The lock is created automatically by `_init_circuit_breaker()`
+- Always use `async with self._circuit_breaker_lock:` before calling circuit breaker methods
 - Never call circuit breaker methods without lock protection
 
 **State Transitions**:
@@ -609,16 +649,16 @@ class MyInfrastructureAdapter(MixinAsyncCircuitBreaker):
 ```python
 # High-reliability service (strict failure tolerance)
 self._init_circuit_breaker(
-    circuit_breaker_threshold=3,    # Open after 3 failures
-    circuit_breaker_reset_timeout=120.0,  # 2 minutes recovery
+    threshold=3,              # Open after 3 failures
+    reset_timeout=120.0,      # 2 minutes recovery
     service_name="critical-service",
     transport_type=EnumInfraTransportType.DATABASE,
 )
 
 # Best-effort service (lenient failure tolerance)
 self._init_circuit_breaker(
-    circuit_breaker_threshold=10,   # Open after 10 failures
-    circuit_breaker_reset_timeout=30.0,   # 30 seconds recovery
+    threshold=10,             # Open after 10 failures
+    reset_timeout=30.0,       # 30 seconds recovery
     service_name="cache-service",
     transport_type=EnumInfraTransportType.REDIS,
 )
@@ -632,63 +672,73 @@ async def publish_with_retry(self, message: dict) -> None:
     max_retries = 3
 
     for attempt in range(max_retries):
-        async with self._lock:
-            # Circuit breaker blocks if too many failures
+        # Check circuit breaker before each attempt
+        async with self._circuit_breaker_lock:
             try:
                 await self._check_circuit_breaker("publish", correlation_id)
             except InfraUnavailableError:
                 # Circuit open - fail fast without retrying
                 raise
 
-            try:
-                # Attempt publish
-                await self._kafka_producer.send(message)
-                return  # Success
+        try:
+            # Attempt publish (outside lock for I/O)
+            await self._kafka_producer.send(message)
 
-            except Exception as e:
-                # Record failure
+            # Record success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+            return  # Success
+
+        except Exception as e:
+            # Record failure
+            async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("publish", correlation_id)
 
-                if attempt == max_retries - 1:
-                    raise  # Last attempt failed
+            if attempt == max_retries - 1:
+                raise  # Last attempt failed
 
-                # Exponential backoff before retry
-                await asyncio.sleep(2 ** attempt)
+            # Exponential backoff before retry
+            await asyncio.sleep(2 ** attempt)
 ```
 
 **Monitoring and Observability**:
 ```python
-# Circuit breaker exposes state for monitoring
-state = self._circuit_breaker_state  # "closed", "open", "half_open"
-failure_count = self._circuit_breaker_failure_count
-last_failure = self._circuit_breaker_last_failure_time
+# Circuit breaker exposes state for monitoring (access under lock)
+async with self._circuit_breaker_lock:
+    is_open = self._circuit_breaker_open           # bool: True if circuit open
+    failure_count = self._circuit_breaker_failures  # int: consecutive failures
+    open_until = self._circuit_breaker_open_until   # float: timestamp for auto-reset
 
 # Log state transitions for operational insights
-if state == "open":
+if is_open:
     logger.warning(
         "Circuit breaker opened",
-        service_name=self._circuit_breaker_service_name,
-        failure_count=failure_count,
-        correlation_id=correlation_id,
+        extra={
+            "service_name": self.service_name,
+            "failure_count": failure_count,
+            "open_until": open_until,
+            "correlation_id": str(correlation_id),
+        },
     )
 ```
 
 **Related Work**:
 - Protocol definition: OMN-861 (Phase 2 - omnibase_spi)
 - Implementation: `src/omnibase_infra/mixins/mixin_async_circuit_breaker.py`
-- Example usage: KafkaEventBus integration
+- Thread safety docs: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
+- Example usage: VaultAdapter, KafkaEventBus integration
 - Error handling: See "Error Recovery Patterns" section above
 
 **Best Practices**:
-- ✅ Always propagate correlation_id through circuit breaker calls
-- ✅ Use descriptive operation names ("connect", "publish", "query")
-- ✅ Configure threshold and timeout based on service characteristics
-- ✅ Monitor circuit breaker state transitions for operational insights
-- ✅ Combine with retry logic for transient failures
-- ✅ Use circuit breaker for fail-fast behavior when service is down
-- ❌ Never call circuit breaker methods without holding lock
-- ❌ Never suppress InfraUnavailableError from circuit breaker
-- ❌ Never use circuit breaker for non-transient errors
+- Always propagate correlation_id through circuit breaker calls
+- Use descriptive operation names ("connect", "publish", "query")
+- Configure threshold and timeout based on service characteristics
+- Monitor circuit breaker state transitions for operational insights
+- Combine with retry logic for transient failures
+- Use circuit breaker for fail-fast behavior when service is down
+- Never call circuit breaker methods without holding `_circuit_breaker_lock`
+- Never suppress InfraUnavailableError from circuit breaker
+- Never use circuit breaker for non-transient errors
 
 ### Service Integration Architecture
 - **Adapter Pattern** - External services wrapped in ONEX adapters (Consul, Kafka, Vault)

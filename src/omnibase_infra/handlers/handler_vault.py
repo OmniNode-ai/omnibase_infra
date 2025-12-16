@@ -21,7 +21,7 @@ import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, TypeVar
+from typing import TypeVar
 from uuid import UUID, uuid4
 
 T = TypeVar("T")
@@ -111,11 +111,11 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         configuration is available. The mixin's _init_circuit_breaker() method
         is called there with the actual config values.
         """
-        self._client: Optional[hvac.Client] = None
-        self._config: Optional[ModelVaultAdapterConfig] = None
+        self._client: hvac.Client | None = None
+        self._config: ModelVaultAdapterConfig | None = None
         self._initialized: bool = False
         self._token_expires_at: float = 0.0
-        self._executor: Optional[ThreadPoolExecutor] = None
+        self._executor: ThreadPoolExecutor | None = None
         self._max_workers: int = 0
         self._max_queue_size: int = 0
         # Circuit breaker initialized flag - set after _init_circuit_breaker called
@@ -505,21 +505,79 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             InfraAuthenticationError: If token renewal fails
         """
         if self._config is None or self._client is None:
+            logger.debug(
+                "Token renewal check skipped - adapter not initialized",
+                extra={
+                    "config_initialized": self._config is not None,
+                    "client_initialized": self._client is not None,
+                    "correlation_id": str(correlation_id),
+                },
+            )
             return
 
         current_time = time.time()
         time_until_expiry = self._token_expires_at - current_time
+        threshold = self._config.token_renewal_threshold_seconds
+        needs_renewal = time_until_expiry < threshold
 
-        if time_until_expiry < self._config.token_renewal_threshold_seconds:
+        # Log edge case when expiry time exactly equals threshold
+        # This helps troubleshoot boundary condition behavior
+        is_edge_case = abs(time_until_expiry - threshold) < 0.001  # Within 1ms
+
+        logger.debug(
+            "Token renewal check",
+            extra={
+                "current_time": current_time,
+                "token_expires_at": self._token_expires_at,
+                "time_until_expiry_seconds": time_until_expiry,
+                "threshold_seconds": threshold,
+                "needs_renewal": needs_renewal,
+                "is_threshold_edge_case": is_edge_case,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        if is_edge_case:
+            logger.debug(
+                "Token renewal edge case detected - expiry equals threshold",
+                extra={
+                    "time_until_expiry_seconds": time_until_expiry,
+                    "threshold_seconds": threshold,
+                    "difference_ms": abs(time_until_expiry - threshold) * 1000,
+                    "will_renew": needs_renewal,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        if needs_renewal:
             logger.info(
                 "Token approaching expiration, renewing",
                 extra={
                     "time_until_expiry_seconds": time_until_expiry,
-                    "threshold_seconds": self._config.token_renewal_threshold_seconds,
+                    "threshold_seconds": threshold,
                     "correlation_id": str(correlation_id),
                 },
             )
             await self.renew_token()
+            logger.debug(
+                "Token renewal completed successfully",
+                extra={
+                    "new_expires_at": self._token_expires_at,
+                    "new_time_until_expiry_seconds": self._token_expires_at
+                    - time.time(),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+        else:
+            logger.debug(
+                "Token renewal skipped - token still valid",
+                extra={
+                    "time_until_expiry_seconds": time_until_expiry,
+                    "threshold_seconds": threshold,
+                    "margin_seconds": time_until_expiry - threshold,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
     async def _execute_with_retry(
         self,
@@ -562,7 +620,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                 await self._check_circuit_breaker(operation, correlation_id)
 
         retry_config = self._config.retry
-        last_exception: Optional[Exception] = None
+        last_exception: Exception | None = None
 
         for attempt in range(retry_config.max_attempts):
             try:
@@ -1133,8 +1191,8 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         correlation_id = uuid4()
 
         # Calculate operational metrics (safe even if not initialized)
-        token_ttl_remaining: Optional[int] = None
-        circuit_state: Optional[str] = None
+        token_ttl_remaining: int | None = None
+        circuit_state: str | None = None
         circuit_failure_count: int = 0
         thread_pool_active: int = 0
         thread_pool_max: int = 0
@@ -1151,11 +1209,19 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                     circuit_state = "open" if self._circuit_breaker_open else "closed"
                     circuit_failure_count = self._circuit_breaker_failures
 
-            # Thread pool metrics (safely access internal state)
+            # Thread pool metrics
             thread_pool_max = self._max_workers
             if self._executor is not None:
-                # ThreadPoolExecutor tracks active threads in _threads set
-                thread_pool_active = len(self._executor._threads)
+                # Access _threads with getattr for safety - ThreadPoolExecutor
+                # tracks active threads in _threads set but it's internal.
+                # This is acceptable for observability metrics; if the attribute
+                # is removed in future Python versions, we gracefully return 0.
+                threads_set = getattr(self._executor, "_threads", None)
+                if threads_set is not None:
+                    thread_pool_active = len(threads_set)
+                # Note: There's no public API for active thread count in
+                # ThreadPoolExecutor. The _threads attribute exists in all
+                # Python 3.x versions and is unlikely to change.
 
         if self._initialized and self._client is not None:
 

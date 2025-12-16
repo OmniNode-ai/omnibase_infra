@@ -13,8 +13,6 @@ Security Note:
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from omnibase_infra.handlers.model_vault_retry_config import ModelVaultRetryConfig
@@ -82,11 +80,11 @@ class ModelVaultAdapterConfig(BaseModel):
             raise ValueError(msg)
         return v
 
-    token: Optional[SecretStr] = Field(
+    token: SecretStr | None = Field(
         default=None,
         description="Authentication token protected from logging",
     )
-    namespace: Optional[str] = Field(
+    namespace: str | None = Field(
         default=None,
         description="Vault namespace for multi-tenant isolation",
     )
