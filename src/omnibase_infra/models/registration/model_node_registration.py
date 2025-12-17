@@ -31,11 +31,29 @@ class ModelNodeRegistration(BaseModel):
     Represents a node's complete registration state for persistence.
     Created from introspection events and updated with heartbeat data.
 
+    Validation Design:
+        This model uses **strict Literal validation** for ``node_type``, accepting
+        only the canonical ONEX types: "effect", "compute", "reducer", "orchestrator".
+
+        This differs intentionally from ``ModelNodeHeartbeatEvent``, which uses
+        relaxed ``str`` validation to support experimental node types in transient
+        heartbeat messages. The rationale:
+
+        - **ModelNodeRegistration** (strict): Represents canonical node catalog
+          entries persisted to PostgreSQL. Must align with the source
+          ``ModelNodeIntrospectionEvent`` constraints. Invalid types would corrupt
+          the registry.
+        - **ModelNodeHeartbeatEvent** (relaxed): Transient operational messages
+          that may include experimental or custom node types not yet in the
+          canonical set.
+
     Attributes:
         node_id: Unique node identifier.
-        node_type: ONEX node type string.
-        node_version: Semantic version of the node.
-        capabilities: Dictionary of node capabilities.
+        node_type: ONEX node type. Uses strict Literal["effect", "compute",
+            "reducer", "orchestrator"] validation to ensure registry integrity.
+            See field-level design note for rationale.
+        node_version: Semantic version of the node (validated against semver).
+        capabilities: Structured node capabilities.
         endpoints: Dictionary of exposed endpoints (name -> URL).
         metadata: Additional node metadata.
         health_endpoint: URL for health check endpoint.

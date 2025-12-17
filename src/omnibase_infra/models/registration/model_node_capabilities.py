@@ -86,5 +86,90 @@ class ModelNodeCapabilities(BaseModel):
         default_factory=dict, description="Nested configuration"
     )
 
+    def __getitem__(self, key: str) -> object:
+        """Enable dict-like access to capabilities.
+
+        First checks if key is a known field (defined in the model schema),
+        then checks model_extra for custom capabilities.
+
+        Args:
+            key: The capability name to retrieve.
+
+        Returns:
+            The capability value (from known field or model_extra).
+
+        Raises:
+            KeyError: If key is not found in known fields or model_extra.
+
+        Example:
+            >>> caps = ModelNodeCapabilities(postgres=True, custom=42)
+            >>> caps["postgres"]
+            True
+            >>> caps["custom"]  # Custom capability from model_extra
+            42
+        """
+        # Check if key is a known field in the model schema (access via class to avoid deprecation)
+        if key in type(self).model_fields:
+            return getattr(self, key)
+
+        # Check model_extra for custom capabilities
+        if self.model_extra and key in self.model_extra:
+            return self.model_extra[key]
+
+        raise KeyError(key)
+
+    def __contains__(self, key: object) -> bool:
+        """Enable membership testing for capabilities.
+
+        Returns True if key is a known field OR exists in model_extra.
+
+        Args:
+            key: The capability name to check.
+
+        Returns:
+            True if the key exists as a known field or in model_extra.
+
+        Example:
+            >>> caps = ModelNodeCapabilities(postgres=True, custom=42)
+            >>> "postgres" in caps
+            True
+            >>> "custom" in caps  # Custom capability in model_extra
+            True
+            >>> "unknown" in caps
+            False
+        """
+        if not isinstance(key, str):
+            return False
+
+        # Check known fields first (access via class to avoid deprecation)
+        if key in type(self).model_fields:
+            return True
+
+        # Check model_extra for custom capabilities
+        return bool(self.model_extra and key in self.model_extra)
+
+    def get(self, key: str, default: object = None) -> object:
+        """Safely get a capability value with optional default.
+
+        Args:
+            key: The capability name to retrieve.
+            default: Value to return if key is not found (defaults to None).
+
+        Returns:
+            The capability value if found, otherwise the default value.
+
+        Example:
+            >>> caps = ModelNodeCapabilities(postgres=True)
+            >>> caps.get("postgres")
+            True
+            >>> caps.get("unknown", False)
+            False
+            >>> caps.get("unknown")  # Returns None by default
+        """
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
 
 __all__ = ["ModelNodeCapabilities"]

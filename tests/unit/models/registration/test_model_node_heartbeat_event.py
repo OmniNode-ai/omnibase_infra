@@ -938,3 +938,514 @@ class TestModelNodeHeartbeatEventFromAttributes:
         assert event.node_version == "1.0.0"
         assert event.uptime_seconds == 1234.5
         assert event.active_operations_count == 5
+
+    def test_from_orm_like_object_with_all_fields(self) -> None:
+        """Test creating model from ORM-like object with all fields populated."""
+        test_node_id = uuid4()
+        correlation_id = uuid4()
+        timestamp = datetime.now(UTC)
+
+        class ORMLike:
+            """Simulates SQLAlchemy ORM object."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "orchestrator"
+                self.node_version = "2.1.0"
+                self.uptime_seconds = 86400.0
+                self.active_operations_count = 42
+                self.memory_usage_mb = 2048.5
+                self.cpu_usage_percent = 75.0
+                self.correlation_id = correlation_id
+                self.timestamp = timestamp
+
+        obj = ORMLike()
+        event = ModelNodeHeartbeatEvent.model_validate(obj)
+        assert event.node_id == test_node_id
+        assert event.node_type == "orchestrator"
+        assert event.node_version == "2.1.0"
+        assert event.uptime_seconds == 86400.0
+        assert event.active_operations_count == 42
+        assert event.memory_usage_mb == 2048.5
+        assert event.cpu_usage_percent == 75.0
+        assert event.correlation_id == correlation_id
+        assert event.timestamp == timestamp
+
+    def test_from_attributes_with_none_optional_fields(self) -> None:
+        """Test from_attributes correctly handles None optional fields."""
+        test_node_id = uuid4()
+
+        class PartialORM:
+            """ORM object with explicit None optional fields."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "reducer"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 500.0
+                self.active_operations_count = 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = None
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = PartialORM()
+        event = ModelNodeHeartbeatEvent.model_validate(obj)
+        assert event.memory_usage_mb is None
+        assert event.cpu_usage_percent is None
+        assert event.correlation_id is None
+
+    def test_from_attributes_validates_constraints(self) -> None:
+        """Test that from_attributes still validates field constraints."""
+        test_node_id = uuid4()
+
+        class InvalidORM:
+            """ORM object with invalid constraint values."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = -100.0  # Invalid: negative
+                self.active_operations_count = 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = None
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = InvalidORM()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent.model_validate(obj)
+        assert "uptime_seconds" in str(exc_info.value)
+
+    def test_from_attributes_validates_semver(self) -> None:
+        """Test that from_attributes validates semver constraint."""
+        test_node_id = uuid4()
+
+        class InvalidSemverORM:
+            """ORM object with invalid semver."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "invalid"  # Not valid semver
+                self.uptime_seconds = 100.0
+                self.active_operations_count = 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = None
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = InvalidSemverORM()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent.model_validate(obj)
+        assert "node_version" in str(exc_info.value)
+
+
+class TestModelNodeHeartbeatEventHashEquality:
+    """Tests for hash and equality (frozen model features)."""
+
+    def test_same_values_produce_equal_instances(self) -> None:
+        """Test that instances with same values are equal."""
+        test_node_id = uuid4()
+        timestamp = datetime.now(UTC)
+        event1 = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        event2 = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        assert event1 == event2
+
+    def test_different_values_produce_unequal_instances(self) -> None:
+        """Test that instances with different values are not equal."""
+        test_node_id = uuid4()
+        event1 = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        event2 = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=200.0,  # Different value
+        )
+        assert event1 != event2
+
+    def test_different_node_ids_produce_unequal_instances(self) -> None:
+        """Test that different node_ids make instances unequal."""
+        timestamp = datetime.now(UTC)
+        event1 = ModelNodeHeartbeatEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        event2 = ModelNodeHeartbeatEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        assert event1 != event2
+
+    def test_frozen_model_is_hashable(self) -> None:
+        """Test that frozen model instances are hashable."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        # Should not raise - frozen models are hashable
+        hash_value = hash(event)
+        assert isinstance(hash_value, int)
+
+    def test_equal_instances_have_same_hash(self) -> None:
+        """Test that equal instances have the same hash value."""
+        test_node_id = uuid4()
+        timestamp = datetime.now(UTC)
+        event1 = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        event2 = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        assert hash(event1) == hash(event2)
+
+    def test_can_use_in_set(self) -> None:
+        """Test that frozen model instances can be used in sets."""
+        test_node_id = uuid4()
+        timestamp = datetime.now(UTC)
+        event1 = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        event2 = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        event3 = ModelNodeHeartbeatEvent(
+            node_id=uuid4(),  # Different node_id
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        # event1 and event2 are equal, so set should have 2 elements
+        event_set = {event1, event2, event3}
+        assert len(event_set) == 2
+
+    def test_can_use_as_dict_key(self) -> None:
+        """Test that frozen model instances can be used as dict keys."""
+        test_node_id = uuid4()
+        timestamp = datetime.now(UTC)
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp,
+        )
+        # Should not raise - frozen models can be dict keys
+        data = {event: "value"}
+        assert data[event] == "value"
+
+
+class TestModelNodeHeartbeatEventModelSchema:
+    """Tests for model schema generation."""
+
+    def test_json_schema_generation(self) -> None:
+        """Test that JSON schema can be generated."""
+        schema = ModelNodeHeartbeatEvent.model_json_schema()
+        assert isinstance(schema, dict)
+        assert "properties" in schema
+        assert "node_id" in schema["properties"]
+        assert "node_type" in schema["properties"]
+        assert "uptime_seconds" in schema["properties"]
+
+    def test_json_schema_required_fields(self) -> None:
+        """Test that required fields are marked in schema."""
+        schema = ModelNodeHeartbeatEvent.model_json_schema()
+        required = schema.get("required", [])
+        assert "node_id" in required
+        assert "node_type" in required
+        assert "uptime_seconds" in required
+
+    def test_json_schema_optional_fields_not_required(self) -> None:
+        """Test that optional fields are not in required list."""
+        schema = ModelNodeHeartbeatEvent.model_json_schema()
+        required = schema.get("required", [])
+        # These have defaults, so should not be required
+        assert "active_operations_count" not in required
+        assert "memory_usage_mb" not in required
+        assert "cpu_usage_percent" not in required
+        assert "correlation_id" not in required
+        assert "timestamp" not in required
+        assert "node_version" not in required
+
+    def test_json_schema_field_descriptions(self) -> None:
+        """Test that field descriptions are included in schema."""
+        schema = ModelNodeHeartbeatEvent.model_json_schema()
+        props = schema["properties"]
+        assert "description" in props["node_id"]
+        assert "description" in props["node_type"]
+        assert "description" in props["uptime_seconds"]
+
+    def test_json_schema_numeric_constraints(self) -> None:
+        """Test that numeric constraints are in schema."""
+        schema = ModelNodeHeartbeatEvent.model_json_schema()
+        props = schema["properties"]
+        # uptime_seconds has ge=0
+        assert props["uptime_seconds"].get("minimum") == 0
+        # cpu_usage_percent has ge=0, le=100
+        # Check anyOf for nullable types
+        cpu_schema = props["cpu_usage_percent"]
+        if "anyOf" in cpu_schema:
+            for option in cpu_schema["anyOf"]:
+                if option.get("type") == "number":
+                    assert option.get("minimum") == 0
+                    assert option.get("maximum") == 100
+
+
+class TestModelNodeHeartbeatEventModelCopy:
+    """Tests for model_copy functionality with frozen model."""
+
+    def test_model_copy_creates_new_instance(self) -> None:
+        """Test that model_copy creates a new instance."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        copied = event.model_copy()
+        assert copied is not event
+        assert copied == event
+
+    def test_model_copy_with_update(self) -> None:
+        """Test model_copy with field updates."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        copied = event.model_copy(update={"uptime_seconds": 200.0})
+        assert copied.uptime_seconds == 200.0
+        assert event.uptime_seconds == 100.0  # Original unchanged
+        assert copied.node_id == event.node_id
+
+    def test_model_copy_update_multiple_fields(self) -> None:
+        """Test model_copy updating multiple fields."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        new_correlation_id = uuid4()
+        copied = event.model_copy(
+            update={
+                "node_type": "compute",
+                "uptime_seconds": 500.0,
+                "correlation_id": new_correlation_id,
+            }
+        )
+        assert copied.node_type == "compute"
+        assert copied.uptime_seconds == 500.0
+        assert copied.correlation_id == new_correlation_id
+        # Original unchanged
+        assert event.node_type == "effect"
+        assert event.uptime_seconds == 100.0
+
+    def test_model_copy_deep_preserves_uuid(self) -> None:
+        """Test that deep copy preserves UUID values correctly."""
+        test_node_id = uuid4()
+        correlation_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            correlation_id=correlation_id,
+        )
+        copied = event.model_copy(deep=True)
+        assert copied.node_id == test_node_id
+        assert copied.correlation_id == correlation_id
+
+
+class TestModelNodeHeartbeatEventTypeCoercion:
+    """Tests for type coercion behavior."""
+
+    def test_string_uuid_coerced_to_uuid(self) -> None:
+        """Test that string UUID is coerced to UUID object."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=str(test_node_id),  # type: ignore[arg-type]
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        assert event.node_id == test_node_id
+        assert isinstance(event.node_id, UUID)
+
+    def test_int_uptime_coerced_to_float(self) -> None:
+        """Test that integer uptime_seconds is coerced to float."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100,  # int, not float
+        )
+        assert event.uptime_seconds == 100.0
+        assert isinstance(event.uptime_seconds, float)
+
+    def test_string_correlation_id_coerced_to_uuid(self) -> None:
+        """Test that string correlation_id is coerced to UUID."""
+        test_node_id = uuid4()
+        correlation_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            correlation_id=str(correlation_id),  # type: ignore[arg-type]
+        )
+        assert event.correlation_id == correlation_id
+        assert isinstance(event.correlation_id, UUID)
+
+    def test_iso_timestamp_string_coerced_to_datetime(self) -> None:
+        """Test that ISO timestamp string is coerced to datetime."""
+        test_node_id = uuid4()
+        timestamp_str = "2025-06-15T10:30:00+00:00"
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            timestamp=timestamp_str,  # type: ignore[arg-type]
+        )
+        assert isinstance(event.timestamp, datetime)
+        assert event.timestamp.year == 2025
+        assert event.timestamp.month == 6
+        assert event.timestamp.day == 15
+
+    def test_int_memory_usage_coerced_to_float(self) -> None:
+        """Test that integer memory_usage_mb is coerced to float."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            memory_usage_mb=512,  # int
+        )
+        assert event.memory_usage_mb == 512.0
+        assert isinstance(event.memory_usage_mb, float)
+
+    def test_int_cpu_usage_coerced_to_float(self) -> None:
+        """Test that integer cpu_usage_percent is coerced to float."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            cpu_usage_percent=50,  # int
+        )
+        assert event.cpu_usage_percent == 50.0
+        assert isinstance(event.cpu_usage_percent, float)
+
+
+class TestModelNodeHeartbeatEventModelValidate:
+    """Tests for model_validate with various input types."""
+
+    def test_model_validate_from_dict(self) -> None:
+        """Test model_validate with dict input."""
+        test_node_id = uuid4()
+        data = {
+            "node_id": test_node_id,
+            "node_type": "effect",
+            "uptime_seconds": 100.0,
+        }
+        event = ModelNodeHeartbeatEvent.model_validate(data)
+        assert event.node_id == test_node_id
+        assert event.node_type == "effect"
+
+    def test_model_validate_from_dict_with_string_uuid(self) -> None:
+        """Test model_validate with string UUID in dict."""
+        test_node_id = uuid4()
+        data = {
+            "node_id": str(test_node_id),
+            "node_type": "effect",
+            "uptime_seconds": 100.0,
+        }
+        event = ModelNodeHeartbeatEvent.model_validate(data)
+        assert event.node_id == test_node_id
+
+    def test_model_validate_strict_mode(self) -> None:
+        """Test model_validate with strict=True rejects type coercion."""
+        test_node_id = uuid4()
+        data = {
+            "node_id": str(test_node_id),  # String, not UUID
+            "node_type": "effect",
+            "uptime_seconds": 100.0,
+        }
+        # Strict mode should reject string where UUID expected
+        with pytest.raises(ValidationError):
+            ModelNodeHeartbeatEvent.model_validate(data, strict=True)
+
+    def test_model_validate_json_string(self) -> None:
+        """Test model_validate_json with JSON string input."""
+        test_node_id = uuid4()
+        json_str = f'{{"node_id": "{test_node_id}", "node_type": "effect", "uptime_seconds": 100.0}}'
+        event = ModelNodeHeartbeatEvent.model_validate_json(json_str)
+        assert event.node_id == test_node_id
+        assert event.node_type == "effect"
+
+
+class TestModelNodeHeartbeatEventRepr:
+    """Tests for model representation."""
+
+    def test_repr_contains_class_name(self) -> None:
+        """Test that repr contains the class name."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        repr_str = repr(event)
+        assert "ModelNodeHeartbeatEvent" in repr_str
+
+    def test_repr_contains_field_values(self) -> None:
+        """Test that repr contains field values."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        repr_str = repr(event)
+        assert str(test_node_id) in repr_str
+        assert "effect" in repr_str
+
+    def test_str_representation(self) -> None:
+        """Test string representation of model."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        str_repr = str(event)
+        assert str(test_node_id) in str_repr
