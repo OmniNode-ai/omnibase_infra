@@ -148,8 +148,13 @@ def validate_infra_patterns(
         - Class has many methods (threshold: 10) - Event bus lifecycle, pub/sub, circuit breaker
         - __init__ has many parameters (threshold: 5) - Backwards compatibility during config migration
 
+        RuntimeHostProcess (runtime_host_process.py) - Documented infrastructure pattern exception:
+        - Class has many methods (threshold: 10) - Lifecycle, message handling, graceful shutdown
+        - Central coordinator requiring: start/stop, health_check, _on_message, _handle_envelope,
+          shutdown_ready, register_handler, get_handler, and supporting methods (OMN-756)
+
         These violations are intentional infrastructure patterns documented in:
-        - kafka_event_bus.py class/method docstrings
+        - kafka_event_bus.py / runtime_host_process.py class/method docstrings
         - CLAUDE.md "Accepted Pattern Exceptions" section
         - This validator's docstring
 
@@ -199,6 +204,18 @@ def validate_infra_patterns(
         {
             "file_pattern": r"plugin_compute_base\.py",
             "violation_pattern": r"Function name 'execute' is too generic",
+        },
+        # RuntimeHostProcess method count exemption (OMN-756)
+        # Central coordinator class that legitimately requires multiple methods for:
+        # - Lifecycle management (start, stop, health_check)
+        # - Message handling (_on_message, _handle_envelope)
+        # - Graceful shutdown (shutdown_ready, drain logic)
+        # - Handler management (register_handler, get_handler)
+        # This complexity is intentional for the runtime coordinator pattern.
+        {
+            "file_pattern": r"runtime_host_process\.py",
+            "class_pattern": r"Class 'RuntimeHostProcess'",
+            "violation_pattern": r"has \d+ methods",
         },
     ]
 

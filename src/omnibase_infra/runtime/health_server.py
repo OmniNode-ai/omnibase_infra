@@ -418,7 +418,9 @@ class HealthServer:
                 "details": {
                     "healthy": bool,
                     "degraded": bool,
-                    "runtime_active": bool,
+                    "is_running": bool,
+                    "is_draining": bool,  // True during graceful shutdown drain
+                    "pending_message_count": int,  // In-flight messages
                     "handlers": {...},
                     // Additional health check details
                 }
