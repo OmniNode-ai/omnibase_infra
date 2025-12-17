@@ -32,14 +32,19 @@ Coverage Goals:
 
 import asyncio
 import json
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
 
 from omnibase_infra.errors import InfraUnavailableError, RuntimeHostError
+
+# Fixed timestamp for deterministic test results.
+# Using a specific point in time avoids flaky CI tests due to timing variations.
+FIXED_TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+FIXED_TEST_TIMESTAMP_ISO = FIXED_TEST_TIMESTAMP.isoformat()
+
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
     ModelNodeIntrospectionPayload,
     ModelNodeRegistryEffectConfig,
@@ -94,7 +99,7 @@ def mock_db_handler_with_rows() -> AsyncMock:
     """Create mock DB handler that returns query results."""
     handler = AsyncMock()
 
-    def create_query_response(envelope: dict[str, Any]) -> dict[str, Any]:
+    def create_query_response(envelope: dict[str, object]) -> dict[str, object]:
         """Generate response based on operation type."""
         operation = envelope.get("operation", "")
         if operation == "db.query":
@@ -112,8 +117,8 @@ def mock_db_handler_with_rows() -> AsyncMock:
                             ),
                             "metadata": json.dumps({}),
                             "health_endpoint": "http://localhost:8080/health",
-                            "registered_at": datetime.now().isoformat(),
-                            "updated_at": datetime.now().isoformat(),
+                            "registered_at": FIXED_TEST_TIMESTAMP_ISO,
+                            "updated_at": FIXED_TEST_TIMESTAMP_ISO,
                         },
                         {
                             "node_id": "test-node-2",
@@ -123,8 +128,8 @@ def mock_db_handler_with_rows() -> AsyncMock:
                             "endpoints": json.dumps({}),
                             "metadata": json.dumps({}),
                             "health_endpoint": None,
-                            "registered_at": datetime.now().isoformat(),
-                            "updated_at": datetime.now().isoformat(),
+                            "registered_at": FIXED_TEST_TIMESTAMP_ISO,
+                            "updated_at": FIXED_TEST_TIMESTAMP_ISO,
                         },
                     ]
                 },
@@ -552,13 +557,13 @@ class TestNodeRegistryEffectRegister:
         """Test that Consul and PostgreSQL operations run in parallel."""
         call_order: list[str] = []
 
-        async def consul_execute(envelope: dict[str, Any]) -> dict[str, Any]:
+        async def consul_execute(envelope: dict[str, object]) -> dict[str, object]:
             call_order.append("consul_start")
             await asyncio.sleep(0.05)
             call_order.append("consul_end")
             return {"status": "success"}
 
-        async def db_execute(envelope: dict[str, Any]) -> dict[str, Any]:
+        async def db_execute(envelope: dict[str, object]) -> dict[str, object]:
             call_order.append("db_start")
             await asyncio.sleep(0.05)
             call_order.append("db_end")
@@ -827,8 +832,8 @@ class TestNodeRegistryEffectDiscover:
                             "endpoints": {},
                             "metadata": {},
                             "health_endpoint": None,
-                            "registered_at": datetime.now().isoformat(),
-                            "updated_at": datetime.now().isoformat(),
+                            "registered_at": FIXED_TEST_TIMESTAMP_ISO,
+                            "updated_at": FIXED_TEST_TIMESTAMP_ISO,
                         }
                     ]
                 },
@@ -882,8 +887,8 @@ class TestNodeRegistryEffectDiscover:
                             "endpoints": {},
                             "metadata": {},
                             "health_endpoint": None,
-                            "registered_at": datetime.now().isoformat(),
-                            "updated_at": datetime.now().isoformat(),
+                            "registered_at": FIXED_TEST_TIMESTAMP_ISO,
+                            "updated_at": FIXED_TEST_TIMESTAMP_ISO,
                         }
                     ]
                 },

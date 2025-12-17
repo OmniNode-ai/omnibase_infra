@@ -864,11 +864,19 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     )
             return {}
 
-        def parse_datetime(val: object) -> datetime:
+        def parse_datetime(val: object, field_name: str = "datetime") -> datetime:
             if isinstance(val, datetime):
                 return val
             if isinstance(val, str):
                 return datetime.fromisoformat(val.replace("Z", "+00:00"))
+            # Fallback to current time when no valid datetime provided
+            logger.warning(
+                f"Using datetime fallback for {field_name}",
+                extra={
+                    "correlation_id": (str(correlation_id) if correlation_id else None),
+                    "field_name": field_name,
+                },
+            )
             return datetime.now(UTC)
 
         # Handle health_endpoint which can be str or None
@@ -881,7 +889,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         last_heartbeat_raw = row.get("last_heartbeat")
         last_heartbeat: datetime | None = None
         if last_heartbeat_raw is not None:
-            last_heartbeat = parse_datetime(last_heartbeat_raw)
+            last_heartbeat = parse_datetime(last_heartbeat_raw, "last_heartbeat")
 
         return ModelNodeRegistration(
             node_id=str(row.get("node_id", "")),
@@ -892,8 +900,12 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             metadata=parse_json(row.get("metadata", {}), "metadata"),
             health_endpoint=health_endpoint,
             last_heartbeat=last_heartbeat,
-            registered_at=parse_datetime(row.get("registered_at", datetime.now(UTC))),
-            updated_at=parse_datetime(row.get("updated_at", datetime.now(UTC))),
+            registered_at=parse_datetime(
+                row.get("registered_at", datetime.now(UTC)), "registered_at"
+            ),
+            updated_at=parse_datetime(
+                row.get("updated_at", datetime.now(UTC)), "updated_at"
+            ),
         )
 
 
