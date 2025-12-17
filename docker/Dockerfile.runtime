@@ -208,6 +208,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     # CA certificates for HTTPS connections
     ca-certificates \
+    # Tini - minimal init system for proper signal handling as PID 1
+    # This ensures SIGTERM is properly forwarded to the Python process
+    # See: https://github.com/krallin/tini
+    tini \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -250,6 +254,12 @@ EXPOSE 8085
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl --fail --silent http://localhost:8085/health || exit 1
 
-# Default entrypoint runs the ONEX kernel via Poetry-installed script
+# Use tini as init to properly handle signals (PID 1 problem)
+# Without tini, signals like SIGTERM aren't properly forwarded to the Python process,
+# causing Docker to send SIGKILL after timeout (exit code 137 instead of 0/143).
+# tini reaps zombie processes and forwards signals correctly.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Default command runs the ONEX kernel via Poetry-installed script
 # The kernel loads configuration from CONTRACTS_DIR and starts the runtime
 CMD ["onex-runtime"]

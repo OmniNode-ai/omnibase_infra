@@ -94,7 +94,6 @@ import asyncio
 import logging
 import time
 from enum import Enum
-from typing import Optional
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType

@@ -15,6 +15,9 @@ Exports:
     InfraTimeoutError: Infrastructure timeout errors
     InfraAuthenticationError: Infrastructure authentication errors
     InfraUnavailableError: Infrastructure resource unavailable errors
+    EnvelopeValidationError: Envelope validation errors (pre-dispatch)
+    UnknownHandlerTypeError: Unknown handler type prefix errors
+    PolicyRegistryError: Policy registry operation errors
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -80,6 +83,13 @@ Error Sanitization Guidelines:
         )
 """
 
+from omnibase_infra.errors.error_container_wiring import (
+    ContainerValidationError,
+    ContainerWiringError,
+    ServiceRegistrationError,
+    ServiceResolutionError,
+)
+from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.infra_errors import (
     EnvelopeValidationError,
     InfraAuthenticationError,
@@ -106,4 +116,10 @@ __all__: list[str] = [
     "InfraUnavailableError",
     "EnvelopeValidationError",
     "UnknownHandlerTypeError",
+    "PolicyRegistryError",
+    # Container wiring errors
+    "ContainerWiringError",
+    "ServiceRegistrationError",
+    "ServiceResolutionError",
+    "ContainerValidationError",
 ]

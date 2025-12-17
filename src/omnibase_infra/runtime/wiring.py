@@ -105,7 +105,7 @@ Example Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
@@ -204,7 +204,8 @@ def wire_default_handlers() -> dict[str, list[str]]:
 
     # Register all known handlers
     for handler_type, (handler_cls, description) in _KNOWN_HANDLERS.items():
-        handler_registry.register(handler_type, handler_cls)
+        # Note: Handlers implement ProtocolHandler structurally but don't inherit from it
+        handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]
         logger.debug(
             "Registered handler",
             extra={
@@ -336,7 +337,8 @@ def wire_handlers_from_contract(
 
             # Register the handler
             handler_cls, description = _KNOWN_HANDLERS[handler_type]
-            handler_registry.register(handler_type, handler_cls)
+            # Note: Handlers implement ProtocolHandler structurally but don't inherit from it
+            handler_registry.register(handler_type, handler_cls)  # type: ignore[arg-type]
             registered_handlers.append(handler_type)
 
             logger.debug(
@@ -438,7 +440,7 @@ def get_known_event_bus_kinds() -> list[str]:
 def wire_custom_handler(
     handler_type: str,
     handler_cls: type[ProtocolHandler],
-    registry: Optional[ProtocolBindingRegistry] = None,
+    registry: ProtocolBindingRegistry | None = None,
 ) -> None:
     """Register a custom handler class with the registry.
 
@@ -472,7 +474,7 @@ def wire_custom_handler(
 def wire_custom_event_bus(
     bus_kind: str,
     bus_cls: type[ProtocolEventBus],
-    registry: Optional[EventBusBindingRegistry] = None,
+    registry: EventBusBindingRegistry | None = None,
 ) -> None:
     """Register a custom event bus class with the registry.
 
