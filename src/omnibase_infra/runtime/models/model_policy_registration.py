@@ -37,7 +37,7 @@ class ModelPolicyRegistration(BaseModel):
         policy_type: Policy type - either orchestrator or reducer
         version: Semantic version string (default: "1.0.0")
         description: Human-readable description of the policy
-        deterministic_async: If True, allows async interface (must be explicit)
+        allow_async: If True, allows async interface (must be explicit)
 
     Example:
         >>> from omnibase_infra.runtime.models import ModelPolicyRegistration
@@ -78,7 +78,7 @@ class ModelPolicyRegistration(BaseModel):
         default="",
         description="Human-readable description of the policy",
     )
-    deterministic_async: bool = Field(
+    allow_async: bool = Field(
         default=False,
         description="If True, allows async interface (must be explicit for async policies)",
     )

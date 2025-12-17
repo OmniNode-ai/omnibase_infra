@@ -59,7 +59,7 @@ Example Usage:
         policy_class=AsyncMergePolicy,
         policy_type=EnumPolicyType.REDUCER,
         version="1.0.0",
-        deterministic_async=True,  # MUST be explicit for async policies
+        allow_async=True,  # MUST be explicit for async policies
     )
 
     # Retrieve a policy
@@ -142,7 +142,7 @@ class PolicyRegistry:
     Sync Enforcement:
         By default, policies must be synchronous. If a policy has async methods
         (evaluate, decide, reduce), registration will fail unless
-        deterministic_async=True is explicitly specified.
+        allow_async=True is explicitly specified.
 
     Scale and Performance Characteristics:
 
@@ -280,7 +280,7 @@ class PolicyRegistry:
 
         VALIDATED (by PolicyRegistry):
             - Async method detection: Policies with async methods (reduce, decide,
-              evaluate) must explicitly set deterministic_async=True. This prevents
+              evaluate) must explicitly set allow_async=True. This prevents
               accidental async policy registration that could cause runtime issues.
             - Policy type validation: policy_type must be a valid EnumPolicyType
               value ("orchestrator" or "reducer"). Invalid types raise PolicyRegistryError.
@@ -468,21 +468,21 @@ class PolicyRegistry:
         self,
         policy_id: str,
         policy_class: type[ProtocolPolicy],
-        deterministic_async: bool,
+        allow_async: bool,
     ) -> None:
         """Validate that policy methods are synchronous unless explicitly async.
 
         This validation enforces the synchronous-by-default policy execution model.
         Policy plugins are expected to be pure decision logic without I/O or async
         operations. If a policy needs async methods (e.g., for deterministic async
-        computation), it must be explicitly flagged with deterministic_async=True
+        computation), it must be explicitly flagged with allow_async=True
         during registration.
 
         Validation Process:
             1. Inspect policy class for methods: reduce(), decide(), evaluate()
             2. Check if any of these methods are async (coroutine functions)
-            3. If async methods found and deterministic_async=False, raise error
-            4. If async methods found and deterministic_async=True, allow registration
+            3. If async methods found and allow_async=False, raise error
+            4. If async methods found and allow_async=True, allow registration
 
         This validation helps prevent accidental async policy registration and ensures
         that async policies are consciously marked as such for proper runtime handling.
@@ -490,11 +490,11 @@ class PolicyRegistry:
         Args:
             policy_id: Unique identifier for the policy being validated
             policy_class: The policy class to validate for async methods
-            deterministic_async: If True, allows async interface; if False, enforces sync
+            allow_async: If True, allows async interface; if False, enforces sync
 
         Raises:
             PolicyRegistryError: If policy has async methods (reduce, decide, evaluate)
-                                and deterministic_async=False. Error includes the policy_id
+                                and allow_async=False. Error includes the policy_id
                                 and the name of the async method that caused validation failure.
 
         Example:
@@ -504,7 +504,7 @@ class PolicyRegistry:
             ...         return True
             >>> registry._validate_sync_enforcement("async_pol", AsyncPolicy, False)
             PolicyRegistryError: Policy 'async_pol' has async evaluate() but
-                                 deterministic_async=True not specified.
+                                 allow_async=True not specified.
 
             >>> # This will succeed - async explicitly flagged
             >>> registry._validate_sync_enforcement("async_pol", AsyncPolicy, True)
@@ -513,10 +513,10 @@ class PolicyRegistry:
             if hasattr(policy_class, method_name):
                 method = getattr(policy_class, method_name)
                 if asyncio.iscoroutinefunction(method):
-                    if not deterministic_async:
+                    if not allow_async:
                         raise PolicyRegistryError(
                             f"Policy '{policy_id}' has async {method_name}() but "
-                            f"deterministic_async=True not specified. "
+                            f"allow_async=True not specified. "
                             f"Policy plugins must be synchronous by default.",
                             policy_id=policy_id,
                             policy_type=None,
@@ -600,11 +600,11 @@ class PolicyRegistry:
                 - policy_class: The policy class to register (must implement ProtocolPolicy)
                 - policy_type: Whether this is orchestrator or reducer policy
                 - version: Semantic version string (default: "1.0.0")
-                - deterministic_async: If True, allows async interface
+                - allow_async: If True, allows async interface
 
         Raises:
             PolicyRegistryError: If policy has async methods and
-                               deterministic_async=False, or if policy_type is invalid
+                               allow_async=False, or if policy_type is invalid
 
         Example:
             >>> from omnibase_infra.runtime.models import ModelPolicyRegistration
@@ -622,10 +622,10 @@ class PolicyRegistry:
         policy_class = registration.policy_class
         policy_type = registration.policy_type
         version = registration.version
-        deterministic_async = registration.deterministic_async
+        allow_async = registration.allow_async
 
         # Validate sync enforcement
-        self._validate_sync_enforcement(policy_id, policy_class, deterministic_async)
+        self._validate_sync_enforcement(policy_id, policy_class, allow_async)
 
         # Normalize policy type
         normalized_type = self._normalize_policy_type(policy_type)
@@ -654,7 +654,7 @@ class PolicyRegistry:
         policy_class: type[ProtocolPolicy],
         policy_type: str | EnumPolicyType,
         version: str = "1.0.0",
-        deterministic_async: bool = False,
+        allow_async: bool = False,
     ) -> None:
         """Convenience method to register a policy with individual parameters.
 
@@ -667,12 +667,12 @@ class PolicyRegistry:
             policy_type: Whether this is orchestrator or reducer policy.
                         Can be EnumPolicyType or string literal.
             version: Semantic version string (default: "1.0.0")
-            deterministic_async: If True, allows async interface. MUST be explicitly
+            allow_async: If True, allows async interface. MUST be explicitly
                                 flagged for policies with async methods.
 
         Raises:
             PolicyRegistryError: If policy has async methods and
-                               deterministic_async=False, or if policy_type is invalid
+                               allow_async=False, or if policy_type is invalid
 
         Example:
             >>> registry = PolicyRegistry()
@@ -688,7 +688,7 @@ class PolicyRegistry:
             policy_class=policy_class,
             policy_type=policy_type,
             version=version,
-            deterministic_async=deterministic_async,
+            allow_async=allow_async,
         )
         self.register(registration)
 
@@ -918,9 +918,21 @@ class PolicyRegistry:
                         version=version,
                     )
 
+                # Trim whitespace BEFORE any split operations
+                # This handles inputs like " 1.2.3 ", "1.2.3\n", "\t1.2.3\t"
+                version = version.strip()
+
                 # Split off prerelease suffix (e.g., "1.0.0-alpha" -> "1.0.0", "alpha")
                 if "-" in version:
                     version_part, prerelease = version.split("-", 1)
+                    # Validate prerelease is non-empty when dash is present
+                    if not prerelease:
+                        raise ProtocolConfigurationError(
+                            f"Invalid semantic version format: '{version}'. "
+                            f"Prerelease suffix cannot be empty when '-' is specified. "
+                            f"Use '1.2.3' for release versions or '1.2.3-alpha' for prereleases.",
+                            version=version,
+                        )
                 else:
                     version_part, prerelease = version, ""
 
