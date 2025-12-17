@@ -94,6 +94,29 @@ class ModelNodeRegistration(BaseModel):
     endpoints: dict[str, str] = Field(
         default_factory=dict, description="Exposed endpoints (name -> URL)"
     )
+
+    @field_validator("endpoints")
+    @classmethod
+    def validate_endpoint_urls(cls, v: dict[str, str]) -> dict[str, str]:
+        """Validate that all endpoint values are valid URLs.
+
+        Args:
+            v: Dictionary of endpoint names to URL strings.
+
+        Returns:
+            The validated endpoints dictionary.
+
+        Raises:
+            ValueError: If any endpoint URL is invalid (missing scheme or netloc).
+        """
+        from urllib.parse import urlparse
+
+        for name, url in v.items():
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                raise ValueError(f"Invalid URL for endpoint '{name}': {url}")
+        return v
+
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional node metadata"
     )
