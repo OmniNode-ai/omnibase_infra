@@ -4,8 +4,6 @@ ONEX Infrastructure CLI Commands.
 Provides CLI interface for infrastructure management and validation.
 """
 
-from typing import Optional
-
 import click
 from rich.console import Console
 from rich.table import Table

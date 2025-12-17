@@ -7,7 +7,7 @@ ProtocolEventHeaders from omnibase_spi for use with event bus implementations.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -70,7 +70,7 @@ class ModelEventHeaders(BaseModel):
     max_retries: int = Field(default=3)
     ttl_seconds: int | None = Field(default=None)
 
-    model_config = ConfigDict(frozen=False, extra="forbid", from_attributes=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     async def validate_headers(self) -> bool:
         """Validate that required headers are present and valid.

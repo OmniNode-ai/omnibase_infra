@@ -3,16 +3,38 @@
 """Runtime module for omnibase_infra.
 
 This module provides the runtime infrastructure for the ONEX infrastructure layer,
-including:
+including three SINGLE SOURCE OF TRUTH registries and the runtime execution host.
 
-- Kernel: Contract-driven bootstrap entrypoint for the ONEX runtime
-- ProtocolBindingRegistry: SINGLE SOURCE OF TRUTH for protocol handler registration
-- EventBusBindingRegistry: Registry for event bus implementations
-- RuntimeHostProcess: The infrastructure-specific runtime host process implementation
-- Wiring functions: Register handlers and event buses with registries
+Core Registries
+---------------
+- **PolicyRegistry**: SINGLE SOURCE OF TRUTH for policy plugin registration
+    - Container-based dependency injection support (preferred) or singleton accessor (legacy)
+    - Thread-safe registration by (policy_id, policy_type, version)
+    - Enforces synchronous-by-default execution (async must be explicit)
+    - Supports orchestrator and reducer policy types with version resolution
+    - Pure decision logic plugins (no I/O, no side effects)
+    - Integrates with ModelOnexContainer for DI pattern
+
+- **ProtocolBindingRegistry**: SINGLE SOURCE OF TRUTH for protocol handler registration
+    - Maps handler types to handler implementations
+    - Enables protocol-based dependency injection
+    - Supports HTTP, database, Kafka, Vault, Consul, Valkey/Redis, gRPC handlers
+
+- **EventBusBindingRegistry**: Registry for event bus implementations
+    - Maps event bus kinds to event bus implementations
+    - Supports in-memory and Kafka event buses
+    - Enables event-driven architectures
+
+Runtime Components
+------------------
+- **Kernel**: Contract-driven bootstrap entrypoint for the ONEX runtime
+- **RuntimeHostProcess**: Infrastructure-specific runtime host process implementation
+- **HealthServer**: HTTP health check endpoint for container orchestration
+- **Wiring functions**: Register handlers and event buses with registries
+- **Envelope validation**: Validate event envelope structures
 
 The runtime module serves as the entry point for running infrastructure services
-and configuring the handler ecosystem.
+and configuring the handler and policy ecosystem.
 """
 
 from __future__ import annotations
@@ -48,6 +70,8 @@ from omnibase_infra.runtime.health_server import (
 from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
+from omnibase_infra.runtime.policy_registry import PolicyRegistry
+from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.wiring import (
     get_known_event_bus_kinds,
@@ -99,6 +123,9 @@ __all__: list[str] = [
     "get_known_event_bus_kinds",
     "wire_custom_handler",
     "wire_custom_event_bus",
+    # Policy protocol and registry
+    "ProtocolPolicy",
+    "PolicyRegistry",
     # Envelope validation
     "PAYLOAD_REQUIRED_OPERATIONS",
     "validate_envelope",
