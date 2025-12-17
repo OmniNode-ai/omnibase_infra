@@ -20,7 +20,7 @@ Operations:
 
 Handler Interface (duck typing):
     consul_handler and db_handler must implement:
-        async def execute(self, envelope: dict[str, object]) -> dict[str, object]
+        async def execute(self, envelope: EnvelopeDict) -> ResultDict
 
 Event Bus Interface (duck typing):
     event_bus must implement:
@@ -59,8 +59,11 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
     ModelRegistryResponse,
 )
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+    EnvelopeDict,
+    JsonValue,
     ProtocolEnvelopeExecutor,
     ProtocolEventBus,
+    ResultDict,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,9 +106,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         Args:
             consul_handler: Handler for Consul operations.
-                Must implement: async execute(envelope: dict[str, object]) -> dict[str, object]
+                Must implement: async execute(envelope: EnvelopeDict) -> ResultDict
             db_handler: Handler for PostgreSQL operations.
-                Must implement: async execute(envelope: dict[str, object]) -> dict[str, object]
+                Must implement: async execute(envelope: EnvelopeDict) -> ResultDict
             event_bus: Optional event bus for publishing events.
                 Must implement: async publish(topic: str, key: bytes, value: bytes) -> None
             config: Configuration for circuit breaker and resilience settings.
@@ -174,7 +177,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
     def _safe_json_dumps(
         self,
-        data: object,
+        data: JsonValue | dict[str, str],
         correlation_id: UUID | None = None,
         field_name: str = "unknown",
         fallback: str = "{}",
@@ -182,7 +185,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         """Safely serialize data to JSON with error handling.
 
         Args:
-            data: The data to serialize
+            data: The data to serialize (any JSON-serializable value)
             correlation_id: Optional correlation ID for logging
             field_name: Name of the field being serialized for logging
             fallback: Value to return on serialization failure (default: "{}")
@@ -205,7 +208,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
     def _safe_json_dumps_strict(
         self,
-        data: object,
+        data: JsonValue | dict[str, str],
         correlation_id: UUID | None = None,
         field_name: str = "unknown",
     ) -> tuple[str, str | None]:
@@ -391,7 +394,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         """Register node with Consul."""
         try:
             # Build Consul registration payload
-            consul_payload: dict[str, object] = {
+            consul_payload: dict[str, JsonValue] = {
                 "name": introspection.node_id,
                 "service_id": introspection.node_id,
                 "tags": [introspection.node_type, f"v{introspection.node_version}"],
@@ -679,11 +682,11 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
             # Parse results into ModelNodeRegistration
             payload = result.get("payload", {})
-            rows: list[dict[str, object]] = []
+            rows: list[dict[str, JsonValue]] = []
             if isinstance(payload, dict):
                 raw_rows = payload.get("rows", [])
                 if isinstance(raw_rows, list):
-                    rows = raw_rows
+                    rows = cast(list[dict[str, JsonValue]], raw_rows)
             nodes = [
                 self._row_to_node_registration(row, request.correlation_id)
                 for row in rows
@@ -824,24 +827,26 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
     def _row_to_node_registration(
         self,
-        row: dict[str, object],
+        row: dict[str, JsonValue],
         correlation_id: UUID | None = None,
     ) -> ModelNodeRegistration:
         """Convert database row to ModelNodeRegistration.
 
         Args:
-            row: Database row dictionary
+            row: Database row dictionary with JSON-serializable values
             correlation_id: Optional correlation ID for logging
         """
 
-        def parse_json(val: object, field_name: str = "unknown") -> dict[str, object]:
+        def parse_json(
+            val: JsonValue, field_name: str = "unknown"
+        ) -> dict[str, JsonValue]:
             if isinstance(val, dict):
                 return val
             if isinstance(val, str):
                 try:
                     parsed = json.loads(val)
                     if isinstance(parsed, dict):
-                        return parsed
+                        return cast(dict[str, JsonValue], parsed)
                     logger.warning(
                         f"JSON parse result not a dict for {field_name}",
                         extra={
@@ -864,7 +869,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     )
             return {}
 
-        def parse_datetime(val: object, field_name: str = "datetime") -> datetime:
+        def parse_datetime(val: JsonValue, field_name: str = "datetime") -> datetime:
             if isinstance(val, datetime):
                 return val
             if isinstance(val, str):
@@ -891,21 +896,38 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         if last_heartbeat_raw is not None:
             last_heartbeat = parse_datetime(last_heartbeat_raw, "last_heartbeat")
 
+        # Parse timestamps - use current time if missing (shouldn't happen in valid data)
+        registered_at_raw = row.get("registered_at")
+        registered_at = (
+            parse_datetime(registered_at_raw, "registered_at")
+            if registered_at_raw is not None
+            else datetime.now(UTC)
+        )
+
+        updated_at_raw = row.get("updated_at")
+        updated_at = (
+            parse_datetime(updated_at_raw, "updated_at")
+            if updated_at_raw is not None
+            else datetime.now(UTC)
+        )
+
+        # Convert endpoints dict to proper type (values must be strings)
+        raw_endpoints = parse_json(row.get("endpoints", {}), "endpoints")
+        endpoints: dict[str, str] = {
+            str(k): str(v) for k, v in raw_endpoints.items() if isinstance(v, str)
+        }
+
         return ModelNodeRegistration(
             node_id=str(row.get("node_id", "")),
             node_type=str(row.get("node_type", "")),
             node_version=str(row.get("node_version", "1.0.0")),
             capabilities=parse_json(row.get("capabilities", {}), "capabilities"),
-            endpoints=parse_json(row.get("endpoints", {}), "endpoints"),
+            endpoints=endpoints,
             metadata=parse_json(row.get("metadata", {}), "metadata"),
             health_endpoint=health_endpoint,
             last_heartbeat=last_heartbeat,
-            registered_at=parse_datetime(
-                row.get("registered_at", datetime.now(UTC)), "registered_at"
-            ),
-            updated_at=parse_datetime(
-                row.get("updated_at", datetime.now(UTC)), "updated_at"
-            ),
+            registered_at=registered_at,
+            updated_at=updated_at,
         )
 
 

@@ -4,11 +4,35 @@
 
 These protocols define the interfaces for handler and event bus dependencies
 using duck typing with Python's Protocol class.
+
+Type Aliases:
+    JsonPrimitive: Basic JSON-serializable types (str, int, float, bool, None)
+    JsonValue: Recursive JSON value type supporting nested structures
+    EnvelopeDict: Dictionary type for operation envelopes
+    ResultDict: Dictionary type for operation results
 """
 
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
+from uuid import UUID
+
+# JSON-serializable value type for strong typing (per ONEX guidelines: never use Any/object).
+# We use str | int | float | bool | None | dict | list to represent JSON values
+# without recursion (which causes issues with type checkers and Pydantic schema generation).
+# This is a documented ONEX exception for JSON-value containers.
+JsonPrimitive = str | int | float | bool | None
+JsonValue = str | int | float | bool | None | dict | list
+
+# Envelope dictionary types for protocol methods.
+# These types are intentionally broad to support various payload structures
+# while still being more specific than 'Any' or 'object'.
+# The 'payload' value can be a dict with various JSON-serializable values,
+# including typed lists like list[str] for SQL parameters.
+EnvelopeDict = dict[str, str | dict[str, JsonValue | list[str]] | list[str] | UUID]
+ResultDict = dict[
+    str, str | dict[str, JsonValue | list[dict]] | list[dict] | int | bool
+]
 
 
 @runtime_checkable
@@ -19,7 +43,7 @@ class ProtocolEnvelopeExecutor(Protocol):
     dictionary and returns a result dictionary.
     """
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+    async def execute(self, envelope: EnvelopeDict) -> ResultDict:
         """Execute an operation based on the envelope contents.
 
         Args:
@@ -55,4 +79,11 @@ class ProtocolEventBus(Protocol):
         ...
 
 
-__all__ = ["ProtocolEnvelopeExecutor", "ProtocolEventBus"]
+__all__ = [
+    "EnvelopeDict",
+    "JsonPrimitive",
+    "JsonValue",
+    "ProtocolEnvelopeExecutor",
+    "ProtocolEventBus",
+    "ResultDict",
+]

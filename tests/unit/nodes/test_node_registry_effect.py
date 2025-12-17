@@ -22,12 +22,21 @@ Test Organization:
     - TestNodeRegistryEffectDiscover: Discovery and filtering
     - TestNodeRegistryEffectRequestIntrospection: Event publishing
     - TestNodeRegistryEffectCircuitBreaker: Fault tolerance
+    - TestNodeRegistryEffectIntegration: Placeholder for integration tests
 
 Coverage Goals:
     - >90% code coverage for node implementation
     - All success, partial success, and failure paths tested
     - Circuit breaker state transitions verified
     - Error handling and validation tested
+
+Test Patterns (CI-Friendly):
+    - SQL assertions use flexible matching (WHERE clause structure, parameterization)
+      rather than exact SQL strings that may break on whitespace changes
+    - Time-dependent tests use retry loops with reasonable timeouts instead of
+      fixed sleeps that may fail in slow CI environments
+    - Fixed timestamps (FIXED_TEST_TIMESTAMP) used for deterministic comparisons
+    - Circuit breaker timeout tests poll with max wait time for CI stability
 """
 
 import asyncio
@@ -861,9 +870,19 @@ class TestNodeRegistryEffectDiscover:
         assert len(response.nodes) == 1
         assert response.nodes[0].node_type == "effect"
 
-        # Verify the filter was passed to the handler
+        # Verify the filter was applied - check SQL structure (flexible matching)
+        # The SQL should have a WHERE clause with parameterized filter
         call_args = mock_db_handler.execute.call_args[0][0]
-        assert "node_type" in call_args["payload"]["sql"]
+        sql = call_args["payload"]["sql"]
+        params = call_args["payload"]["params"]
+
+        # Verify parameterized query structure (not exact SQL string)
+        assert "WHERE" in sql.upper(), (
+            "SQL should contain WHERE clause for filtered query"
+        )
+        assert "$1" in sql, "SQL should use parameterized placeholder"
+        assert len(params) == 1, "Should have exactly one filter parameter"
+        assert "effect" in params, "Filter value should be in params"
 
         await node.shutdown()
 
@@ -916,9 +935,18 @@ class TestNodeRegistryEffectDiscover:
         assert len(response.nodes) == 1
         assert response.nodes[0].node_id == "specific-node"
 
-        # Verify the filter was passed
+        # Verify the filter was applied - check SQL structure (flexible matching)
         call_args = mock_db_handler.execute.call_args[0][0]
-        assert "node_id" in call_args["payload"]["sql"]
+        sql = call_args["payload"]["sql"]
+        params = call_args["payload"]["params"]
+
+        # Verify parameterized query structure (not exact SQL string)
+        assert "WHERE" in sql.upper(), (
+            "SQL should contain WHERE clause for filtered query"
+        )
+        assert "$1" in sql, "SQL should use parameterized placeholder"
+        assert len(params) == 1, "Should have exactly one filter parameter"
+        assert "specific-node" in params, "Filter value should be in params"
 
         await node.shutdown()
 
@@ -1947,3 +1975,85 @@ class TestNodeRegistryEffectJsonSerialization:
         assert isinstance(params[5], str)  # metadata
 
         await node.shutdown()
+
+
+# =============================================================================
+# Integration Tests Placeholder
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestNodeRegistryEffectIntegration:
+    """Integration tests placeholder for NodeRegistryEffect with real backends.
+
+    These tests require real Consul and PostgreSQL instances to run.
+    They validate end-to-end behavior that cannot be fully tested with mocks.
+
+    TODO: Integration tests to implement:
+        - test_register_with_real_consul: Verify Consul service registration
+          with actual health check callbacks
+        - test_register_with_real_postgres: Verify PostgreSQL UPSERT behavior
+          with actual database constraints
+        - test_discover_with_real_postgres: Verify SQL query generation
+          works with real PostgreSQL query planner
+        - test_circuit_breaker_with_real_failures: Test circuit breaker
+          behavior with actual network failures/timeouts
+        - test_concurrent_registrations: Verify idempotent registration
+          under concurrent load with real backends
+        - test_event_bus_with_real_kafka: Verify introspection events
+          are properly published to Kafka
+
+    Environment Setup Required:
+        - Consul: localhost:8500
+        - PostgreSQL: localhost:5432 with node_registrations table
+        - Kafka: localhost:9092 with registry topics
+
+    Run with: pytest -m integration tests/unit/nodes/test_node_registry_effect.py
+    """
+
+    @pytest.mark.skip(reason="Requires real Consul instance")
+    async def test_register_with_real_consul(self) -> None:
+        """Test node registration with real Consul backend.
+
+        TODO: Implement integration test that:
+        1. Connects to real Consul at localhost:8500
+        2. Registers a test node with health check
+        3. Verifies node appears in Consul catalog
+        4. Verifies health check is callable
+        5. Deregisters and verifies cleanup
+        """
+
+    @pytest.mark.skip(reason="Requires real PostgreSQL instance")
+    async def test_register_with_real_postgres(self) -> None:
+        """Test node registration with real PostgreSQL backend.
+
+        TODO: Implement integration test that:
+        1. Connects to real PostgreSQL at localhost:5432
+        2. Registers a test node with UPSERT
+        3. Verifies row exists in node_registrations table
+        4. Re-registers same node and verifies updated_at changes
+        5. Deregisters and verifies row deleted
+        """
+
+    @pytest.mark.skip(reason="Requires real PostgreSQL instance")
+    async def test_discover_with_real_postgres(self) -> None:
+        """Test node discovery with real PostgreSQL query execution.
+
+        TODO: Implement integration test that:
+        1. Registers multiple test nodes with different types
+        2. Queries with various filter combinations
+        3. Verifies SQL parameterization prevents injection
+        4. Verifies results match expected filters
+        """
+
+    @pytest.mark.skip(reason="Requires real Kafka instance")
+    async def test_introspection_with_real_kafka(self) -> None:
+        """Test introspection event publishing with real Kafka.
+
+        TODO: Implement integration test that:
+        1. Connects to real Kafka at localhost:9092
+        2. Sets up consumer for introspection topic
+        3. Publishes introspection request
+        4. Verifies event received by consumer
+        5. Verifies event schema and correlation ID
+        """
