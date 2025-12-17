@@ -324,19 +324,46 @@ class RuntimeHostProcess:
 
     @property
     def pending_message_count(self) -> int:
-        """Return current count of in-flight messages being processed.
+        """Return the current count of in-flight messages being processed.
 
         This property provides visibility into how many messages are currently
         being processed by the runtime host. Used for graceful shutdown to
         determine when it's safe to complete the shutdown process.
 
-        Note:
-            This returns the current value without acquiring the lock for
-            performance reasons. For precise shutdown decisions, use the
-            shutdown_ready() method which acquires the lock.
+        Atomicity Guarantees:
+            This property returns the raw counter value WITHOUT acquiring the
+            async lock (_pending_lock). This is safe because:
+
+            1. Single int read is atomic under CPython's GIL - reading a single
+               integer value cannot be interrupted mid-operation
+            2. The value is only used for observability/monitoring purposes
+               where exact precision is not required
+            3. The slight possibility of reading a stale value during concurrent
+               increment/decrement is acceptable for monitoring use cases
+
+        Thread Safety Considerations:
+            While the read itself is atomic, the value may be approximate if
+            read occurs during concurrent message processing:
+            - Another coroutine may be in the middle of incrementing/decrementing
+            - The value represents a point-in-time snapshot, not a synchronized view
+            - For observability, this approximation is acceptable and avoids
+              lock contention that would impact performance
+
+        Use Cases (appropriate for this property):
+            - Logging current message count for debugging
+            - Metrics/observability dashboards
+            - Approximate health status reporting
+            - Monitoring drain progress during shutdown
+
+        When to use shutdown_ready() instead:
+            For shutdown decisions requiring precise count, use the async
+            shutdown_ready() method which acquires the lock to ensure no
+            race condition with in-flight message processing. The stop()
+            method uses shutdown_ready() internally for this reason.
 
         Returns:
-            Number of messages currently being processed.
+            Current count of messages being processed. May be approximate
+            if reads occur during concurrent increment/decrement operations.
         """
         return self._pending_message_count
 
@@ -473,6 +500,16 @@ class RuntimeHostProcess:
         loop = asyncio.get_running_loop()
         drain_start = loop.time()
         drain_deadline = drain_start + self._drain_timeout_seconds
+        last_progress_log = drain_start
+
+        # Log drain start for observability
+        logger.info(
+            "Starting drain period",
+            extra={
+                "pending_messages": self._pending_message_count,
+                "drain_timeout_seconds": self._drain_timeout_seconds,
+            },
+        )
 
         while not await self.shutdown_ready():
             remaining = drain_deadline - loop.time()
@@ -488,6 +525,19 @@ class RuntimeHostProcess:
 
             # Wait a short interval before checking again
             await asyncio.sleep(min(0.1, remaining))
+
+            # Log progress every 5 seconds during long drains for observability
+            elapsed = loop.time() - drain_start
+            if elapsed - (last_progress_log - drain_start) >= 5.0:
+                logger.info(
+                    "Drain in progress",
+                    extra={
+                        "pending_messages": self._pending_message_count,
+                        "elapsed_seconds": round(elapsed, 2),
+                        "remaining_seconds": round(remaining, 2),
+                    },
+                )
+                last_progress_log = loop.time()
 
         logger.info(
             "Drain period completed",

@@ -519,6 +519,111 @@ class TestRuntimeHostProcessTimeoutValidation:
 
 
 # =============================================================================
+# TestRuntimeHostProcessDrainTimeoutValidation
+# =============================================================================
+
+
+class TestRuntimeHostProcessDrainTimeoutValidation:
+    """Test drain_timeout_seconds configuration validation.
+
+    Tests the bounds validation (1-300 seconds) for graceful shutdown drain period.
+    Implemented as part of OMN-756 (graceful shutdown with drain period).
+    """
+
+    @pytest.mark.asyncio
+    async def test_drain_timeout_below_minimum_is_clamped(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that drain timeout values below minimum are clamped to 1.0."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            process = RuntimeHostProcess(config={"drain_timeout_seconds": 0.5})
+
+        # Should be clamped to minimum
+        assert process._drain_timeout_seconds == 1.0
+
+        # Warning should be logged
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1
+        assert any(
+            "out of valid range" in r.message or "clamping" in r.message
+            for r in warning_logs
+        )
+
+    @pytest.mark.asyncio
+    async def test_drain_timeout_above_maximum_is_clamped(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that drain timeout values above maximum are clamped to 300.0."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            process = RuntimeHostProcess(config={"drain_timeout_seconds": 600.0})
+
+        # Should be clamped to maximum
+        assert process._drain_timeout_seconds == 300.0
+
+        # Warning should be logged
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1
+        assert any(
+            "out of valid range" in r.message or "clamping" in r.message
+            for r in warning_logs
+        )
+
+    @pytest.mark.asyncio
+    async def test_drain_timeout_within_range_is_accepted(self) -> None:
+        """Test that drain timeout values within range are accepted as-is."""
+        # Test minimum boundary
+        process_min = RuntimeHostProcess(config={"drain_timeout_seconds": 1.0})
+        assert process_min._drain_timeout_seconds == 1.0
+
+        # Test maximum boundary
+        process_max = RuntimeHostProcess(config={"drain_timeout_seconds": 300.0})
+        assert process_max._drain_timeout_seconds == 300.0
+
+        # Test middle value
+        process_mid = RuntimeHostProcess(config={"drain_timeout_seconds": 150.0})
+        assert process_mid._drain_timeout_seconds == 150.0
+
+    @pytest.mark.asyncio
+    async def test_drain_timeout_default_when_not_specified(self) -> None:
+        """Test that default drain timeout is used when not specified in config."""
+        process = RuntimeHostProcess()
+        assert process._drain_timeout_seconds == 30.0
+
+    @pytest.mark.asyncio
+    async def test_drain_timeout_invalid_string_falls_back_to_default(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that invalid string drain timeout values fall back to default."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            process = RuntimeHostProcess(
+                config={"drain_timeout_seconds": "not-a-number"}
+            )
+
+        # Should fall back to default
+        assert process._drain_timeout_seconds == 30.0
+
+        # Warning should be logged
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1
+        assert any("Invalid drain_timeout_seconds" in r.message for r in warning_logs)
+
+    @pytest.mark.asyncio
+    async def test_drain_timeout_integer_within_range_is_accepted(self) -> None:
+        """Test that integer drain timeout values within range are accepted."""
+        process = RuntimeHostProcess(config={"drain_timeout_seconds": 60})
+        assert process._drain_timeout_seconds == 60.0
+
+
+# =============================================================================
 # TestRuntimeHostProcessLifecycle
 # =============================================================================
 
@@ -1997,6 +2102,253 @@ class TestRuntimeHostProcessShutdownPriority:
 
 
 # =============================================================================
+# TestRuntimeHostProcessGracefulDrain
+# =============================================================================
+
+
+class TestRuntimeHostProcessGracefulDrain:
+    """Tests for graceful drain behavior during shutdown (OMN-756).
+
+    These tests verify that the RuntimeHostProcess properly handles the drain
+    period during shutdown:
+    - Waits for in-flight messages to complete
+    - Logs drain period start and completion
+    - Completes quickly when no messages are pending
+    """
+
+    @pytest.mark.asyncio
+    async def test_stop_with_no_pending_messages_completes_immediately(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Stop should complete quickly when no messages are pending.
+
+        When there are no in-flight messages being processed, the drain period
+        should complete almost immediately without waiting for the timeout.
+        """
+        import logging
+        import time
+
+        # Create process with short drain timeout to make test faster
+        process = RuntimeHostProcess(config={"drain_timeout_seconds": 5.0})
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            await process.start()
+
+            # Verify no messages are pending
+            assert process.pending_message_count == 0
+            assert await process.shutdown_ready() is True
+
+            with caplog.at_level(logging.INFO):
+                start = time.monotonic()
+                await process.stop()
+                elapsed = time.monotonic() - start
+
+            # Should complete in well under 1 second when nothing pending
+            # The drain loop polls every 100ms, so even with overhead should be fast
+            assert elapsed < 1.0, (
+                f"Stop took {elapsed:.3f}s, expected < 1.0s when no messages pending"
+            )
+
+            # Process should be stopped
+            assert process.is_running is False
+
+    @pytest.mark.asyncio
+    async def test_stop_logs_drain_period_started(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify that stopping logs the shutdown initiation message.
+
+        The stop() method should log "Stopping RuntimeHostProcess" when
+        initiating shutdown, before the drain period begins.
+        """
+        import logging
+
+        process = RuntimeHostProcess(config={"drain_timeout_seconds": 5.0})
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            await process.start()
+
+            with caplog.at_level(logging.INFO):
+                await process.stop()
+
+        # Verify "Stopping RuntimeHostProcess" was logged
+        info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        assert any("Stopping RuntimeHostProcess" in msg for msg in info_messages), (
+            f"Expected 'Stopping RuntimeHostProcess' in logs, got: {info_messages}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stop_logs_drain_period_completed(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify completion logging with duration and pending message count.
+
+        The stop() method should log "Drain period completed" with:
+        - drain_duration_seconds: Time elapsed during drain period
+        - pending_messages: Number of messages still pending (should be 0 normally)
+        """
+        import logging
+
+        process = RuntimeHostProcess(config={"drain_timeout_seconds": 5.0})
+
+        # Patch _populate_handlers_from_registry to prevent handler instantiation
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(process, "_populate_handlers_from_registry", noop_populate):
+            await process.start()
+
+            with caplog.at_level(logging.INFO):
+                await process.stop()
+
+        # Find the "Drain period completed" log record
+        drain_completed_records = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.INFO and "Drain period completed" in r.message
+        ]
+
+        assert len(drain_completed_records) >= 1, (
+            f"Expected 'Drain period completed' log, got messages: "
+            f"{[r.message for r in caplog.records if r.levelno == logging.INFO]}"
+        )
+
+        # Verify the log record has the expected extra fields
+        drain_record = drain_completed_records[0]
+
+        # Check that drain_duration_seconds is logged (via extra dict)
+        # The extra fields are available as attributes on the record
+        assert hasattr(drain_record, "drain_duration_seconds"), (
+            "Expected 'drain_duration_seconds' in log extra fields"
+        )
+        assert isinstance(drain_record.drain_duration_seconds, float), (
+            f"drain_duration_seconds should be float, got "
+            f"{type(drain_record.drain_duration_seconds)}"
+        )
+        assert drain_record.drain_duration_seconds >= 0, (
+            "drain_duration_seconds should be non-negative"
+        )
+
+        # Check that pending_messages is logged
+        assert hasattr(drain_record, "pending_messages"), (
+            "Expected 'pending_messages' in log extra fields"
+        )
+        assert isinstance(drain_record.pending_messages, int), (
+            f"pending_messages should be int, got {type(drain_record.pending_messages)}"
+        )
+        # When no messages pending, should be 0
+        assert drain_record.pending_messages == 0, (
+            f"Expected pending_messages=0, got {drain_record.pending_messages}"
+        )
+
+
+# =============================================================================
+# TestRuntimeHostProcessPendingMessageTracking
+# =============================================================================
+
+
+class TestRuntimeHostProcessPendingMessageTracking:
+    """Tests for pending message count tracking (OMN-756 graceful shutdown support).
+
+    These tests verify the pending message tracking functionality which is used
+    during graceful shutdown to determine when it's safe to complete shutdown.
+
+    The pending message tracking consists of:
+    - _pending_message_count: Private counter for in-flight messages
+    - pending_message_count: Public property to read the counter
+    - shutdown_ready(): Async method to check if no messages are pending
+    - _pending_lock: asyncio.Lock for thread-safe access
+    """
+
+    @pytest.fixture
+    def runtime_process(self) -> RuntimeHostProcess:
+        """Create a RuntimeHostProcess instance for testing."""
+        return RuntimeHostProcess()
+
+    def test_pending_message_count_starts_at_zero(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that pending message count is 0 on initialization.
+
+        The RuntimeHostProcess should start with no pending messages since
+        no messages have been received yet.
+        """
+        assert runtime_process.pending_message_count == 0
+
+    def test_pending_message_count_property_returns_current_value(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that pending_message_count property returns the current counter value.
+
+        The property should return the actual value of _pending_message_count,
+        which can be manipulated directly for testing purposes.
+        """
+        # Initial value is 0
+        assert runtime_process.pending_message_count == 0
+
+        # Directly manipulate private counter for testing
+        runtime_process._pending_message_count = 5
+        assert runtime_process.pending_message_count == 5
+
+        # Change the value again
+        runtime_process._pending_message_count = 10
+        assert runtime_process.pending_message_count == 10
+
+        # Reset to zero
+        runtime_process._pending_message_count = 0
+        assert runtime_process.pending_message_count == 0
+
+    @pytest.mark.asyncio
+    async def test_shutdown_ready_returns_true_when_no_pending(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that shutdown_ready() returns True when no messages are pending.
+
+        When _pending_message_count is 0, the process is ready for shutdown
+        and shutdown_ready() should return True.
+        """
+        # Initial state - no pending messages
+        assert runtime_process._pending_message_count == 0
+        assert await runtime_process.shutdown_ready() is True
+
+    @pytest.mark.asyncio
+    async def test_shutdown_ready_returns_false_when_pending(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that shutdown_ready() returns False when messages are pending.
+
+        When _pending_message_count is greater than 0, there are in-flight
+        messages being processed, and shutdown_ready() should return False.
+        """
+        # Set pending message count to simulate in-flight messages
+        runtime_process._pending_message_count = 1
+        assert await runtime_process.shutdown_ready() is False
+
+        # Multiple pending messages
+        runtime_process._pending_message_count = 5
+        assert await runtime_process.shutdown_ready() is False
+
+        # Reset to zero - should be ready for shutdown
+        runtime_process._pending_message_count = 0
+        assert await runtime_process.shutdown_ready() is True
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
@@ -2004,6 +2356,7 @@ class TestRuntimeHostProcessShutdownPriority:
 __all__: list[str] = [
     "TestRuntimeHostProcessInitialization",
     "TestRuntimeHostProcessTimeoutValidation",
+    "TestRuntimeHostProcessDrainTimeoutValidation",
     "TestRuntimeHostProcessLifecycle",
     "TestRuntimeHostProcessEnvelopeRouting",
     "TestRuntimeHostProcessErrorHandling",
@@ -2012,6 +2365,8 @@ __all__: list[str] = [
     "TestRuntimeHostProcessDeterministic",
     "TestRuntimeHostProcessLogWarnings",
     "TestRuntimeHostProcessShutdownPriority",
+    "TestRuntimeHostProcessGracefulDrain",
+    "TestRuntimeHostProcessPendingMessageTracking",
     "MockHandler",
     "MockFailingHandler",
     "MockEventBus",
