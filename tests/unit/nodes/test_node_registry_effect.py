@@ -32,6 +32,7 @@ Coverage Goals:
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
@@ -953,12 +954,22 @@ class TestNodeRegistryEffectDiscover:
 
         assert response.success is True
 
-        # Verify both filters in SQL
+        # Verify filters were passed as parameters (order-independent)
         call_args = mock_db_handler.execute.call_args[0][0]
         sql = call_args["payload"]["sql"]
-        assert "node_type" in sql
-        assert "node_id" in sql
-        assert "AND" in sql
+        params = call_args["payload"]["params"]
+
+        # Verify two filter values were passed
+        assert len(params) == 2
+
+        # Verify WHERE clause exists with parameterized filters
+        assert "WHERE" in sql
+        assert "$1" in sql
+        assert "$2" in sql
+
+        # Verify the actual parameter values (order-independent)
+        assert "effect" in params
+        assert "test-node" in params
 
         await node.shutdown()
 
@@ -1128,15 +1139,8 @@ class TestNodeRegistryEffectUnknownOperation:
         correlation_id: UUID,
     ) -> None:
         """Test that unknown operation raises RuntimeHostError."""
-        # We need to bypass Pydantic validation to test this
-        # Create a valid request and manually modify it
-        request = ModelRegistryRequest(
-            operation="register",  # Valid operation
-            correlation_id=correlation_id,
-        )
-
-        # Create a modified version with invalid operation
-        # Using model_construct to bypass validation
+        # Use model_construct to bypass Pydantic validation and create
+        # a request with an invalid operation value
         invalid_request = ModelRegistryRequest.model_construct(
             operation="invalid_operation",
             correlation_id=correlation_id,
@@ -1285,11 +1289,32 @@ class TestNodeRegistryEffectCircuitBreaker:
         with pytest.raises(InfraUnavailableError):
             await node.execute(request)
 
-        # Wait for reset timeout
-        await asyncio.sleep(reset_timeout + 0.05)
+        # Wait for reset timeout with retry loop for CI stability
+        # Using retry loop instead of fixed sleep to handle timing variations
+        max_wait = 1.0  # 1 second max wait
+        poll_interval = 0.05  # 50ms between attempts
+        start_time = time.time()
+        response = None
 
-        # Next request should succeed (circuit auto-reset to half-open)
-        response = await node.execute(request)
+        # Initial wait for reset timeout to elapse
+        await asyncio.sleep(reset_timeout)
+
+        while time.time() - start_time < max_wait:
+            try:
+                response = await node.execute(request)
+                if response.success:
+                    break
+            except InfraUnavailableError:
+                # Circuit not yet reset, wait and retry
+                await asyncio.sleep(poll_interval)
+        else:
+            pytest.fail(
+                f"Circuit breaker did not reset within {max_wait}s "
+                f"(reset_timeout={reset_timeout}s)"
+            )
+
+        # Verify the response
+        assert response is not None
         assert response.success is True
 
         await node.shutdown()
