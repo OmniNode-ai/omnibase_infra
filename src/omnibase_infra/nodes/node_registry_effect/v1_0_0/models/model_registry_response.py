@@ -23,7 +23,7 @@ class ModelRegistryResponse(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    operation: str
+    operation: Literal["register", "deregister", "discover", "request_introspection"]
     success: bool
     status: Literal["success", "partial", "failed"]
     consul_result: ModelConsulOperationResult | None = None

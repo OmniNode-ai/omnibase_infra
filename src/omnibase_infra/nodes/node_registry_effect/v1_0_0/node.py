@@ -33,7 +33,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -672,7 +672,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 return val
             if isinstance(val, str):
                 return datetime.fromisoformat(val.replace("Z", "+00:00"))
-            return datetime.now()
+            return datetime.now(UTC)
 
         # Handle health_endpoint which can be str or None
         health_endpoint_raw = row.get("health_endpoint")
@@ -695,8 +695,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             metadata=parse_json(row.get("metadata", {})),
             health_endpoint=health_endpoint,
             last_heartbeat=last_heartbeat,
-            registered_at=parse_datetime(row.get("registered_at", datetime.now())),
-            updated_at=parse_datetime(row.get("updated_at", datetime.now())),
+            registered_at=parse_datetime(row.get("registered_at", datetime.now(UTC))),
+            updated_at=parse_datetime(row.get("updated_at", datetime.now(UTC))),
         )
 
 

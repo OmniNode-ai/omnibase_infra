@@ -34,7 +34,6 @@ io_operations:
     description: "Kafka event bus operations for publishing registry state changes."
     operations:
       - "publish"
-      - "subscribe"
     target: "kafka"
 dependencies:
   - name: "consul_handler"

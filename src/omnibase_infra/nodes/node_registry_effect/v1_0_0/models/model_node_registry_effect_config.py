@@ -11,6 +11,11 @@ class ModelNodeRegistryEffectConfig(BaseModel):
     This model encapsulates configuration parameters for the registry effect node,
     following the ONEX pattern of using config models to reduce __init__ parameter count.
 
+    Note:
+        This is an MVP implementation. Additional configuration options (registry
+        endpoints, connection pooling, timeouts, retry policies) will be added in
+        future iterations as the node matures.
+
     Attributes:
         circuit_breaker_threshold: Number of consecutive failures before opening circuit.
             When this threshold is reached, subsequent requests will fail fast with

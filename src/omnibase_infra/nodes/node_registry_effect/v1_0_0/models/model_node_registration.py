@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelNodeRegistration(BaseModel):
     """Node registration record from storage."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     node_id: str
     node_type: str
