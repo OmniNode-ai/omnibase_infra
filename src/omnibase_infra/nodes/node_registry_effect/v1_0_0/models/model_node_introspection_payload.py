@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelNodeIntrospectionPayload(BaseModel):
     """Introspection data for node registration."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     node_id: str = Field(..., description="Unique node identifier")
     node_type: Literal["effect", "compute", "reducer", "orchestrator"]

@@ -21,7 +21,7 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models.model_postgres_oper
 class ModelRegistryResponse(BaseModel):
     """Response model for registry operations."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     operation: Literal["register", "deregister", "discover", "request_introspection"]
     success: bool

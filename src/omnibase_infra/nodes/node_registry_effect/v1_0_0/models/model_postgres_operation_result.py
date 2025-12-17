@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 class ModelPostgresOperationResult(BaseModel):
     """Result of a PostgreSQL operation."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     success: bool
     rows_affected: int = 0

@@ -15,7 +15,7 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models.model_node_introspe
 class ModelRegistryRequest(BaseModel):
     """Request model for registry operations."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     operation: Literal["register", "deregister", "discover", "request_introspection"]
     node_id: str | None = Field(None, description="Node ID for deregister/discover")

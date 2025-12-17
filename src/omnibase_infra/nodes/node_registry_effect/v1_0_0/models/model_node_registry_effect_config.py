@@ -25,7 +25,7 @@ class ModelNodeRegistryEffectConfig(BaseModel):
             a test request to determine if the service has recovered.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     circuit_breaker_threshold: int = Field(
         default=5,
