@@ -73,6 +73,9 @@ ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
     {"node_type", "node_id", "node_version"}
 )
 
+# Performance threshold for slow operation warnings (milliseconds)
+SLOW_OPERATION_THRESHOLD_MS: float = 1000.0
+
 
 class NodeRegistryEffect(MixinAsyncCircuitBreaker):
     """Registry Effect Node for dual registration to Consul and PostgreSQL.
@@ -174,6 +177,68 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             message = message[:497] + "..."
 
         return f"{exception_type}: {message}"
+
+    def _log_operation_performance(
+        self,
+        operation: str,
+        processing_time_ms: float,
+        success: bool,
+        correlation_id: UUID | None = None,
+        node_id: str | None = None,
+        record_count: int | None = None,
+        status: str | None = None,
+    ) -> None:
+        """Log structured performance metrics for registry operations.
+
+        Args:
+            operation: The operation type (register, deregister, discover, heartbeat)
+            processing_time_ms: Time taken to complete the operation in milliseconds
+            success: Whether the operation succeeded
+            correlation_id: Optional correlation ID for distributed tracing
+            node_id: Optional node ID for node-specific operations
+            record_count: Optional count of records (for discover operations)
+            status: Optional status string (success, partial, failed)
+        """
+        # Build structured log extra dict
+        log_extra: dict[str, str | float | int | bool | None] = {
+            "event_type": "registry_operation_complete",
+            "operation": operation,
+            "processing_time_ms": round(processing_time_ms, 3),
+            "correlation_id": str(correlation_id) if correlation_id else None,
+            "success": success,
+        }
+
+        # Add optional fields only if provided
+        if node_id is not None:
+            log_extra["node_id"] = node_id
+        if record_count is not None:
+            log_extra["record_count"] = record_count
+        if status is not None:
+            log_extra["status"] = status
+
+        # Log the operation completion
+        logger.info(
+            f"Registry operation completed: {operation}",
+            extra=log_extra,
+        )
+
+        # Log slow operation warning if threshold exceeded
+        if processing_time_ms > SLOW_OPERATION_THRESHOLD_MS:
+            slow_extra: dict[str, str | float | int | bool | None] = {
+                "event_type": "registry_operation_slow",
+                "operation": operation,
+                "processing_time_ms": round(processing_time_ms, 3),
+                "threshold_ms": SLOW_OPERATION_THRESHOLD_MS,
+                "correlation_id": str(correlation_id) if correlation_id else None,
+            }
+            if node_id is not None:
+                slow_extra["node_id"] = node_id
+
+            logger.warning(
+                f"Slow registry operation detected: {operation} took "
+                f"{processing_time_ms:.1f}ms (threshold: {SLOW_OPERATION_THRESHOLD_MS}ms)",
+                extra=slow_extra,
+            )
 
     def _safe_json_dumps(
         self,
@@ -376,6 +441,16 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
+        # Log structured performance metrics
+        self._log_operation_performance(
+            operation="register",
+            processing_time_ms=processing_time_ms,
+            success=success,
+            correlation_id=request.correlation_id,
+            node_id=introspection.node_id,
+            status=status,
+        )
+
         return ModelRegistryResponse(
             operation="register",
             success=success,
@@ -562,6 +637,16 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
+        # Log structured performance metrics
+        self._log_operation_performance(
+            operation="deregister",
+            processing_time_ms=processing_time_ms,
+            success=success,
+            correlation_id=request.correlation_id,
+            node_id=request.node_id,
+            status=status,
+        )
+
         return ModelRegistryResponse(
             operation="deregister",
             success=success,
@@ -697,6 +782,16 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
+            # Log structured performance metrics for successful discovery
+            self._log_operation_performance(
+                operation="discover",
+                processing_time_ms=processing_time_ms,
+                success=True,
+                correlation_id=request.correlation_id,
+                record_count=len(nodes),
+                status="success",
+            )
+
             return ModelRegistryResponse(
                 operation="discover",
                 success=True,
@@ -718,6 +813,17 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 },
             )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+            # Log structured performance metrics for failed discovery
+            self._log_operation_performance(
+                operation="discover",
+                processing_time_ms=processing_time_ms,
+                success=False,
+                correlation_id=request.correlation_id,
+                record_count=0,
+                status="failed",
+            )
+
             return ModelRegistryResponse(
                 operation="discover",
                 success=False,
@@ -757,6 +863,16 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
             if serialization_error:
                 processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+                # Log structured performance metrics for serialization failure
+                self._log_operation_performance(
+                    operation="request_introspection",
+                    processing_time_ms=processing_time_ms,
+                    success=False,
+                    correlation_id=request.correlation_id,
+                    status="failed",
+                )
+
                 return ModelRegistryResponse(
                     operation="request_introspection",
                     success=False,
@@ -777,6 +893,15 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
+            # Log structured performance metrics for successful introspection request
+            self._log_operation_performance(
+                operation="request_introspection",
+                processing_time_ms=processing_time_ms,
+                success=True,
+                correlation_id=request.correlation_id,
+                status="success",
+            )
+
             return ModelRegistryResponse(
                 operation="request_introspection",
                 success=True,
@@ -792,6 +917,16 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 },
             )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+            # Log structured performance metrics for failed introspection request
+            self._log_operation_performance(
+                operation="request_introspection",
+                processing_time_ms=processing_time_ms,
+                success=False,
+                correlation_id=request.correlation_id,
+                status="failed",
+            )
+
             return ModelRegistryResponse(
                 operation="request_introspection",
                 success=False,
