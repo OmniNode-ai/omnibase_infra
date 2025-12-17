@@ -27,7 +27,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
         uptime_seconds: Node uptime in seconds (must be >= 0).
         active_operations_count: Number of active operations (must be >= 0).
         memory_usage_mb: Optional memory usage in megabytes.
-        cpu_usage_percent: Optional CPU usage percentage.
+        cpu_usage_percent: Optional CPU usage percentage (0-100).
         correlation_id: Request correlation ID for tracing.
         timestamp: Event timestamp.
 
@@ -51,6 +51,11 @@ class ModelNodeHeartbeatEvent(BaseModel):
 
     # Required fields
     node_id: UUID = Field(..., description="Node identifier")
+    # Design Note: node_type uses relaxed `str` validation (not `Literal`) to support
+    # custom node types during development. This is intentional - heartbeats may come
+    # from experimental or plugin nodes not in the standard ONEX type set. For strict
+    # validation, see ModelNodeIntrospectionEvent which uses Literal["effect", "compute",
+    # "reducer", "orchestrator"]. Tests explicitly verify custom types are accepted.
     node_type: str = Field(..., description="ONEX node type")
 
     # Health metrics
@@ -64,7 +69,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
         default=None, description="Memory usage in megabytes"
     )
     cpu_usage_percent: float | None = Field(
-        default=None, description="CPU usage percentage"
+        default=None, ge=0, le=100, description="CPU usage percentage (0-100)"
     )
 
     # Metadata

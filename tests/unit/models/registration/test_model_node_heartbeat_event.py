@@ -468,17 +468,29 @@ class TestModelNodeHeartbeatEventResourceMetrics:
         )
         assert event.cpu_usage_percent == 100.0
 
-    def test_cpu_usage_over_100_allowed(self) -> None:
-        """Test that >100% cpu_usage_percent is allowed (no constraint)."""
+    def test_cpu_usage_over_100_raises_validation_error(self) -> None:
+        """Test that >100% cpu_usage_percent raises ValidationError."""
         test_node_id = uuid4()
-        # Some systems can report >100% for multi-core usage
-        event = ModelNodeHeartbeatEvent(
-            node_id=test_node_id,
-            node_type="effect",
-            uptime_seconds=100.0,
-            cpu_usage_percent=400.0,  # 4 cores at 100%
-        )
-        assert event.cpu_usage_percent == 400.0
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                uptime_seconds=100.0,
+                cpu_usage_percent=101.0,
+            )
+        assert "cpu_usage_percent" in str(exc_info.value)
+
+    def test_cpu_usage_negative_raises_validation_error(self) -> None:
+        """Test that negative cpu_usage_percent raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                uptime_seconds=100.0,
+                cpu_usage_percent=-1.0,
+            )
+        assert "cpu_usage_percent" in str(exc_info.value)
 
     def test_large_memory_usage_allowed(self) -> None:
         """Test that large memory_usage_mb is allowed."""

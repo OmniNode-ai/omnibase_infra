@@ -8,11 +8,16 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Semantic versioning pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
+# See: https://semver.org/
+SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$")
 
 
 class ModelNodeRegistration(BaseModel):
@@ -60,6 +65,27 @@ class ModelNodeRegistration(BaseModel):
     node_version: str = Field(
         default="1.0.0", description="Semantic version of the node"
     )
+
+    @field_validator("node_version")
+    @classmethod
+    def validate_semver(cls, v: str) -> str:
+        """Validate that node_version follows semantic versioning.
+
+        Args:
+            v: The version string to validate.
+
+        Returns:
+            The validated version string.
+
+        Raises:
+            ValueError: If the version string is not valid semver format.
+        """
+        if not SEMVER_PATTERN.match(v):
+            raise ValueError(
+                f"Invalid semantic version '{v}'. "
+                "Expected format: MAJOR.MINOR.PATCH[-prerelease][+build]"
+            )
+        return v
 
     # Capabilities and endpoints
     capabilities: dict[str, Any] = Field(

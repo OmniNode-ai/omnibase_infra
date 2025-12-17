@@ -534,20 +534,20 @@ class TestModelNodeRegistrationEdgeCases:
         assert registration.metadata["config"]["replicas"] == 3
 
     def test_unicode_in_node_type(self) -> None:
-        """Test Unicode characters in string fields."""
+        """Test Unicode characters in string fields (except node_version which requires semver)."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
             node_id=test_node_id,
             node_type="效果节点",
-            node_version="版本1.0",
+            node_version="1.0.0",  # Must be valid semver
             metadata={"description": "Узел обработки"},
             registered_at=now,
             updated_at=now,
         )
         assert registration.node_id == test_node_id
         assert registration.node_type == "效果节点"
-        assert registration.node_version == "版本1.0"
+        assert registration.node_version == "1.0.0"
         assert registration.metadata["description"] == "Узел обработки"
 
     def test_extra_fields_forbidden(self) -> None:
@@ -951,3 +951,173 @@ class TestModelNodeRegistrationHashing:
         # Mutable models should raise TypeError when hashed
         with pytest.raises(TypeError):
             hash(registration)
+
+
+class TestModelNodeRegistrationSemverValidation:
+    """Tests for semantic version validation on node_version field."""
+
+    def test_valid_semver_basic(self) -> None:
+        """Test that basic semver strings are accepted."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        valid_versions = ["0.0.0", "1.0.0", "2.1.3", "10.20.30", "999.999.999"]
+        for version in valid_versions:
+            registration = ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version=version,
+                registered_at=now,
+                updated_at=now,
+            )
+            assert registration.node_version == version
+
+    def test_valid_semver_with_prerelease(self) -> None:
+        """Test that semver with prerelease identifiers are accepted."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        valid_versions = [
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0-beta",
+            "1.0.0-beta.2",
+            "1.0.0-rc.1",
+            "1.0.0-0.3.7",
+            "1.0.0-x.7.z.92",
+        ]
+        for version in valid_versions:
+            registration = ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version=version,
+                registered_at=now,
+                updated_at=now,
+            )
+            assert registration.node_version == version
+
+    def test_valid_semver_with_build_metadata(self) -> None:
+        """Test that semver with build metadata are accepted."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        valid_versions = [
+            "1.0.0+build.123",
+            "1.0.0+20130313144700",
+            "1.0.0+exp.sha.5114f85",
+        ]
+        for version in valid_versions:
+            registration = ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version=version,
+                registered_at=now,
+                updated_at=now,
+            )
+            assert registration.node_version == version
+
+    def test_valid_semver_with_prerelease_and_build(self) -> None:
+        """Test that semver with both prerelease and build metadata are accepted."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        valid_versions = [
+            "1.0.0-alpha+001",
+            "1.0.0-alpha.1+build.123",
+            "1.0.0-beta.2+exp.sha.5114f85",
+        ]
+        for version in valid_versions:
+            registration = ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version=version,
+                registered_at=now,
+                updated_at=now,
+            )
+            assert registration.node_version == version
+
+    def test_invalid_semver_missing_patch(self) -> None:
+        """Test that version missing patch number is rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="1.0",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "Invalid semantic version" in str(exc_info.value)
+
+    def test_invalid_semver_with_v_prefix(self) -> None:
+        """Test that version with 'v' prefix is rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="v1.0.0",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "Invalid semantic version" in str(exc_info.value)
+
+    def test_invalid_semver_four_parts(self) -> None:
+        """Test that version with four parts is rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="1.0.0.0",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "Invalid semantic version" in str(exc_info.value)
+
+    def test_invalid_semver_arbitrary_string(self) -> None:
+        """Test that arbitrary strings are rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        invalid_versions = ["invalid", "latest", "stable", "dev", ""]
+        for version in invalid_versions:
+            with pytest.raises(ValidationError) as exc_info:
+                ModelNodeRegistration(
+                    node_id=test_node_id,
+                    node_type="effect",
+                    node_version=version,
+                    registered_at=now,
+                    updated_at=now,
+                )
+            assert "Invalid semantic version" in str(exc_info.value)
+
+    def test_invalid_semver_non_numeric_parts(self) -> None:
+        """Test that versions with non-numeric parts are rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        invalid_versions = ["a.b.c", "1.x.0", "1.0.x"]
+        for version in invalid_versions:
+            with pytest.raises(ValidationError) as exc_info:
+                ModelNodeRegistration(
+                    node_id=test_node_id,
+                    node_type="effect",
+                    node_version=version,
+                    registered_at=now,
+                    updated_at=now,
+                )
+            assert "Invalid semantic version" in str(exc_info.value)
+
+    def test_semver_error_message_format(self) -> None:
+        """Test that validation error contains helpful message."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="invalid",
+                registered_at=now,
+                updated_at=now,
+            )
+        error_message = str(exc_info.value)
+        assert "Invalid semantic version 'invalid'" in error_message
+        assert "MAJOR.MINOR.PATCH" in error_message
