@@ -169,20 +169,15 @@ class NodeDualRegistrationReducer:
         self._fsm_contract: ModelFSMContract | None = None
 
         # FSM contract path - use robust path resolution
+        # _find_contracts_dir() traverses up from current file to find contracts/
+        # directory, which is more reliable than counting .parent calls.
+        # If contracts directory is not found, RuntimeError propagates to caller
+        # since this is a genuine configuration error that should be surfaced.
         if fsm_contract_path is None:
-            try:
-                contracts_dir = _find_contracts_dir()
-                self._fsm_contract_path = (
-                    contracts_dir / "fsm" / "dual_registration_reducer_fsm.yaml"
-                )
-            except RuntimeError:
-                # Fallback to relative path construction for backwards compatibility
-                self._fsm_contract_path = (
-                    Path(__file__).parent.parent.parent.parent.parent
-                    / "contracts"
-                    / "fsm"
-                    / "dual_registration_reducer_fsm.yaml"
-                )
+            contracts_dir = _find_contracts_dir()
+            self._fsm_contract_path = (
+                contracts_dir / "fsm" / "dual_registration_reducer_fsm.yaml"
+            )
         else:
             self._fsm_contract_path = fsm_contract_path
 
@@ -513,16 +508,21 @@ class NodeDualRegistrationReducer:
         # Additional business validation can be added here
         if event.node_id is None:
             logger.warning(
-                "Validation failed: missing node_id",
+                "Payload validation failed: node_id is required but was None",
                 extra={"correlation_id": str(correlation_id)},
             )
             return False
 
         if event.node_type not in _VALID_NODE_TYPES:
+            valid_types = ", ".join(sorted(_VALID_NODE_TYPES))
             logger.warning(
-                "Validation failed: invalid node_type",
+                "Payload validation failed: node_type '%s' is not valid. "
+                "Expected one of: %s",
+                event.node_type,
+                valid_types,
                 extra={
                     "node_type": event.node_type,
+                    "valid_types": list(_VALID_NODE_TYPES),
                     "correlation_id": str(correlation_id),
                 },
             )
@@ -634,7 +634,11 @@ class NodeDualRegistrationReducer:
 
             response = await self._consul_handler.execute(envelope)
 
-            # ConsulHandler returns dict response - use dict access pattern
+            # NOTE: Response access pattern intentionally differs from
+            # _register_postgres. ConsulHandler.execute() returns a dict response
+            # (not a typed model),
+            # so we use dict access with .get() for safe key retrieval.
+            # This is different from DbAdapter which returns ModelDbQueryResponse.
             if response.get("status") == "success":
                 logger.info(
                     "Consul registration succeeded",
@@ -750,7 +754,10 @@ class NodeDualRegistrationReducer:
 
             response = await self._db_adapter.execute(envelope)
 
-            # DbAdapter returns ModelDbQueryResponse object - use attribute access
+            # NOTE: Response access pattern intentionally differs from _register_consul.
+            # DbAdapter.execute() returns a ModelDbQueryResponse (typed Pydantic model),
+            # so we use attribute access for type safety and IDE support.
+            # This is different from ConsulHandler which returns a plain dict.
             if response.status == "success":
                 logger.info(
                     "PostgreSQL registration succeeded",

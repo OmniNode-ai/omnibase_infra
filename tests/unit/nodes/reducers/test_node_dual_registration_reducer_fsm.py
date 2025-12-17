@@ -32,8 +32,6 @@ Coverage Goals:
 
 from __future__ import annotations
 
-import tempfile
-from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -41,7 +39,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-import yaml
 
 from omnibase_infra.handlers import ConsulHandler, DbAdapter
 from omnibase_infra.handlers.models import (
@@ -106,15 +103,14 @@ error_handling:
 
 
 @pytest.fixture
-def fsm_contract_path(sample_fsm_contract_yaml: str) -> Generator[Path, None, None]:
-    """Create temporary FSM contract file."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(sample_fsm_contract_yaml)
-        temp_path = Path(f.name)
-    yield temp_path
-    # Cleanup
-    if temp_path.exists():
-        temp_path.unlink()
+def fsm_contract_path(sample_fsm_contract_yaml: str, tmp_path: Path) -> Path:
+    """Create temporary FSM contract file.
+
+    Uses pytest's tmp_path fixture for automatic cleanup.
+    """
+    contract_file = tmp_path / "fsm_contract.yaml"
+    contract_file.write_text(sample_fsm_contract_yaml)
+    return contract_file
 
 
 @pytest.fixture
@@ -964,8 +960,12 @@ class TestFSMContractLoading:
         self,
         mock_consul_handler: AsyncMock,
         mock_db_adapter: AsyncMock,
+        tmp_path: Path,
     ) -> None:
-        """Test that initialization fails if initial state is invalid."""
+        """Test that initialization fails if initial state is invalid.
+
+        Uses pytest's tmp_path fixture for automatic cleanup.
+        """
         from omnibase_infra.errors import RuntimeHostError
 
         # Create contract with invalid initial state
@@ -978,27 +978,19 @@ state_transitions:
   states: []
   transitions: []
 """
-        contract_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".yaml", delete=False
-            ) as f:
-                f.write(invalid_contract)
-                contract_path = Path(f.name)
+        contract_path = tmp_path / "invalid_contract.yaml"
+        contract_path.write_text(invalid_contract)
 
-            reducer = NodeDualRegistrationReducer(
-                consul_handler=mock_consul_handler,
-                db_adapter=mock_db_adapter,
-                fsm_contract_path=contract_path,
-            )
+        reducer = NodeDualRegistrationReducer(
+            consul_handler=mock_consul_handler,
+            db_adapter=mock_db_adapter,
+            fsm_contract_path=contract_path,
+        )
 
-            with pytest.raises(RuntimeHostError) as exc_info:
-                await reducer.initialize()
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await reducer.initialize()
 
-            assert "Invalid initial state" in str(exc_info.value)
-        finally:
-            if contract_path and contract_path.exists():
-                contract_path.unlink()
+        assert "Invalid initial state" in str(exc_info.value)
 
 
 # -----------------------------------------------------------------------------

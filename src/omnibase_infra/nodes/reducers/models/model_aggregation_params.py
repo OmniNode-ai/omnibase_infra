@@ -42,7 +42,7 @@ class ModelAggregationParams(BaseModel):
         ..., description="Request correlation ID for distributed tracing"
     )
     registration_time_ms: float = Field(
-        ..., description="Total registration time in milliseconds"
+        ..., ge=0.0, description="Total registration time in milliseconds"
     )
 
     @field_validator("consul_result", "postgres_result", mode="before")
