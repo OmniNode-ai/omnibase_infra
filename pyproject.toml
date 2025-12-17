@@ -114,8 +114,11 @@ line-ending = "auto"
 # Matches omnibase_core settings for consistency across ONEX ecosystem
 select = ["E", "F", "W", "C90", "I", "N", "UP", "YTT", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
 ignore = [
-    "UP007",     # Use X | Y for type annotations (preserve Optional[T] for ONEX validator compliance)
-    "UP045",     # Use X | None for Optional - conflicts with ONEX validator (requires Optional[X])
+    # Type annotation style rules (both needed - UP007 handles Union, UP045 handles Optional)
+    # Note: ONEX prefers X | None syntax (PEP 604). These ignores allow legacy Optional[X]/Union[X,Y]
+    # if introduced, but codebase is already compliant. Can be removed to enforce strict PEP 604.
+    "UP007",     # Union[X, Y] -> X | Y (allow legacy Union syntax if present)
+    "UP045",     # Optional[X] -> X | None (allow legacy Optional syntax if present)
     "S101",      # Allow assert statements in tests
     "E501",      # Line too long (technical debt - will fix incrementally)
     "BLE001",    # Blind exception catching (technical debt)

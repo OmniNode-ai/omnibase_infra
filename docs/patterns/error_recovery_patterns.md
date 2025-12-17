@@ -325,7 +325,7 @@ async def get_user_data(
 
     async def _fetch_from_cache() -> dict[str, object]:
         # Return potentially stale cached data
-        cached = await redis.get(f"user:{user_id}")
+        cached = await valkey.get(f"user:{user_id}")
         return json.loads(cached) if cached else {}
 
     user_data, used_cache = await with_fallback(
