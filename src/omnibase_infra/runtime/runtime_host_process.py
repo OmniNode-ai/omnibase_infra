@@ -470,7 +470,7 @@ class RuntimeHostProcess:
 
         # Step 1.5: Wait for in-flight messages to drain (OMN-756)
         # This allows messages currently being processed to complete
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         drain_start = loop.time()
         drain_deadline = drain_start + self._drain_timeout_seconds
 
