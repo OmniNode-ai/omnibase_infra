@@ -90,6 +90,11 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
         - Thread pool gracefully shutdown on handler.shutdown()
         - All consul (synchronous) operations run in dedicated thread pool
 
+        Note: ThreadPoolExecutor uses an unbounded queue by default. The max_queue_size
+        is calculated and exposed via health_check for monitoring purposes but is not
+        enforced by the executor. Future enhancement: Use a bounded queue for
+        backpressure protection (e.g., custom executor with queue.Queue(maxsize=N)).
+
     Circuit Breaker Pattern (Production-Grade):
         - Uses MixinAsyncCircuitBreaker for consistent circuit breaker implementation
         - Prevents cascading failures to Consul service
@@ -239,7 +244,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                     correlation_id=init_correlation_id,
                 )
                 raise InfraConnectionError(
-                    "Failed to verify Consul connectivity",
+                    "Consul connectivity verification failed",
                     context=ctx,
                 ) from e
 
@@ -335,7 +340,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 correlation_id=init_correlation_id,
             )
             raise InfraConnectionError(
-                f"Failed to connect to Consul: {type(e).__name__}",
+                f"Consul connection failed: {type(e).__name__}",
                 context=ctx,
             ) from e
         except Exception as e:
@@ -346,7 +351,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 correlation_id=init_correlation_id,
             )
             raise RuntimeHostError(
-                f"Failed to initialize Consul client: {type(e).__name__}",
+                f"Consul client initialization failed: {type(e).__name__}",
                 context=ctx,
             ) from e
 
@@ -358,6 +363,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             - Clearing Consul client connection
             - Resetting circuit breaker state (thread-safe via mixin)
         """
+        shutdown_correlation_id = uuid4()
+
         if self._executor is not None:
             # Shutdown thread pool gracefully (wait for pending tasks)
             self._executor.shutdown(wait=True)
@@ -375,7 +382,12 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
         self._initialized = False
         self._config = None
         self._circuit_breaker_initialized = False
-        logger.info("ConsulHandler shutdown complete")
+        logger.info(
+            "ConsulHandler shutdown complete",
+            extra={
+                "correlation_id": str(shutdown_correlation_id),
+            },
+        )
 
     async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
         """Execute Consul operation from envelope.
@@ -978,9 +990,13 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                     circuit_failure_count = self._circuit_breaker_failures
 
             # Thread pool metrics
+            # Note: ThreadPoolExecutor doesn't expose active thread count via public API.
+            # Using internal _threads attribute for monitoring purposes. This is a
+            # Python-version-dependent implementation detail and may change in future
+            # Python versions. Alternative: remove this metric or use a custom executor
+            # wrapper that tracks thread count explicitly.
             thread_pool_max = self._max_workers
             if self._executor is not None:
-                # Access _threads with getattr for safety
                 threads_set = getattr(self._executor, "_threads", None)
                 if threads_set is not None:
                     thread_pool_active = len(threads_set)
@@ -1011,6 +1027,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             "circuit_breaker_failure_count": circuit_failure_count,
             "thread_pool_active_workers": thread_pool_active,
             "thread_pool_max_workers": thread_pool_max,
+            # Queue size metric (configured max, not enforced - see docstring)
+            "thread_pool_max_queue_size": self._max_queue_size,
         }
 
     async def _health_check_operation(

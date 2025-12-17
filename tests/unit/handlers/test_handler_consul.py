@@ -244,7 +244,7 @@ class TestConsulHandlerInitialization:
             with pytest.raises(InfraConnectionError) as exc_info:
                 await handler.initialize(consul_config)
 
-            assert "failed to connect" in str(exc_info.value).lower()
+            assert "consul connection failed" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
     async def test_initialize_no_leader(

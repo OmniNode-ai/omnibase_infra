@@ -4,6 +4,22 @@
 
 Defines the canonical transport types for infrastructure components.
 Used for error context, protocol routing, and transport identification.
+
+Supported transport types:
+    - HTTP: REST API transport
+    - DATABASE: PostgreSQL and other database connections
+    - KAFKA: Kafka message broker
+    - CONSUL: Consul service discovery and KV operations
+    - VAULT: HashiCorp Vault secret management
+    - VALKEY: Valkey (Redis-compatible) cache/messaging
+    - GRPC: gRPC protocol
+    - RUNTIME: Runtime host internal transport
+
+Each transport type has a corresponding handler implementation:
+    - ConsulHandler: Service registration, health checks, KV store operations
+    - VaultHandler: Secret retrieval, token management, lease renewal
+    - KafkaEventBus: Event publishing/subscription, consumer groups
+    - PostgresConnectionManager: Connection pooling, query execution
 """
 
 from enum import Enum

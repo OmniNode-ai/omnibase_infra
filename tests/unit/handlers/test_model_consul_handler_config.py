@@ -352,12 +352,12 @@ class TestModelConsulHandlerConfig:
 class TestModelConsulHandlerConfigEdgeCases:
     """Edge case tests for ModelConsulHandlerConfig."""
 
-    def test_empty_host_allowed(self) -> None:
-        """Test that empty host is technically allowed but not recommended."""
-        # Empty string is allowed by Pydantic (no min_length constraint)
-        config = ModelConsulHandlerConfig(host="")
-        assert config.host == ""
-        assert config.base_url == "http://:8500"
+    def test_empty_host_rejected(self) -> None:
+        """Test that empty host is rejected with ValidationError."""
+        # Empty string is rejected by min_length=1 constraint
+        with pytest.raises(ValidationError) as exc_info:
+            ModelConsulHandlerConfig(host="")
+        assert "host" in str(exc_info.value)
 
     def test_empty_datacenter_vs_none(self) -> None:
         """Test difference between empty datacenter and None."""

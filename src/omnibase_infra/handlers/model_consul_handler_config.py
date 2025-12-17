@@ -66,6 +66,7 @@ class ModelConsulHandlerConfig(BaseModel):
 
     host: str = Field(
         default="localhost",
+        min_length=1,
         description="Consul server hostname",
     )
     port: int = Field(
