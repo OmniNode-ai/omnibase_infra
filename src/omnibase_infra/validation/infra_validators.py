@@ -67,25 +67,24 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Maximum allowed complex union types in infrastructure code.
 # TECH DEBT (OMN-871): Baseline as of 2025-12-17, target: reduce incrementally
 #
-# Current count breakdown (~201 unions as of 2025-12-17):
+# Current count breakdown (~195 unions as of 2025-12-17):
 # - Infrastructure handlers (~90): Consul, Kafka, Vault, PostgreSQL adapters
 # - Runtime components (~40): RuntimeHostProcess, handler/policy registries, wiring
 # - Models (~24): Event bus models, error context, runtime config, registration events
-# - Strongly-typed models (~47): ModelNodeCapabilities, ModelNodeMetadata with
-#     backwards-compatible dict-like access methods and nullable fields
+# - Registration models (~41): ModelNodeCapabilities, ModelNodeMetadata with nullable fields
 #
 # OMN-891 registration event models contribute unions:
 # - model_node_heartbeat_event.py (3): memory_usage_mb, cpu_usage_percent, correlation_id
 # - model_node_introspection_event.py (5): node_role, correlation_id, network_id,
 #     deployment_id, epoch
 # - model_node_registration.py (2): health_endpoint, last_heartbeat
-# - model_node_capabilities.py (~22): __getitem__/get() return types, config dict
-# - model_node_metadata.py (~15): nullable fields, __getitem__/get() return types
+# - model_node_capabilities.py (~18): nullable fields for optional capability flags
+# - model_node_metadata.py (~13): nullable fields for optional metadata
 #
 # Note: The validator counts X | None (PEP 604) patterns as unions, which is
-# the ONEX-preferred syntax per CLAUDE.md. Threshold set to 210 to allow for
-# the new strongly-typed models while maintaining awareness of union complexity.
-INFRA_MAX_UNIONS = 210
+# the ONEX-preferred syntax per CLAUDE.md. Threshold set to 200 to provide a
+# small buffer above the current baseline while maintaining awareness of union complexity.
+INFRA_MAX_UNIONS = 200
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

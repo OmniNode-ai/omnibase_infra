@@ -80,7 +80,7 @@ class TestModelNodeRegistrationBasicInstantiation:
         )
         assert registration.endpoints["health"] == "http://localhost:8080/health"
         assert registration.endpoints["metrics"] == "http://localhost:8080/metrics"
-        assert registration.metadata["environment"] == "production"
+        assert registration.metadata.environment == "production"
         assert str(registration.health_endpoint) == "http://localhost:8080/health"
         assert registration.last_heartbeat == heartbeat_time
         assert registration.registered_at == now
@@ -514,8 +514,8 @@ class TestModelNodeRegistrationEdgeCases:
         now = datetime.now(UTC)
         complex_capabilities: dict[str, Any] = {
             "database": True,
-            "max_connections": 100,
-            "supported_operations": ["read", "write", "delete"],
+            "max_batch": 100,
+            "supported_types": ["read", "write", "delete"],
             "config": {"pool_size": 10, "timeout": 30},
         }
         registration = ModelNodeRegistration(
@@ -525,23 +525,24 @@ class TestModelNodeRegistrationEdgeCases:
             registered_at=now,
             updated_at=now,
         )
-        assert registration.capabilities["database"] is True
-        assert registration.capabilities["max_connections"] == 100
-        assert registration.capabilities["supported_operations"] == [
+        assert registration.capabilities.database is True
+        assert registration.capabilities.max_batch == 100
+        assert registration.capabilities.supported_types == [
             "read",
             "write",
             "delete",
         ]
-        assert registration.capabilities["config"]["pool_size"] == 10
+        assert registration.capabilities.config["pool_size"] == 10
 
     def test_complex_metadata_dict(self) -> None:
-        """Test metadata with complex nested values."""
+        """Test metadata with complex nested values via model_extra."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
+        # environment is a known field, tags and config are extra fields
         complex_metadata: dict[str, Any] = {
             "environment": "production",
             "tags": ["primary", "critical"],
-            "config": {"replicas": 3, "region": "us-west-2"},
+            "nested_config": {"replicas": 3, "region": "us-west-2"},
         }
         registration = ModelNodeRegistration(
             node_id=test_node_id,
@@ -550,9 +551,11 @@ class TestModelNodeRegistrationEdgeCases:
             registered_at=now,
             updated_at=now,
         )
-        assert registration.metadata["environment"] == "production"
-        assert registration.metadata["tags"] == ["primary", "critical"]
-        assert registration.metadata["config"]["replicas"] == 3
+        # Known field accessed via attribute
+        assert registration.metadata.environment == "production"
+        # Extra fields accessed via model_extra
+        assert registration.metadata.model_extra["tags"] == ["primary", "critical"]
+        assert registration.metadata.model_extra["nested_config"]["replicas"] == 3
 
     def test_unicode_in_node_type_rejected(self) -> None:
         """Test that Unicode node_type is rejected.
@@ -591,8 +594,10 @@ class TestModelNodeRegistrationEdgeCases:
         )
         assert registration.node_id == test_node_id
         assert registration.node_type == "effect"
-        assert registration.metadata["description"] == "Узел обработки"
-        assert registration.metadata["名前"] == "効果ノード"
+        # description is a known field, accessed via attribute
+        assert registration.metadata.description == "Узел обработки"
+        # Unicode keys in extra fields accessed via model_extra
+        assert registration.metadata.model_extra["名前"] == "効果ノード"
 
     def test_extra_fields_forbidden(self) -> None:
         """Test that extra fields are forbidden by model config."""

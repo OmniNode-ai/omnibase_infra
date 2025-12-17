@@ -426,10 +426,10 @@ class TestModelNodeIntrospectionEventEdgeCases:
                 "config": {"timeout": 30, "retries": 3},
             },
         )
-        assert event.capabilities["processing"] is True
-        assert event.capabilities["max_batch"] == 1000
-        assert event.capabilities["supported_types"] == ["json", "xml", "csv"]
-        assert event.capabilities["config"]["timeout"] == 30
+        assert event.capabilities.processing is True
+        assert event.capabilities.max_batch == 1000
+        assert event.capabilities.supported_types == ["json", "xml", "csv"]
+        assert event.capabilities.config["timeout"] == 30
 
     def test_unicode_in_fields(self) -> None:
         """Test Unicode characters in string fields."""
@@ -442,7 +442,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
         )
         assert event.node_id == test_node_id
         assert event.node_role == "处理器"
-        assert event.metadata["description"] == "Узел обработки"
+        assert event.metadata.description == "Узел обработки"
 
     def test_extra_fields_forbidden(self) -> None:
         """Test that extra fields are forbidden by model config."""

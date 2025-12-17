@@ -46,13 +46,6 @@ class ModelNodeMetadata(BaseModel):
         >>> meta = ModelNodeMetadata(description="Узел обработки")
         >>> meta.description
         'Узел обработки'
-
-        >>> # Custom metadata via extra="allow"
-        >>> meta = ModelNodeMetadata(
-        ...     custom_field="value",  # type: ignore[call-arg]
-        ... )
-        >>> meta.model_extra["custom_field"]
-        'value'
     """
 
     model_config = ConfigDict(
@@ -81,50 +74,6 @@ class ModelNodeMetadata(BaseModel):
     key: str | None = Field(default=None, description="Generic key field")
     key1: str | None = Field(default=None, description="Generic key1 field")
     meta: str | None = Field(default=None, description="Generic meta field")
-
-    def __getitem__(self, key: str) -> str | int | None:
-        """Support dict-like access for backwards compatibility.
-
-        Args:
-            key: The metadata key to access.
-
-        Returns:
-            The metadata value.
-
-        Raises:
-            KeyError: If the key is not found in known fields or extras.
-        """
-        # Check known fields first
-        if hasattr(self, key) and key != "model_config":
-            value = getattr(self, key)
-            if value is not None:
-                return value  # type: ignore[return-value, no-any-return]
-        # Check extra fields
-        if self.model_extra and key in self.model_extra:
-            return self.model_extra[key]  # type: ignore[return-value, no-any-return]
-        # For backwards compatibility, check all known fields including None values
-        if key in self.model_fields:
-            return getattr(self, key)  # type: ignore[return-value, no-any-return]
-        raise KeyError(key)
-
-    def get(
-        self,
-        key: str,
-        default: str | int | None = None,
-    ) -> str | int | None:
-        """Support dict-like get() for backwards compatibility.
-
-        Args:
-            key: The metadata key to access.
-            default: Default value if key not found.
-
-        Returns:
-            The metadata value or default.
-        """
-        try:
-            return self[key]
-        except KeyError:
-            return default
 
 
 __all__ = ["ModelNodeMetadata"]
