@@ -37,3 +37,8 @@ class ModelNodeRegistryEffectConfig(BaseModel):
         ge=0.0,
         description="Seconds before circuit breaker auto-resets to half-open state",
     )
+    slow_operation_threshold_ms: float = Field(
+        default=1000.0,
+        ge=0.0,
+        description="Threshold in milliseconds for logging slow operation warnings",
+    )

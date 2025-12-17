@@ -77,8 +77,9 @@ ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
     {"node_type", "node_id", "node_version"}
 )
 
-# Performance threshold for slow operation warnings (milliseconds)
-SLOW_OPERATION_THRESHOLD_MS: float = 1000.0
+# Default performance threshold for slow operation warnings (milliseconds)
+# Used as fallback when config not provided
+DEFAULT_SLOW_OPERATION_THRESHOLD_MS: float = 1000.0
 
 
 class NodeRegistryEffect(MixinAsyncCircuitBreaker):
@@ -100,6 +101,57 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         consul_handler: Must have async execute(envelope: dict) -> dict method
         db_handler: Must have async execute(envelope: dict) -> dict method
         event_bus: Must have async publish(topic: str, key: bytes, value: bytes) -> None method
+
+    Connection Pooling:
+        This node delegates database operations to db_handler and does not manage
+        connections directly. The db_handler implementation (e.g., PostgreSQL adapter)
+        is responsible for:
+        - Connection pool management to prevent connection exhaustion
+        - Connection health checks and automatic reconnection
+        - Proper connection release after each operation
+
+        For production deployments, ensure the PostgreSQL adapter uses asyncpg
+        with connection pooling (recommended pool size: 10-20 connections).
+
+    Dependency Injection:
+        TODO(OMN-901): Migrate to container-based dependency injection.
+
+        Per ONEX patterns (CLAUDE.md), all services should use ModelONEXContainer
+        for dependency injection. Current implementation uses direct constructor
+        injection because:
+
+        1. The container infrastructure (wire_infrastructure_services) does not
+           yet support registration/resolution of:
+           - ProtocolEnvelopeExecutor handlers (consul, db)
+           - ProtocolEventBus implementations
+
+        2. These handlers require runtime configuration (connection strings,
+           credentials from Vault) that would need container-level wiring.
+
+        Migration path when container support is ready:
+        ```python
+        # Future container-based implementation
+        @classmethod
+        async def create_from_container(
+            cls, container: ModelONEXContainer
+        ) -> NodeRegistryEffect:
+            consul_handler = await container.service_registry.resolve_service(
+                ProtocolEnvelopeExecutor, name="consul"
+            )
+            db_handler = await container.service_registry.resolve_service(
+                ProtocolEnvelopeExecutor, name="postgres"
+            )
+            event_bus = await container.service_registry.resolve_service(
+                ProtocolEventBus
+            )
+            return cls(consul_handler, db_handler, event_bus)
+        ```
+
+        Required infrastructure work:
+        - Add handler registration to wire_infrastructure_services()
+        - Add event bus registration to wire_infrastructure_services()
+        - Support named service resolution for multiple handlers of same protocol
+        - Ensure handlers are wired with proper Vault/Consul credentials
     """
 
     def __init__(
@@ -116,10 +168,21 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 Must implement: async execute(envelope: EnvelopeDict) -> ResultDict
             db_handler: Handler for PostgreSQL operations.
                 Must implement: async execute(envelope: EnvelopeDict) -> ResultDict
+                The handler is responsible for connection lifecycle management,
+                including connection pooling and automatic reconnection.
             event_bus: Optional event bus for publishing events.
                 Must implement: async publish(topic: str, key: bytes, value: bytes) -> None
             config: Configuration for circuit breaker and resilience settings.
                 Uses defaults if not provided.
+
+        Note:
+            This node does not manage database connections directly. The db_handler
+            must handle connection pooling internally to prevent connection exhaustion
+            under high load. See class docstring for production recommendations.
+
+            TODO(OMN-901): This constructor uses direct injection. When container
+            infrastructure supports handler registration, add a factory method
+            `create_from_container()` to resolve dependencies from container.
         """
         self._consul_handler: ProtocolEnvelopeExecutor = consul_handler
         self._db_handler: ProtocolEnvelopeExecutor = db_handler
@@ -128,6 +191,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         # Use defaults if config not provided
         config = config or ModelNodeRegistryEffectConfig()
+
+        # Store slow operation threshold from config (configurable per environment)
+        self._slow_operation_threshold_ms: float = config.slow_operation_threshold_ms
 
         # Initialize circuit breaker
         self._init_circuit_breaker(
@@ -227,12 +293,12 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         )
 
         # Log slow operation warning if threshold exceeded
-        if processing_time_ms > SLOW_OPERATION_THRESHOLD_MS:
+        if processing_time_ms > self._slow_operation_threshold_ms:
             slow_extra: dict[str, str | float | int | bool | None] = {
                 "event_type": "registry_operation_slow",
                 "operation": operation,
                 "processing_time_ms": round(processing_time_ms, 3),
-                "threshold_ms": SLOW_OPERATION_THRESHOLD_MS,
+                "threshold_ms": self._slow_operation_threshold_ms,
                 "correlation_id": str(correlation_id) if correlation_id else None,
             }
             if node_id is not None:
@@ -240,7 +306,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
             logger.warning(
                 f"Slow registry operation detected: {operation} took "
-                f"{processing_time_ms:.1f}ms (threshold: {SLOW_OPERATION_THRESHOLD_MS}ms)",
+                f"{processing_time_ms:.1f}ms (threshold: {self._slow_operation_threshold_ms}ms)",
                 extra=slow_extra,
             )
 
@@ -326,15 +392,94 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
     async def execute(self, request: ModelRegistryRequest) -> ModelRegistryResponse:
         """Execute registry operation from request.
 
+        This method routes to the appropriate operation handler based on
+        request.operation: register, deregister, discover, or request_introspection.
+
+        Circuit Breaker Behavior:
+            This method is protected by MixinAsyncCircuitBreaker. The circuit breaker
+            monitors consecutive failures and transitions through three states:
+
+            - CLOSED (normal): Requests proceed normally. Failures increment the
+              counter. Success resets the counter.
+            - OPEN (blocking): After threshold consecutive failures, the circuit
+              opens. All requests fail fast with InfraUnavailableError until
+              reset_timeout expires. No backend calls are made.
+            - HALF_OPEN (testing): After reset_timeout, the next request is allowed
+              through as a test. Success closes the circuit; failure reopens it.
+
+            Configuration (via ModelNodeRegistryEffectConfig):
+            - circuit_breaker_threshold: Failures before opening (default: 5)
+            - circuit_breaker_reset_timeout: Seconds until auto-reset (default: 60.0)
+
+            Success Criteria:
+            - Full success (status="success"): Both backends succeeded, resets circuit
+            - Partial success (status="partial"): One backend succeeded, resets circuit
+            - Full failure (status="failed"): Both backends failed, does NOT reset circuit
+
+        Retry Guidance for Callers:
+            - DO NOT retry when InfraUnavailableError is raised (circuit is open).
+              The circuit breaker is protecting degraded backends; retrying wastes
+              resources and delays recovery.
+            - Check error context for retry_after_seconds which indicates when the
+              circuit will attempt auto-reset.
+            - For transient failures (status="failed" but circuit not open), implement
+              exponential backoff at the caller level (e.g., 1s, 2s, 4s delays).
+            - Partial success (status="partial") indicates one backend is healthy;
+              the unhealthy backend may recover on subsequent calls.
+
+        Error Recovery Strategies:
+            - InfraUnavailableError: Wait for retry_after_seconds, then retry once.
+              If still failing, escalate or use fallback data source.
+            - RuntimeHostError: Do not retry; fix the request (missing fields,
+              invalid operation, not initialized).
+            - status="partial": Log warning, consider the operation successful for
+              the healthy backend. The failed backend will be retried on next call.
+            - status="failed": Implement exponential backoff, consider circuit
+              breaker may open after threshold failures.
+
         Args:
-            request: Registry request with operation and payload
+            request: Registry request containing:
+                - operation: One of "register", "deregister", "discover",
+                  "request_introspection"
+                - correlation_id: UUID for distributed tracing
+                - introspection_event: Required for "register" operation
+                - node_id: Required for "deregister" operation
+                - filters: Optional dict for "discover" operation
 
         Returns:
-            ModelRegistryResponse with operation results
+            ModelRegistryResponse with:
+                - operation: Echo of requested operation
+                - success: True if at least one backend succeeded
+                - status: "success" | "partial" | "failed"
+                - consul_result: Result from Consul backend (if applicable)
+                - postgres_result: Result from PostgreSQL backend (if applicable)
+                - nodes: List of discovered nodes (for "discover" operation)
+                - processing_time_ms: Operation duration in milliseconds
+                - correlation_id: Echo of request correlation_id
+                - error: Sanitized error message (if status="failed")
 
         Raises:
-            RuntimeHostError: If not initialized or invalid request
-            InfraUnavailableError: If circuit breaker is open
+            RuntimeHostError: If not initialized, invalid request, or missing
+                required fields for the operation.
+            InfraUnavailableError: If circuit breaker is open. Check
+                error.model.context for retry_after_seconds.
+
+        Example:
+            ```python
+            try:
+                response = await registry_effect.execute(request)
+                if response.status == "partial":
+                    logger.warning("Partial success", extra={...})
+            except InfraUnavailableError as e:
+                # Circuit is open - do not retry immediately
+                retry_after = e.model.context.get("retry_after_seconds", 60)
+                logger.error(f"Service unavailable, retry after {retry_after}s")
+            ```
+
+        See Also:
+            - MixinAsyncCircuitBreaker: Circuit breaker implementation
+            - ModelNodeRegistryEffectConfig: Configuration options
+            - docs/patterns/circuit_breaker_implementation.md: Detailed patterns
         """
         if not self._initialized:
             raise RuntimeHostError(

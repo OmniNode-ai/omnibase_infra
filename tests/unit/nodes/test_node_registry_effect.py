@@ -1997,6 +1997,171 @@ class TestNodeRegistryEffectJsonSerialization:
 
 
 # =============================================================================
+# Test: Configurable Slow Operation Threshold
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNodeRegistryEffectSlowOperationThreshold:
+    """Tests for configurable slow operation threshold."""
+
+    async def test_default_threshold_is_1000ms(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+    ) -> None:
+        """Test that default slow operation threshold is 1000ms."""
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+        )
+        # Default config should set threshold to 1000ms
+        assert node._slow_operation_threshold_ms == 1000.0
+
+    async def test_custom_threshold_from_config(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+    ) -> None:
+        """Test that slow operation threshold can be configured."""
+        custom_threshold = 500.0
+        config = ModelNodeRegistryEffectConfig(
+            slow_operation_threshold_ms=custom_threshold,
+        )
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            config=config,
+        )
+        assert node._slow_operation_threshold_ms == custom_threshold
+
+    async def test_zero_threshold_valid(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+    ) -> None:
+        """Test that zero threshold is valid (logs all operations as slow)."""
+        config = ModelNodeRegistryEffectConfig(
+            slow_operation_threshold_ms=0.0,
+        )
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            config=config,
+        )
+        assert node._slow_operation_threshold_ms == 0.0
+
+    async def test_high_threshold_for_slow_environments(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+    ) -> None:
+        """Test that high threshold works for slow environments (e.g., CI)."""
+        # In CI environments, operations may take longer
+        ci_threshold = 5000.0  # 5 seconds
+        config = ModelNodeRegistryEffectConfig(
+            slow_operation_threshold_ms=ci_threshold,
+        )
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            config=config,
+        )
+        assert node._slow_operation_threshold_ms == ci_threshold
+
+    async def test_slow_operation_uses_configured_threshold(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        mock_event_bus: AsyncMock,
+        introspection_payload: ModelNodeIntrospectionPayload,
+        correlation_id: UUID,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that slow operation warning uses configured threshold."""
+        import logging
+
+        # Set a very low threshold so normal operations trigger slow warning
+        low_threshold = 0.001  # 0.001ms - any operation will exceed this
+        config = ModelNodeRegistryEffectConfig(
+            slow_operation_threshold_ms=low_threshold,
+        )
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            event_bus=mock_event_bus,
+            config=config,
+        )
+        await node.initialize()
+
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection_payload,
+            correlation_id=correlation_id,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await node.execute(request)
+
+        # Verify slow operation warning was logged with configured threshold
+        slow_warnings = [
+            record for record in caplog.records
+            if "Slow registry operation" in record.message
+        ]
+        assert len(slow_warnings) >= 1
+
+        # Verify the warning message contains our configured threshold
+        warning_message = slow_warnings[0].message
+        assert f"threshold: {low_threshold}ms" in warning_message
+
+        await node.shutdown()
+
+    async def test_high_threshold_suppresses_slow_warning(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        mock_event_bus: AsyncMock,
+        introspection_payload: ModelNodeIntrospectionPayload,
+        correlation_id: UUID,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that high threshold suppresses slow operation warning."""
+        import logging
+
+        # Set a very high threshold so normal operations don't trigger slow warning
+        high_threshold = 60000.0  # 60 seconds - no operation will exceed this
+        config = ModelNodeRegistryEffectConfig(
+            slow_operation_threshold_ms=high_threshold,
+        )
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            event_bus=mock_event_bus,
+            config=config,
+        )
+        await node.initialize()
+
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection_payload,
+            correlation_id=correlation_id,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await node.execute(request)
+
+        # Verify no slow operation warning was logged
+        slow_warnings = [
+            record for record in caplog.records
+            if "Slow registry operation" in record.message
+        ]
+        assert len(slow_warnings) == 0
+
+        await node.shutdown()
+
+
+# =============================================================================
 # Integration Tests Placeholder
 # =============================================================================
 
