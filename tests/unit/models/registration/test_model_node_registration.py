@@ -77,7 +77,7 @@ class TestModelNodeRegistrationBasicInstantiation:
         assert registration.endpoints["health"] == "http://localhost:8080/health"
         assert registration.endpoints["metrics"] == "http://localhost:8080/metrics"
         assert registration.metadata["environment"] == "production"
-        assert registration.health_endpoint == "http://localhost:8080/health"
+        assert str(registration.health_endpoint) == "http://localhost:8080/health"
         assert registration.last_heartbeat == heartbeat_time
         assert registration.registered_at == now
         assert registration.updated_at == now
@@ -590,7 +590,7 @@ class TestModelNodeRegistrationEdgeCases:
             registered_at=now,
             updated_at=now,
         )
-        assert registration.health_endpoint == long_url
+        assert str(registration.health_endpoint) == long_url
 
 
 class TestModelNodeRegistrationTimestampHandling:
@@ -1121,3 +1121,147 @@ class TestModelNodeRegistrationSemverValidation:
         error_message = str(exc_info.value)
         assert "Invalid semantic version 'invalid'" in error_message
         assert "MAJOR.MINOR.PATCH" in error_message
+
+
+class TestModelNodeRegistrationHealthEndpointValidation:
+    """Tests for health_endpoint URL validation using HttpUrl."""
+
+    def test_valid_http_url(self) -> None:
+        """Test that valid HTTP URLs are accepted."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            health_endpoint="http://localhost:8080/health",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert str(registration.health_endpoint) == "http://localhost:8080/health"
+
+    def test_valid_https_url(self) -> None:
+        """Test that valid HTTPS URLs are accepted."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            health_endpoint="https://api.example.com/health",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert str(registration.health_endpoint) == "https://api.example.com/health"
+
+    def test_valid_url_with_path_and_query(self) -> None:
+        """Test that URLs with paths and query parameters are accepted."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            health_endpoint="http://localhost:8080/api/v1/health?timeout=30",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert (
+            str(registration.health_endpoint)
+            == "http://localhost:8080/api/v1/health?timeout=30"
+        )
+
+    def test_none_health_endpoint_allowed(self) -> None:
+        """Test that None is allowed for health_endpoint."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            health_endpoint=None,
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.health_endpoint is None
+
+    def test_invalid_url_missing_scheme(self) -> None:
+        """Test that URLs without scheme are rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                health_endpoint="localhost:8080/health",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "health_endpoint" in str(exc_info.value)
+
+    def test_invalid_url_file_scheme(self) -> None:
+        """Test that non-HTTP schemes like file:// are rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                health_endpoint="file:///etc/passwd",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "health_endpoint" in str(exc_info.value)
+
+    def test_invalid_url_plain_string(self) -> None:
+        """Test that plain strings are rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                health_endpoint="not-a-url",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "health_endpoint" in str(exc_info.value)
+
+    def test_invalid_url_empty_string(self) -> None:
+        """Test that empty strings are rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                health_endpoint="",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "health_endpoint" in str(exc_info.value)
+
+    def test_invalid_url_relative_path(self) -> None:
+        """Test that relative paths are rejected."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                health_endpoint="/health",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "health_endpoint" in str(exc_info.value)
+
+    def test_health_endpoint_serialization_roundtrip(self) -> None:
+        """Test that health_endpoint survives JSON serialization roundtrip."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            health_endpoint="https://api.example.com/health",
+            registered_at=now,
+            updated_at=now,
+        )
+        json_str = registration.model_dump_json()
+        restored = ModelNodeRegistration.model_validate_json(json_str)
+        assert str(restored.health_endpoint) == str(registration.health_endpoint)

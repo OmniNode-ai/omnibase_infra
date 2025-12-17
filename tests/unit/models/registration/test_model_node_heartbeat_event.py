@@ -5,7 +5,7 @@
 Tests validate:
 - Required field instantiation
 - Optional field handling
-- Non-negative constraint validation for uptime_seconds and active_operations_count
+- Non-negative constraint validation for uptime_seconds, active_operations_count, and memory_usage_mb
 - JSON serialization/deserialization roundtrip
 - Timestamp auto-generation
 - Frozen model immutability
@@ -35,6 +35,7 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
         )
         assert event.node_id == test_node_id
         assert event.node_type == "effect"
+        assert event.node_version == "1.0.0"  # Default value
         assert event.uptime_seconds == 3600.0
         assert event.active_operations_count == 0  # Default value
         assert event.memory_usage_mb is None
@@ -49,6 +50,7 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
         event = ModelNodeHeartbeatEvent(
             node_id=test_node_id,
             node_type="compute",
+            node_version="2.1.0",
             uptime_seconds=7200.5,
             active_operations_count=10,
             memory_usage_mb=512.0,
@@ -58,6 +60,7 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
         )
         assert event.node_id == test_node_id
         assert event.node_type == "compute"
+        assert event.node_version == "2.1.0"
         assert event.uptime_seconds == 7200.5
         assert event.active_operations_count == 10
         assert event.memory_usage_mb == 512.0
@@ -82,6 +85,79 @@ class TestModelNodeHeartbeatEventBasicInstantiation:
             uptime_seconds=100.0,
         )
         assert event2.node_type == "custom_type"
+
+
+class TestModelNodeHeartbeatEventNodeVersion:
+    """Tests for node_version field."""
+
+    def test_node_version_default_value(self) -> None:
+        """Test that node_version defaults to '1.0.0'."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+        )
+        assert event.node_version == "1.0.0"
+
+    def test_node_version_explicit_value(self) -> None:
+        """Test that node_version can be set explicitly."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="2.3.4",
+            uptime_seconds=100.0,
+        )
+        assert event.node_version == "2.3.4"
+
+    def test_node_version_with_prerelease(self) -> None:
+        """Test that node_version accepts prerelease versions."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0-alpha.1",
+            uptime_seconds=100.0,
+        )
+        assert event.node_version == "1.0.0-alpha.1"
+
+    def test_node_version_with_build_metadata(self) -> None:
+        """Test that node_version accepts build metadata."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0+build.123",
+            uptime_seconds=100.0,
+        )
+        assert event.node_version == "1.0.0+build.123"
+
+    def test_node_version_serialization_roundtrip(self) -> None:
+        """Test that node_version is preserved in JSON serialization."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="3.2.1",
+            uptime_seconds=100.0,
+        )
+        json_str = event.model_dump_json()
+        restored = ModelNodeHeartbeatEvent.model_validate_json(json_str)
+        assert restored.node_version == "3.2.1"
+
+    def test_node_version_in_model_dump(self) -> None:
+        """Test that node_version appears in model_dump output."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="4.5.6",
+            uptime_seconds=100.0,
+        )
+        data = event.model_dump()
+        assert "node_version" in data
+        assert data["node_version"] == "4.5.6"
 
 
 class TestModelNodeHeartbeatEventUptimeValidation:
@@ -197,6 +273,66 @@ class TestModelNodeHeartbeatEventActiveOperationsValidation:
             active_operations_count=10000,
         )
         assert event.active_operations_count == 10000
+
+
+class TestModelNodeHeartbeatEventMemoryUsageValidation:
+    """Tests for memory_usage_mb validation (ge=0 constraint)."""
+
+    def test_negative_memory_usage_mb_raises_validation_error(self) -> None:
+        """Test that negative memory_usage_mb raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                uptime_seconds=100.0,
+                memory_usage_mb=-1.0,
+            )
+        assert "memory_usage_mb" in str(exc_info.value)
+
+    def test_negative_memory_usage_mb_large_negative(self) -> None:
+        """Test that large negative memory_usage_mb raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError):
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                uptime_seconds=100.0,
+                memory_usage_mb=-99999.0,
+            )
+
+    def test_zero_memory_usage_mb_allowed(self) -> None:
+        """Test that zero memory_usage_mb is valid."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            memory_usage_mb=0.0,
+        )
+        assert event.memory_usage_mb == 0.0
+
+    def test_positive_memory_usage_mb_allowed(self) -> None:
+        """Test that positive memory_usage_mb is valid."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            memory_usage_mb=512.0,
+        )
+        assert event.memory_usage_mb == 512.0
+
+    def test_very_small_positive_memory_usage_mb_allowed(self) -> None:
+        """Test that very small positive memory_usage_mb is valid."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            uptime_seconds=100.0,
+            memory_usage_mb=0.001,
+        )
+        assert event.memory_usage_mb == 0.001
 
 
 class TestModelNodeHeartbeatEventSerialization:
@@ -340,6 +476,18 @@ class TestModelNodeHeartbeatEventImmutability:
         )
         with pytest.raises(ValidationError):
             event.node_type = "compute"  # type: ignore[misc]
+
+    def test_frozen_model_cannot_modify_node_version(self) -> None:
+        """Test that node_version cannot be modified after creation."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0",
+            uptime_seconds=100.0,
+        )
+        with pytest.raises(ValidationError):
+            event.node_version = "2.0.0"  # type: ignore[misc]
 
     def test_frozen_model_cannot_modify_uptime_seconds(self) -> None:
         """Test that uptime_seconds cannot be modified after creation."""
@@ -575,6 +723,7 @@ class TestModelNodeHeartbeatEventFromAttributes:
             def __init__(self, node_id: UUID) -> None:
                 self.node_id = node_id
                 self.node_type = "compute"
+                self.node_version = "1.0.0"
                 self.uptime_seconds = 1234.5
                 self.active_operations_count = 5
                 self.memory_usage_mb = None
@@ -586,5 +735,6 @@ class TestModelNodeHeartbeatEventFromAttributes:
         event = ModelNodeHeartbeatEvent.model_validate(obj)
         assert event.node_id == test_node_id
         assert event.node_type == "compute"
+        assert event.node_version == "1.0.0"
         assert event.uptime_seconds == 1234.5
         assert event.active_operations_count == 5

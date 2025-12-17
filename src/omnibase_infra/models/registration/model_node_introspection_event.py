@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelNodeIntrospectionEvent(BaseModel):
@@ -25,6 +25,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
     Attributes:
         node_id: Unique node identifier.
         node_type: ONEX node type (effect, compute, reducer, orchestrator).
+        node_version: Semantic version of the node emitting this event.
         capabilities: Dictionary of node capabilities.
         endpoints: Dictionary of exposed endpoints (name -> URL).
         node_role: Optional role descriptor (registry, adapter, etc).
@@ -40,6 +41,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         >>> event = ModelNodeIntrospectionEvent(
         ...     node_id=uuid4(),
         ...     node_type="effect",
+        ...     node_version="1.2.3",
         ...     capabilities={"postgres": True, "read": True, "write": True},
         ...     endpoints={"health": "http://localhost:8080/health"},
         ... )
@@ -56,12 +58,38 @@ class ModelNodeIntrospectionEvent(BaseModel):
     node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
         ..., description="ONEX node type"
     )
+    node_version: str = Field(
+        default="1.0.0",
+        description="Semantic version of the node emitting this event",
+    )
     capabilities: dict[str, Any] = Field(
         default_factory=dict, description="Node capabilities"
     )
     endpoints: dict[str, str] = Field(
         default_factory=dict, description="Exposed endpoints (name -> URL)"
     )
+
+    @field_validator("endpoints")
+    @classmethod
+    def validate_endpoint_urls(cls, v: dict[str, str]) -> dict[str, str]:
+        """Validate that all endpoint values are valid URLs.
+
+        Args:
+            v: Dictionary of endpoint names to URL strings.
+
+        Returns:
+            The validated endpoints dictionary.
+
+        Raises:
+            ValueError: If any endpoint URL is invalid (missing scheme or netloc).
+        """
+        from urllib.parse import urlparse
+
+        for name, url in v.items():
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                raise ValueError(f"Invalid URL for endpoint '{name}': {url}")
+        return v
 
     # Optional metadata
     node_role: str | None = Field(
@@ -82,7 +110,9 @@ class ModelNodeIntrospectionEvent(BaseModel):
         default=None, description="Deployment/release identifier"
     )
     epoch: int | None = Field(
-        default=None, description="Registration epoch for ordering"
+        default=None,
+        ge=0,
+        description="Registration epoch for ordering (monotonically increasing counter)",
     )
 
     # Timestamps

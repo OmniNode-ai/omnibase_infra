@@ -24,6 +24,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
     Attributes:
         node_id: Node identifier.
         node_type: ONEX node type string.
+        node_version: Semantic version of the node emitting this event.
         uptime_seconds: Node uptime in seconds (must be >= 0).
         active_operations_count: Number of active operations (must be >= 0).
         memory_usage_mb: Optional memory usage in megabytes.
@@ -36,6 +37,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
         >>> event = ModelNodeHeartbeatEvent(
         ...     node_id=uuid4(),
         ...     node_type="effect",
+        ...     node_version="1.2.3",
         ...     uptime_seconds=3600.5,
         ...     active_operations_count=5,
         ...     memory_usage_mb=256.0,
@@ -57,6 +59,10 @@ class ModelNodeHeartbeatEvent(BaseModel):
     # validation, see ModelNodeIntrospectionEvent which uses Literal["effect", "compute",
     # "reducer", "orchestrator"]. Tests explicitly verify custom types are accepted.
     node_type: str = Field(..., description="ONEX node type")
+    node_version: str = Field(
+        default="1.0.0",
+        description="Semantic version of the node emitting this event",
+    )
 
     # Health metrics
     uptime_seconds: float = Field(..., ge=0, description="Node uptime in seconds")
@@ -66,7 +72,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
 
     # Resource usage (optional)
     memory_usage_mb: float | None = Field(
-        default=None, description="Memory usage in megabytes"
+        default=None, ge=0, description="Memory usage in megabytes"
     )
     cpu_usage_percent: float | None = Field(
         default=None, ge=0, le=100, description="CPU usage percentage (0-100)"

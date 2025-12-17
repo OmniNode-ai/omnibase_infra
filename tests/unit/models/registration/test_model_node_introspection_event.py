@@ -34,6 +34,7 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         )
         assert event.node_id == test_node_id
         assert event.node_type == "effect"
+        assert event.node_version == "1.0.0"  # Default value
         assert event.capabilities == {}
         assert event.endpoints == {}
         assert event.node_role is None
@@ -51,6 +52,7 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="compute",
+            node_version="2.1.0",
             capabilities={"processing": True, "batch_size": 100},
             endpoints={
                 "health": "http://localhost:8080/health",
@@ -66,6 +68,7 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         )
         assert event.node_id == test_node_id
         assert event.node_type == "compute"
+        assert event.node_version == "2.1.0"
         assert event.capabilities == {"processing": True, "batch_size": 100}
         assert event.endpoints == {
             "health": "http://localhost:8080/health",
@@ -78,6 +81,73 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         assert event.deployment_id == "deploy-001"
         assert event.epoch == 1
         assert event.timestamp == timestamp
+
+
+class TestModelNodeIntrospectionEventNodeVersion:
+    """Tests for node_version field."""
+
+    def test_node_version_default_value(self) -> None:
+        """Test that node_version defaults to '1.0.0'."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+        )
+        assert event.node_version == "1.0.0"
+
+    def test_node_version_explicit_value(self) -> None:
+        """Test that node_version can be set explicitly."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="2.3.4",
+        )
+        assert event.node_version == "2.3.4"
+
+    def test_node_version_with_prerelease(self) -> None:
+        """Test that node_version accepts prerelease versions."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0-beta.2",
+        )
+        assert event.node_version == "1.0.0-beta.2"
+
+    def test_node_version_with_build_metadata(self) -> None:
+        """Test that node_version accepts build metadata."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0+build.456",
+        )
+        assert event.node_version == "1.0.0+build.456"
+
+    def test_node_version_serialization_roundtrip(self) -> None:
+        """Test that node_version is preserved in JSON serialization."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="3.2.1",
+        )
+        json_str = event.model_dump_json()
+        restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
+        assert restored.node_version == "3.2.1"
+
+    def test_node_version_in_model_dump(self) -> None:
+        """Test that node_version appears in model_dump output."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="4.5.6",
+        )
+        data = event.model_dump()
+        assert "node_version" in data
+        assert data["node_version"] == "4.5.6"
 
 
 class TestModelNodeIntrospectionEventNodeTypeValidation:
@@ -277,6 +347,17 @@ class TestModelNodeIntrospectionEventImmutability:
         with pytest.raises(ValidationError):
             event.node_type = "compute"  # type: ignore[misc]
 
+    def test_frozen_model_cannot_modify_node_version(self) -> None:
+        """Test that node_version cannot be modified after creation."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0",
+        )
+        with pytest.raises(ValidationError):
+            event.node_version = "2.0.0"  # type: ignore[misc]
+
     def test_frozen_model_cannot_modify_capabilities(self) -> None:
         """Test that capabilities dict reference cannot be reassigned."""
         test_node_id = uuid4()
@@ -363,18 +444,23 @@ class TestModelNodeIntrospectionEventEdgeCases:
             )
         assert "extra_field" in str(exc_info.value)
 
-    def test_negative_epoch_allowed(self) -> None:
-        """Test that negative epoch values are allowed (no constraint)."""
+    def test_negative_epoch_raises_validation_error(self) -> None:
+        """Test that negative epoch values raise ValidationError.
+
+        Epoch represents a registration ordering counter (monotonically increasing),
+        so negative values are semantically invalid.
+        """
         test_node_id = uuid4()
-        event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id,
-            node_type="effect",
-            epoch=-1,
-        )
-        assert event.epoch == -1
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                epoch=-1,
+            )
+        assert "epoch" in str(exc_info.value)
 
     def test_zero_epoch_allowed(self) -> None:
-        """Test that zero epoch is allowed."""
+        """Test that zero epoch is allowed (valid for first registration)."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
@@ -382,6 +468,16 @@ class TestModelNodeIntrospectionEventEdgeCases:
             epoch=0,
         )
         assert event.epoch == 0
+
+    def test_positive_epoch_allowed(self) -> None:
+        """Test that positive epoch values are allowed."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            epoch=42,
+        )
+        assert event.epoch == 42
 
     def test_large_epoch_allowed(self) -> None:
         """Test that large epoch values are allowed."""
@@ -405,6 +501,7 @@ class TestModelNodeIntrospectionEventFromAttributes:
             def __init__(self, node_id: UUID) -> None:
                 self.node_id = node_id
                 self.node_type = "compute"
+                self.node_version = "1.0.0"
                 self.capabilities: dict[str, bool] = {}
                 self.endpoints: dict[str, str] = {}
                 self.node_role = None
@@ -419,6 +516,7 @@ class TestModelNodeIntrospectionEventFromAttributes:
         event = ModelNodeIntrospectionEvent.model_validate(obj)
         assert event.node_id == test_node_id
         assert event.node_type == "compute"
+        assert event.node_version == "1.0.0"
 
 
 class TestModelNodeIntrospectionEventEquality:
@@ -592,3 +690,172 @@ class TestModelNodeIntrospectionEventCopying:
         # Note: For frozen models, we can't modify in place, but the dict
         # reference should still be different
         assert copied.capabilities is not event.capabilities
+
+
+class TestModelNodeIntrospectionEventEndpointUrlValidation:
+    """Tests for endpoints dict URL validation."""
+
+    def test_valid_http_endpoints(self) -> None:
+        """Test that valid HTTP URLs in endpoints are accepted."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            endpoints={
+                "health": "http://localhost:8080/health",
+                "metrics": "http://localhost:8080/metrics",
+            },
+        )
+        assert event.endpoints["health"] == "http://localhost:8080/health"
+        assert event.endpoints["metrics"] == "http://localhost:8080/metrics"
+
+    def test_valid_https_endpoints(self) -> None:
+        """Test that valid HTTPS URLs in endpoints are accepted."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            endpoints={
+                "api": "https://api.example.com:443/v1",
+                "health": "https://api.example.com/health",
+            },
+        )
+        assert event.endpoints["api"] == "https://api.example.com:443/v1"
+        assert event.endpoints["health"] == "https://api.example.com/health"
+
+    def test_valid_urls_with_path_and_query(self) -> None:
+        """Test that URLs with paths and query parameters are accepted."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            endpoints={
+                "health": "http://localhost:8080/api/v1/health?timeout=30&verbose=true",
+            },
+        )
+        assert (
+            event.endpoints["health"]
+            == "http://localhost:8080/api/v1/health?timeout=30&verbose=true"
+        )
+
+    def test_empty_endpoints_dict_allowed(self) -> None:
+        """Test that empty endpoints dict is allowed."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            endpoints={},
+        )
+        assert event.endpoints == {}
+
+    def test_invalid_url_missing_scheme(self) -> None:
+        """Test that URLs without scheme are rejected."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                endpoints={"health": "localhost:8080/health"},
+            )
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "Invalid URL" in error_str
+        assert "health" in error_str
+
+    def test_invalid_url_missing_host(self) -> None:
+        """Test that URLs without host are rejected."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                endpoints={"health": "http:///health"},
+            )
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "Invalid URL" in error_str
+
+    def test_invalid_url_plain_string(self) -> None:
+        """Test that plain strings are rejected."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                endpoints={"api": "not-a-url"},
+            )
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "Invalid URL" in error_str
+        assert "api" in error_str
+
+    def test_invalid_url_empty_string(self) -> None:
+        """Test that empty string URLs are rejected."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                endpoints={"health": ""},
+            )
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "Invalid URL" in error_str
+
+    def test_invalid_url_relative_path(self) -> None:
+        """Test that relative paths are rejected."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                endpoints={"health": "/health"},
+            )
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "Invalid URL" in error_str
+
+    def test_multiple_endpoints_one_invalid(self) -> None:
+        """Test that validation fails if any endpoint URL is invalid."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                endpoints={
+                    "health": "http://localhost:8080/health",
+                    "metrics": "invalid-url",
+                    "api": "http://localhost:8080/api",
+                },
+            )
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "Invalid URL" in error_str
+        assert "metrics" in error_str
+
+    def test_error_message_contains_endpoint_name(self) -> None:
+        """Test that error message includes the invalid endpoint name."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                endpoints={"my_bad_endpoint": "no-scheme"},
+            )
+        error_str = str(exc_info.value)
+        assert "my_bad_endpoint" in error_str
+
+    def test_endpoints_serialization_roundtrip(self) -> None:
+        """Test that endpoints survive JSON serialization roundtrip."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            endpoints={
+                "health": "http://localhost:8080/health",
+                "metrics": "https://api.example.com/metrics",
+            },
+        )
+        json_str = event.model_dump_json()
+        restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
+        assert restored.endpoints == event.endpoints

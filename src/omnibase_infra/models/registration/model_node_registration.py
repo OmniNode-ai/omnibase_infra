@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 # Semantic versioning pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
 # See: https://semver.org/
@@ -99,7 +99,7 @@ class ModelNodeRegistration(BaseModel):
     )
 
     # Health tracking
-    health_endpoint: str | None = Field(
+    health_endpoint: HttpUrl | None = Field(
         default=None, description="URL for health check endpoint"
     )
     last_heartbeat: datetime | None = Field(
