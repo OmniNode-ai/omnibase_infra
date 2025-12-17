@@ -1709,3 +1709,211 @@ class TestNodeRegistryEffectErrorSanitization:
         assert response.consul_result.error is not None
         assert "secret123" not in response.consul_result.error
         assert "[REDACTED]" in response.consul_result.error
+
+
+# =============================================================================
+# Test: JSON Serialization Error Handling
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNodeRegistryEffectJsonSerialization:
+    """Tests for JSON serialization error handling."""
+
+    def test_safe_json_dumps_success(self) -> None:
+        """Test that _safe_json_dumps serializes valid data."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        data = {"key": "value", "nested": {"list": [1, 2, 3]}}
+        result = node._safe_json_dumps(data, uuid4(), "test_field")
+        assert result == json.dumps(data)
+
+    def test_safe_json_dumps_handles_unserializable_object(self) -> None:
+        """Test that _safe_json_dumps handles unserializable objects gracefully."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+
+        # Create an unserializable object (set is not JSON serializable)
+        unserializable_data = {"items": {1, 2, 3}}  # set is not serializable
+        correlation_id = uuid4()
+        result = node._safe_json_dumps(
+            unserializable_data, correlation_id, "test_field"
+        )
+
+        # Should return fallback value
+        assert result == "{}"
+
+    def test_safe_json_dumps_handles_circular_reference(self) -> None:
+        """Test that _safe_json_dumps handles circular references."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+
+        # Create circular reference
+        circular: dict[str, object] = {}
+        circular["self"] = circular
+
+        correlation_id = uuid4()
+        result = node._safe_json_dumps(circular, correlation_id, "circular_field")
+
+        # Should return fallback value
+        assert result == "{}"
+
+    def test_safe_json_dumps_custom_fallback(self) -> None:
+        """Test that _safe_json_dumps uses custom fallback."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+
+        unserializable = {"items": {1, 2, 3}}
+        result = node._safe_json_dumps(
+            unserializable, uuid4(), "test_field", fallback="[]"
+        )
+
+        assert result == "[]"
+
+    def test_safe_json_dumps_strict_success(self) -> None:
+        """Test that _safe_json_dumps_strict returns None error on success."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        data = {"event_type": "TEST", "correlation_id": "abc123"}
+        json_str, error = node._safe_json_dumps_strict(data, uuid4(), "test_field")
+
+        assert error is None
+        assert json_str == json.dumps(data)
+
+    def test_safe_json_dumps_strict_failure(self) -> None:
+        """Test that _safe_json_dumps_strict returns error message on failure."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+
+        # Create unserializable data
+        unserializable = {"items": {1, 2, 3}}
+        json_str, error = node._safe_json_dumps_strict(
+            unserializable, uuid4(), "unserializable_field"
+        )
+
+        assert json_str == "{}"
+        assert error is not None
+        assert "JSON serialization failed" in error
+        assert "unserializable_field" in error
+        assert "TypeError" in error
+
+    async def test_request_introspection_fails_on_serialization_error(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        mock_event_bus: AsyncMock,
+    ) -> None:
+        """Test that request_introspection fails gracefully on serialization error.
+
+        This test verifies that if the event payload cannot be serialized,
+        the operation returns a failure response rather than publishing a malformed event.
+        """
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            event_bus=mock_event_bus,
+        )
+        await node.initialize()
+
+        # Monkey-patch _safe_json_dumps_strict to simulate serialization failure
+        original_method = node._safe_json_dumps_strict
+
+        def failing_serializer(
+            data: object,
+            correlation_id: UUID | None = None,
+            field_name: str = "unknown",
+        ) -> tuple[str, str | None]:
+            # Simulate serialization failure for introspection events
+            if field_name == "introspection_event":
+                return (
+                    "{}",
+                    "JSON serialization failed for introspection_event: TypeError",
+                )
+            return original_method(data, correlation_id, field_name)
+
+        node._safe_json_dumps_strict = failing_serializer  # type: ignore[method-assign]
+
+        correlation_id = uuid4()
+        request = ModelRegistryRequest(
+            operation="request_introspection",
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+
+        # Should fail gracefully
+        assert response.success is False
+        assert response.status == "failed"
+        assert response.error is not None
+        assert "JSON serialization failed" in response.error
+        assert response.correlation_id == correlation_id
+
+        # Event bus should NOT have been called
+        mock_event_bus.publish.assert_not_called()
+
+        await node.shutdown()
+
+    async def test_register_handles_json_serialization_for_capabilities(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        mock_event_bus: AsyncMock,
+    ) -> None:
+        """Test that registration handles unserializable capabilities gracefully."""
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            event_bus=mock_event_bus,
+        )
+        await node.initialize()
+
+        # Create introspection with complex nested data
+        # Note: The ModelNodeIntrospectionPayload accepts dict[str, object]
+        # which allows for nested structures
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="test-node",
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities={"operations": ["read", "write"]},
+            endpoints={"health": "http://localhost:8080/health"},
+            metadata={"environment": "test"},
+        )
+
+        correlation_id = uuid4()
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+
+        # Registration should succeed
+        assert response.success is True
+        assert response.correlation_id == correlation_id
+
+        # Verify JSON serialization was called via db_handler
+        mock_db_handler.execute.assert_called_once()
+        call_args = mock_db_handler.execute.call_args[0][0]
+        params = call_args["payload"]["params"]
+
+        # Verify capabilities, endpoints, metadata were serialized
+        # They should be JSON strings
+        assert isinstance(params[3], str)  # capabilities
+        assert isinstance(params[4], str)  # endpoints
+        assert isinstance(params[5], str)  # metadata
+
+        await node.shutdown()

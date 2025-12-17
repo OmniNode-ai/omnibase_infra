@@ -53,11 +53,17 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
     ModelRegistryRequest,
     ModelRegistryResponse,
 )
+from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+    ProtocolEnvelopeExecutor,
+    ProtocolEventBus,
+)
 
 logger = logging.getLogger(__name__)
 
 # Whitelist of allowed filter keys for SQL query building (SQL injection prevention)
-ALLOWED_FILTER_KEYS: frozenset[str] = frozenset({"node_type", "node_id", "node_version"})
+ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
+    {"node_type", "node_id", "node_version"}
+)
 
 
 class NodeRegistryEffect(MixinAsyncCircuitBreaker):
@@ -83,9 +89,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
     def __init__(
         self,
-        consul_handler: object,
-        db_handler: object,
-        event_bus: object | None = None,
+        consul_handler: ProtocolEnvelopeExecutor,
+        db_handler: ProtocolEnvelopeExecutor,
+        event_bus: ProtocolEventBus | None = None,
         config: ModelNodeRegistryEffectConfig | None = None,
     ) -> None:
         """Initialize Registry Effect Node.
@@ -100,9 +106,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             config: Configuration for circuit breaker and resilience settings.
                 Uses defaults if not provided.
         """
-        self._consul_handler: object = consul_handler
-        self._db_handler: object = db_handler
-        self._event_bus: object | None = event_bus
+        self._consul_handler: ProtocolEnvelopeExecutor = consul_handler
+        self._db_handler: ProtocolEnvelopeExecutor = db_handler
+        self._event_bus: ProtocolEventBus | None = event_bus
         self._initialized = False
 
         # Use defaults if config not provided
@@ -166,6 +172,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         data: object,
         correlation_id: UUID | None = None,
         field_name: str = "unknown",
+        fallback: str = "{}",
     ) -> str:
         """Safely serialize data to JSON with error handling.
 
@@ -173,9 +180,10 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             data: The data to serialize
             correlation_id: Optional correlation ID for logging
             field_name: Name of the field being serialized for logging
+            fallback: Value to return on serialization failure (default: "{}")
 
         Returns:
-            JSON string, or "{}" on serialization failure
+            JSON string, or fallback value on serialization failure
         """
         try:
             return json.dumps(data)
@@ -185,9 +193,46 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 extra={
                     "correlation_id": str(correlation_id) if correlation_id else None,
                     "field_name": field_name,
+                    "error_type": type(e).__name__,
                 },
             )
-            return "{}"
+            return fallback
+
+    def _safe_json_dumps_strict(
+        self,
+        data: object,
+        correlation_id: UUID | None = None,
+        field_name: str = "unknown",
+    ) -> tuple[str, str | None]:
+        """Safely serialize data to JSON with strict error reporting.
+
+        Unlike _safe_json_dumps, this method returns both the result and any error
+        that occurred, allowing callers to decide how to handle serialization failures.
+
+        Args:
+            data: The data to serialize
+            correlation_id: Optional correlation ID for logging
+            field_name: Name of the field being serialized for logging
+
+        Returns:
+            Tuple of (json_string, error_message). If successful, error_message is None.
+            If failed, json_string is "{}" and error_message describes the failure.
+        """
+        try:
+            return json.dumps(data), None
+        except (TypeError, ValueError) as e:
+            error_msg = (
+                f"JSON serialization failed for {field_name}: {type(e).__name__}"
+            )
+            logger.warning(
+                error_msg,
+                extra={
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                    "field_name": field_name,
+                    "error_type": type(e).__name__,
+                },
+            )
+            return "{}", error_msg
 
     async def initialize(self) -> None:
         """Initialize the effect node and verify backend connectivity."""
@@ -355,11 +400,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     "timeout": "10s",
                 }
 
-            # Execute via consul handler (duck typing - expects execute method)
-            execute_method = getattr(self._consul_handler, "execute", None)
-            if execute_method is None:
-                raise AttributeError("consul_handler must have execute method")
-            result = await execute_method(
+            # Execute via consul handler (Protocol-typed)
+            result = await self._consul_handler.execute(
                 {
                     "operation": "consul.register",
                     "payload": consul_payload,
@@ -407,11 +449,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     updated_at = NOW()
             """
 
-            # Execute via db handler (duck typing - expects execute method)
-            execute_method = getattr(self._db_handler, "execute", None)
-            if execute_method is None:
-                raise AttributeError("db_handler must have execute method")
-            result = await execute_method(
+            # Execute via db handler (Protocol-typed)
+            result = await self._db_handler.execute(
                 {
                     "operation": "db.execute",
                     "payload": {
@@ -421,7 +460,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                             introspection.node_type,
                             introspection.node_version,
                             self._safe_json_dumps(
-                                introspection.capabilities, correlation_id, "capabilities"
+                                introspection.capabilities,
+                                correlation_id,
+                                "capabilities",
                             ),
                             self._safe_json_dumps(
                                 introspection.endpoints, correlation_id, "endpoints"
@@ -530,11 +571,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
     ) -> ModelConsulOperationResult:
         """Deregister node from Consul."""
         try:
-            # Execute via consul handler (duck typing - expects execute method)
-            execute_method = getattr(self._consul_handler, "execute", None)
-            if execute_method is None:
-                raise AttributeError("consul_handler must have execute method")
-            result = await execute_method(
+            # Execute via consul handler (Protocol-typed)
+            result = await self._consul_handler.execute(
                 {
                     "operation": "consul.deregister",
                     "payload": {"service_id": node_id},
@@ -546,7 +584,16 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 service_id=node_id,
             )
         except Exception as e:
-            return ModelConsulOperationResult(success=False, error=self._sanitize_error(e))
+            logger.warning(
+                f"Consul deregistration failed: {type(e).__name__}",
+                extra={
+                    "node_id": node_id,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return ModelConsulOperationResult(
+                success=False, error=self._sanitize_error(e)
+            )
 
     async def _deregister_postgres(
         self,
@@ -555,11 +602,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
     ) -> ModelPostgresOperationResult:
         """Delete node from PostgreSQL."""
         try:
-            # Execute via db handler (duck typing - expects execute method)
-            execute_method = getattr(self._db_handler, "execute", None)
-            if execute_method is None:
-                raise AttributeError("db_handler must have execute method")
-            result = await execute_method(
+            # Execute via db handler (Protocol-typed)
+            result = await self._db_handler.execute(
                 {
                     "operation": "db.execute",
                     "payload": {
@@ -581,7 +625,16 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 rows_affected=rows_affected,
             )
         except Exception as e:
-            return ModelPostgresOperationResult(success=False, error=self._sanitize_error(e))
+            logger.warning(
+                f"PostgreSQL deregistration failed: {type(e).__name__}",
+                extra={
+                    "node_id": node_id,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return ModelPostgresOperationResult(
+                success=False, error=self._sanitize_error(e)
+            )
 
     async def _discover_nodes(
         self,
@@ -610,11 +663,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 if conditions:
                     sql += " WHERE " + " AND ".join(conditions)
 
-            # Execute via db handler (duck typing - expects execute method)
-            execute_method = getattr(self._db_handler, "execute", None)
-            if execute_method is None:
-                raise AttributeError("db_handler must have execute method")
-            result = await execute_method(
+            # Execute via db handler (Protocol-typed)
+            result = await self._db_handler.execute(
                 {
                     "operation": "db.query",
                     "payload": {"sql": sql, "params": params},
@@ -645,6 +695,13 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 correlation_id=request.correlation_id,
             )
         except Exception as e:
+            logger.warning(
+                f"Node discovery failed: {type(e).__name__}",
+                extra={
+                    "filters": request.filters,
+                    "correlation_id": str(request.correlation_id),
+                },
+            )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             return ModelRegistryResponse(
                 operation="discover",
@@ -673,20 +730,31 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
 
         try:
-            # Publish REQUEST_INTROSPECTION event (duck typing - expects publish method)
-            publish_method = getattr(self._event_bus, "publish", None)
-            if publish_method is None:
-                raise AttributeError("event_bus must have publish method")
+            # Publish REQUEST_INTROSPECTION event (Protocol-typed)
             event_payload = {
                 "event_type": "REGISTRY_REQUEST_INTROSPECTION",
                 "correlation_id": str(request.correlation_id),
             }
-            await publish_method(
+
+            # Use strict serialization - don't publish malformed events
+            json_payload, serialization_error = self._safe_json_dumps_strict(
+                event_payload, request.correlation_id, "introspection_event"
+            )
+            if serialization_error:
+                processing_time_ms = (time.perf_counter() - start_time) * 1000
+                return ModelRegistryResponse(
+                    operation="request_introspection",
+                    success=False,
+                    status="failed",
+                    error=serialization_error,
+                    processing_time_ms=processing_time_ms,
+                    correlation_id=request.correlation_id,
+                )
+
+            await self._event_bus.publish(
                 topic="onex.evt.registry-request-introspection.v1",
                 key=b"registry",
-                value=self._safe_json_dumps(
-                    event_payload, request.correlation_id, "introspection_event"
-                ).encode("utf-8"),
+                value=json_payload.encode("utf-8"),
             )
 
             processing_time_ms = (time.perf_counter() - start_time) * 1000
@@ -702,6 +770,12 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 correlation_id=request.correlation_id,
             )
         except Exception as e:
+            logger.warning(
+                f"Introspection request failed: {type(e).__name__}",
+                extra={
+                    "correlation_id": str(request.correlation_id),
+                },
+            )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             return ModelRegistryResponse(
                 operation="request_introspection",
@@ -750,8 +824,10 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     if isinstance(parsed, dict):
                         return parsed
                     logger.warning(f"JSON parse result not a dict for {field_name}")
-                except json.JSONDecodeError:
-                    logger.warning(f"JSON parse failed for {field_name}")
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        f"JSON parse failed for {field_name}: {type(e).__name__}"
+                    )
             return {}
 
         def parse_datetime(val: object) -> datetime:

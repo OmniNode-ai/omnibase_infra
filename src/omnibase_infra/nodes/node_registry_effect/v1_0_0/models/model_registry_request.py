@@ -3,7 +3,7 @@
 """Registry request model for node registration operations."""
 
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,4 +25,7 @@ class ModelRegistryRequest(BaseModel):
     filters: dict[str, str] | None = Field(
         None, description="Filters for discover operation"
     )
-    correlation_id: UUID = Field(..., description="Request correlation ID")
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
+        description="Request correlation ID - auto-generated if not provided",
+    )
