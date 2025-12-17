@@ -5,18 +5,19 @@
 This module exports all infrastructure-specific Pydantic models.
 """
 
-from omnibase_infra.models.discovery import (
-    ModelNodeIntrospectionEvent,
-)
 from omnibase_infra.models.registration import (
+    ModelNodeCapabilities,
     ModelNodeHeartbeatEvent,
+    ModelNodeIntrospectionEvent,
+    ModelNodeMetadata,
     ModelNodeRegistration,
 )
 
 __all__ = [
-    # Discovery models
-    "ModelNodeIntrospectionEvent",
     # Registration models
+    "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",
+    "ModelNodeIntrospectionEvent",
+    "ModelNodeMetadata",
     "ModelNodeRegistration",
 ]

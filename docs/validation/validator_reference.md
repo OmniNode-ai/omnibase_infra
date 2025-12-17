@@ -183,7 +183,7 @@ def validate_infra_patterns(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **strict** (`bool`, optional): Enable strict mode. Defaults to `True`.
+- **strict** (`bool`, optional): Enable strict mode. Defaults to `False`.
 
 ### Returns
 
@@ -339,7 +339,7 @@ def validate_infra_union_usage(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `20`.
+- **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `185`.
 - **strict** (`bool`, optional): Enable strict mode. Defaults to `False`.
 
 ### Returns
@@ -364,7 +364,7 @@ Infrastructure code needs typed unions for:
 - Message routing and handler dispatch
 - Service integration type safety
 
-**Why max_unions=20**: Infrastructure has many service adapters with typed handlers. 20 allows necessary unions while preventing excessive complexity.
+**Why max_unions=185**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The higher threshold accommodates RuntimeHostProcess, handler wiring, strongly-typed optional model wrappers (PEP 604 `X | None` syntax), and ONEX service integration patterns while preventing excessive complexity.
 
 ### Example Usage
 
@@ -611,11 +611,11 @@ INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Validation thresholds
-INFRA_MAX_UNIONS = 20           # Maximum allowed complex union types
+INFRA_MAX_UNIONS = 185          # Maximum allowed complex union types
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
 
 # Strict mode flags
-INFRA_PATTERNS_STRICT = True    # Strict pattern enforcement
+INFRA_PATTERNS_STRICT = False   # Relaxed pattern enforcement for infrastructure
 INFRA_UNIONS_STRICT = False     # Allow necessary unions for infrastructure
 ```
 

@@ -2,105 +2,157 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Registration Model.
 
-This module provides the Pydantic model for persisted node registration
-in PostgreSQL, used by the discovery system to track registered nodes
-and their capabilities.
+This module provides ModelNodeRegistration for persisted node registrations
+in the ONEX 2-way registration pattern.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
-# Type aliases for strongly-typed capability and metadata values
-# Capabilities support: lists of strings (operations/protocols), booleans (flags),
-# and string dictionaries (method signatures)
-CapabilityValue = list[str] | bool | dict[str, str]
-
-# Metadata supports primitive JSON-serializable types
-MetadataValue = str | int | float | bool | None
+from omnibase_infra.models.registration.model_node_capabilities import (
+    ModelNodeCapabilities,
+)
+from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
+from omnibase_infra.utils.util_semver import validate_semver as _validate_semver
 
 
 class ModelNodeRegistration(BaseModel):
     """Model for persisted node registration in PostgreSQL.
 
-    Represents a registered node in the ONEX discovery system, including
-    its type, version, capabilities, endpoints, and health status.
+    Represents a node's complete registration state for persistence.
+    Created from introspection events and updated with heartbeat data.
+
+    Validation Design:
+        This model uses **strict Literal validation** for ``node_type``, accepting
+        only the canonical ONEX types: "effect", "compute", "reducer", "orchestrator".
+
+        This differs intentionally from ``ModelNodeHeartbeatEvent``, which uses
+        relaxed ``str`` validation to support experimental node types in transient
+        heartbeat messages. The rationale:
+
+        - **ModelNodeRegistration** (strict): Represents canonical node catalog
+          entries persisted to PostgreSQL. Must align with the source
+          ``ModelNodeIntrospectionEvent`` constraints. Invalid types would corrupt
+          the registry.
+        - **ModelNodeHeartbeatEvent** (relaxed): Transient operational messages
+          that may include experimental or custom node types not yet in the
+          canonical set.
 
     Attributes:
-        node_id: Unique identifier for the registered node
-        node_type: Type classification of the node (e.g., 'effect', 'compute')
-        node_version: Semantic version of the node (default: "1.0.0")
-        capabilities: Dictionary of node capabilities and features
-        endpoints: Dictionary mapping endpoint names to their URLs
-        metadata: Additional metadata associated with the node
-        health_endpoint: URL for the node's health check endpoint
-        last_heartbeat: Timestamp of the last successful heartbeat
-        registered_at: Timestamp when the node was first registered
-        updated_at: Timestamp when the registration was last updated
+        node_id: Unique node identifier.
+        node_type: ONEX node type. Uses strict Literal["effect", "compute",
+            "reducer", "orchestrator"] validation to ensure registry integrity.
+            See field-level design note for rationale.
+        node_version: Semantic version of the node (validated against semver).
+        capabilities: Structured node capabilities.
+        endpoints: Dictionary of exposed endpoints (name -> URL).
+        metadata: Additional node metadata.
+        health_endpoint: URL for health check endpoint.
+        last_heartbeat: Timestamp of last received heartbeat.
+        registered_at: Timestamp when node was first registered.
+        updated_at: Timestamp of last update.
 
     Example:
-        >>> from omnibase_infra.models.registration import ModelNodeRegistration
-        >>> from datetime import UTC, datetime
+        >>> from datetime import datetime, UTC
+        >>> from uuid import uuid4
+        >>> now = datetime.now(UTC)
         >>> registration = ModelNodeRegistration(
-        ...     node_id="node-postgres-adapter-001",
+        ...     node_id=uuid4(),
         ...     node_type="effect",
-        ...     node_version="1.0.0",
-        ...     capabilities={"database": True, "transactions": True},
-        ...     endpoints={"api": "http://localhost:8080"},
+        ...     capabilities={"postgres": True},
+        ...     endpoints={"health": "http://localhost:8080/health"},
         ...     health_endpoint="http://localhost:8080/health",
-        ...     registered_at=datetime.now(UTC),
-        ...     updated_at=datetime.now(UTC),
+        ...     registered_at=now,
+        ...     updated_at=now,
         ... )
+
+    See Also:
+        - :class:`ModelNodeIntrospectionEvent`: Source event for registrations.
+          Uses the same strict ``Literal`` validation for ``node_type``.
+        - :class:`ModelNodeHeartbeatEvent`: Transient health events.
+          Uses relaxed ``str`` validation to support experimental node types.
     """
 
     model_config = ConfigDict(
-        strict=True,
-        frozen=False,  # Allow updates for heartbeat and metadata changes
+        frozen=False,  # Mutable for updates
         extra="forbid",
+        from_attributes=True,
     )
 
-    node_id: str = Field(
-        ...,
-        description="Unique identifier for the registered node",
-    )
-    node_type: str = Field(
-        ...,
-        description="Type classification of the node (e.g., 'effect', 'compute')",
+    # Identity
+    node_id: UUID = Field(..., description="Unique node identifier")
+    # Design Note: node_type uses strict Literal validation to match the source
+    # introspection event constraints. ModelNodeRegistration is created from
+    # ModelNodeIntrospectionEvent data, so type constraints must align. Unlike
+    # ModelNodeHeartbeatEvent (which uses relaxed str validation to support
+    # experimental node types), registrations represent canonical node catalog
+    # entries that require strict ONEX type compliance.
+    # See ModelNodeIntrospectionEvent for source validation.
+    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
+        ..., description="ONEX node type"
     )
     node_version: str = Field(
-        default="1.0.0",
-        description="Semantic version of the node",
+        default="1.0.0", description="Semantic version of the node"
     )
-    capabilities: dict[str, CapabilityValue] = Field(
-        default_factory=dict,
-        description="Dictionary of node capabilities and features",
+
+    @field_validator("node_version")
+    @classmethod
+    def validate_semver(cls, v: str) -> str:
+        """Validate that node_version follows semantic versioning."""
+        return _validate_semver(v, "node_version")
+
+    # Capabilities and endpoints
+    capabilities: ModelNodeCapabilities = Field(
+        default_factory=ModelNodeCapabilities, description="Node capabilities"
     )
     endpoints: dict[str, str] = Field(
-        default_factory=dict,
-        description="Dictionary mapping endpoint names to their URLs",
+        default_factory=dict, description="Exposed endpoints (name -> URL)"
     )
-    metadata: dict[str, MetadataValue] = Field(
-        default_factory=dict,
-        description="Additional metadata associated with the node",
+
+    @field_validator("endpoints")
+    @classmethod
+    def validate_endpoint_urls(cls, v: dict[str, str]) -> dict[str, str]:
+        """Validate that all endpoint values are valid URLs.
+
+        Args:
+            v: Dictionary of endpoint names to URL strings.
+
+        Returns:
+            The validated endpoints dictionary.
+
+        Raises:
+            ValueError: If any endpoint URL is invalid (missing scheme or netloc).
+        """
+        from urllib.parse import urlparse
+
+        for name, url in v.items():
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                raise ValueError(f"Invalid URL for endpoint '{name}': {url}")
+        return v
+
+    metadata: ModelNodeMetadata = Field(
+        default_factory=ModelNodeMetadata, description="Additional node metadata"
     )
-    health_endpoint: str | None = Field(
-        default=None,
-        description="URL for the node's health check endpoint",
+
+    # Health tracking
+    health_endpoint: HttpUrl | None = Field(
+        default=None, description="URL for health check endpoint"
     )
     last_heartbeat: datetime | None = Field(
-        default=None,
-        description="Timestamp of the last successful heartbeat",
+        default=None, description="Timestamp of last received heartbeat"
     )
+
+    # Timestamps
     registered_at: datetime = Field(
-        ...,
-        description="Timestamp when the node was first registered",
+        ..., description="Timestamp when node was first registered"
     )
-    updated_at: datetime = Field(
-        ...,
-        description="Timestamp when the registration was last updated",
-    )
+    updated_at: datetime = Field(..., description="Timestamp of last update")
 
 
-__all__: list[str] = ["ModelNodeRegistration", "CapabilityValue", "MetadataValue"]
+__all__ = ["ModelNodeRegistration"]

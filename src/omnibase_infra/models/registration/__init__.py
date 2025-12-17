@@ -1,22 +1,25 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Node Registration Models.
+"""Registration models for ONEX 2-way registration pattern."""
 
-Models for node introspection and registration events.
-"""
-
+from omnibase_infra.models.registration.model_node_capabilities import (
+    ModelNodeCapabilities,
+)
 from omnibase_infra.models.registration.model_node_heartbeat_event import (
     ModelNodeHeartbeatEvent,
 )
+from omnibase_infra.models.registration.model_node_introspection_event import (
+    ModelNodeIntrospectionEvent,
+)
+from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
 from omnibase_infra.models.registration.model_node_registration import (
-    CapabilityValue,
-    MetadataValue,
     ModelNodeRegistration,
 )
 
 __all__ = [
-    "CapabilityValue",
-    "MetadataValue",
+    "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",
+    "ModelNodeIntrospectionEvent",
+    "ModelNodeMetadata",
     "ModelNodeRegistration",
 ]

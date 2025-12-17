@@ -124,7 +124,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
@@ -1251,27 +1251,35 @@ class MixinNodeIntrospection:
 
             # Get node_id and node_type with fallback logging
             # The "unknown" fallback indicates a potential initialization issue
-            node_id = self._introspection_node_id
-            if node_id is None:
+            node_id_str = self._introspection_node_id
+            if node_id_str is None:
                 logger.warning(
                     "Node ID not initialized, using 'unknown' in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
                     extra={"operation": "_publish_heartbeat"},
                 )
-                node_id = "unknown"
+                node_id_str = "unknown"
 
             node_type = self._introspection_node_type
             if node_type is None:
                 logger.warning(
                     "Node type not initialized, using 'unknown' in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
-                    extra={"node_id": node_id, "operation": "_publish_heartbeat"},
+                    extra={"node_id": node_id_str, "operation": "_publish_heartbeat"},
                 )
                 node_type = "unknown"
 
+            # Convert node_id to UUID for heartbeat model compatibility
+            # Try to parse as UUID first, otherwise generate deterministic UUID from string
+            try:
+                node_id_uuid = UUID(node_id_str)
+            except ValueError:
+                # Generate deterministic UUID from string using uuid5 with DNS namespace
+                node_id_uuid = uuid5(NAMESPACE_DNS, node_id_str)
+
             # Create heartbeat event
             heartbeat = ModelNodeHeartbeatEvent(
-                node_id=node_id,
+                node_id=node_id_uuid,
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
                 # TODO(OMN-XXX): Implement active operation tracking
