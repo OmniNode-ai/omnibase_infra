@@ -58,9 +58,27 @@ class ModelNodeIntrospectionEvent(BaseModel):
     )
 
     # Endpoint URLs
+    #
+    # Design Decision: We use dict[str, str] instead of dict[str, HttpUrl] for endpoints.
+    #
+    # Rationale:
+    # 1. Flexibility: Internal endpoints may use non-standard schemes (e.g., "consul://",
+    #    "grpc://", or relative paths like "/health") that HttpUrl rejects.
+    # 2. Simplicity: Endpoint validation is deferred to the consuming services, which
+    #    know their specific requirements and can apply appropriate validation.
+    # 3. Performance: HttpUrl validation adds parsing overhead for every endpoint,
+    #    which is unnecessary for internal service discovery where endpoints are
+    #    typically constructed programmatically.
+    # 4. Consistency: Other infrastructure components (e.g., Consul, Kubernetes)
+    #    also use string-based endpoint formats.
+    #
+    # If strict URL validation is needed, consumers can wrap endpoint access with
+    # validation logic or use pydantic.HttpUrl when processing individual endpoints.
     endpoints: dict[str, str] = Field(
         default_factory=dict,
-        description="Endpoint URLs (health, api, metrics)",
+        description="Endpoint URLs (health, api, metrics). Values are strings to "
+        "support various URL schemes including internal service protocols. "
+        "URL validation is deferred to consuming services.",
     )
 
     # State information

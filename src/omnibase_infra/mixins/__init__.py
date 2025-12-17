@@ -14,11 +14,15 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     MixinAsyncCircuitBreaker,
 )
 from omnibase_infra.mixins.mixin_node_introspection import (
+    CapabilitiesDict,
+    IntrospectionCacheDict,
     MixinNodeIntrospection,
 )
 
 __all__ = [
+    "CapabilitiesDict",
     "CircuitState",
+    "IntrospectionCacheDict",
     "MixinAsyncCircuitBreaker",
     "MixinNodeIntrospection",
 ]

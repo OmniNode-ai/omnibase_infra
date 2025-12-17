@@ -336,6 +336,7 @@ class TestMixinNodeIntrospectionCapabilities:
 
         # Should discover methods with operation keywords
         operations = capabilities["operations"]
+        assert isinstance(operations, list)
         assert "execute" in operations
         assert "handle_event" in operations
         assert "process_batch" in operations
@@ -348,6 +349,7 @@ class TestMixinNodeIntrospectionCapabilities:
 
         # Private methods should not be in operations
         operations = capabilities["operations"]
+        assert isinstance(operations, list)
         for op in operations:
             assert not op.startswith("_")
 
@@ -365,7 +367,9 @@ class TestMixinNodeIntrospectionCapabilities:
         capabilities = await mock_node.get_capabilities()
 
         # Should include MixinNodeIntrospection in protocols
-        assert "MixinNodeIntrospection" in capabilities["protocols"]
+        protocols = capabilities["protocols"]
+        assert isinstance(protocols, list)
+        assert "MixinNodeIntrospection" in protocols
 
     async def test_get_capabilities_includes_method_signatures(
         self, mock_node: MockNode
@@ -1274,7 +1278,9 @@ class TestMixinNodeIntrospectionEdgeCases:
         elapsed_ms = (time.time() - start) * 1000
 
         # Should include all 10 operation methods
-        assert len(capabilities["operations"]) >= 10
+        operations = capabilities["operations"]
+        assert isinstance(operations, list)
+        assert len(operations) >= 10
         assert elapsed_ms < threshold_ms, (
             f"Large capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
@@ -1440,6 +1446,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         # Get capabilities (uses cache)
         capabilities = await node.get_capabilities()
         cached_signatures = capabilities["method_signatures"]
+        assert isinstance(cached_signatures, dict)
 
         # Get cached signatures directly
         direct_cached = MixinNodeIntrospection._class_method_cache.get(MockNode, {})
@@ -1542,3 +1549,152 @@ class TestMixinNodeIntrospectionClassLevelCache:
         capabilities = await node.get_capabilities()
         assert isinstance(capabilities, dict)
         assert "method_signatures" in capabilities
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinNodeIntrospectionConfigurableKeywords:
+    """Tests for configurable operation_keywords and exclude_prefixes."""
+
+    async def test_default_operation_keywords_used_when_not_specified(self) -> None:
+        """Test that DEFAULT_OPERATION_KEYWORDS is used when not specified."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="default-keywords-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+        assert (
+            node._introspection_operation_keywords
+            == MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
+        )
+
+    async def test_default_exclude_prefixes_used_when_not_specified(self) -> None:
+        """Test that DEFAULT_EXCLUDE_PREFIXES is used when not specified."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="default-prefixes-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+        assert (
+            node._introspection_exclude_prefixes
+            == MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES
+        )
+
+    async def test_custom_operation_keywords_are_stored(self) -> None:
+        """Test that custom operation_keywords are stored correctly."""
+        custom_keywords = {"fetch", "upload", "download", "sync"}
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="custom-keywords-node",
+            node_type="EFFECT",
+            event_bus=None,
+            operation_keywords=custom_keywords,
+        )
+        assert node._introspection_operation_keywords == custom_keywords
+
+    async def test_custom_exclude_prefixes_are_stored(self) -> None:
+        """Test that custom exclude_prefixes are stored correctly."""
+        custom_prefixes = {"_", "helper_", "internal_"}
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="custom-prefixes-node",
+            node_type="EFFECT",
+            event_bus=None,
+            exclude_prefixes=custom_prefixes,
+        )
+        assert node._introspection_exclude_prefixes == custom_prefixes
+
+    async def test_custom_operation_keywords_affect_capability_discovery(self) -> None:
+        """Test that custom operation_keywords affect which methods are discovered."""
+
+        class CustomMethodsNode(MixinNodeIntrospection):
+            async def fetch_data(self, source: str) -> dict[str, str]:
+                return {"source": source}
+
+            async def upload_file(self, file_path: str) -> bool:
+                return True
+
+            async def execute_task(self, task_id: str) -> None:
+                pass
+
+        node = CustomMethodsNode()
+        node.initialize_introspection(
+            node_id="custom-ops-node",
+            node_type="EFFECT",
+            event_bus=None,
+            operation_keywords={"fetch", "upload"},
+        )
+        capabilities = await node.get_capabilities()
+        operations = capabilities["operations"]
+        assert "fetch_data" in operations
+        assert "upload_file" in operations
+        assert "execute_task" not in operations
+
+    async def test_node_type_specific_keywords_constant_exists(self) -> None:
+        """Test that NODE_TYPE_OPERATION_KEYWORDS constant exists."""
+        assert hasattr(MixinNodeIntrospection, "NODE_TYPE_OPERATION_KEYWORDS")
+        keywords_map = MixinNodeIntrospection.NODE_TYPE_OPERATION_KEYWORDS
+        assert "EFFECT" in keywords_map
+        assert "COMPUTE" in keywords_map
+        assert "REDUCER" in keywords_map
+        assert "ORCHESTRATOR" in keywords_map
+        for keywords in keywords_map.values():
+            assert isinstance(keywords, set)
+
+    async def test_empty_operation_keywords_discovers_no_operations(self) -> None:
+        """Test that empty operation_keywords results in no operations discovered."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="empty-keywords-node",
+            node_type="EFFECT",
+            event_bus=None,
+            operation_keywords=set(),
+        )
+        capabilities = await node.get_capabilities()
+        assert len(capabilities["operations"]) == 0
+
+    async def test_configuration_is_instance_specific(self) -> None:
+        """Test that configuration is instance-specific, not shared."""
+
+        class MultiInstanceNode(MixinNodeIntrospection):
+            async def execute_task(self) -> None:
+                pass
+
+            async def fetch_data(self) -> None:
+                pass
+
+        node1 = MultiInstanceNode()
+        node1.initialize_introspection(
+            node_id="node-1",
+            node_type="EFFECT",
+            event_bus=None,
+            operation_keywords={"execute"},
+        )
+        node2 = MultiInstanceNode()
+        node2.initialize_introspection(
+            node_id="node-2",
+            node_type="EFFECT",
+            event_bus=None,
+            operation_keywords={"fetch"},
+        )
+        caps1 = await node1.get_capabilities()
+        caps2 = await node2.get_capabilities()
+        assert "execute_task" in caps1["operations"]
+        assert "fetch_data" not in caps1["operations"]
+        assert "fetch_data" in caps2["operations"]
+        assert "execute_task" not in caps2["operations"]
+
+    async def test_default_keywords_not_mutated(self) -> None:
+        """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances."""
+        original_defaults = MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.copy()
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="no-mutation-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+        node._introspection_operation_keywords.add("custom_keyword")
+        assert original_defaults == MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
+        assert "custom_keyword" not in MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS

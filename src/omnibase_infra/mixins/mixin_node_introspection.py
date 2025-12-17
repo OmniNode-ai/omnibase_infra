@@ -20,6 +20,55 @@ Note:
     - active_operations_count in heartbeats is currently hardcoded to 0.
       Full implementation deferred - see TODO in _publish_heartbeat().
 
+Security Considerations:
+    This mixin uses Python reflection (via the ``inspect`` module) to automatically
+    discover node capabilities. While this enables powerful service discovery, it
+    has security implications that developers must understand.
+
+    **What Gets Exposed via Introspection**:
+
+    - Public method names (potential operations a node can perform)
+    - Method signatures (parameter names and type annotations)
+    - Protocol and mixin implementations (discovered capabilities)
+    - FSM state information (if ``MixinFSM`` or similar state attributes are present)
+    - Endpoint URLs (health, API, metrics paths)
+    - Node metadata (name, version, type)
+
+    **Built-in Protections**:
+
+    The mixin includes filtering mechanisms to limit exposure:
+
+    - **Private method exclusion**: Methods prefixed with ``_`` are excluded from
+      capability discovery.
+    - **Utility method filtering**: Common utility prefixes (``get_*``, ``set_*``,
+      ``initialize*``, ``start_*``, ``stop_*``) are filtered out by default.
+    - **Operation keyword matching**: Only methods containing operation keywords
+      (``execute``, ``handle``, ``process``, ``run``, ``invoke``, ``call``) are
+      reported as capabilities in the operations list.
+    - **Configurable exclusions**: The ``exclude_prefixes`` parameter in
+      ``initialize_introspection()`` allows additional filtering.
+
+    **Best Practices for Node Developers**:
+
+    - Prefix internal/sensitive methods with ``_`` to exclude them from introspection.
+    - Avoid exposing sensitive business logic in public method names (e.g., use
+      ``process_request`` instead of ``decrypt_and_forward_to_payment_gateway``).
+    - Review exposed capabilities before deploying to production environments.
+    - Consider network segmentation for introspection event topics in multi-tenant
+      environments.
+    - Use the ``exclude_prefixes`` parameter to filter additional method patterns
+      if needed.
+
+    **Network Security Considerations**:
+
+    - Introspection data is published to Kafka topics (``node.introspection``).
+    - In multi-tenant environments, ensure proper topic ACLs are configured.
+    - Consider whether introspection topics should be accessible outside the cluster.
+    - Monitor introspection topic consumers for unauthorized access.
+
+    For more details, see the "Node Introspection Security Considerations" section
+    in ``CLAUDE.md``.
+
 Usage:
     ```python
     from omnibase_infra.mixins import MixinNodeIntrospection
@@ -62,6 +111,7 @@ See Also:
     - MixinAsyncCircuitBreaker for circuit breaker pattern
     - ModelNodeIntrospectionEvent for event model
     - ModelNodeHeartbeatEvent for heartbeat model
+    - CLAUDE.md "Node Introspection Security Considerations" section
 """
 
 from __future__ import annotations
@@ -72,7 +122,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
@@ -90,14 +140,28 @@ INTROSPECTION_TOPIC = "node.introspection"
 HEARTBEAT_TOPIC = "node.heartbeat"
 REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 
-# Type alias for introspection cache structure
-# The cache stores JSON-serializable data from ModelNodeIntrospectionEvent.model_dump()
-IntrospectionCacheValue = str | int | float | bool | list[str] | dict[str, str]
-
 # Type alias for capabilities dictionary structure
 # operations: list of method names, protocols: list of protocol names
 # has_fsm: boolean, method_signatures: dict of method name to signature string
 CapabilitiesDict = dict[str, list[str] | bool | dict[str, str]]
+
+
+class IntrospectionCacheDict(TypedDict):
+    """TypedDict representing the JSON-serialized ModelNodeIntrospectionEvent.
+
+    This type precisely matches the output of ModelNodeIntrospectionEvent.model_dump(mode="json"),
+    enabling proper type checking for cache operations without requiring type: ignore comments.
+    """
+
+    node_id: str
+    node_type: str
+    capabilities: dict[str, list[str] | bool | dict[str, str]]
+    endpoints: dict[str, str]
+    current_state: str | None
+    version: str
+    reason: str
+    correlation_id: str | None  # UUID serializes to string in JSON mode
+    timestamp: str  # datetime serializes to ISO string in JSON mode
 
 
 class MixinNodeIntrospection:
@@ -151,7 +215,7 @@ class MixinNodeIntrospection:
     # All of these are initialized in initialize_introspection()
     #
     # Caching attributes
-    _introspection_cache: dict[str, IntrospectionCacheValue] | None
+    _introspection_cache: IntrospectionCacheDict | None
     _introspection_cache_ttl: float
     _introspection_cached_at: float | None
 
@@ -168,6 +232,78 @@ class MixinNodeIntrospection:
     _introspection_version: str
     _introspection_start_time: float | None
 
+    # Capability discovery configuration
+    _introspection_operation_keywords: set[str]
+    _introspection_exclude_prefixes: set[str]
+
+    # Default operation keywords for capability discovery
+    DEFAULT_OPERATION_KEYWORDS: ClassVar[set[str]] = {
+        "execute",
+        "handle",
+        "process",
+        "run",
+        "invoke",
+        "call",
+    }
+
+    # Default prefixes to exclude from capability discovery
+    DEFAULT_EXCLUDE_PREFIXES: ClassVar[set[str]] = {
+        "_",
+        "get_",
+        "set_",
+        "initialize",
+        "start_",
+        "stop_",
+    }
+
+    # Node-type-specific operation keyword suggestions
+    NODE_TYPE_OPERATION_KEYWORDS: ClassVar[dict[str, set[str]]] = {
+        "EFFECT": {
+            "execute",
+            "handle",
+            "process",
+            "run",
+            "invoke",
+            "call",
+            "fetch",
+            "send",
+            "query",
+            "connect",
+        },
+        "COMPUTE": {
+            "execute",
+            "handle",
+            "process",
+            "run",
+            "compute",
+            "transform",
+            "calculate",
+            "convert",
+            "parse",
+        },
+        "REDUCER": {
+            "execute",
+            "handle",
+            "process",
+            "run",
+            "aggregate",
+            "reduce",
+            "merge",
+            "combine",
+            "accumulate",
+        },
+        "ORCHESTRATOR": {
+            "execute",
+            "handle",
+            "process",
+            "run",
+            "orchestrate",
+            "coordinate",
+            "schedule",
+            "dispatch",
+        },
+    }
+
     def initialize_introspection(
         self,
         node_id: str,
@@ -175,6 +311,8 @@ class MixinNodeIntrospection:
         event_bus: ProtocolEventBus | None = None,
         version: str = "1.0.0",
         cache_ttl: float = 300.0,
+        operation_keywords: set[str] | None = None,
+        exclude_prefixes: set[str] | None = None,
     ) -> None:
         """Initialize introspection configuration.
 
@@ -188,6 +326,12 @@ class MixinNodeIntrospection:
                 Must have `publish_envelope()` method if provided.
             version: Node version string (default: "1.0.0")
             cache_ttl: Cache time-to-live in seconds (default: 300.0)
+            operation_keywords: Optional set of keywords to identify operation methods.
+                Methods containing these keywords are reported as operations.
+                If None, uses DEFAULT_OPERATION_KEYWORDS.
+            exclude_prefixes: Optional set of prefixes to exclude from capability
+                discovery. Methods starting with these prefixes are filtered out.
+                If None, uses DEFAULT_EXCLUDE_PREFIXES.
 
         Raises:
             ValueError: If node_id or node_type is empty
@@ -202,6 +346,16 @@ class MixinNodeIntrospection:
                         event_bus=config.event_bus,
                         version="1.2.0",
                     )
+
+            # With custom operation keywords
+            class MyEffectNode(MixinNodeIntrospection):
+                def __init__(self, config):
+                    self.initialize_introspection(
+                        node_id=config.node_id,
+                        node_type="EFFECT",
+                        event_bus=config.event_bus,
+                        operation_keywords={"fetch", "upload", "download"},
+                    )
             ```
         """
         if not node_id:
@@ -215,6 +369,18 @@ class MixinNodeIntrospection:
         self._introspection_event_bus = event_bus
         self._introspection_version = version
         self._introspection_cache_ttl = cache_ttl
+
+        # Capability discovery configuration - use copies to avoid mutation
+        self._introspection_operation_keywords = (
+            operation_keywords
+            if operation_keywords is not None
+            else self.DEFAULT_OPERATION_KEYWORDS.copy()
+        )
+        self._introspection_exclude_prefixes = (
+            exclude_prefixes
+            if exclude_prefixes is not None
+            else self.DEFAULT_EXCLUDE_PREFIXES.copy()
+        )
 
         # State
         self._introspection_cache = None
@@ -244,6 +410,8 @@ class MixinNodeIntrospection:
                 "version": version,
                 "cache_ttl": cache_ttl,
                 "has_event_bus": event_bus is not None,
+                "operation_keywords_count": len(self._introspection_operation_keywords),
+                "exclude_prefixes_count": len(self._introspection_exclude_prefixes),
             },
         )
 
@@ -387,9 +555,10 @@ class MixinNodeIntrospection:
             "method_signatures": {},
         }
 
-        # Discover operations from public methods using class-level cached signatures
-        operation_keywords = {"execute", "handle", "process", "run", "invoke", "call"}
-        exclude_prefixes = {"_", "get_", "set_", "initialize", "start_", "stop_"}
+        # Use instance configuration for operation discovery
+        # These are set in initialize_introspection() with defaults or custom values
+        operation_keywords = self._introspection_operation_keywords
+        exclude_prefixes = self._introspection_exclude_prefixes
 
         # Get cached method signatures (class-level, computed once per class)
         cached_signatures = self._get_class_method_signatures()
@@ -604,15 +773,24 @@ class MixinNodeIntrospection:
             correlation_id=uuid4(),
         )
 
-        # Update cache
-        self._introspection_cache = event.model_dump(mode="json")  # type: ignore[assignment]
+        # Update cache - cast the model_dump output to our typed dict since we know
+        # the structure matches (model_dump returns dict[str, Any] by default)
+        self._introspection_cache = cast(
+            IntrospectionCacheDict, event.model_dump(mode="json")
+        )
         self._introspection_cached_at = current_time
+
+        # Extract operations list with proper type narrowing
+        operations_value = capabilities.get("operations", [])
+        operations_count = (
+            len(operations_value) if isinstance(operations_value, list) else 0
+        )
 
         logger.debug(
             f"Introspection data refreshed for {self._introspection_node_id}",
             extra={
                 "node_id": self._introspection_node_id,
-                "capabilities_count": len(capabilities.get("operations", [])),  # type: ignore[arg-type]
+                "capabilities_count": operations_count,
                 "endpoints_count": len(endpoints),
             },
         )
@@ -848,11 +1026,20 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
-    async def _registry_listener_loop(self) -> None:
+    async def _registry_listener_loop(
+        self,
+        max_retries: int = 3,
+        base_backoff_seconds: float = 1.0,
+    ) -> None:
         """Background loop listening for REQUEST_INTROSPECTION events.
 
         Subscribes to the request_introspection topic and responds
-        with introspection data when requests are received.
+        with introspection data when requests are received. Includes
+        retry logic with exponential backoff for subscription failures.
+
+        Args:
+            max_retries: Maximum subscription retry attempts (default: 3)
+            base_backoff_seconds: Base backoff time for exponential retry
         """
         if self._introspection_event_bus is None:
             logger.warning(
@@ -886,20 +1073,34 @@ class MixinNodeIntrospection:
                     correlation_id: UUID | None = None
                     if correlation_id_str:
                         try:
-                            correlation_id = UUID(correlation_id_str)
-                        except (ValueError, TypeError, AttributeError) as e:
+                            # UUID() raises ValueError for malformed strings,
+                            # TypeError for non-string inputs (e.g., int, list).
+                            # Convert to string first for safer handling
+                            # of unexpected types.
+                            correlation_id = UUID(str(correlation_id_str))
+                        except (ValueError, TypeError) as e:
+                            # Log warning with structured fields for monitoring.
+                            # Truncate received value preview to avoid log bloat
+                            # from potentially malicious oversized input.
                             logger.warning(
-                                "Invalid correlation_id format in introspection request",
+                                "Invalid correlation_id format in introspection "
+                                "request, generating new correlation_id",
                                 extra={
                                     "node_id": self._introspection_node_id,
                                     "error_type": type(e).__name__,
-                                    "received_value_length": len(
+                                    "error_message": str(e),
+                                    "received_value_type": type(
+                                        correlation_id_str
+                                    ).__name__,
+                                    "received_value_preview": (
                                         str(correlation_id_str)[:50]
-                                    )
-                                    if correlation_id_str
-                                    else 0,
+                                        if correlation_id_str
+                                        else ""
+                                    ),
                                 },
                             )
+                            # Graceful degradation: continue with None,
+                            # will generate new UUID
                             correlation_id = None
                 else:
                     correlation_id = None
@@ -923,49 +1124,124 @@ class MixinNodeIntrospection:
                     exc_info=True,
                 )
 
-        try:
-            # Subscribe to request topic
-            if hasattr(self._introspection_event_bus, "subscribe"):
-                unsubscribe = await self._introspection_event_bus.subscribe(
-                    topic=REQUEST_INTROSPECTION_TOPIC,
-                    group_id=f"introspection-{self._introspection_node_id}",
-                    on_message=on_request,
-                )
-                self._registry_unsubscribe = unsubscribe
-
-                # Wait for stop signal
-                await self._introspection_stop_event.wait()
-
-        except asyncio.CancelledError:
-            logger.debug(
-                f"Registry listener cancelled for {self._introspection_node_id}",
-                extra={"node_id": self._introspection_node_id},
-            )
-        except Exception as e:
-            # Use error() with exc_info=True instead of exception() to include
-            # structured error_type and error_message fields for log aggregation
-            logger.error(  # noqa: G201
-                f"Error in registry listener for {self._introspection_node_id}",
-                extra={
-                    "node_id": self._introspection_node_id,
-                    "error_type": type(e).__name__,
-                    "error_message": str(e),
-                },
-                exc_info=True,
-            )
-        finally:
-            # Clean up subscription
+        # Helper function to clean up subscription
+        async def cleanup_subscription() -> None:
+            """Clean up the current subscription."""
             if self._registry_unsubscribe is not None:
                 try:
                     result = self._registry_unsubscribe()
                     if asyncio.iscoroutine(result):
                         await result
-                except Exception as e:
+                except Exception as cleanup_error:
                     logger.debug(
-                        f"Error unsubscribing registry listener: {e}",
-                        extra={"error": str(e)},
+                        "Error unsubscribing registry listener for "
+                        f"{self._introspection_node_id}",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "error_type": type(cleanup_error).__name__,
+                            "error_message": str(cleanup_error),
+                        },
                     )
                 self._registry_unsubscribe = None
+
+        # Retry loop with exponential backoff for subscription failures
+        retry_count = 0
+        while not self._introspection_stop_event.is_set():
+            try:
+                # Subscribe to request topic
+                if hasattr(self._introspection_event_bus, "subscribe"):
+                    unsubscribe = await self._introspection_event_bus.subscribe(
+                        topic=REQUEST_INTROSPECTION_TOPIC,
+                        group_id=f"introspection-{self._introspection_node_id}",
+                        on_message=on_request,
+                    )
+                    self._registry_unsubscribe = unsubscribe
+
+                    # Reset retry count on successful subscription
+                    retry_count = 0
+
+                    logger.info(
+                        f"Registry listener subscribed for {self._introspection_node_id}",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "topic": REQUEST_INTROSPECTION_TOPIC,
+                        },
+                    )
+
+                    # Wait for stop signal
+                    await self._introspection_stop_event.wait()
+                    # Stop signal received, exit loop
+                    break
+
+                logger.warning(
+                    "Event bus does not support subscribe for "
+                    f"{self._introspection_node_id}",
+                    extra={"node_id": self._introspection_node_id},
+                )
+                break
+
+            except asyncio.CancelledError:
+                logger.debug(
+                    f"Registry listener cancelled for {self._introspection_node_id}",
+                    extra={"node_id": self._introspection_node_id},
+                )
+                break
+            except Exception as e:
+                retry_count += 1
+                logger.error(  # noqa: G201
+                    f"Error in registry listener for {self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                        "retry_count": retry_count,
+                        "max_retries": max_retries,
+                    },
+                    exc_info=True,
+                )
+
+                # Clean up any partial subscription before retry
+                await cleanup_subscription()
+
+                # Check if we should retry
+                if retry_count >= max_retries:
+                    logger.exception(
+                        "Registry listener exhausted retries for "
+                        f"{self._introspection_node_id}",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "retry_count": retry_count,
+                            "max_retries": max_retries,
+                        },
+                    )
+                    break
+
+                # Exponential backoff before retry
+                backoff = base_backoff_seconds * (2 ** (retry_count - 1))
+                logger.info(
+                    f"Registry listener retrying in {backoff}s for "
+                    f"{self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "backoff_seconds": backoff,
+                        "retry_count": retry_count,
+                    },
+                )
+
+                # Wait for backoff period or stop signal
+                try:
+                    await asyncio.wait_for(
+                        self._introspection_stop_event.wait(),
+                        timeout=backoff,
+                    )
+                    # Stop signal received during backoff
+                    break
+                except TimeoutError:
+                    # Normal timeout, continue to retry
+                    pass
+
+        # Final cleanup
+        await cleanup_subscription()
 
         logger.info(
             f"Registry listener stopped for {self._introspection_node_id}",
@@ -1101,5 +1377,5 @@ __all__ = [
     "HEARTBEAT_TOPIC",
     "REQUEST_INTROSPECTION_TOPIC",
     "CapabilitiesDict",
-    "IntrospectionCacheValue",
+    "IntrospectionCacheDict",
 ]
