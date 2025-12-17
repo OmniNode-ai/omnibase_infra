@@ -166,7 +166,7 @@ def validate_infra_patterns(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        strict: Enable strict mode. Defaults to INFRA_PATTERNS_STRICT (True).
+        strict: Enable strict mode. Defaults to INFRA_PATTERNS_STRICT (False).
 
     Returns:
         ModelValidationResult with validation status and filtered errors.
