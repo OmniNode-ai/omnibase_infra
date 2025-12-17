@@ -10,10 +10,15 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+
+from omnibase_infra.models.registration.model_node_capabilities import (
+    ModelNodeCapabilities,
+)
+from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
 
 # Semantic versioning pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
 # See: https://semver.org/
@@ -97,8 +102,8 @@ class ModelNodeRegistration(BaseModel):
         return v
 
     # Capabilities and endpoints
-    capabilities: dict[str, Any] = Field(
-        default_factory=dict, description="Node capabilities"
+    capabilities: ModelNodeCapabilities = Field(
+        default_factory=ModelNodeCapabilities, description="Node capabilities"
     )
     endpoints: dict[str, str] = Field(
         default_factory=dict, description="Exposed endpoints (name -> URL)"
@@ -126,8 +131,8 @@ class ModelNodeRegistration(BaseModel):
                 raise ValueError(f"Invalid URL for endpoint '{name}': {url}")
         return v
 
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional node metadata"
+    metadata: ModelNodeMetadata = Field(
+        default_factory=ModelNodeMetadata, description="Additional node metadata"
     )
 
     # Health tracking

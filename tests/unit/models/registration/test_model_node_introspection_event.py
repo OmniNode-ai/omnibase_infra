@@ -19,7 +19,11 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
+from omnibase_infra.models.registration import (
+    ModelNodeCapabilities,
+    ModelNodeIntrospectionEvent,
+    ModelNodeMetadata,
+)
 
 
 class TestModelNodeIntrospectionEventBasicInstantiation:
@@ -35,10 +39,10 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         assert event.node_id == test_node_id
         assert event.node_type == "effect"
         assert event.node_version == "1.0.0"  # Default value
-        assert event.capabilities == {}
+        assert event.capabilities == ModelNodeCapabilities()
         assert event.endpoints == {}
         assert event.node_role is None
-        assert event.metadata == {}
+        assert event.metadata == ModelNodeMetadata()
         assert event.correlation_id is None
         assert event.network_id is None
         assert event.deployment_id is None
@@ -69,13 +73,17 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         assert event.node_id == test_node_id
         assert event.node_type == "compute"
         assert event.node_version == "2.1.0"
-        assert event.capabilities == {"processing": True, "batch_size": 100}
+        assert event.capabilities == ModelNodeCapabilities(
+            processing=True, batch_size=100
+        )
         assert event.endpoints == {
             "health": "http://localhost:8080/health",
             "metrics": "http://localhost:8080/metrics",
         }
         assert event.node_role == "processor"
-        assert event.metadata == {"version": "1.0.0", "environment": "production"}
+        assert event.metadata == ModelNodeMetadata(
+            version="1.0.0", environment="production"
+        )
         assert event.correlation_id == correlation_id
         assert event.network_id == "network-001"
         assert event.deployment_id == "deploy-001"
@@ -263,13 +271,16 @@ class TestModelNodeIntrospectionEventSerialization:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
-            capabilities={"database": True},
+            capabilities=ModelNodeCapabilities(database=True),
         )
         data = event.model_dump()
         assert isinstance(data, dict)
         assert data["node_id"] == test_node_id
         assert data["node_type"] == "effect"
-        assert data["capabilities"] == {"database": True}
+        # capabilities is now a nested dict from ModelNodeCapabilities
+        assert data["capabilities"]["database"] is True
+        # Check other default values in the capabilities dict
+        assert data["capabilities"]["postgres"] is False
 
     def test_model_dump_mode_json(self) -> None:
         """Test model_dump with mode='json' for JSON-compatible output."""

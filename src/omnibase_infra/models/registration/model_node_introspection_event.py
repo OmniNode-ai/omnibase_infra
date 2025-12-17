@@ -10,10 +10,15 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.models.registration.model_node_capabilities import (
+    ModelNodeCapabilities,
+)
+from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
 
 # Semantic versioning pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$")
@@ -88,8 +93,8 @@ class ModelNodeIntrospectionEvent(BaseModel):
             )
         return v
 
-    capabilities: dict[str, Any] = Field(
-        default_factory=dict, description="Node capabilities"
+    capabilities: ModelNodeCapabilities = Field(
+        default_factory=ModelNodeCapabilities, description="Node capabilities"
     )
     endpoints: dict[str, str] = Field(
         default_factory=dict, description="Exposed endpoints (name -> URL)"
@@ -121,8 +126,8 @@ class ModelNodeIntrospectionEvent(BaseModel):
     node_role: str | None = Field(
         default=None, description="Node role (registry, adapter, etc)"
     )
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional node metadata"
+    metadata: ModelNodeMetadata = Field(
+        default_factory=ModelNodeMetadata, description="Additional node metadata"
     )
     correlation_id: UUID | None = Field(
         default=None, description="Request correlation ID for tracing"

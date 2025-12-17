@@ -19,7 +19,11 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.models.registration import ModelNodeRegistration
+from omnibase_infra.models.registration import (
+    ModelNodeCapabilities,
+    ModelNodeMetadata,
+    ModelNodeRegistration,
+)
 
 
 class TestModelNodeRegistrationBasicInstantiation:
@@ -38,9 +42,9 @@ class TestModelNodeRegistrationBasicInstantiation:
         assert registration.node_id == test_node_id
         assert registration.node_type == "effect"
         assert registration.node_version == "1.0.0"  # Default
-        assert registration.capabilities == {}  # Default
+        assert registration.capabilities == ModelNodeCapabilities()  # Default
         assert registration.endpoints == {}  # Default
-        assert registration.metadata == {}  # Default
+        assert registration.metadata == ModelNodeMetadata()  # Default
         assert registration.health_endpoint is None  # Default
         assert registration.last_heartbeat is None  # Default
         assert registration.registered_at == now
@@ -69,11 +73,11 @@ class TestModelNodeRegistrationBasicInstantiation:
         assert registration.node_id == test_node_id
         assert registration.node_type == "effect"
         assert registration.node_version == "2.1.0"
-        assert registration.capabilities == {
-            "postgres": True,
-            "read": True,
-            "write": True,
-        }
+        assert registration.capabilities == ModelNodeCapabilities(
+            postgres=True,
+            read=True,
+            write=True,
+        )
         assert registration.endpoints["health"] == "http://localhost:8080/health"
         assert registration.endpoints["metrics"] == "http://localhost:8080/metrics"
         assert registration.metadata["environment"] == "production"
@@ -100,18 +104,20 @@ class TestModelNodeRegistrationMutability:
         assert registration.node_version == "2.0.0"
 
     def test_mutable_model_can_update_capabilities(self) -> None:
-        """Test that capabilities dict can be reassigned."""
+        """Test that capabilities model can be reassigned."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
             node_id=test_node_id,
             node_type="effect",
-            capabilities={"original": True},
+            capabilities=ModelNodeCapabilities(feature=True),
             registered_at=now,
             updated_at=now,
         )
-        registration.capabilities = {"modified": True, "new_capability": True}
-        assert registration.capabilities == {"modified": True, "new_capability": True}
+        registration.capabilities = ModelNodeCapabilities(postgres=True, read=True)
+        assert registration.capabilities == ModelNodeCapabilities(
+            postgres=True, read=True
+        )
 
     def test_mutable_model_can_update_endpoints(self) -> None:
         """Test that endpoints dict can be reassigned."""
@@ -132,18 +138,22 @@ class TestModelNodeRegistrationMutability:
         assert registration.endpoints["api"] == "http://new/api"
 
     def test_mutable_model_can_update_metadata(self) -> None:
-        """Test that metadata dict can be reassigned."""
+        """Test that metadata model can be reassigned."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
             node_id=test_node_id,
             node_type="effect",
-            metadata={"key": "old_value"},
+            metadata=ModelNodeMetadata(key="old_value"),
             registered_at=now,
             updated_at=now,
         )
-        registration.metadata = {"key": "new_value", "extra": "data"}
-        assert registration.metadata == {"key": "new_value", "extra": "data"}
+        registration.metadata = ModelNodeMetadata(
+            key="new_value", environment="production"
+        )
+        assert registration.metadata == ModelNodeMetadata(
+            key="new_value", environment="production"
+        )
 
     def test_mutable_model_can_update_health_endpoint(self) -> None:
         """Test that health_endpoint can be modified."""
@@ -231,8 +241,8 @@ class TestModelNodeRegistrationDefaultValues:
         )
         assert registration.node_version == "1.0.0"
 
-    def test_default_capabilities_empty_dict(self) -> None:
-        """Test that capabilities defaults to empty dict."""
+    def test_default_capabilities_empty_model(self) -> None:
+        """Test that capabilities defaults to empty ModelNodeCapabilities."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
@@ -241,8 +251,8 @@ class TestModelNodeRegistrationDefaultValues:
             registered_at=now,
             updated_at=now,
         )
-        assert registration.capabilities == {}
-        assert isinstance(registration.capabilities, dict)
+        assert registration.capabilities == ModelNodeCapabilities()
+        assert isinstance(registration.capabilities, ModelNodeCapabilities)
 
     def test_default_endpoints_empty_dict(self) -> None:
         """Test that endpoints defaults to empty dict."""
@@ -257,8 +267,8 @@ class TestModelNodeRegistrationDefaultValues:
         assert registration.endpoints == {}
         assert isinstance(registration.endpoints, dict)
 
-    def test_default_metadata_empty_dict(self) -> None:
-        """Test that metadata defaults to empty dict."""
+    def test_default_metadata_empty_model(self) -> None:
+        """Test that metadata defaults to empty ModelNodeMetadata."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
@@ -267,8 +277,8 @@ class TestModelNodeRegistrationDefaultValues:
             registered_at=now,
             updated_at=now,
         )
-        assert registration.metadata == {}
-        assert isinstance(registration.metadata, dict)
+        assert registration.metadata == ModelNodeMetadata()
+        assert isinstance(registration.metadata, ModelNodeMetadata)
 
     def test_default_health_endpoint_none(self) -> None:
         """Test that health_endpoint defaults to None."""
@@ -294,8 +304,8 @@ class TestModelNodeRegistrationDefaultValues:
         )
         assert registration.last_heartbeat is None
 
-    def test_default_dicts_are_independent(self) -> None:
-        """Test that default dicts are independent between instances."""
+    def test_default_models_are_independent(self) -> None:
+        """Test that default models are independent between instances."""
         test_node_id1 = uuid4()
         test_node_id2 = uuid4()
         now = datetime.now(UTC)
@@ -311,10 +321,11 @@ class TestModelNodeRegistrationDefaultValues:
             registered_at=now,
             updated_at=now,
         )
-        # Modify reg1's capabilities
-        reg1.capabilities["test"] = True
-        # reg2's capabilities should be unaffected
-        assert "test" not in reg2.capabilities
+        # Modify reg1's capabilities by replacing with new model
+        reg1.capabilities = ModelNodeCapabilities(postgres=True)
+        # reg2's capabilities should be unaffected (still default)
+        assert reg2.capabilities.postgres is False
+        assert reg1.capabilities.postgres is True
 
 
 class TestModelNodeRegistrationSerialization:
@@ -381,7 +392,7 @@ class TestModelNodeRegistrationSerialization:
             node_id=test_node_id,
             node_type="effect",
             node_version="1.5.0",
-            capabilities={"feature": True},
+            capabilities=ModelNodeCapabilities(feature=True),
             registered_at=now,
             updated_at=now,
         )
@@ -390,7 +401,10 @@ class TestModelNodeRegistrationSerialization:
         assert data["node_id"] == test_node_id
         assert data["node_type"] == "effect"
         assert data["node_version"] == "1.5.0"
-        assert data["capabilities"] == {"feature": True}
+        # capabilities is now a nested dict from ModelNodeCapabilities
+        assert data["capabilities"]["feature"] is True
+        # Check other default values in the capabilities dict
+        assert data["capabilities"]["postgres"] is False
 
     def test_model_dump_mode_json(self) -> None:
         """Test model_dump with mode='json' for JSON-compatible output."""
@@ -703,23 +717,24 @@ class TestModelNodeRegistrationFromAttributes:
         assert registration.updated_at == now
 
 
-class TestModelNodeRegistrationMutableDicts:
-    """Tests for mutable dict field behavior."""
+class TestModelNodeRegistrationMutableModels:
+    """Tests for mutable model field behavior."""
 
-    def test_can_mutate_capabilities_in_place(self) -> None:
-        """Test that capabilities dict can be mutated in place."""
+    def test_can_mutate_capabilities_via_attribute(self) -> None:
+        """Test that capabilities model attributes can be mutated."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
             node_id=test_node_id,
             node_type="effect",
-            capabilities={"original": True},
+            capabilities=ModelNodeCapabilities(feature=True),
             registered_at=now,
             updated_at=now,
         )
-        registration.capabilities["new_key"] = "new_value"
-        assert registration.capabilities["original"] is True
-        assert registration.capabilities["new_key"] == "new_value"
+        # Mutate via attribute assignment (ModelNodeCapabilities has frozen=False)
+        registration.capabilities.postgres = True
+        assert registration.capabilities.feature is True
+        assert registration.capabilities.postgres is True
 
     def test_can_mutate_endpoints_in_place(self) -> None:
         """Test that endpoints dict can be mutated in place."""
@@ -736,41 +751,43 @@ class TestModelNodeRegistrationMutableDicts:
         assert registration.endpoints["health"] == "http://localhost/health"
         assert registration.endpoints["metrics"] == "http://localhost/metrics"
 
-    def test_can_mutate_metadata_in_place(self) -> None:
-        """Test that metadata dict can be mutated in place."""
+    def test_can_mutate_metadata_via_attribute(self) -> None:
+        """Test that metadata model attributes can be mutated."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
             node_id=test_node_id,
             node_type="effect",
-            metadata={"key1": "value1"},
+            metadata=ModelNodeMetadata(key1="value1"),
             registered_at=now,
             updated_at=now,
         )
-        registration.metadata["key2"] = "value2"
-        del registration.metadata["key1"]
-        assert "key1" not in registration.metadata
-        assert registration.metadata["key2"] == "value2"
+        # Mutate via attribute assignment (ModelNodeMetadata has frozen=False)
+        registration.metadata.environment = "production"
+        registration.metadata.key1 = None  # Set to None instead of delete
+        assert registration.metadata.key1 is None
+        assert registration.metadata.environment == "production"
 
-    def test_can_clear_dicts(self) -> None:
-        """Test that dict fields can be cleared."""
+    def test_can_reset_models_to_defaults(self) -> None:
+        """Test that model fields can be reset to defaults."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
             node_id=test_node_id,
             node_type="effect",
-            capabilities={"key": "value"},
+            capabilities=ModelNodeCapabilities(postgres=True),
             endpoints={"health": "http://localhost/health"},
-            metadata={"meta": "data"},
+            metadata=ModelNodeMetadata(environment="production"),
             registered_at=now,
             updated_at=now,
         )
-        registration.capabilities.clear()
+        # Reset by assigning new default models
+        registration.capabilities = ModelNodeCapabilities()
         registration.endpoints.clear()
-        registration.metadata.clear()
-        assert registration.capabilities == {}
+        registration.metadata = ModelNodeMetadata()
+        assert registration.capabilities == ModelNodeCapabilities()
         assert registration.endpoints == {}
-        assert registration.metadata == {}
+        assert registration.metadata == ModelNodeMetadata()
 
 
 class TestModelNodeRegistrationEquality:
@@ -932,18 +949,18 @@ class TestModelNodeRegistrationCopying:
         registration = ModelNodeRegistration(
             node_id=test_node_id,
             node_type="effect",
-            capabilities={"key": "value"},
+            capabilities=ModelNodeCapabilities(postgres=True),
             registered_at=now,
             updated_at=now,
         )
         copied = registration.model_copy(deep=True)
         # Both should have same values
         assert copied.capabilities == registration.capabilities
-        # But dict should be independent (deep copy)
+        # But model should be independent (deep copy)
         assert copied.capabilities is not registration.capabilities
         # Modifying copy should not affect original
-        copied.capabilities["new_key"] = "new_value"
-        assert "new_key" not in registration.capabilities
+        copied.capabilities.read = True
+        assert registration.capabilities.read is False
 
     def test_model_copy_shallow_shares_dict_reference(self) -> None:
         """Test that shallow copy shares nested dict references."""
