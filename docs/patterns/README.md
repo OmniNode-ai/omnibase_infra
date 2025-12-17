@@ -52,7 +52,7 @@ This directory contains detailed implementation guides and best practices for ON
 | KAFKA | `SERVICE_UNAVAILABLE` | [Circuit Breaker](./circuit_breaker_implementation.md#kafka-publisher-protection) |
 | CONSUL | `SERVICE_UNAVAILABLE` | [Error Handling](./error_handling_patterns.md#transport-type-mapping) |
 | VAULT | `SERVICE_UNAVAILABLE` | [Error Recovery](./error_recovery_patterns.md#credential-refresh-pattern) |
-| REDIS | `SERVICE_UNAVAILABLE` | [Error Recovery](./error_recovery_patterns.md#graceful-degradation-pattern) |
+| VALKEY | `SERVICE_UNAVAILABLE` | [Error Recovery](./error_recovery_patterns.md#graceful-degradation-pattern) |
 
 ## Pattern Relationships
 

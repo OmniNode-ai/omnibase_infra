@@ -271,7 +271,7 @@ ModelOnexError (from omnibase_core)
 | `KAFKA` | `SERVICE_UNAVAILABLE` | Message broker service unavailable |
 | `CONSUL` | `SERVICE_UNAVAILABLE` | Service discovery unavailable |
 | `VAULT` | `SERVICE_UNAVAILABLE` | Secret management service unavailable |
-| `REDIS` | `SERVICE_UNAVAILABLE` | Cache service unavailable |
+| `VALKEY` | `SERVICE_UNAVAILABLE` | Cache service unavailable |
 | `None` (no context) | `SERVICE_UNAVAILABLE` | Generic fallback |
 
 ```python
@@ -558,7 +558,7 @@ Use `EnumInfraTransportType` for transport identification in error context:
 | `KAFKA` | `"kafka"` | Kafka message broker |
 | `CONSUL` | `"consul"` | Service discovery |
 | `VAULT` | `"vault"` | Secret management |
-| `REDIS` | `"redis"` | Cache/message transport |
+| `VALKEY` | `"valkey"` | Cache/message transport |
 | `GRPC` | `"grpc"` | gRPC protocol |
 
 ## 🏗️ Infrastructure-Specific Patterns
@@ -663,7 +663,7 @@ self._init_circuit_breaker(
     threshold=10,             # Open after 10 failures
     reset_timeout=30.0,       # 30 seconds recovery
     service_name="cache-service",
-    transport_type=EnumInfraTransportType.REDIS,
+    transport_type=EnumInfraTransportType.VALKEY,
 )
 ```
 

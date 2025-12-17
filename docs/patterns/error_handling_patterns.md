@@ -64,7 +64,7 @@ Error codes are automatically selected based on transport type:
 |-----------|-------------------|-----------|
 | DATABASE | `DATABASE_CONNECTION_ERROR` | PostgreSQL connection failures, query timeouts |
 | HTTP/GRPC | `NETWORK_ERROR` | REST API failures, gRPC stream errors |
-| KAFKA/CONSUL/VAULT/REDIS | `SERVICE_UNAVAILABLE` | Message broker down, service registry unavailable |
+| KAFKA/CONSUL/VAULT/VALKEY | `SERVICE_UNAVAILABLE` | Message broker down, service registry unavailable |
 
 ### Transport Type Mapping
 
@@ -82,7 +82,7 @@ EnumInfraTransportType.GRPC      # gRPC services
 EnumInfraTransportType.KAFKA     # Message broker
 EnumInfraTransportType.CONSUL    # Service discovery
 EnumInfraTransportType.VAULT     # Secret management
-EnumInfraTransportType.REDIS     # Cache layer
+EnumInfraTransportType.VALKEY    # Cache layer
 ```
 
 ## Error Sanitization

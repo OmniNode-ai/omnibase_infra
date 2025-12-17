@@ -351,7 +351,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (108).
+        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (160).
         strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:
