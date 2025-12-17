@@ -234,7 +234,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Infrastructure thresholds (stricter than core defaults)
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
-INFRA_PATTERNS_STRICT = True    # Strict pattern enforcement
+INFRA_PATTERNS_STRICT = False   # Relaxed pattern enforcement for infrastructure
 
 # Infrastructure allowances (more permissive than core defaults)
 INFRA_MAX_UNIONS = 20           # Infrastructure needs typed handlers

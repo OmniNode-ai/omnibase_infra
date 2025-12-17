@@ -65,16 +65,26 @@ INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Maximum allowed complex union types in infrastructure code.
-# TECH DEBT (OMN-871): Temporarily increased to 175 violations (baseline as of 2025-12-17)
-# Target: Reduce incrementally as codebase evolves
-# Infrastructure code has many typed handlers (Consul, Kafka, Vault, PostgreSQL adapters)
-# which require typed unions for protocol implementations and message routing.
-# Set to accommodate infrastructure service integration patterns including
-# RuntimeHostProcess, handler wiring, and strongly-typed optional model wrappers
-# while preventing overly complex union types.
-# Note: The omnibase_core validator counts X | None (PEP 604) patterns as unions,
-# which is the ONEX-preferred syntax per CLAUDE.md.
-INFRA_MAX_UNIONS = 175
+# TECH DEBT (OMN-871): Baseline as of 2025-12-17, target: reduce incrementally
+#
+# Current count breakdown (~195 unions as of 2025-12-17):
+# - Infrastructure handlers (~90): Consul, Kafka, Vault, PostgreSQL adapters
+# - Runtime components (~40): RuntimeHostProcess, handler/policy registries, wiring
+# - Models (~24): Event bus models, error context, runtime config, registration events
+# - Registration models (~41): ModelNodeCapabilities, ModelNodeMetadata with nullable fields
+#
+# OMN-891 registration event models contribute unions:
+# - model_node_heartbeat_event.py (3): memory_usage_mb, cpu_usage_percent, correlation_id
+# - model_node_introspection_event.py (5): node_role, correlation_id, network_id,
+#     deployment_id, epoch
+# - model_node_registration.py (2): health_endpoint, last_heartbeat
+# - model_node_capabilities.py (~18): nullable fields for optional capability flags
+# - model_node_metadata.py (~13): nullable fields for optional metadata
+#
+# Note: The validator counts X | None (PEP 604) patterns as unions, which is
+# the ONEX-preferred syntax per CLAUDE.md. Threshold set to 200 to provide a
+# small buffer above the current baseline while maintaining awareness of union complexity.
+INFRA_MAX_UNIONS = 200
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -83,11 +93,11 @@ INFRA_MAX_UNIONS = 175
 INFRA_MAX_VIOLATIONS = 0
 
 # Strict mode for pattern validation in infrastructure code.
-# Set to False to allow legitimate infrastructure patterns (registry classes with many methods,
-# functions with multiple parameters for configuration).
-# Pattern violations are still logged but don't fail validation.
-# Infrastructure code has unique requirements (registries, adapters) that differ from core library code.
-INFRA_PATTERNS_STRICT = False
+# Set to True to enforce strict pattern compliance per ONEX CLAUDE.md mandates.
+# Specific documented exemptions (KafkaEventBus, RuntimeHostProcess) are handled via the
+# exempted_patterns list in validate_infra_patterns(), NOT via global relaxation.
+# All other infrastructure code must comply with standard ONEX pattern thresholds.
+INFRA_PATTERNS_STRICT = True
 
 # Strict mode for union usage validation in infrastructure code.
 # Set to False to allow necessary unions for protocol implementations and service adapters
@@ -171,7 +181,7 @@ def validate_infra_patterns(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        strict: Enable strict mode. Defaults to INFRA_PATTERNS_STRICT (False).
+        strict: Enable strict mode. Defaults to INFRA_PATTERNS_STRICT (True).
 
     Returns:
         ModelValidationResult with validation status and filtered errors.
@@ -216,6 +226,46 @@ def validate_infra_patterns(
             "file_pattern": r"runtime_host_process\.py",
             "class_pattern": r"Class 'RuntimeHostProcess'",
             "violation_pattern": r"has \d+ methods",
+        },
+        # RuntimeHostProcess __init__ parameter count exemption (OMN-756)
+        # Central coordinator requires multiple configuration parameters:
+        # - event_bus, input_topic, output_topic, config, handler_registry
+        # These parameters configure event routing and handler binding.
+        {
+            "file_pattern": r"runtime_host_process\.py",
+            "method_pattern": r"Function '__init__'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # PolicyRegistry method count exemption
+        # Central registry class requires comprehensive policy management:
+        # - CRUD operations (register, get, update, remove)
+        # - Query operations (list, filter, search)
+        # - Lifecycle operations (enable, disable, validate)
+        # This is a domain registry pattern, not a code smell.
+        {
+            "file_pattern": r"policy_registry\.py",
+            "class_pattern": r"Class 'PolicyRegistry'",
+            "violation_pattern": r"has \d+ methods",
+        },
+        # PolicyRegistry.register_policy parameter count exemption
+        # Policy registration requires multiple fields for complete policy definition
+        {
+            "file_pattern": r"policy_registry\.py",
+            "method_pattern": r"Function 'register_policy'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # ModelPolicyKey.policy_id exemption (OMN-812)
+        # policy_id is intentionally a human-readable string identifier (e.g., 'exponential_backoff'),
+        # NOT a UUID. The _id suffix triggers false positive UUID suggestions.
+        {
+            "file_pattern": r"model_policy_key\.py",
+            "violation_pattern": r"Field 'policy_id' should use UUID",
+        },
+        # ModelPolicyRegistration.policy_id exemption (OMN-812)
+        # Same rationale as ModelPolicyKey - semantic identifier, not UUID
+        {
+            "file_pattern": r"model_policy_registration\.py",
+            "violation_pattern": r"Field 'policy_id' should use UUID",
         },
     ]
 
@@ -378,7 +428,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (175).
+        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (200).
         strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:
