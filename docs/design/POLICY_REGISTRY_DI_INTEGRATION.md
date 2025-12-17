@@ -403,7 +403,7 @@ def register_policy_in_container(
     policy_class: type[ProtocolPolicy],
     policy_type: str | EnumPolicyType,
     version: str = "1.0.0",
-    deterministic_async: bool = False,
+    allow_async: bool = False,
 ) -> None:
     """Register a policy in container-managed registry.
 
@@ -415,11 +415,11 @@ def register_policy_in_container(
         policy_class: The policy class to register.
         policy_type: Whether this is orchestrator or reducer policy.
         version: Semantic version string (default: "1.0.0").
-        deterministic_async: If True, allows async interface.
+        allow_async: If True, allows async interface.
 
     Raises:
         PolicyRegistryError: If policy has async methods and
-                           deterministic_async=False.
+                           allow_async=False.
 
     Example:
         >>> register_policy_in_container(
@@ -435,7 +435,7 @@ def register_policy_in_container(
         policy_class=policy_class,
         policy_type=policy_type,
         version=version,
-        deterministic_async=deterministic_async,
+        allow_async=allow_async,
     )
 
 

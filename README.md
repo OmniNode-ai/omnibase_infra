@@ -106,3 +106,10 @@ Ruff handles both formatting and linting (replaces black + isort):
 ### Development Workflow
 
 Follow the patterns in `omniintelligence` repository for ONEX compliance.
+
+### Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+- Commit message format and conventions
+- Agent attribution guidelines
+- Code review processes
