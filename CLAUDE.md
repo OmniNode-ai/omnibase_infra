@@ -40,12 +40,21 @@
 |------|-------------|---------------|---------|
 | Model | `model_<name>.py` | `Model<Name>` | `model_kafka_message.py` → `ModelKafkaMessage` |
 | Enum | `enum_<name>.py` | `Enum<Name>` | `enum_handler_type.py` → `EnumHandlerType` |
-| Protocol | `protocol_<name>.py` | `Protocol<Name>` | `protocol_event_bus.py` → `ProtocolEventBus` |
+| Protocol | `protocol_<name>.py` or `protocols.py` | `Protocol<Name>` | See note below |
 | Mixin | `mixin_<name>.py` | `Mixin<Name>` | `mixin_health_check.py` → `MixinHealthCheck` |
 | Service | `service_<name>.py` | `Service<Name>` | `service_discovery.py` → `ServiceDiscovery` |
 | Util | `util_<name>.py` | (functions) | `util_retry.py` → `retry_with_backoff()` |
 | Error | In `errors/` | `<Domain><Type>Error` | `InfraConnectionError` |
 | Node | `node.py` | `Node<Name><Type>` | `NodePostgresAdapterEffect` |
+
+**Protocol File Naming**:
+- **Single protocol**: Use `protocol_<name>.py` for standalone protocols (e.g., `protocol_event_bus.py` contains `ProtocolEventBus`)
+- **Domain-grouped protocols**: Use `protocols.py` when multiple cohesive protocols belong to a specific domain or node module (e.g., `nodes/<name>/v1_0_0/protocols.py` containing `ProtocolNodeInput`, `ProtocolNodeOutput`, `ProtocolNodeConfig`)
+
+Domain grouping is preferred when:
+- Protocols are tightly coupled and always used together
+- Protocols define the complete interface for a single node or module
+- Protocols share common type dependencies within the same bounded context
 
 ### Registry Naming Conventions
 
