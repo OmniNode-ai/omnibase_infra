@@ -143,27 +143,30 @@ class MixinNodeIntrospection:
     # Maps class -> {method_name: signature_string}
     # This avoids expensive reflection on each introspection call since
     # method signatures don't change after class definition.
+    # NOTE: ClassVar is intentionally shared across all instances - this is correct
+    # behavior for a per-class cache of immutable method signatures.
     _class_method_cache: ClassVar[dict[type, dict[str, str]]] = {}
 
-    # Caching attributes (class-level defaults, instance overrides in initialize)
-    _introspection_cache: dict[str, IntrospectionCacheValue] | None = None
-    _introspection_cache_ttl: float = 300.0  # 5 minutes
-    _introspection_cached_at: float | None = None
+    # Type annotations for instance attributes (no default values to avoid shared state)
+    # All of these are initialized in initialize_introspection()
+    #
+    # Caching attributes
+    _introspection_cache: dict[str, IntrospectionCacheValue] | None
+    _introspection_cache_ttl: float
+    _introspection_cached_at: float | None
 
     # Background task attributes
-    _heartbeat_task: asyncio.Task[None] | None = None
-    _registry_listener_task: asyncio.Task[None] | None = None
-    _introspection_stop_event: asyncio.Event | None = None
-    _registry_unsubscribe: Callable[[], None] | Callable[[], Awaitable[None]] | None = (
-        None
-    )
+    _heartbeat_task: asyncio.Task[None] | None
+    _registry_listener_task: asyncio.Task[None] | None
+    _introspection_stop_event: asyncio.Event | None
+    _registry_unsubscribe: Callable[[], None] | Callable[[], Awaitable[None]] | None
 
     # Configuration attributes
-    _introspection_node_id: str | None = None
-    _introspection_node_type: str | None = None
-    _introspection_event_bus: ProtocolEventBus | None = None
-    _introspection_version: str = "1.0.0"
-    _introspection_start_time: float | None = None
+    _introspection_node_id: str | None
+    _introspection_node_type: str | None
+    _introspection_event_bus: ProtocolEventBus | None
+    _introspection_version: str
+    _introspection_start_time: float | None
 
     def initialize_introspection(
         self,
