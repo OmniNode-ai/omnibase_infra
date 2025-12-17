@@ -8,16 +8,14 @@ execution in the dual registration reducer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from uuid import UUID
 
-if TYPE_CHECKING:
-    from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
+from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 
 
-@dataclass
-class ModelFSMContext:
+class ModelFSMContext(BaseModel):
     """Context maintained during FSM execution.
 
     Matches context_variables in contracts/fsm/dual_registration_reducer_fsm.yaml.
@@ -35,16 +33,39 @@ class ModelFSMContext:
         registration_start_time: Start time for performance tracking.
     """
 
-    correlation_id: UUID | None = None
-    node_id: str | None = None
-    node_type: str | None = None
-    introspection_payload: ModelNodeIntrospectionEvent | None = None
-    consul_registered: bool = False
-    postgres_registered: bool = False
-    success_count: int = 0
-    consul_error: str | None = None
-    postgres_error: str | None = None
-    registration_start_time: float = 0.0
+    model_config = ConfigDict(frozen=False, extra="forbid")
+
+    correlation_id: UUID | None = Field(
+        default=None, description="Request correlation ID for distributed tracing"
+    )
+    node_id: UUID | None = Field(
+        default=None, description="Unique identifier of the node being registered"
+    )
+    node_type: str | None = Field(
+        default=None,
+        description="ONEX node type (effect, compute, reducer, orchestrator)",
+    )
+    introspection_payload: ModelNodeIntrospectionEvent | None = Field(
+        default=None, description="The original introspection event being processed"
+    )
+    consul_registered: bool = Field(
+        default=False, description="Whether Consul registration succeeded"
+    )
+    postgres_registered: bool = Field(
+        default=False, description="Whether PostgreSQL registration succeeded"
+    )
+    success_count: int = Field(
+        default=0, description="Number of successful registrations (0, 1, or 2)"
+    )
+    consul_error: str | None = Field(
+        default=None, description="Error message if Consul registration failed"
+    )
+    postgres_error: str | None = Field(
+        default=None, description="Error message if PostgreSQL registration failed"
+    )
+    registration_start_time: float = Field(
+        default=0.0, description="Start time for performance tracking"
+    )
 
 
 __all__ = ["ModelFSMContext"]

@@ -280,6 +280,16 @@ state_transitions:
       actions:
         - action: reset_for_next_event
           description: "Reset reducer state for next introspection event"
+    # -------------------------------------------------------------------------
+    # registration_failed -> idle (failure result emitted)
+    # -------------------------------------------------------------------------
+    - from: registration_failed
+      to: idle
+      trigger: failure_result_emitted
+      description: "Failure result emitted, ready for next event"
+      actions:
+        - action: reset_for_next_event
+          description: "Reset reducer state for next introspection event"
 # =============================================================================
 # CONTEXT VARIABLES
 # =============================================================================

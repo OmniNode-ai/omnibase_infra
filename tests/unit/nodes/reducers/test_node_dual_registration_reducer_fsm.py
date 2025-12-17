@@ -33,6 +33,7 @@ Coverage Goals:
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -105,11 +106,15 @@ error_handling:
 
 
 @pytest.fixture
-def fsm_contract_path(sample_fsm_contract_yaml: str) -> Path:
+def fsm_contract_path(sample_fsm_contract_yaml: str) -> Generator[Path, None, None]:
     """Create temporary FSM contract file."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(sample_fsm_contract_yaml)
-        return Path(f.name)
+        temp_path = Path(f.name)
+    yield temp_path
+    # Cleanup
+    if temp_path.exists():
+        temp_path.unlink()
 
 
 @pytest.fixture
@@ -667,10 +672,8 @@ class TestFSMResetCycles:
         event3 = create_introspection_event(node_type="reducer")
         result3 = await dual_registration_reducer.execute(event3)
         assert result3.status == "failed"
-        # Note: registration_failed does not return to idle
-        assert (
-            dual_registration_reducer.current_state == EnumFSMState.REGISTRATION_FAILED
-        )
+        # Note: registration_failed now transitions back to idle via FAILURE_RESULT_EMITTED
+        assert dual_registration_reducer.current_state == EnumFSMState.IDLE
 
         # Verify metrics
         assert dual_registration_reducer.metrics.total_registrations == 3
@@ -975,20 +978,27 @@ state_transitions:
   states: []
   transitions: []
 """
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(invalid_contract)
-            contract_path = Path(f.name)
+        contract_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", delete=False
+            ) as f:
+                f.write(invalid_contract)
+                contract_path = Path(f.name)
 
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=contract_path,
-        )
+            reducer = NodeDualRegistrationReducer(
+                consul_handler=mock_consul_handler,
+                db_adapter=mock_db_adapter,
+                fsm_contract_path=contract_path,
+            )
 
-        with pytest.raises(RuntimeHostError) as exc_info:
-            await reducer.initialize()
+            with pytest.raises(RuntimeHostError) as exc_info:
+                await reducer.initialize()
 
-        assert "Invalid initial state" in str(exc_info.value)
+            assert "Invalid initial state" in str(exc_info.value)
+        finally:
+            if contract_path and contract_path.exists():
+                contract_path.unlink()
 
 
 # -----------------------------------------------------------------------------

@@ -27,6 +27,7 @@ class EnumFSMTrigger(str, Enum):
         ALL_BACKENDS_FAILED: Both backends failed.
         RESULT_EMITTED: Success result emitted to event bus.
         PARTIAL_RESULT_EMITTED: Partial result emitted to event bus.
+        FAILURE_RESULT_EMITTED: Failure result emitted to event bus.
     """
 
     INTROSPECTION_EVENT_RECEIVED = "introspection_event_received"
@@ -39,6 +40,7 @@ class EnumFSMTrigger(str, Enum):
     ALL_BACKENDS_FAILED = "all_backends_failed"
     RESULT_EMITTED = "result_emitted"
     PARTIAL_RESULT_EMITTED = "partial_result_emitted"
+    FAILURE_RESULT_EMITTED = "failure_result_emitted"
 
 
 __all__ = ["EnumFSMTrigger"]

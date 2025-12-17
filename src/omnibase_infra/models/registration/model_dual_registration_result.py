@@ -40,7 +40,7 @@ class ModelDualRegistrationResult(BaseModel):
     Example:
         >>> from uuid import uuid4
         >>> result = ModelDualRegistrationResult(
-        ...     node_id="node-postgres-adapter-001",
+        ...     node_id=uuid4(),
         ...     consul_registered=True,
         ...     postgres_registered=True,
         ...     status="success",
@@ -53,7 +53,7 @@ class ModelDualRegistrationResult(BaseModel):
     Example (partial failure):
         >>> from uuid import uuid4
         >>> result = ModelDualRegistrationResult(
-        ...     node_id="node-kafka-adapter-001",
+        ...     node_id=uuid4(),
         ...     consul_registered=True,
         ...     postgres_registered=False,
         ...     status="partial",

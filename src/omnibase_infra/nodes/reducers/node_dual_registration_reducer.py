@@ -37,6 +37,7 @@ Related:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import UTC, datetime
@@ -45,7 +46,6 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 import yaml
-from pydantic import BaseModel
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -67,10 +67,41 @@ from omnibase_infra.nodes.reducers.models import (
     ModelReducerMetrics,
 )
 
+# Valid ONEX node types for introspection event validation.
+# This constant serves as defense-in-depth validation for mock objects in tests,
+# since ModelNodeIntrospectionEvent.node_type already enforces this via Literal type.
+_VALID_NODE_TYPES: frozenset[str] = frozenset(
+    {"effect", "compute", "reducer", "orchestrator"}
+)
+
 logger = logging.getLogger(__name__)
 
 
-class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
+def _find_contracts_dir() -> Path:
+    """Find contracts directory by traversing up from current file.
+
+    This is more robust than multiple .parent calls and handles
+    different installation/development environments.
+
+    Returns:
+        Path to the contracts directory.
+
+    Raises:
+        RuntimeError: If contracts directory cannot be found.
+    """
+    current = Path(__file__).resolve().parent
+    while current != current.parent:
+        contracts_dir = current / "contracts"
+        if contracts_dir.is_dir():
+            return contracts_dir
+        current = current.parent
+    raise RuntimeError(
+        "Could not find contracts directory. "
+        "Ensure the FSM contract exists at contracts/fsm/dual_registration_reducer_fsm.yaml"
+    )
+
+
+class NodeDualRegistrationReducer:
     """Dual registration reducer that aggregates registration state.
 
     Listens for NODE_INTROSPECTION events and coordinates dual registration
@@ -137,16 +168,21 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
         self._fsm_context = ModelFSMContext()
         self._fsm_contract: ModelFSMContract | None = None
 
-        # FSM contract path
+        # FSM contract path - use robust path resolution
         if fsm_contract_path is None:
-            # Default to contracts/fsm/dual_registration_reducer_fsm.yaml
-            # relative to project root
-            self._fsm_contract_path = (
-                Path(__file__).parent.parent.parent.parent.parent
-                / "contracts"
-                / "fsm"
-                / "dual_registration_reducer_fsm.yaml"
-            )
+            try:
+                contracts_dir = _find_contracts_dir()
+                self._fsm_contract_path = (
+                    contracts_dir / "fsm" / "dual_registration_reducer_fsm.yaml"
+                )
+            except RuntimeError:
+                # Fallback to relative path construction for backwards compatibility
+                self._fsm_contract_path = (
+                    Path(__file__).parent.parent.parent.parent.parent
+                    / "contracts"
+                    / "fsm"
+                    / "dual_registration_reducer_fsm.yaml"
+                )
         else:
             self._fsm_contract_path = fsm_contract_path
 
@@ -287,7 +323,7 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
         # Initialize FSM context
         self._fsm_context = ModelFSMContext(
             correlation_id=cid,
-            node_id=str(event.node_id),
+            node_id=event.node_id,
             node_type=event.node_type,
             introspection_payload=event,
             registration_start_time=time.perf_counter(),
@@ -306,6 +342,8 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
             if not validation_passed:
                 # FSM: validating_payload -> registration_failed
                 await self._transition(EnumFSMTrigger.VALIDATION_FAILED)
+                # FSM: registration_failed -> idle
+                await self._transition(EnumFSMTrigger.FAILURE_RESULT_EMITTED)
                 return self._build_failed_result(cid, "Validation failed")
 
             # FSM: validating_payload -> registering_parallel
@@ -331,6 +369,8 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
             else:
                 # FSM: aggregating_results -> registration_failed
                 await self._transition(EnumFSMTrigger.ALL_BACKENDS_FAILED)
+                # FSM: registration_failed -> idle
+                await self._transition(EnumFSMTrigger.FAILURE_RESULT_EMITTED)
 
             return result
 
@@ -416,6 +456,11 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
                 EnumFSMState.PARTIAL_FAILURE,
                 EnumFSMTrigger.PARTIAL_RESULT_EMITTED,
             ): EnumFSMState.IDLE,
+            # registration_failed -> idle
+            (
+                EnumFSMState.REGISTRATION_FAILED,
+                EnumFSMTrigger.FAILURE_RESULT_EMITTED,
+            ): EnumFSMState.IDLE,
         }
 
         key = (self._current_state, trigger)
@@ -473,7 +518,7 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
             )
             return False
 
-        if event.node_type not in ("effect", "compute", "reducer", "orchestrator"):
+        if event.node_type not in _VALID_NODE_TYPES:
             logger.warning(
                 "Validation failed: invalid node_type",
                 extra={
@@ -524,7 +569,7 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
         params = ModelAggregationParams(
             consul_result=consul_result,
             postgres_result=postgres_result,
-            node_id=str(event.node_id),
+            node_id=event.node_id,
             correlation_id=correlation_id,
             registration_time_ms=elapsed_ms,
         )
@@ -589,7 +634,7 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
 
             response = await self._consul_handler.execute(envelope)
 
-            # Check response status
+            # ConsulHandler returns dict response - use dict access pattern
             if response.get("status") == "success":
                 logger.info(
                     "Consul registration succeeded",
@@ -684,8 +729,6 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
                     updated_at = EXCLUDED.updated_at
             """
 
-            import json
-
             envelope: dict[str, object] = {
                 "operation": "db.execute",
                 "payload": {
@@ -707,7 +750,7 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
 
             response = await self._db_adapter.execute(envelope)
 
-            # Check response status
+            # DbAdapter returns ModelDbQueryResponse object - use attribute access
             if response.status == "success":
                 logger.info(
                     "PostgreSQL registration succeeded",
@@ -805,14 +848,14 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
                 extra={
                     "registration_time_ms": params.registration_time_ms,
                     "target_ms": self._TARGET_DUAL_REGISTRATION_MS,
-                    "node_id": params.node_id,
+                    "node_id": str(params.node_id),
                     "correlation_id": str(params.correlation_id),
                 },
             )
 
-        # Build result - node_id is UUID
+        # Build result - node_id is already UUID from params
         return ModelDualRegistrationResult(
-            node_id=UUID(params.node_id),
+            node_id=params.node_id,
             consul_registered=consul_registered,
             postgres_registered=postgres_registered,
             status=status,
@@ -839,12 +882,19 @@ class NodeDualRegistrationReducer[TInput: BaseModel, TOutput: BaseModel]:
         self._metrics.failure_count += 1
         self._metrics.total_registrations += 1
 
-        # Convert node_id string to UUID, use a nil UUID as fallback
-        node_id_str = self._fsm_context.node_id
-        try:
-            node_id = UUID(node_id_str) if node_id_str else UUID(int=0)
-        except ValueError:
+        # Get node_id from FSM context, use a nil UUID as fallback
+        # node_id is stored as UUID in ModelFSMContext
+        node_id_value = self._fsm_context.node_id
+        if node_id_value is None:
             node_id = UUID(int=0)  # Nil UUID as fallback
+        elif isinstance(node_id_value, UUID):
+            node_id = node_id_value
+        else:
+            # Handle string case for backwards compatibility
+            try:
+                node_id = UUID(str(node_id_value))
+            except ValueError:
+                node_id = UUID(int=0)  # Nil UUID as fallback
 
         return ModelDualRegistrationResult(
             node_id=node_id,
