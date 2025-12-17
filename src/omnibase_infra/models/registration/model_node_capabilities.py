@@ -89,9 +89,6 @@ class ModelNodeCapabilities(BaseModel):
     def __getitem__(self, key: str) -> object:
         """Enable dict-like access to capabilities.
 
-        First checks if key is a known field (defined in the model schema),
-        then checks model_extra for custom capabilities.
-
         Args:
             key: The capability name to retrieve.
 
@@ -108,14 +105,11 @@ class ModelNodeCapabilities(BaseModel):
             >>> caps["custom"]  # Custom capability from model_extra
             42
         """
-        # Check if key is a known field in the model schema (access via class to avoid deprecation)
         if key in type(self).model_fields:
             return getattr(self, key)
-
-        # Check model_extra for custom capabilities
-        if self.model_extra and key in self.model_extra:
-            return self.model_extra[key]
-
+        extra = self.model_extra or {}
+        if key in extra:
+            return extra[key]
         raise KeyError(key)
 
     def __contains__(self, key: object) -> bool:

@@ -229,8 +229,8 @@ def validate_infra_patterns(
         },
         # RuntimeHostProcess __init__ parameter count exemption (OMN-756)
         # Central coordinator requires multiple configuration parameters:
-        # - event_bus, handler_registry, correlation_id_provider, message_router
-        # - health_checker, shutdown_handler for lifecycle management
+        # - event_bus, input_topic, output_topic, config, handler_registry
+        # These parameters configure event routing and handler binding.
         {
             "file_pattern": r"runtime_host_process\.py",
             "method_pattern": r"Function '__init__'",

@@ -8,14 +8,12 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Semantic versioning pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
-SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$")
+from omnibase_infra.utils.util_semver import validate_semver as _validate_semver
 
 
 class ModelNodeHeartbeatEvent(BaseModel):
@@ -71,23 +69,8 @@ class ModelNodeHeartbeatEvent(BaseModel):
     @field_validator("node_version")
     @classmethod
     def validate_semver(cls, v: str) -> str:
-        """Validate that node_version follows semantic versioning.
-
-        Args:
-            v: The version string to validate.
-
-        Returns:
-            The validated version string.
-
-        Raises:
-            ValueError: If the version string is not valid semver format.
-        """
-        if not SEMVER_PATTERN.match(v):
-            raise ValueError(
-                f"Invalid semantic version '{v}'. "
-                "Expected format: MAJOR.MINOR.PATCH[-prerelease][+build]"
-            )
-        return v
+        """Validate that node_version follows semantic versioning."""
+        return _validate_semver(v, "node_version")
 
     # Health metrics
     uptime_seconds: float = Field(..., ge=0, description="Node uptime in seconds")

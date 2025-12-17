@@ -1041,6 +1041,208 @@ class TestModelNodeHeartbeatEventFromAttributes:
             ModelNodeHeartbeatEvent.model_validate(obj)
         assert "node_version" in str(exc_info.value)
 
+    def test_from_attributes_validates_cpu_usage_over_100(self) -> None:
+        """Test that from_attributes validates cpu_usage_percent le=100 constraint."""
+        test_node_id = uuid4()
+
+        class InvalidCpuORM:
+            """ORM object with cpu_usage_percent over 100."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 100.0
+                self.active_operations_count = 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = 150.0  # Invalid: > 100
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = InvalidCpuORM()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent.model_validate(obj)
+        assert "cpu_usage_percent" in str(exc_info.value)
+
+    def test_from_attributes_validates_cpu_usage_negative(self) -> None:
+        """Test that from_attributes validates cpu_usage_percent ge=0 constraint."""
+        test_node_id = uuid4()
+
+        class InvalidCpuNegativeORM:
+            """ORM object with negative cpu_usage_percent."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 100.0
+                self.active_operations_count = 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = -5.0  # Invalid: < 0
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = InvalidCpuNegativeORM()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent.model_validate(obj)
+        assert "cpu_usage_percent" in str(exc_info.value)
+
+    def test_from_attributes_validates_memory_usage_negative(self) -> None:
+        """Test that from_attributes validates memory_usage_mb ge=0 constraint."""
+        test_node_id = uuid4()
+
+        class InvalidMemoryORM:
+            """ORM object with negative memory_usage_mb."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 100.0
+                self.active_operations_count = 0
+                self.memory_usage_mb = -256.0  # Invalid: < 0
+                self.cpu_usage_percent = None
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = InvalidMemoryORM()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent.model_validate(obj)
+        assert "memory_usage_mb" in str(exc_info.value)
+
+    def test_from_attributes_validates_active_operations_negative(self) -> None:
+        """Test that from_attributes validates active_operations_count ge=0 constraint."""
+        test_node_id = uuid4()
+
+        class InvalidActiveOpsORM:
+            """ORM object with negative active_operations_count."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 100.0
+                self.active_operations_count = -10  # Invalid: < 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = None
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = InvalidActiveOpsORM()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent.model_validate(obj)
+        assert "active_operations_count" in str(exc_info.value)
+
+    def test_from_attributes_boundary_cpu_usage_zero(self) -> None:
+        """Test that from_attributes accepts boundary value cpu_usage_percent=0."""
+        test_node_id = uuid4()
+
+        class BoundaryCpuZeroORM:
+            """ORM object with cpu_usage_percent at lower boundary."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 100.0
+                self.active_operations_count = 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = 0.0  # Boundary: exactly 0
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = BoundaryCpuZeroORM()
+        event = ModelNodeHeartbeatEvent.model_validate(obj)
+        assert event.cpu_usage_percent == 0.0
+
+    def test_from_attributes_boundary_cpu_usage_100(self) -> None:
+        """Test that from_attributes accepts boundary value cpu_usage_percent=100."""
+        test_node_id = uuid4()
+
+        class BoundaryCpu100ORM:
+            """ORM object with cpu_usage_percent at upper boundary."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 100.0
+                self.active_operations_count = 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = 100.0  # Boundary: exactly 100
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = BoundaryCpu100ORM()
+        event = ModelNodeHeartbeatEvent.model_validate(obj)
+        assert event.cpu_usage_percent == 100.0
+
+    def test_from_attributes_boundary_memory_usage_zero(self) -> None:
+        """Test that from_attributes accepts boundary value memory_usage_mb=0."""
+        test_node_id = uuid4()
+
+        class BoundaryMemoryZeroORM:
+            """ORM object with memory_usage_mb at boundary."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 100.0
+                self.active_operations_count = 0
+                self.memory_usage_mb = 0.0  # Boundary: exactly 0
+                self.cpu_usage_percent = None
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = BoundaryMemoryZeroORM()
+        event = ModelNodeHeartbeatEvent.model_validate(obj)
+        assert event.memory_usage_mb == 0.0
+
+    def test_from_attributes_boundary_uptime_zero(self) -> None:
+        """Test that from_attributes accepts boundary value uptime_seconds=0."""
+        test_node_id = uuid4()
+
+        class BoundaryUptimeZeroORM:
+            """ORM object with uptime_seconds at boundary."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 0.0  # Boundary: exactly 0
+                self.active_operations_count = 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = None
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = BoundaryUptimeZeroORM()
+        event = ModelNodeHeartbeatEvent.model_validate(obj)
+        assert event.uptime_seconds == 0.0
+
+    def test_from_attributes_boundary_active_operations_zero(self) -> None:
+        """Test that from_attributes accepts boundary value active_operations_count=0."""
+        test_node_id = uuid4()
+
+        class BoundaryActiveOpsZeroORM:
+            """ORM object with active_operations_count at boundary."""
+
+            def __init__(self) -> None:
+                self.node_id = test_node_id
+                self.node_type = "effect"
+                self.node_version = "1.0.0"
+                self.uptime_seconds = 100.0
+                self.active_operations_count = 0  # Boundary: exactly 0
+                self.memory_usage_mb = None
+                self.cpu_usage_percent = None
+                self.correlation_id = None
+                self.timestamp = datetime.now(UTC)
+
+        obj = BoundaryActiveOpsZeroORM()
+        event = ModelNodeHeartbeatEvent.model_validate(obj)
+        assert event.active_operations_count == 0
+
 
 class TestModelNodeHeartbeatEventHashEquality:
     """Tests for hash and equality (frozen model features)."""

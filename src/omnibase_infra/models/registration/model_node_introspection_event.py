@@ -8,7 +8,6 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
@@ -19,9 +18,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
-
-# Semantic versioning pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
-SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$")
+from omnibase_infra.utils.util_semver import validate_semver as _validate_semver
 
 
 class ModelNodeIntrospectionEvent(BaseModel):
@@ -64,6 +61,11 @@ class ModelNodeIntrospectionEvent(BaseModel):
 
     # Required fields
     node_id: UUID = Field(..., description="Unique node identifier")
+    # Design Note: node_type uses strict Literal validation because introspection
+    # events are the authoritative source for node registrations persisted to
+    # PostgreSQL. ModelNodeRegistration inherits this constraint to maintain
+    # registry integrity. For relaxed validation supporting experimental node
+    # types, see ModelNodeHeartbeatEvent which uses str.
     node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
         ..., description="ONEX node type"
     )
@@ -75,23 +77,8 @@ class ModelNodeIntrospectionEvent(BaseModel):
     @field_validator("node_version")
     @classmethod
     def validate_semver(cls, v: str) -> str:
-        """Validate that node_version follows semantic versioning.
-
-        Args:
-            v: The version string to validate.
-
-        Returns:
-            The validated version string.
-
-        Raises:
-            ValueError: If the version string is not valid semver format.
-        """
-        if not SEMVER_PATTERN.match(v):
-            raise ValueError(
-                f"Invalid semantic version '{v}'. "
-                "Expected format: MAJOR.MINOR.PATCH[-prerelease][+build]"
-            )
-        return v
+        """Validate that node_version follows semantic versioning."""
+        return _validate_semver(v, "node_version")
 
     capabilities: ModelNodeCapabilities = Field(
         default_factory=ModelNodeCapabilities, description="Node capabilities"
