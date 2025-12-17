@@ -122,6 +122,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
@@ -145,17 +146,93 @@ REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 # has_fsm: boolean, method_signatures: dict of method name to signature string
 CapabilitiesDict = dict[str, list[str] | bool | dict[str, str]]
 
+# Performance threshold constants (in milliseconds)
+PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
+PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
+PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
+PERF_THRESHOLD_CACHE_HIT_MS = 1.0
+
+
+@dataclass
+class IntrospectionPerformanceMetrics:
+    """Performance metrics for introspection operations.
+
+    This dataclass captures timing information for introspection operations,
+    enabling performance monitoring and alerting when operations exceed
+    the <50ms target threshold.
+
+    Attributes:
+        get_capabilities_ms: Time taken by get_capabilities() in milliseconds.
+        discover_capabilities_ms: Time taken by _discover_capabilities() in ms.
+        get_endpoints_ms: Time taken by get_endpoints() in milliseconds.
+        get_current_state_ms: Time taken by get_current_state() in milliseconds.
+        total_introspection_ms: Total time for get_introspection_data() in ms.
+        cache_hit: Whether the result was served from cache.
+        method_count: Number of methods discovered during reflection.
+        threshold_exceeded: Whether any operation exceeded performance thresholds.
+        slow_operations: List of operation names that exceeded their thresholds.
+
+    Example:
+        ```python
+        metrics = node.get_performance_metrics()
+        if metrics.threshold_exceeded:
+            logger.warning(
+                "Introspection performance degraded",
+                extra={
+                    "slow_operations": metrics.slow_operations,
+                    "total_ms": metrics.total_introspection_ms,
+                }
+            )
+        ```
+    """
+
+    get_capabilities_ms: float = 0.0
+    discover_capabilities_ms: float = 0.0
+    get_endpoints_ms: float = 0.0
+    get_current_state_ms: float = 0.0
+    total_introspection_ms: float = 0.0
+    cache_hit: bool = False
+    method_count: int = 0
+    threshold_exceeded: bool = False
+    slow_operations: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, float | bool | int | list[str]]:
+        """Convert metrics to dictionary for logging/serialization.
+
+        Returns:
+            Dictionary with all metric fields.
+        """
+        return {
+            "get_capabilities_ms": self.get_capabilities_ms,
+            "discover_capabilities_ms": self.discover_capabilities_ms,
+            "get_endpoints_ms": self.get_endpoints_ms,
+            "get_current_state_ms": self.get_current_state_ms,
+            "total_introspection_ms": self.total_introspection_ms,
+            "cache_hit": self.cache_hit,
+            "method_count": self.method_count,
+            "threshold_exceeded": self.threshold_exceeded,
+            "slow_operations": self.slow_operations,
+        }
+
 
 class IntrospectionCacheDict(TypedDict):
     """TypedDict representing the JSON-serialized ModelNodeIntrospectionEvent.
 
-    This type precisely matches the output of ModelNodeIntrospectionEvent.model_dump(mode="json"),
+    This type matches the output of ModelNodeIntrospectionEvent.model_dump(mode="json"),
     enabling proper type checking for cache operations without requiring type: ignore comments.
+
+    Note:
+        The capabilities field uses a permissive type to accommodate all possible
+        values from model_dump(), including nested structures and dynamic values.
+        The actual structure is: operations (list[str]), protocols (list[str]),
+        has_fsm (bool), method_signatures (dict[str, str]).
     """
 
     node_id: str
     node_type: str
-    capabilities: dict[str, list[str] | bool | dict[str, str]]
+    # Permissive type for capabilities to handle all model_dump() output variations
+    # Actual structure: {"operations": list, "protocols": list, "has_fsm": bool, "method_signatures": dict}
+    capabilities: dict[str, list[str] | bool | dict[str, str] | int | float | None]
     endpoints: dict[str, str]
     current_state: str | None
     version: str
@@ -187,6 +264,44 @@ class MixinNodeIntrospection:
         _introspection_version: Node version string
         _introspection_start_time: Node startup timestamp
 
+    Security Considerations:
+        This mixin uses Python reflection (via the ``inspect`` module) to
+        automatically discover node capabilities. While this enables powerful
+        service discovery, it has security implications:
+
+        **Exposed Information**:
+
+        - Public method names (potential operations a node can perform)
+        - Method signatures (parameter names and type annotations)
+        - Protocol and mixin implementations (discovered capabilities)
+        - FSM state information (if state attributes are present)
+        - Endpoint URLs (health, API, metrics paths)
+        - Node metadata (name, version, type)
+
+        **Built-in Protections**:
+
+        - Private methods (prefixed with ``_``) are excluded by default
+        - Utility method prefixes (``get_*``, ``set_*``, etc.) are filtered
+        - Only methods containing operation keywords are reported as operations
+        - Configure ``exclude_prefixes`` in ``initialize_introspection()`` for
+          additional filtering
+
+        **Recommendations for Production**:
+
+        - Prefix internal/sensitive methods with ``_`` to exclude them
+        - Use generic operation names that don't reveal implementation details
+        - Review ``get_capabilities()`` output before production deployment
+        - In multi-tenant environments, configure Kafka topic ACLs for
+          introspection events (``node.introspection``, ``node.heartbeat``,
+          ``node.request_introspection``)
+        - Monitor introspection topic consumers for unauthorized access
+        - Consider network segmentation for introspection event topics
+
+    See Also:
+        - Module docstring for detailed security documentation
+        - CLAUDE.md "Node Introspection Security Considerations" section
+        - ``get_capabilities()`` for filtering logic details
+
     Example:
         ```python
         class PostgresAdapter(MixinNodeIntrospection):
@@ -198,7 +313,11 @@ class MixinNodeIntrospection:
                 )
 
             async def execute(self, query: str) -> list[dict]:
-                # Node operation
+                # Node operation - WILL be exposed via introspection
+                ...
+
+            def _internal_helper(self, data: dict) -> dict:
+                # Private method - will NOT be exposed
                 ...
         ```
     """
@@ -235,6 +354,17 @@ class MixinNodeIntrospection:
     # Capability discovery configuration
     _introspection_operation_keywords: set[str]
     _introspection_exclude_prefixes: set[str]
+
+    # Registry listener callback error tracking (instance-level)
+    # Used for rate-limiting error logging to prevent log spam during
+    # sustained failures. These are initialized in initialize_introspection().
+    _registry_callback_consecutive_failures: int
+    _registry_callback_last_failure_time: float
+    _registry_callback_failure_log_threshold: int
+
+    # Performance metrics tracking (instance-level)
+    # Stores the most recent performance metrics from introspection operations
+    _introspection_last_metrics: IntrospectionPerformanceMetrics | None
 
     # Default operation keywords for capability discovery
     DEFAULT_OPERATION_KEYWORDS: ClassVar[set[str]] = {
@@ -393,6 +523,16 @@ class MixinNodeIntrospection:
         self._introspection_stop_event = asyncio.Event()
         self._registry_unsubscribe = None
 
+        # Registry listener callback error tracking
+        # Used for rate-limiting error logging to prevent log spam
+        self._registry_callback_consecutive_failures = 0
+        self._registry_callback_last_failure_time = 0.0
+        # Only log every Nth consecutive failure to prevent log spam
+        self._registry_callback_failure_log_threshold = 5
+
+        # Performance metrics tracking
+        self._introspection_last_metrics = None
+
         if event_bus is None:
             logger.warning(
                 f"Introspection initialized without event bus for {node_id}",
@@ -445,6 +585,25 @@ class MixinNodeIntrospection:
         populating the cache on first access. The cache is shared across all
         instances of the same class, avoiding expensive reflection operations
         on each introspection call.
+
+        Security Note:
+            This method uses Python's ``inspect`` module to extract method
+            signatures, which exposes detailed type information:
+
+            - Parameter names may reveal business logic (e.g., ``user_id``,
+              ``payment_token``, ``decrypt_key``)
+            - Type annotations expose internal data structures
+            - Return types reveal output formats
+
+            **Filtering Applied**:
+
+            - Only public methods (not starting with ``_``) are included
+            - Methods without inspectable signatures get ``(...)`` placeholder
+
+            **Mitigation**:
+
+            - Use generic parameter names for public methods
+            - Prefix sensitive helper methods with ``_``
 
         Returns:
             Dictionary mapping public method names to signature strings.
@@ -512,6 +671,71 @@ class MixinNodeIntrospection:
         else:
             cls._class_method_cache.clear()
 
+    def _should_skip_method(self, method_name: str) -> bool:
+        """Check if method should be excluded from capability discovery.
+
+        Uses the configured exclude_prefixes set for efficient prefix matching.
+
+        Args:
+            method_name: Name of the method to check
+
+        Returns:
+            True if method should be skipped, False otherwise
+        """
+        return any(
+            method_name.startswith(prefix)
+            for prefix in self._introspection_exclude_prefixes
+        )
+
+    def _is_operation_method(self, method_name: str) -> bool:
+        """Check if method name indicates an operation.
+
+        Uses the configured operation_keywords set to identify methods
+        that represent node operations.
+
+        Args:
+            method_name: Name of the method to check
+
+        Returns:
+            True if method appears to be an operation, False otherwise
+        """
+        name_lower = method_name.lower()
+        return any(
+            keyword in name_lower for keyword in self._introspection_operation_keywords
+        )
+
+    def _discover_protocols(self) -> list[str]:
+        """Discover protocol and mixin implementations from class hierarchy.
+
+        Security Note:
+            This method exposes the inheritance hierarchy by returning class
+            names that start with ``Protocol`` or ``Mixin``. This reveals what
+            capabilities the node implements (e.g., ``ProtocolDatabaseAdapter``,
+            ``MixinAsyncCircuitBreaker``). This information is generally safe
+            to expose as it describes the node's public interface contracts,
+            but be aware that it may reveal architectural decisions.
+
+        Returns:
+            List of protocol and mixin class names implemented by this class
+        """
+        protocols: list[str] = []
+        for base in type(self).__mro__:
+            base_name = base.__name__
+            if base_name.startswith(("Protocol", "Mixin")):
+                protocols.append(base_name)
+        return protocols
+
+    def _has_fsm_state(self) -> bool:
+        """Check if this class has FSM state management.
+
+        Looks for common FSM state attribute patterns.
+
+        Returns:
+            True if FSM state attributes are found, False otherwise
+        """
+        fsm_indicators = {"_state", "current_state", "_current_state", "state"}
+        return any(hasattr(self, indicator) for indicator in fsm_indicators)
+
     async def get_capabilities(self) -> CapabilitiesDict:
         """Extract node capabilities via reflection.
 
@@ -522,6 +746,34 @@ class MixinNodeIntrospection:
 
         Method signatures are cached at the class level for performance
         optimization, as they don't change after class definition.
+
+        Security Note:
+            This method exposes information about the node's public interface.
+            The returned data includes method names, parameter signatures, and
+            type annotations which may reveal implementation details.
+
+            **What Gets Exposed**:
+
+            - Method names matching operation keywords (execute, handle, etc.)
+            - Full method signatures including parameter names and types
+            - Protocol/mixin class names from the inheritance hierarchy
+            - Whether FSM state management is present
+
+            **Filtering Applied**:
+
+            - Private methods (``_`` prefix) are excluded
+            - Utility methods (``get_*``, ``set_*``, ``initialize*``, etc.) are
+              filtered based on ``exclude_prefixes`` configuration
+            - Only methods containing configured ``operation_keywords`` are
+              listed in the ``operations`` field
+
+            **Best Practices**:
+
+            - Review this output before production deployment
+            - Use generic operation names (e.g., ``process_request`` instead of
+              ``decrypt_and_forward_to_payment_gateway``)
+            - Prefix sensitive internal methods with ``_``
+            - Configure additional ``exclude_prefixes`` if needed
 
         Returns:
             Dictionary containing:
@@ -545,61 +797,59 @@ class MixinNodeIntrospection:
             #         ...
             #     }
             # }
+
+            # Review exposed capabilities before production
+            for op in capabilities["operations"]:
+                print(f"Exposed operation: {op}")
             ```
         """
         self._ensure_initialized()
-        capabilities: CapabilitiesDict = {
-            "operations": [],
-            "protocols": [],
-            "has_fsm": False,
-            "method_signatures": {},
-        }
-
-        # Use instance configuration for operation discovery
-        # These are set in initialize_introspection() with defaults or custom values
-        operation_keywords = self._introspection_operation_keywords
-        exclude_prefixes = self._introspection_exclude_prefixes
+        start_time = time.perf_counter()
 
         # Get cached method signatures (class-level, computed once per class)
+        # Track discovery time separately for performance analysis
+        discover_start = time.perf_counter()
         cached_signatures = self._get_class_method_signatures()
+        discover_elapsed_ms = (time.perf_counter() - discover_start) * 1000
 
         # Filter signatures and identify operations
         operations: list[str] = []
         method_signatures: dict[str, str] = {}
 
         for name, sig in cached_signatures.items():
-            # Skip common utility methods based on prefix
-            if any(name.startswith(prefix) for prefix in exclude_prefixes):
+            # Skip utility methods based on configured prefixes
+            if self._should_skip_method(name):
                 continue
 
             # Add method signature to filtered results
             method_signatures[name] = sig
 
             # Add methods that look like operations
-            name_lower = name.lower()
-            if any(keyword in name_lower for keyword in operation_keywords):
+            if self._is_operation_method(name):
                 operations.append(name)
 
-        # Discover protocols from base classes
-        protocols: list[str] = []
-        for base in type(self).__mro__:
-            base_name = base.__name__
-            if base_name.startswith(("Protocol", "Mixin")):
-                protocols.append(base_name)
+        # Build capabilities dict
+        capabilities: CapabilitiesDict = {
+            "operations": operations,
+            "protocols": self._discover_protocols(),
+            "has_fsm": self._has_fsm_state(),
+            "method_signatures": method_signatures,
+        }
 
-        # Check for FSM state attributes
-        has_fsm = False
-        fsm_indicators = {"_state", "current_state", "_current_state", "state"}
-        for indicator in fsm_indicators:
-            if hasattr(self, indicator):
-                has_fsm = True
-                break
-
-        # Assign to capabilities dict
-        capabilities["operations"] = operations
-        capabilities["protocols"] = protocols
-        capabilities["has_fsm"] = has_fsm
-        capabilities["method_signatures"] = method_signatures
+        # Performance instrumentation
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        if elapsed_ms > PERF_THRESHOLD_GET_CAPABILITIES_MS:
+            logger.warning(
+                "Capability discovery exceeded 50ms target",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "elapsed_ms": round(elapsed_ms, 2),
+                    "discover_elapsed_ms": round(discover_elapsed_ms, 2),
+                    "method_count": len(cached_signatures),
+                    "operation_count": len(operations),
+                    "threshold_ms": PERF_THRESHOLD_GET_CAPABILITIES_MS,
+                },
+            )
 
         return capabilities
 
@@ -731,6 +981,10 @@ class MixinNodeIntrospection:
         Returns cached data if available and not expired, otherwise
         builds fresh introspection data and caches it.
 
+        Performance metrics are captured for each call and stored in
+        ``_introspection_last_metrics``. Use ``get_performance_metrics()``
+        to retrieve the most recent metrics.
+
         Returns:
             ModelNodeIntrospectionEvent containing full introspection data.
 
@@ -744,7 +998,11 @@ class MixinNodeIntrospection:
             ```
         """
         self._ensure_initialized()
+        total_start = time.perf_counter()
         current_time = time.time()
+
+        # Initialize metrics for this call
+        metrics = IntrospectionPerformanceMetrics()
 
         # Check cache validity
         if (
@@ -755,16 +1013,60 @@ class MixinNodeIntrospection:
         ):
             # Return cached data with updated timestamp
             cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
+
+            # Record cache hit metrics
+            elapsed_ms = (time.perf_counter() - total_start) * 1000
+            metrics.total_introspection_ms = elapsed_ms
+            metrics.cache_hit = True
+
+            # Check cache hit threshold
+            if elapsed_ms > PERF_THRESHOLD_CACHE_HIT_MS:
+                metrics.threshold_exceeded = True
+                metrics.slow_operations.append("cache_hit")
+
+            self._introspection_last_metrics = metrics
             return cached_event
 
-        # Build fresh introspection data
+        # Build fresh introspection data with timing for each component
+        cap_start = time.perf_counter()
         capabilities = await self.get_capabilities()
+        metrics.get_capabilities_ms = (time.perf_counter() - cap_start) * 1000
+
+        # Extract method count from capabilities
+        method_sigs = capabilities.get("method_signatures", {})
+        metrics.method_count = len(method_sigs) if isinstance(method_sigs, dict) else 0
+
+        endpoints_start = time.perf_counter()
         endpoints = await self.get_endpoints()
+        metrics.get_endpoints_ms = (time.perf_counter() - endpoints_start) * 1000
+
+        state_start = time.perf_counter()
         current_state = await self.get_current_state()
+        metrics.get_current_state_ms = (time.perf_counter() - state_start) * 1000
+
+        # Get node_id and node_type with fallback logging
+        # The "unknown" fallback indicates a potential initialization issue
+        node_id = self._introspection_node_id
+        if node_id is None:
+            logger.warning(
+                "Node ID not initialized, using 'unknown' - "
+                "ensure initialize_introspection() was called correctly",
+                extra={"operation": "get_introspection_data"},
+            )
+            node_id = "unknown"
+
+        node_type = self._introspection_node_type
+        if node_type is None:
+            logger.warning(
+                "Node type not initialized, using 'unknown' - "
+                "ensure initialize_introspection() was called correctly",
+                extra={"node_id": node_id, "operation": "get_introspection_data"},
+            )
+            node_type = "unknown"
 
         event = ModelNodeIntrospectionEvent(
-            node_id=self._introspection_node_id or "unknown",
-            node_type=self._introspection_node_type or "unknown",
+            node_id=node_id,
+            node_type=node_type,
             capabilities=capabilities,
             endpoints=endpoints,
             current_state=current_state,
@@ -786,12 +1088,46 @@ class MixinNodeIntrospection:
             len(operations_value) if isinstance(operations_value, list) else 0
         )
 
+        # Finalize metrics
+        metrics.total_introspection_ms = (time.perf_counter() - total_start) * 1000
+        metrics.cache_hit = False
+
+        # Check thresholds and identify slow operations
+        if metrics.get_capabilities_ms > PERF_THRESHOLD_GET_CAPABILITIES_MS:
+            metrics.threshold_exceeded = True
+            metrics.slow_operations.append("get_capabilities")
+
+        if metrics.total_introspection_ms > PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS:
+            metrics.threshold_exceeded = True
+            if "total_introspection" not in metrics.slow_operations:
+                metrics.slow_operations.append("total_introspection")
+
+        # Store metrics for later retrieval
+        self._introspection_last_metrics = metrics
+
+        # Log if any threshold was exceeded
+        if metrics.threshold_exceeded:
+            logger.warning(
+                "Introspection exceeded performance threshold",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "total_ms": round(metrics.total_introspection_ms, 2),
+                    "get_capabilities_ms": round(metrics.get_capabilities_ms, 2),
+                    "get_endpoints_ms": round(metrics.get_endpoints_ms, 2),
+                    "get_current_state_ms": round(metrics.get_current_state_ms, 2),
+                    "method_count": metrics.method_count,
+                    "slow_operations": metrics.slow_operations,
+                    "threshold_ms": PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS,
+                },
+            )
+
         logger.debug(
             f"Introspection data refreshed for {self._introspection_node_id}",
             extra={
                 "node_id": self._introspection_node_id,
                 "capabilities_count": operations_count,
                 "endpoints_count": len(endpoints),
+                "total_ms": round(metrics.total_introspection_ms, 2),
             },
         )
 
@@ -913,16 +1249,38 @@ class MixinNodeIntrospection:
             if self._introspection_start_time is not None:
                 uptime_seconds = time.time() - self._introspection_start_time
 
+            # Get node_id and node_type with fallback logging
+            # The "unknown" fallback indicates a potential initialization issue
+            node_id = self._introspection_node_id
+            if node_id is None:
+                logger.warning(
+                    "Node ID not initialized, using 'unknown' in heartbeat - "
+                    "ensure initialize_introspection() was called correctly",
+                    extra={"operation": "_publish_heartbeat"},
+                )
+                node_id = "unknown"
+
+            node_type = self._introspection_node_type
+            if node_type is None:
+                logger.warning(
+                    "Node type not initialized, using 'unknown' in heartbeat - "
+                    "ensure initialize_introspection() was called correctly",
+                    extra={"node_id": node_id, "operation": "_publish_heartbeat"},
+                )
+                node_type = "unknown"
+
             # Create heartbeat event
             heartbeat = ModelNodeHeartbeatEvent(
-                node_id=self._introspection_node_id or "unknown",
-                node_type=self._introspection_node_type or "unknown",
+                node_id=node_id,
+                node_type=node_type,
                 uptime_seconds=uptime_seconds,
                 # TODO(OMN-XXX): Implement active operation tracking
                 # Currently hardcoded to 0. Full implementation requires:
                 # - Operation counter increment/decrement around async operations
                 # - Thread-safe counter for concurrent operations
                 # - Integration with node's actual execution context
+                # This is intentionally left as 0 until the tracking infrastructure
+                # is implemented. See MixinNodeIntrospection docstring note.
                 active_operations_count=0,
                 correlation_id=uuid4(),
             )
@@ -1037,6 +1395,34 @@ class MixinNodeIntrospection:
         with introspection data when requests are received. Includes
         retry logic with exponential backoff for subscription failures.
 
+        Security Note:
+            This method subscribes to the ``node.request_introspection`` Kafka
+            topic and responds with full introspection data to any request.
+            This creates a network-accessible endpoint for capability discovery.
+
+            **Network Exposure**:
+
+            - Any consumer on the Kafka cluster can request introspection data
+            - Responses are published to ``node.introspection`` topic
+            - No authentication is performed on incoming requests
+
+            **Multi-tenant Considerations**:
+
+            - Configure Kafka topic ACLs to restrict access to introspection
+              topics in multi-tenant environments
+            - Consider whether introspection topics should be accessible
+              outside the cluster boundary
+            - Monitor topic consumers for unauthorized access patterns
+            - Use separate Kafka clusters for different security domains
+
+            **Request Validation**:
+
+            - The ``target_node_id`` field allows filtering requests to
+              specific nodes - only matching requests are processed
+            - Malformed requests are handled gracefully without crashing
+            - Correlation IDs are validated but invalid IDs don't block
+              processing
+
         Args:
             max_retries: Maximum subscription retry attempts (default: 3)
             base_backoff_seconds: Base backoff time for exponential retry
@@ -1057,53 +1443,83 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
-        async def on_request(message: ModelEventMessage) -> None:
-            """Handle incoming introspection request."""
+        def _parse_correlation_id(raw_value: str | None) -> UUID | None:
+            """Parse correlation ID from request data with graceful fallback.
+
+            Args:
+                raw_value: Raw correlation_id value from request JSON
+
+            Returns:
+                Parsed UUID or None if parsing fails or value is empty
+            """
+            if not raw_value:
+                return None
+
             try:
-                # Parse request to check if it targets this node
-                if hasattr(message, "value") and message.value:
-                    request_data = json.loads(message.value.decode("utf-8"))
-                    target_node_id = request_data.get("target_node_id")
+                # UUID() raises ValueError for malformed strings,
+                # TypeError for non-string inputs (e.g., int, list).
+                # Convert to string first for safer handling of unexpected types.
+                return UUID(str(raw_value))
+            except (ValueError, TypeError) as e:
+                # Log warning with structured fields for monitoring.
+                # Truncate received value preview to avoid log bloat
+                # from potentially malicious oversized input.
+                logger.warning(
+                    "Invalid correlation_id format in introspection "
+                    "request, generating new correlation_id",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                        "received_value_type": type(raw_value).__name__,
+                        "received_value_preview": str(raw_value)[:50],
+                    },
+                )
+                return None
 
-                    # If request has a target and it's not us, ignore
-                    if target_node_id and target_node_id != self._introspection_node_id:
-                        return
+        def _should_log_failure(consecutive_failures: int, threshold: int) -> bool:
+            """Determine if failure should be logged based on rate limiting.
 
-                    correlation_id_str = request_data.get("correlation_id")
-                    correlation_id: UUID | None = None
-                    if correlation_id_str:
-                        try:
-                            # UUID() raises ValueError for malformed strings,
-                            # TypeError for non-string inputs (e.g., int, list).
-                            # Convert to string first for safer handling
-                            # of unexpected types.
-                            correlation_id = UUID(str(correlation_id_str))
-                        except (ValueError, TypeError) as e:
-                            # Log warning with structured fields for monitoring.
-                            # Truncate received value preview to avoid log bloat
-                            # from potentially malicious oversized input.
-                            logger.warning(
-                                "Invalid correlation_id format in introspection "
-                                "request, generating new correlation_id",
-                                extra={
-                                    "node_id": self._introspection_node_id,
-                                    "error_type": type(e).__name__,
-                                    "error_message": str(e),
-                                    "received_value_type": type(
-                                        correlation_id_str
-                                    ).__name__,
-                                    "received_value_preview": (
-                                        str(correlation_id_str)[:50]
-                                        if correlation_id_str
-                                        else ""
-                                    ),
-                                },
-                            )
-                            # Graceful degradation: continue with None,
-                            # will generate new UUID
-                            correlation_id = None
-                else:
-                    correlation_id = None
+            Logs first failure and every Nth consecutive failure to prevent log spam.
+
+            Args:
+                consecutive_failures: Current consecutive failure count
+                threshold: Log every Nth failure
+
+            Returns:
+                True if this failure should be logged at error level
+            """
+            return consecutive_failures == 1 or consecutive_failures % threshold == 0
+
+        async def on_request(message: ModelEventMessage) -> None:
+            """Handle incoming introspection request.
+
+            Includes error recovery with rate-limited logging to prevent
+            log spam during sustained failures. Continues processing on
+            non-fatal errors to maintain graceful degradation.
+            """
+            try:
+                # Early exit if message has no parseable value
+                if not hasattr(message, "value") or not message.value:
+                    await self.publish_introspection(
+                        reason="request",
+                        correlation_id=None,
+                    )
+                    self._registry_callback_consecutive_failures = 0
+                    return
+
+                # Parse request data
+                request_data = json.loads(message.value.decode("utf-8"))
+
+                # Check if request targets a specific node (early exit if not us)
+                target_node_id = request_data.get("target_node_id")
+                if target_node_id and target_node_id != self._introspection_node_id:
+                    return
+
+                # Parse correlation ID with graceful fallback
+                correlation_id = _parse_correlation_id(
+                    request_data.get("correlation_id")
+                )
 
                 # Respond with introspection data
                 await self.publish_introspection(
@@ -1111,18 +1527,50 @@ class MixinNodeIntrospection:
                     correlation_id=correlation_id,
                 )
 
+                # Reset failure counter on success
+                self._registry_callback_consecutive_failures = 0
+
             except Exception as e:
-                # Use error() with exc_info=True instead of exception() to include
-                # structured error_type and error_message fields for log aggregation
-                logger.error(  # noqa: G201
-                    f"Error handling introspection request for {self._introspection_node_id}",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                    },
-                    exc_info=True,
-                )
+                # Track consecutive failures for rate-limited logging
+                self._registry_callback_consecutive_failures += 1
+                self._registry_callback_last_failure_time = time.time()
+
+                # Rate-limit error logging to prevent log spam during sustained failures
+                if _should_log_failure(
+                    self._registry_callback_consecutive_failures,
+                    self._registry_callback_failure_log_threshold,
+                ):
+                    logger.error(  # noqa: G201
+                        f"Error handling introspection request for {self._introspection_node_id}",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "error_type": type(e).__name__,
+                            "error_message": str(e),
+                            "consecutive_failures": (
+                                self._registry_callback_consecutive_failures
+                            ),
+                            "log_rate_limited": (
+                                self._registry_callback_consecutive_failures > 1
+                            ),
+                        },
+                        exc_info=True,
+                    )
+                else:
+                    # Log at debug level for rate-limited failures
+                    logger.debug(
+                        f"Suppressed error log for introspection request "
+                        f"(failure {self._registry_callback_consecutive_failures})",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "error_type": type(e).__name__,
+                            "consecutive_failures": (
+                                self._registry_callback_consecutive_failures
+                            ),
+                        },
+                    )
+
+                # Continue processing - graceful degradation
+                # The callback should not raise exceptions that would disrupt the listener
 
         # Helper function to clean up subscription
         async def cleanup_subscription() -> None:
@@ -1205,14 +1653,19 @@ class MixinNodeIntrospection:
 
                 # Check if we should retry
                 if retry_count >= max_retries:
-                    logger.exception(
-                        "Registry listener exhausted retries for "
-                        f"{self._introspection_node_id}",
+                    # Use error() with exc_info=True instead of exception()
+                    # to include structured error_type and error_message fields
+                    # for log aggregation
+                    logger.error(  # noqa: G201
+                        "Registry listener exhausted retries",
                         extra={
                             "node_id": self._introspection_node_id,
                             "retry_count": retry_count,
                             "max_retries": max_retries,
+                            "error_type": type(e).__name__,
+                            "error_message": str(e),
                         },
+                        exc_info=True,
                     )
                     break
 
@@ -1370,6 +1823,42 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
+    def get_performance_metrics(self) -> IntrospectionPerformanceMetrics | None:
+        """Get the most recent performance metrics from introspection operations.
+
+        Returns the performance metrics captured during the last call to
+        ``get_introspection_data()``. Use this to monitor introspection
+        performance and detect when operations exceed the <50ms threshold.
+
+        Returns:
+            IntrospectionPerformanceMetrics if introspection has been called,
+            None if no introspection has been performed yet.
+
+        Example:
+            ```python
+            # After calling introspection
+            await node.get_introspection_data()
+
+            # Check performance metrics
+            metrics = node.get_performance_metrics()
+            if metrics and metrics.threshold_exceeded:
+                logger.warning(
+                    "Slow introspection detected",
+                    extra={
+                        "slow_operations": metrics.slow_operations,
+                        "total_ms": metrics.total_introspection_ms,
+                    }
+                )
+
+            # Access individual timings
+            if metrics:
+                print(f"Total time: {metrics.total_introspection_ms:.2f}ms")
+                print(f"Cache hit: {metrics.cache_hit}")
+                print(f"Methods discovered: {metrics.method_count}")
+            ```
+        """
+        return self._introspection_last_metrics
+
 
 __all__ = [
     "MixinNodeIntrospection",
@@ -1378,4 +1867,9 @@ __all__ = [
     "REQUEST_INTROSPECTION_TOPIC",
     "CapabilitiesDict",
     "IntrospectionCacheDict",
+    "IntrospectionPerformanceMetrics",
+    "PERF_THRESHOLD_GET_CAPABILITIES_MS",
+    "PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS",
+    "PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS",
+    "PERF_THRESHOLD_CACHE_HIT_MS",
 ]

@@ -5,7 +5,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelNodeHeartbeatEvent(BaseModel):
@@ -52,10 +52,10 @@ class ModelNodeHeartbeatEvent(BaseModel):
         description="UTC timestamp of heartbeat generation",
     )
 
-    model_config = {
-        "frozen": False,
-        "extra": "forbid",
-        "json_schema_extra": {
+    model_config = ConfigDict(
+        frozen=False,
+        extra="forbid",
+        json_schema_extra={
             "examples": [
                 {
                     "node_id": "node-postgres-adapter-001",
@@ -69,4 +69,7 @@ class ModelNodeHeartbeatEvent(BaseModel):
                 }
             ]
         },
-    }
+    )
+
+
+__all__ = ["ModelNodeHeartbeatEvent"]

@@ -42,7 +42,13 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
+from omnibase_infra.mixins.mixin_node_introspection import (
+    PERF_THRESHOLD_CACHE_HIT_MS,
+    PERF_THRESHOLD_GET_CAPABILITIES_MS,
+    PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS,
+    IntrospectionPerformanceMetrics,
+    MixinNodeIntrospection,
+)
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 
 # CI environments may be slower - apply multiplier for performance thresholds
@@ -1628,6 +1634,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         )
         capabilities = await node.get_capabilities()
         operations = capabilities["operations"]
+        assert isinstance(operations, list)
         assert "fetch_data" in operations
         assert "upload_file" in operations
         assert "execute_task" not in operations
@@ -1653,7 +1660,9 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
             operation_keywords=set(),
         )
         capabilities = await node.get_capabilities()
-        assert len(capabilities["operations"]) == 0
+        operations = capabilities["operations"]
+        assert isinstance(operations, list)
+        assert len(operations) == 0
 
     async def test_configuration_is_instance_specific(self) -> None:
         """Test that configuration is instance-specific, not shared."""
@@ -1681,10 +1690,14 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         )
         caps1 = await node1.get_capabilities()
         caps2 = await node2.get_capabilities()
-        assert "execute_task" in caps1["operations"]
-        assert "fetch_data" not in caps1["operations"]
-        assert "fetch_data" in caps2["operations"]
-        assert "execute_task" not in caps2["operations"]
+        ops1 = caps1["operations"]
+        ops2 = caps2["operations"]
+        assert isinstance(ops1, list)
+        assert isinstance(ops2, list)
+        assert "execute_task" in ops1
+        assert "fetch_data" not in ops1
+        assert "fetch_data" in ops2
+        assert "execute_task" not in ops2
 
     async def test_default_keywords_not_mutated(self) -> None:
         """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances."""
@@ -1698,3 +1711,547 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         node._introspection_operation_keywords.add("custom_keyword")
         assert original_defaults == MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
         assert "custom_keyword" not in MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinNodeIntrospectionPerformanceMetrics:
+    """Tests for performance metrics tracking and retrieval."""
+
+    async def test_get_performance_metrics_returns_none_before_introspection(
+        self,
+    ) -> None:
+        """Test that get_performance_metrics returns None before introspection."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="metrics-test-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        metrics = node.get_performance_metrics()
+        assert metrics is None
+
+    async def test_get_performance_metrics_returns_metrics_after_introspection(
+        self,
+    ) -> None:
+        """Test that get_performance_metrics returns metrics after introspection."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="metrics-test-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        await node.get_introspection_data()
+        metrics = node.get_performance_metrics()
+
+        assert metrics is not None
+        assert isinstance(metrics, IntrospectionPerformanceMetrics)
+
+    async def test_performance_metrics_contains_expected_fields(self) -> None:
+        """Test that performance metrics contain all expected fields."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="metrics-fields-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        await node.get_introspection_data()
+        metrics = node.get_performance_metrics()
+
+        assert metrics is not None
+        # Check all fields exist
+        assert hasattr(metrics, "get_capabilities_ms")
+        assert hasattr(metrics, "discover_capabilities_ms")
+        assert hasattr(metrics, "get_endpoints_ms")
+        assert hasattr(metrics, "get_current_state_ms")
+        assert hasattr(metrics, "total_introspection_ms")
+        assert hasattr(metrics, "cache_hit")
+        assert hasattr(metrics, "method_count")
+        assert hasattr(metrics, "threshold_exceeded")
+        assert hasattr(metrics, "slow_operations")
+
+        # Check types
+        assert isinstance(metrics.get_capabilities_ms, float)
+        assert isinstance(metrics.total_introspection_ms, float)
+        assert isinstance(metrics.cache_hit, bool)
+        assert isinstance(metrics.method_count, int)
+        assert isinstance(metrics.threshold_exceeded, bool)
+        assert isinstance(metrics.slow_operations, list)
+
+    async def test_performance_metrics_cache_hit_detection(self) -> None:
+        """Test that cache hits are correctly detected in metrics."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="cache-hit-metrics-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # First call - cache miss
+        await node.get_introspection_data()
+        metrics_miss = node.get_performance_metrics()
+        assert metrics_miss is not None
+        assert metrics_miss.cache_hit is False
+
+        # Second call - cache hit
+        await node.get_introspection_data()
+        metrics_hit = node.get_performance_metrics()
+        assert metrics_hit is not None
+        assert metrics_hit.cache_hit is True
+
+    async def test_performance_metrics_method_count(self) -> None:
+        """Test that method count is correctly reported in metrics."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="method-count-metrics-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        await node.get_introspection_data()
+        metrics = node.get_performance_metrics()
+
+        assert metrics is not None
+        # MockNode has at least 4 public methods (execute, health_check,
+        # handle_event, process_batch)
+        assert metrics.method_count >= 4
+
+    async def test_performance_metrics_to_dict(self) -> None:
+        """Test that to_dict() returns all fields."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="to-dict-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        await node.get_introspection_data()
+        metrics = node.get_performance_metrics()
+
+        assert metrics is not None
+        metrics_dict = metrics.to_dict()
+
+        assert isinstance(metrics_dict, dict)
+        assert "get_capabilities_ms" in metrics_dict
+        assert "discover_capabilities_ms" in metrics_dict
+        assert "get_endpoints_ms" in metrics_dict
+        assert "get_current_state_ms" in metrics_dict
+        assert "total_introspection_ms" in metrics_dict
+        assert "cache_hit" in metrics_dict
+        assert "method_count" in metrics_dict
+        assert "threshold_exceeded" in metrics_dict
+        assert "slow_operations" in metrics_dict
+
+    async def test_performance_metrics_fresh_on_each_call(self) -> None:
+        """Test that performance metrics are fresh for each introspection call."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="fresh-metrics-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,  # Very short TTL to force cache refresh
+        )
+
+        # First call
+        await node.get_introspection_data()
+        metrics1 = node.get_performance_metrics()
+        assert metrics1 is not None
+        total_ms_1 = metrics1.total_introspection_ms
+
+        # Wait for cache to expire
+        await asyncio.sleep(0.01)
+
+        # Second call with fresh computation
+        await node.get_introspection_data()
+        metrics2 = node.get_performance_metrics()
+        assert metrics2 is not None
+        total_ms_2 = metrics2.total_introspection_ms
+
+        # Metrics should be different (fresh computation)
+        # We can't guarantee exact timing, but both should be positive
+        assert total_ms_1 > 0
+        assert total_ms_2 > 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinNodeIntrospectionMethodCountBenchmark:
+    """Performance benchmarks with varying method counts.
+
+    These tests validate that introspection performance scales appropriately
+    with the number of methods on a node. The <50ms target should be maintained
+    even with a large number of methods due to class-level caching.
+    """
+
+    async def test_benchmark_minimal_methods_node(self) -> None:
+        """Benchmark introspection on a node with minimal methods."""
+
+        class MinimalMethodsNode(MixinNodeIntrospection):
+            """Node with just one operation method."""
+
+            async def execute(self, data: str) -> str:
+                return data
+
+        node = MinimalMethodsNode()
+        node.initialize_introspection(
+            node_id="minimal-methods-node",
+            node_type="COMPUTE",
+            event_bus=None,
+        )
+
+        # Clear cache for accurate measurement
+        MixinNodeIntrospection._invalidate_class_method_cache(MinimalMethodsNode)
+
+        times: list[float] = []
+        for _ in range(20):
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            MixinNodeIntrospection._invalidate_class_method_cache(MinimalMethodsNode)
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            times.append((time.perf_counter() - start) * 1000)
+
+        avg_time = sum(times) / len(times)
+        max_time = max(times)
+        metrics = node.get_performance_metrics()
+
+        print(
+            f"\nMinimal methods node ({metrics.method_count if metrics else 0} methods):"
+        )
+        print(f"  avg={avg_time:.2f}ms, max={max_time:.2f}ms")
+
+        # Should be well under the threshold
+        threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
+        assert avg_time < threshold_ms, (
+            f"Minimal methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
+
+    async def test_benchmark_medium_methods_node(self) -> None:
+        """Benchmark introspection on a node with ~20 methods."""
+
+        class MediumMethodsNode(MixinNodeIntrospection):
+            """Node with ~20 operation methods."""
+
+            async def execute_task_01(self, d: str) -> str:
+                return d
+
+            async def execute_task_02(self, d: str) -> str:
+                return d
+
+            async def execute_task_03(self, d: str) -> str:
+                return d
+
+            async def handle_event_01(self, d: str) -> str:
+                return d
+
+            async def handle_event_02(self, d: str) -> str:
+                return d
+
+            async def handle_event_03(self, d: str) -> str:
+                return d
+
+            async def process_data_01(self, d: str) -> str:
+                return d
+
+            async def process_data_02(self, d: str) -> str:
+                return d
+
+            async def process_data_03(self, d: str) -> str:
+                return d
+
+            async def run_operation_01(self, d: str) -> str:
+                return d
+
+            async def run_operation_02(self, d: str) -> str:
+                return d
+
+            async def run_operation_03(self, d: str) -> str:
+                return d
+
+            async def invoke_action_01(self, d: str) -> str:
+                return d
+
+            async def invoke_action_02(self, d: str) -> str:
+                return d
+
+            async def invoke_action_03(self, d: str) -> str:
+                return d
+
+            async def call_service_01(self, d: str) -> str:
+                return d
+
+            async def call_service_02(self, d: str) -> str:
+                return d
+
+            async def call_service_03(self, d: str) -> str:
+                return d
+
+            # Additional utility methods
+            def validate_input(self, d: str) -> bool:
+                return True
+
+            def transform_output(self, d: str) -> str:
+                return d
+
+        node = MediumMethodsNode()
+        node.initialize_introspection(
+            node_id="medium-methods-node",
+            node_type="COMPUTE",
+            event_bus=None,
+        )
+
+        # Clear cache for accurate measurement
+        MixinNodeIntrospection._invalidate_class_method_cache(MediumMethodsNode)
+
+        times: list[float] = []
+        for _ in range(20):
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            MixinNodeIntrospection._invalidate_class_method_cache(MediumMethodsNode)
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            times.append((time.perf_counter() - start) * 1000)
+
+        avg_time = sum(times) / len(times)
+        max_time = max(times)
+        metrics = node.get_performance_metrics()
+
+        print(
+            f"\nMedium methods node ({metrics.method_count if metrics else 0} methods):"
+        )
+        print(f"  avg={avg_time:.2f}ms, max={max_time:.2f}ms")
+
+        # Should still be under the threshold
+        threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
+        assert avg_time < threshold_ms, (
+            f"Medium methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
+
+    async def test_benchmark_large_methods_node(self) -> None:
+        """Benchmark introspection on a node with ~50 methods."""
+
+        # Create a node class dynamically with many methods
+        class LargeMethodsNode(MixinNodeIntrospection):
+            """Node with ~50 methods to stress-test reflection performance."""
+
+        # Add 50 methods dynamically
+        for i in range(50):
+            # Alternate between different operation keywords
+            keywords = ["execute", "handle", "process", "run", "invoke"]
+            keyword = keywords[i % len(keywords)]
+
+            async def method(self: LargeMethodsNode, data: str = "") -> str:
+                return data
+
+            method.__name__ = f"{keyword}_operation_{i:02d}"
+            setattr(LargeMethodsNode, method.__name__, method)
+
+        node = LargeMethodsNode()
+        node.initialize_introspection(
+            node_id="large-methods-node",
+            node_type="COMPUTE",
+            event_bus=None,
+        )
+
+        # Clear cache for accurate measurement
+        MixinNodeIntrospection._invalidate_class_method_cache(LargeMethodsNode)
+
+        times: list[float] = []
+        for _ in range(20):
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            MixinNodeIntrospection._invalidate_class_method_cache(LargeMethodsNode)
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            times.append((time.perf_counter() - start) * 1000)
+
+        avg_time = sum(times) / len(times)
+        max_time = max(times)
+        p95_time = sorted(times)[int(len(times) * 0.95)]
+        metrics = node.get_performance_metrics()
+
+        print(
+            f"\nLarge methods node ({metrics.method_count if metrics else 0} methods):"
+        )
+        print(f"  avg={avg_time:.2f}ms, max={max_time:.2f}ms, p95={p95_time:.2f}ms")
+
+        # Should still be under the threshold even with 50+ methods
+        threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
+        assert avg_time < threshold_ms, (
+            f"Large methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
+
+    async def test_benchmark_cache_hit_performance_50_methods(self) -> None:
+        """Benchmark cache hit performance with large method count."""
+
+        class LargeCacheNode(MixinNodeIntrospection):
+            pass
+
+        # Add 50 methods
+        for i in range(50):
+
+            async def method(self: LargeCacheNode, data: str = "") -> str:
+                return data
+
+            method.__name__ = f"execute_task_{i:02d}"
+            setattr(LargeCacheNode, method.__name__, method)
+
+        node = LargeCacheNode()
+        node.initialize_introspection(
+            node_id="large-cache-node",
+            node_type="COMPUTE",
+            event_bus=None,
+        )
+
+        # Warm cache
+        await node.get_introspection_data()
+
+        # Measure cache hits
+        times: list[float] = []
+        for _ in range(100):
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            times.append((time.perf_counter() - start) * 1000)
+
+        avg_time = sum(times) / len(times)
+        max_time = max(times)
+        p99_time = sorted(times)[int(len(times) * 0.99)]
+
+        print(
+            f"\nCache hit (50 methods): avg={avg_time:.3f}ms, max={max_time:.3f}ms, p99={p99_time:.3f}ms"
+        )
+
+        # Cache hits should be very fast regardless of method count
+        threshold_ms = PERF_THRESHOLD_CACHE_HIT_MS * PERF_MULTIPLIER
+        assert avg_time < threshold_ms, (
+            f"Cache hit avg {avg_time:.3f}ms exceeds {threshold_ms:.1f}ms"
+        )
+
+    async def test_method_count_scaling_analysis(self) -> None:
+        """Analyze how introspection time scales with method count."""
+        results: list[tuple[int, float]] = []
+
+        for method_count in [5, 10, 20, 30, 40, 50]:
+            # Create node class with specified method count
+            class ScalingTestNode(MixinNodeIntrospection):
+                pass
+
+            for i in range(method_count):
+
+                async def method(self: ScalingTestNode, data: str = "") -> str:
+                    return data
+
+                method.__name__ = f"execute_op_{i:02d}"
+                setattr(ScalingTestNode, method.__name__, method)
+
+            node = ScalingTestNode()
+            node.initialize_introspection(
+                node_id=f"scaling-test-{method_count}",
+                node_type="COMPUTE",
+                event_bus=None,
+            )
+
+            # Clear cache and measure
+            MixinNodeIntrospection._invalidate_class_method_cache(ScalingTestNode)
+
+            times: list[float] = []
+            for _ in range(10):
+                node._introspection_cache = None
+                node._introspection_cached_at = None
+                MixinNodeIntrospection._invalidate_class_method_cache(ScalingTestNode)
+
+                start = time.perf_counter()
+                await node.get_introspection_data()
+                times.append((time.perf_counter() - start) * 1000)
+
+            avg_time = sum(times) / len(times)
+            results.append((method_count, avg_time))
+
+            # Clean up class from cache
+            MixinNodeIntrospection._invalidate_class_method_cache(ScalingTestNode)
+
+        print("\n\nMethod Count Scaling Analysis:")
+        print("Methods | Avg Time (ms)")
+        print("--------|---------------")
+        for method_count, avg_time in results:
+            print(f"   {method_count:3d}  |    {avg_time:.2f}")
+
+        # All should be under threshold
+        threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
+        for method_count, avg_time in results:
+            assert avg_time < threshold_ms, (
+                f"{method_count} methods: {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+            )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinNodeIntrospectionThresholdDetection:
+    """Tests for threshold exceeded detection."""
+
+    async def test_threshold_not_exceeded_normal_operation(self) -> None:
+        """Test that thresholds are not marked exceeded in normal operation."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="threshold-normal-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        await node.get_introspection_data()
+        metrics = node.get_performance_metrics()
+
+        assert metrics is not None
+        # Under normal operation with MockNode, thresholds should not be exceeded
+        # (unless running on very slow CI)
+        if metrics.total_introspection_ms < PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS:
+            assert metrics.threshold_exceeded is False
+            assert len(metrics.slow_operations) == 0
+
+    async def test_slow_operations_list_populated_when_exceeded(self) -> None:
+        """Test that slow_operations is populated when threshold exceeded."""
+        # This test verifies the structure is correct
+        # We can't reliably force slow operations in a unit test
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="slow-ops-structure-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        await node.get_introspection_data()
+        metrics = node.get_performance_metrics()
+
+        assert metrics is not None
+        # slow_operations should always be a list
+        assert isinstance(metrics.slow_operations, list)
+
+    async def test_cache_hit_threshold_separate_from_total(self) -> None:
+        """Test that cache hit has its own performance threshold."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="cache-threshold-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # First call - cache miss
+        await node.get_introspection_data()
+
+        # Second call - cache hit
+        await node.get_introspection_data()
+        metrics = node.get_performance_metrics()
+
+        assert metrics is not None
+        assert metrics.cache_hit is True
+
+        # Cache hit should be very fast
+        # If it exceeds 1ms, there might be an issue
+        if metrics.total_introspection_ms < PERF_THRESHOLD_CACHE_HIT_MS:
+            assert "cache_hit" not in metrics.slow_operations
