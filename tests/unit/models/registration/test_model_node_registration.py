@@ -1,0 +1,743 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Unit tests for ModelNodeRegistration.
+
+Tests validate:
+- Required field instantiation
+- Optional field handling
+- Mutable model (can update fields)
+- JSON serialization/deserialization roundtrip
+- Default values for optional fields
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+from pydantic import ValidationError
+
+from omnibase_infra.models.registration import ModelNodeRegistration
+
+
+class TestModelNodeRegistrationBasicInstantiation:
+    """Tests for basic model instantiation."""
+
+    def test_valid_instantiation_required_fields(self) -> None:
+        """Test creating registration with only required fields."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.node_id == test_node_id
+        assert registration.node_type == "effect"
+        assert registration.node_version == "1.0.0"  # Default
+        assert registration.capabilities == {}  # Default
+        assert registration.endpoints == {}  # Default
+        assert registration.metadata == {}  # Default
+        assert registration.health_endpoint is None  # Default
+        assert registration.last_heartbeat is None  # Default
+        assert registration.registered_at == now
+        assert registration.updated_at == now
+
+    def test_valid_instantiation_all_fields(self) -> None:
+        """Test creating registration with all fields populated."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        heartbeat_time = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="2.1.0",
+            capabilities={"postgres": True, "read": True, "write": True},
+            endpoints={
+                "health": "http://localhost:8080/health",
+                "metrics": "http://localhost:8080/metrics",
+            },
+            metadata={"environment": "production", "region": "us-west-2"},
+            health_endpoint="http://localhost:8080/health",
+            last_heartbeat=heartbeat_time,
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.node_id == test_node_id
+        assert registration.node_type == "effect"
+        assert registration.node_version == "2.1.0"
+        assert registration.capabilities == {
+            "postgres": True,
+            "read": True,
+            "write": True,
+        }
+        assert registration.endpoints["health"] == "http://localhost:8080/health"
+        assert registration.endpoints["metrics"] == "http://localhost:8080/metrics"
+        assert registration.metadata["environment"] == "production"
+        assert registration.health_endpoint == "http://localhost:8080/health"
+        assert registration.last_heartbeat == heartbeat_time
+        assert registration.registered_at == now
+        assert registration.updated_at == now
+
+
+class TestModelNodeRegistrationMutability:
+    """Tests for mutable model (can update fields)."""
+
+    def test_mutable_model_can_update_node_version(self) -> None:
+        """Test that node_version can be modified after creation."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.node_version = "2.0.0"
+        assert registration.node_version == "2.0.0"
+
+    def test_mutable_model_can_update_capabilities(self) -> None:
+        """Test that capabilities dict can be reassigned."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            capabilities={"original": True},
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.capabilities = {"modified": True, "new_capability": True}
+        assert registration.capabilities == {"modified": True, "new_capability": True}
+
+    def test_mutable_model_can_update_endpoints(self) -> None:
+        """Test that endpoints dict can be reassigned."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            endpoints={"health": "http://old/health"},
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.endpoints = {
+            "health": "http://new/health",
+            "api": "http://new/api",
+        }
+        assert registration.endpoints["health"] == "http://new/health"
+        assert registration.endpoints["api"] == "http://new/api"
+
+    def test_mutable_model_can_update_metadata(self) -> None:
+        """Test that metadata dict can be reassigned."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            metadata={"key": "old_value"},
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.metadata = {"key": "new_value", "extra": "data"}
+        assert registration.metadata == {"key": "new_value", "extra": "data"}
+
+    def test_mutable_model_can_update_health_endpoint(self) -> None:
+        """Test that health_endpoint can be modified."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.health_endpoint is None
+        registration.health_endpoint = "http://localhost:8080/health"
+        assert registration.health_endpoint == "http://localhost:8080/health"
+
+    def test_mutable_model_can_update_last_heartbeat(self) -> None:
+        """Test that last_heartbeat can be modified."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.last_heartbeat is None
+        new_heartbeat = datetime.now(UTC)
+        registration.last_heartbeat = new_heartbeat
+        assert registration.last_heartbeat == new_heartbeat
+
+    def test_mutable_model_can_update_updated_at(self) -> None:
+        """Test that updated_at can be modified."""
+        test_node_id = uuid4()
+        initial_time = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=initial_time,
+            updated_at=initial_time,
+        )
+        new_time = datetime.now(UTC)
+        registration.updated_at = new_time
+        assert registration.updated_at == new_time
+
+    def test_mutable_model_can_update_node_id(self) -> None:
+        """Test that node_id can be modified (though unusual)."""
+        test_node_id = uuid4()
+        new_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.node_id = new_node_id
+        assert registration.node_id == new_node_id
+
+    def test_mutable_model_can_update_node_type(self) -> None:
+        """Test that node_type can be modified (though unusual)."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.node_type = "compute"
+        assert registration.node_type == "compute"
+
+
+class TestModelNodeRegistrationDefaultValues:
+    """Tests for default values."""
+
+    def test_default_node_version(self) -> None:
+        """Test that node_version defaults to '1.0.0'."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.node_version == "1.0.0"
+
+    def test_default_capabilities_empty_dict(self) -> None:
+        """Test that capabilities defaults to empty dict."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.capabilities == {}
+        assert isinstance(registration.capabilities, dict)
+
+    def test_default_endpoints_empty_dict(self) -> None:
+        """Test that endpoints defaults to empty dict."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.endpoints == {}
+        assert isinstance(registration.endpoints, dict)
+
+    def test_default_metadata_empty_dict(self) -> None:
+        """Test that metadata defaults to empty dict."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.metadata == {}
+        assert isinstance(registration.metadata, dict)
+
+    def test_default_health_endpoint_none(self) -> None:
+        """Test that health_endpoint defaults to None."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.health_endpoint is None
+
+    def test_default_last_heartbeat_none(self) -> None:
+        """Test that last_heartbeat defaults to None."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.last_heartbeat is None
+
+    def test_default_dicts_are_independent(self) -> None:
+        """Test that default dicts are independent between instances."""
+        test_node_id1 = uuid4()
+        test_node_id2 = uuid4()
+        now = datetime.now(UTC)
+        reg1 = ModelNodeRegistration(
+            node_id=test_node_id1,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        reg2 = ModelNodeRegistration(
+            node_id=test_node_id2,
+            node_type="compute",
+            registered_at=now,
+            updated_at=now,
+        )
+        # Modify reg1's capabilities
+        reg1.capabilities["test"] = True
+        # reg2's capabilities should be unaffected
+        assert "test" not in reg2.capabilities
+
+
+class TestModelNodeRegistrationSerialization:
+    """Tests for JSON serialization and deserialization."""
+
+    def test_json_serialization_roundtrip_minimal(self) -> None:
+        """Test JSON serialization and deserialization with minimal fields."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="reducer",
+            registered_at=now,
+            updated_at=now,
+        )
+        json_str = registration.model_dump_json()
+        restored = ModelNodeRegistration.model_validate_json(json_str)
+        assert restored.node_id == registration.node_id
+        assert restored.node_type == registration.node_type
+        assert restored.node_version == registration.node_version
+        assert restored.capabilities == registration.capabilities
+        assert restored.endpoints == registration.endpoints
+
+    def test_json_serialization_roundtrip_full(self) -> None:
+        """Test JSON serialization and deserialization with all fields."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        heartbeat_time = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="3.0.0",
+            capabilities={"database": True, "transactions": True},
+            endpoints={"health": "http://localhost:8080/health"},
+            metadata={"cluster": "primary", "priority": 1},
+            health_endpoint="http://localhost:8080/health",
+            last_heartbeat=heartbeat_time,
+            registered_at=now,
+            updated_at=now,
+        )
+        json_str = registration.model_dump_json()
+        restored = ModelNodeRegistration.model_validate_json(json_str)
+
+        assert restored.node_id == registration.node_id
+        assert restored.node_type == registration.node_type
+        assert restored.node_version == registration.node_version
+        assert restored.capabilities == registration.capabilities
+        assert restored.endpoints == registration.endpoints
+        assert restored.metadata == registration.metadata
+        assert restored.health_endpoint == registration.health_endpoint
+        assert restored.last_heartbeat == registration.last_heartbeat
+        # Timestamps should match within reasonable precision
+        assert (
+            abs((restored.registered_at - registration.registered_at).total_seconds())
+            < 1
+        )
+        assert abs((restored.updated_at - registration.updated_at).total_seconds()) < 1
+
+    def test_model_dump_dict(self) -> None:
+        """Test model_dump produces correct dict structure."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.5.0",
+            capabilities={"feature": True},
+            registered_at=now,
+            updated_at=now,
+        )
+        data = registration.model_dump()
+        assert isinstance(data, dict)
+        assert data["node_id"] == test_node_id
+        assert data["node_type"] == "effect"
+        assert data["node_version"] == "1.5.0"
+        assert data["capabilities"] == {"feature": True}
+
+    def test_model_dump_mode_json(self) -> None:
+        """Test model_dump with mode='json' for JSON-compatible output."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="compute",
+            registered_at=now,
+            updated_at=now,
+        )
+        data = registration.model_dump(mode="json")
+        # UUID should be serialized as string in JSON mode
+        assert data["node_id"] == str(test_node_id)
+        # Datetime should be serialized as ISO string
+        assert isinstance(data["registered_at"], str)
+        assert isinstance(data["updated_at"], str)
+
+
+class TestModelNodeRegistrationRequiredFields:
+    """Tests for required field validation."""
+
+    def test_missing_node_id_raises_validation_error(self) -> None:
+        """Test that missing node_id raises ValidationError."""
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_type="effect",
+                registered_at=now,
+                updated_at=now,
+            )  # type: ignore[call-arg]
+        assert "node_id" in str(exc_info.value)
+
+    def test_missing_node_type_raises_validation_error(self) -> None:
+        """Test that missing node_type raises ValidationError."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                registered_at=now,
+                updated_at=now,
+            )  # type: ignore[call-arg]
+        assert "node_type" in str(exc_info.value)
+
+    def test_missing_registered_at_raises_validation_error(self) -> None:
+        """Test that missing registered_at raises ValidationError."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                updated_at=now,
+            )  # type: ignore[call-arg]
+        assert "registered_at" in str(exc_info.value)
+
+    def test_missing_updated_at_raises_validation_error(self) -> None:
+        """Test that missing updated_at raises ValidationError."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                registered_at=now,
+            )  # type: ignore[call-arg]
+        assert "updated_at" in str(exc_info.value)
+
+
+class TestModelNodeRegistrationEdgeCases:
+    """Tests for edge cases and special values."""
+
+    def test_invalid_node_id_empty_string_raises_error(self) -> None:
+        """Test that empty string is not allowed for node_id (UUID type)."""
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError):
+            ModelNodeRegistration(
+                node_id="",  # type: ignore[arg-type]
+                node_type="effect",
+                registered_at=now,
+                updated_at=now,
+            )
+
+    def test_empty_string_node_type(self) -> None:
+        """Test that empty string is allowed for node_type."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.node_type == ""
+
+    def test_complex_capabilities_dict(self) -> None:
+        """Test capabilities with complex nested values."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        complex_capabilities: dict[str, Any] = {
+            "database": True,
+            "max_connections": 100,
+            "supported_operations": ["read", "write", "delete"],
+            "config": {"pool_size": 10, "timeout": 30},
+        }
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            capabilities=complex_capabilities,
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.capabilities["database"] is True
+        assert registration.capabilities["max_connections"] == 100
+        assert registration.capabilities["supported_operations"] == [
+            "read",
+            "write",
+            "delete",
+        ]
+        assert registration.capabilities["config"]["pool_size"] == 10
+
+    def test_complex_metadata_dict(self) -> None:
+        """Test metadata with complex nested values."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        complex_metadata: dict[str, Any] = {
+            "environment": "production",
+            "tags": ["primary", "critical"],
+            "config": {"replicas": 3, "region": "us-west-2"},
+        }
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            metadata=complex_metadata,
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.metadata["environment"] == "production"
+        assert registration.metadata["tags"] == ["primary", "critical"]
+        assert registration.metadata["config"]["replicas"] == 3
+
+    def test_unicode_in_node_type(self) -> None:
+        """Test Unicode characters in string fields."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="效果节点",
+            node_version="版本1.0",
+            metadata={"description": "Узел обработки"},
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.node_id == test_node_id
+        assert registration.node_type == "效果节点"
+        assert registration.node_version == "版本1.0"
+        assert registration.metadata["description"] == "Узел обработки"
+
+    def test_extra_fields_forbidden(self) -> None:
+        """Test that extra fields are forbidden by model config."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="effect",
+                registered_at=now,
+                updated_at=now,
+                extra_field="not_allowed",  # type: ignore[call-arg]
+            )
+        assert "extra_field" in str(exc_info.value)
+
+    def test_long_version_string(self) -> None:
+        """Test that long version strings are allowed."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        long_version = "1.0.0-alpha.1.20250115.build123456+metadata.abcdef"
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version=long_version,
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.node_version == long_version
+
+    def test_long_health_endpoint_url(self) -> None:
+        """Test that long health endpoint URLs are allowed."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        long_url = "http://subdomain.example.com:8080/api/v1/health/deep/check?timeout=30&include=all"
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            health_endpoint=long_url,
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration.health_endpoint == long_url
+
+
+class TestModelNodeRegistrationTimestampHandling:
+    """Tests for timestamp field handling."""
+
+    def test_registered_at_and_updated_at_can_differ(self) -> None:
+        """Test that registered_at and updated_at can have different values."""
+        test_node_id = uuid4()
+        registered = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
+        updated = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=registered,
+            updated_at=updated,
+        )
+        assert registration.registered_at == registered
+        assert registration.updated_at == updated
+        assert registration.updated_at > registration.registered_at
+
+    def test_last_heartbeat_can_be_different_from_other_timestamps(self) -> None:
+        """Test that last_heartbeat can have different value from other timestamps."""
+        test_node_id = uuid4()
+        registered = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
+        updated = datetime(2025, 1, 2, 0, 0, 0, tzinfo=UTC)
+        heartbeat = datetime(2025, 1, 3, 0, 0, 0, tzinfo=UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=registered,
+            updated_at=updated,
+            last_heartbeat=heartbeat,
+        )
+        assert registration.registered_at == registered
+        assert registration.updated_at == updated
+        assert registration.last_heartbeat == heartbeat
+
+    def test_timestamps_can_be_same(self) -> None:
+        """Test that all timestamps can have the same value."""
+        test_node_id = uuid4()
+        same_time = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=same_time,
+            updated_at=same_time,
+            last_heartbeat=same_time,
+        )
+        assert registration.registered_at == same_time
+        assert registration.updated_at == same_time
+        assert registration.last_heartbeat == same_time
+
+
+class TestModelNodeRegistrationFromAttributes:
+    """Tests for from_attributes configuration (ORM mode)."""
+
+    def test_from_dict_like_object(self) -> None:
+        """Test creating model from dict-like object."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+
+        class DictLike:
+            def __init__(self, node_id: UUID) -> None:
+                self.node_id = node_id
+                self.node_type = "compute"
+                self.node_version = "1.0.0"
+                self.capabilities: dict[str, bool] = {}
+                self.endpoints: dict[str, str] = {}
+                self.metadata: dict[str, str] = {}
+                self.health_endpoint = None
+                self.last_heartbeat = None
+                self.registered_at = now
+                self.updated_at = now
+
+        obj = DictLike(test_node_id)
+        registration = ModelNodeRegistration.model_validate(obj)
+        assert registration.node_id == test_node_id
+        assert registration.node_type == "compute"
+        assert registration.registered_at == now
+        assert registration.updated_at == now
+
+
+class TestModelNodeRegistrationMutableDicts:
+    """Tests for mutable dict field behavior."""
+
+    def test_can_mutate_capabilities_in_place(self) -> None:
+        """Test that capabilities dict can be mutated in place."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            capabilities={"original": True},
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.capabilities["new_key"] = "new_value"
+        assert registration.capabilities["original"] is True
+        assert registration.capabilities["new_key"] == "new_value"
+
+    def test_can_mutate_endpoints_in_place(self) -> None:
+        """Test that endpoints dict can be mutated in place."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            endpoints={"health": "http://localhost/health"},
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.endpoints["metrics"] = "http://localhost/metrics"
+        assert registration.endpoints["health"] == "http://localhost/health"
+        assert registration.endpoints["metrics"] == "http://localhost/metrics"
+
+    def test_can_mutate_metadata_in_place(self) -> None:
+        """Test that metadata dict can be mutated in place."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            metadata={"key1": "value1"},
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.metadata["key2"] = "value2"
+        del registration.metadata["key1"]
+        assert "key1" not in registration.metadata
+        assert registration.metadata["key2"] == "value2"
+
+    def test_can_clear_dicts(self) -> None:
+        """Test that dict fields can be cleared."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            capabilities={"key": "value"},
+            endpoints={"health": "http://localhost/health"},
+            metadata={"meta": "data"},
+            registered_at=now,
+            updated_at=now,
+        )
+        registration.capabilities.clear()
+        registration.endpoints.clear()
+        registration.metadata.clear()
+        assert registration.capabilities == {}
+        assert registration.endpoints == {}
+        assert registration.metadata == {}
