@@ -90,10 +90,41 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
         - Thread pool gracefully shutdown on handler.shutdown()
         - All consul (synchronous) operations run in dedicated thread pool
 
-        Note: ThreadPoolExecutor uses an unbounded queue by default. The max_queue_size
-        is calculated and exposed via health_check for monitoring purposes but is not
-        enforced by the executor. Future enhancement: Use a bounded queue for
-        backpressure protection (e.g., custom executor with queue.Queue(maxsize=N)).
+        Queue Size Management (MVP Behavior):
+            ThreadPoolExecutor uses an unbounded queue by default. The max_queue_size
+            parameter is calculated (max_workers * multiplier) and exposed via
+            health_check() for monitoring purposes, but is NOT enforced by the executor.
+
+            Why unbounded is acceptable for MVP:
+                - Consul operations are typically short-lived (KV get/put, health checks)
+                - Circuit breaker provides backpressure when Consul is unavailable
+                - Thread pool size limits concurrent execution (default: 10 workers)
+                - Memory exhaustion from queue growth is unlikely in normal operation
+
+            Future Enhancement Path:
+                For production deployments with strict resource controls, implement a
+                custom executor with bounded queue using queue.Queue(maxsize=N):
+
+                    from queue import Queue
+                    from concurrent.futures import ThreadPoolExecutor
+
+                    class BoundedThreadPoolExecutor(ThreadPoolExecutor):
+                        def __init__(self, max_workers, max_queue_size):
+                            super().__init__(max_workers)
+                            self._work_queue = Queue(maxsize=max_queue_size)
+
+                This would reject tasks when queue is full, enabling explicit backpressure.
+
+            Operational Monitoring:
+                The health_check() endpoint exposes thread_pool_max_queue_size for
+                monitoring dashboards. Operators should track this alongside:
+                - thread_pool_active_workers: Current threads in use
+                - thread_pool_max_workers: Configured thread pool limit
+                - circuit_breaker_state: "open" indicates Consul unavailability
+
+                Alert thresholds should consider that max_queue_size is informational
+                only in MVP. High queue depth would manifest as increased latency
+                rather than rejected requests.
 
     Circuit Breaker Pattern (Production-Grade):
         - Uses MixinAsyncCircuitBreaker for consistent circuit breaker implementation
@@ -109,6 +140,24 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
         - Backoff calculation: initial_delay * (exponential_base ** attempt)
         - Max backoff capped at max_delay_seconds
         - Circuit breaker checked before retry execution
+
+    Error Context Design:
+        Error contexts use static target_name="consul_handler" for consistency with
+        VaultAdapter and other infrastructure handlers. This provides predictable
+        error categorization and log filtering across all Consul operations.
+
+        For multi-DC deployments, datacenter differentiation is achieved via:
+        - Circuit breaker service_name (e.g., "consul.dc1", "consul.dc2")
+        - Structured logging with datacenter field in extra dict
+        - Correlation IDs that can be traced across datacenters
+
+        This design keeps error aggregation unified (all Consul errors grouped under
+        "consul_handler") while still providing operational visibility per-datacenter
+        through circuit breaker metrics and structured logs.
+
+        Future Enhancement: If error differentiation per-DC becomes a requirement
+        (e.g., for DC-specific alerting), target_name could be made dynamic:
+        target_name=f"consul.{self._config.datacenter or 'default'}"
     """
 
     def __init__(self) -> None:
@@ -546,7 +595,11 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
             except TimeoutError as e:
                 last_exception = e
-                # Only record circuit failure on final retry attempt
+                # NOTE: Circuit breaker failures are recorded only on final retry attempt.
+                # Rationale: Transient failures during retry shouldn't count toward threshold.
+                # Only persistent failures (after all retries exhausted) indicate true service
+                # degradation. This prevents circuit breaker from opening due to temporary
+                # network blips. Pattern consistent with VaultAdapter implementation.
                 if attempt == retry_config.max_attempts - 1:
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
@@ -583,7 +636,11 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
             except consul.ConsulException as e:
                 last_exception = e
-                # Only record circuit failure on final retry attempt
+                # NOTE: Circuit breaker failures are recorded only on final retry attempt.
+                # Rationale: Transient failures during retry shouldn't count toward threshold.
+                # Only persistent failures (after all retries exhausted) indicate true service
+                # degradation. This prevents circuit breaker from opening due to temporary
+                # network blips. Pattern consistent with VaultAdapter implementation.
                 if attempt == retry_config.max_attempts - 1:
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
@@ -603,7 +660,11 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
             except Exception as e:
                 last_exception = e
-                # Only record circuit failure on final retry attempt
+                # NOTE: Circuit breaker failures are recorded only on final retry attempt.
+                # Rationale: Transient failures during retry shouldn't count toward threshold.
+                # Only persistent failures (after all retries exhausted) indicate true service
+                # degradation. This prevents circuit breaker from opening due to temporary
+                # network blips. Pattern consistent with VaultAdapter implementation.
                 if attempt == retry_config.max_attempts - 1:
                     if self._circuit_breaker_initialized:
                         async with self._circuit_breaker_lock:
