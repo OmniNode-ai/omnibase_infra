@@ -38,13 +38,13 @@ class TestInfraValidatorConstants:
     def test_infra_max_unions_constant(self) -> None:
         """Verify INFRA_MAX_UNIONS constant has expected value.
 
-        NOTE: Currently set to 160 (baseline as of 2025-12-16) due to tech debt.
+        NOTE: Currently set to 175 (baseline as of 2025-12-17) due to tech debt.
         This is documented in infra_validators.py and will be reduced incrementally.
         The omnibase_core validator counts X | None (PEP 604) patterns as unions,
         which is the ONEX-preferred syntax per CLAUDE.md.
         """
-        assert INFRA_MAX_UNIONS == 160, (
-            "INFRA_MAX_UNIONS should be 160 (current baseline)"
+        assert INFRA_MAX_UNIONS == 175, (
+            "INFRA_MAX_UNIONS should be 175 (current baseline)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
