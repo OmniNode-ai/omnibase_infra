@@ -36,6 +36,10 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers import ConsulHandler, DbAdapter
+from omnibase_infra.handlers.models import (
+    ModelConsulHandlerPayload,
+    ModelConsulHandlerResponse,
+)
 from omnibase_infra.models.registration import (
     ModelDualRegistrationResult,
     ModelNodeIntrospectionEvent,
@@ -71,9 +75,13 @@ def sample_introspection_event() -> ModelNodeIntrospectionEvent:
 def mock_consul_handler() -> MagicMock:
     """Create a mock ConsulHandler that succeeds by default."""
     handler = MagicMock(spec=ConsulHandler)
-    handler.execute = AsyncMock(
-        return_value={"status": "success", "payload": {"registered": True}}
+    # Return ModelConsulHandlerResponse for type consistency
+    mock_response = ModelConsulHandlerResponse(
+        status="success",
+        payload=ModelConsulHandlerPayload(data={"registered": True}),
+        correlation_id=uuid4(),
     )
+    handler.execute = AsyncMock(return_value=mock_response)
     return handler
 
 

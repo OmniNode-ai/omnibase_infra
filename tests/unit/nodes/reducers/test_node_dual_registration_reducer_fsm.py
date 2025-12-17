@@ -42,6 +42,8 @@ import pytest
 
 from omnibase_infra.handlers import ConsulHandler, DbAdapter
 from omnibase_infra.handlers.models import (
+    ModelConsulHandlerPayload,
+    ModelConsulHandlerResponse,
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
@@ -64,7 +66,16 @@ from omnibase_infra.nodes.reducers.node_dual_registration_reducer import (
 
 @pytest.fixture
 def sample_fsm_contract_yaml() -> str:
-    """Create sample FSM contract YAML content."""
+    """Create sample FSM contract YAML content.
+
+    Note: This fixture includes all transitions from the production contract
+    (contracts/fsm/dual_registration_reducer_fsm.yaml) because the reducer
+    builds its transition map dynamically from the contract at initialization.
+
+    Field names must match the Pydantic models in model_fsm_contract.py:
+    - states use 'state_name' (not 'name')
+    - error_handling uses 'default_error_state' (not 'default_action')
+    """
     return """
 contract_version: "1.0.0"
 name: "dual_registration_reducer_fsm"
@@ -73,21 +84,21 @@ description: "FSM for dual registration workflow"
 state_transitions:
   initial_state: "idle"
   states:
-    - name: "idle"
+    - state_name: "idle"
       description: "Waiting for introspection events"
-    - name: "receiving_introspection"
+    - state_name: "receiving_introspection"
       description: "Parsing NODE_INTROSPECTION event"
-    - name: "validating_payload"
+    - state_name: "validating_payload"
       description: "Validating event structure"
-    - name: "registering_parallel"
+    - state_name: "registering_parallel"
       description: "Parallel registration to both backends"
-    - name: "aggregating_results"
+    - state_name: "aggregating_results"
       description: "Combining registration outcomes"
-    - name: "registration_complete"
+    - state_name: "registration_complete"
       description: "Both backends succeeded"
-    - name: "partial_failure"
+    - state_name: "partial_failure"
       description: "One backend failed"
-    - name: "registration_failed"
+    - state_name: "registration_failed"
       description: "Both backends failed"
   transitions:
     - from: "idle"
@@ -96,9 +107,36 @@ state_transitions:
     - from: "receiving_introspection"
       to: "validating_payload"
       trigger: "event_parsed"
+    - from: "validating_payload"
+      to: "registering_parallel"
+      trigger: "validation_passed"
+    - from: "validating_payload"
+      to: "registration_failed"
+      trigger: "validation_failed"
+    - from: "registering_parallel"
+      to: "aggregating_results"
+      trigger: "registration_attempts_complete"
+    - from: "aggregating_results"
+      to: "registration_complete"
+      trigger: "all_backends_succeeded"
+    - from: "aggregating_results"
+      to: "partial_failure"
+      trigger: "partial_success"
+    - from: "aggregating_results"
+      to: "registration_failed"
+      trigger: "all_backends_failed"
+    - from: "registration_complete"
+      to: "idle"
+      trigger: "result_emitted"
+    - from: "partial_failure"
+      to: "idle"
+      trigger: "partial_result_emitted"
+    - from: "registration_failed"
+      to: "idle"
+      trigger: "failure_result_emitted"
 
 error_handling:
-  default_action: "log_and_continue"
+  default_error_state: "registration_failed"
 """
 
 
@@ -121,11 +159,12 @@ def mock_consul_handler() -> AsyncMock:
         AsyncMock configured with default successful responses.
     """
     mock = AsyncMock(spec=ConsulHandler)
-    # Configure default successful response
-    mock.execute.return_value = {
-        "status": "success",
-        "payload": {"registered": True},
-    }
+    # Configure default successful response with ModelConsulHandlerResponse
+    mock.execute.return_value = ModelConsulHandlerResponse(
+        status="success",
+        payload=ModelConsulHandlerPayload(data={"registered": True}),
+        correlation_id=uuid4(),
+    )
     mock.health_check.return_value = {"healthy": True}
     return mock
 

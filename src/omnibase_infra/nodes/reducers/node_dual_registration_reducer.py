@@ -167,6 +167,9 @@ class NodeDualRegistrationReducer:
         self._current_state = EnumFSMState.IDLE
         self._fsm_context = ModelFSMContext()
         self._fsm_contract: ModelFSMContract | None = None
+        self._transition_map: dict[
+            tuple[EnumFSMState, EnumFSMTrigger], EnumFSMState
+        ] = {}
 
         # FSM contract path - use robust path resolution
         # _find_contracts_dir() traverses up from current file to find contracts/
@@ -246,6 +249,20 @@ class NodeDualRegistrationReducer:
                     f"Invalid initial state in FSM contract: {initial_state_str}",
                     context=ctx,
                 )
+
+            # Build transition map dynamically from contract
+            self._transition_map = {}
+            for transition in self._fsm_contract.transitions:
+                try:
+                    from_state = EnumFSMState(transition.from_state)
+                    to_state = EnumFSMState(transition.to_state)
+                    trigger = EnumFSMTrigger(transition.trigger)
+                    self._transition_map[(from_state, trigger)] = to_state
+                except ValueError as e:
+                    raise RuntimeHostError(
+                        f"Invalid transition in FSM contract: {transition.trigger}",
+                        context=ctx,
+                    ) from e
 
             self._initialized = True
             logger.info(
@@ -391,75 +408,30 @@ class NodeDualRegistrationReducer:
         """Execute FSM state transition.
 
         Validates the transition against the FSM contract and updates
-        the current state.
+        the current state. The transition map is built dynamically from
+        the YAML contract during initialize().
 
         Args:
             trigger: Trigger to fire for state transition.
 
         Raises:
-            RuntimeHostError: If transition is invalid.
+            RuntimeHostError: If transition is invalid or contract not loaded.
         """
-        # State transition map based on FSM contract
-        transition_map: dict[tuple[EnumFSMState, EnumFSMTrigger], EnumFSMState] = {
-            # idle -> receiving_introspection
-            (
-                EnumFSMState.IDLE,
-                EnumFSMTrigger.INTROSPECTION_EVENT_RECEIVED,
-            ): EnumFSMState.RECEIVING_INTROSPECTION,
-            # receiving_introspection -> validating_payload
-            (
-                EnumFSMState.RECEIVING_INTROSPECTION,
-                EnumFSMTrigger.EVENT_PARSED,
-            ): EnumFSMState.VALIDATING_PAYLOAD,
-            # validating_payload -> registering_parallel
-            (
-                EnumFSMState.VALIDATING_PAYLOAD,
-                EnumFSMTrigger.VALIDATION_PASSED,
-            ): EnumFSMState.REGISTERING_PARALLEL,
-            # validating_payload -> registration_failed
-            (
-                EnumFSMState.VALIDATING_PAYLOAD,
-                EnumFSMTrigger.VALIDATION_FAILED,
-            ): EnumFSMState.REGISTRATION_FAILED,
-            # registering_parallel -> aggregating_results
-            (
-                EnumFSMState.REGISTERING_PARALLEL,
-                EnumFSMTrigger.REGISTRATION_ATTEMPTS_COMPLETE,
-            ): EnumFSMState.AGGREGATING_RESULTS,
-            # aggregating_results -> registration_complete
-            (
-                EnumFSMState.AGGREGATING_RESULTS,
-                EnumFSMTrigger.ALL_BACKENDS_SUCCEEDED,
-            ): EnumFSMState.REGISTRATION_COMPLETE,
-            # aggregating_results -> partial_failure
-            (
-                EnumFSMState.AGGREGATING_RESULTS,
-                EnumFSMTrigger.PARTIAL_SUCCESS,
-            ): EnumFSMState.PARTIAL_FAILURE,
-            # aggregating_results -> registration_failed
-            (
-                EnumFSMState.AGGREGATING_RESULTS,
-                EnumFSMTrigger.ALL_BACKENDS_FAILED,
-            ): EnumFSMState.REGISTRATION_FAILED,
-            # registration_complete -> idle
-            (
-                EnumFSMState.REGISTRATION_COMPLETE,
-                EnumFSMTrigger.RESULT_EMITTED,
-            ): EnumFSMState.IDLE,
-            # partial_failure -> idle
-            (
-                EnumFSMState.PARTIAL_FAILURE,
-                EnumFSMTrigger.PARTIAL_RESULT_EMITTED,
-            ): EnumFSMState.IDLE,
-            # registration_failed -> idle
-            (
-                EnumFSMState.REGISTRATION_FAILED,
-                EnumFSMTrigger.FAILURE_RESULT_EMITTED,
-            ): EnumFSMState.IDLE,
-        }
+        # Ensure transition map is populated (contract must be loaded)
+        if not self._transition_map:
+            ctx = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="fsm_transition",
+                target_name="dual_registration_reducer",
+                correlation_id=self._fsm_context.correlation_id,
+            )
+            raise RuntimeHostError(
+                "FSM transition map not initialized. Call initialize() first.",
+                context=ctx,
+            )
 
         key = (self._current_state, trigger)
-        if key not in transition_map:
+        if key not in self._transition_map:
             ctx = ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="fsm_transition",
@@ -474,7 +446,7 @@ class NodeDualRegistrationReducer:
             )
 
         old_state = self._current_state
-        self._current_state = transition_map[key]
+        self._current_state = self._transition_map[key]
 
         logger.debug(
             "FSM transition",
@@ -634,12 +606,10 @@ class NodeDualRegistrationReducer:
 
             response = await self._consul_handler.execute(envelope)
 
-            # NOTE: Response access pattern intentionally differs from
-            # _register_postgres. ConsulHandler.execute() returns a dict response
-            # (not a typed model),
-            # so we use dict access with .get() for safe key retrieval.
-            # This is different from DbAdapter which returns ModelDbQueryResponse.
-            if response.get("status") == "success":
+            # NOTE: Both ConsulHandler and DbAdapter now return typed Pydantic models
+            # (ModelConsulHandlerResponse and ModelDbQueryResponse respectively).
+            # This provides consistent attribute access patterns across both handlers.
+            if response.status == "success":
                 logger.info(
                     "Consul registration succeeded",
                     extra={
@@ -653,7 +623,7 @@ class NodeDualRegistrationReducer:
             logger.warning(
                 "Consul registration returned non-success status",
                 extra={
-                    "status": response.get("status"),
+                    "status": response.status,
                     "correlation_id": str(correlation_id),
                 },
             )
@@ -754,10 +724,9 @@ class NodeDualRegistrationReducer:
 
             response = await self._db_adapter.execute(envelope)
 
-            # NOTE: Response access pattern intentionally differs from _register_consul.
-            # DbAdapter.execute() returns a ModelDbQueryResponse (typed Pydantic model),
-            # so we use attribute access for type safety and IDE support.
-            # This is different from ConsulHandler which returns a plain dict.
+            # NOTE: Both DbAdapter and ConsulHandler now return typed Pydantic models
+            # (ModelDbQueryResponse and ModelConsulHandlerResponse respectively).
+            # This provides consistent attribute access patterns across both handlers.
             if response.status == "success":
                 logger.info(
                     "PostgreSQL registration succeeded",

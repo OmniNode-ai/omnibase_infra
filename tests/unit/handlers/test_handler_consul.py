@@ -26,6 +26,10 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.handler_consul import ConsulHandler
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
+from omnibase_infra.handlers.models import (
+    ModelConsulHandlerPayload,
+    ModelConsulHandlerResponse,
+)
 
 
 @pytest.fixture
@@ -340,8 +344,9 @@ class TestConsulHandlerKVOperations:
 
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
+            payload = response.payload.data
             assert isinstance(payload, dict)
             assert payload["value"] == "test-value"
             assert payload["key"] == "test/key"
@@ -376,8 +381,9 @@ class TestConsulHandlerKVOperations:
             response = await handler.execute(envelope)
 
             # Should return success with found=False
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
+            payload = response.payload.data
             assert isinstance(payload, dict)
             assert payload.get("found") is False
             assert payload.get("value") is None
@@ -425,8 +431,9 @@ class TestConsulHandlerKVOperations:
 
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
+            payload = response.payload.data
             assert isinstance(payload, dict)
             assert payload["found"] is True
             assert payload["count"] == 2
@@ -458,8 +465,9 @@ class TestConsulHandlerKVOperations:
 
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
+            payload = response.payload.data
             assert isinstance(payload, dict)
             assert payload["success"] is True
             assert payload["key"] == "test/key"
@@ -491,7 +499,8 @@ class TestConsulHandlerKVOperations:
 
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
 
     @pytest.mark.asyncio
     async def test_kv_operation_missing_key(
@@ -579,8 +588,9 @@ class TestConsulHandlerServiceOperations:
 
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
+            payload = response.payload.data
             assert isinstance(payload, dict)
             assert payload["registered"] is True
             assert payload["name"] == "my-service"
@@ -610,8 +620,9 @@ class TestConsulHandlerServiceOperations:
 
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
+            payload = response.payload.data
             assert isinstance(payload, dict)
             assert payload["registered"] is True
             # service_id defaults to name when not provided
@@ -667,8 +678,9 @@ class TestConsulHandlerServiceOperations:
 
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
+            payload = response.payload.data
             assert isinstance(payload, dict)
             assert payload["deregistered"] is True
             assert payload["service_id"] == "my-service-1"
@@ -727,8 +739,9 @@ class TestConsulHandlerHealthOperations:
 
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
+            payload = response.payload.data
             assert isinstance(payload, dict)
             assert payload["healthy"] is True
 
@@ -805,7 +818,8 @@ class TestConsulHandlerExecuteRouting:
             }
 
             response = await handler.execute(envelope)
-            assert response["status"] == "success"
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
 
     @pytest.mark.asyncio
     async def test_execute_unsupported_operation(
@@ -926,7 +940,8 @@ class TestConsulHandlerCorrelationId:
             }
 
             response = await handler.execute(envelope)
-            assert response["correlation_id"] == test_uuid
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.correlation_id == test_uuid
 
     @pytest.mark.asyncio
     async def test_correlation_id_extraction_string(
@@ -952,7 +967,8 @@ class TestConsulHandlerCorrelationId:
             }
 
             response = await handler.execute(envelope)
-            assert response["correlation_id"] == test_uuid
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.correlation_id == test_uuid
 
     @pytest.mark.asyncio
     async def test_correlation_id_generation(
@@ -976,8 +992,8 @@ class TestConsulHandlerCorrelationId:
 
             response = await handler.execute(envelope)
             # Should have a correlation_id generated
-            assert "correlation_id" in response
-            assert isinstance(response["correlation_id"], UUID)
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert isinstance(response.correlation_id, UUID)
 
 
 class TestConsulHandlerDescribe:
@@ -1169,7 +1185,8 @@ class TestConsulHandlerRetryLogic:
             # Should succeed on retry
             response = await handler.execute(envelope)
 
-            assert response["status"] == "success"
+            assert isinstance(response, ModelConsulHandlerResponse)
+            assert response.status == "success"
             assert mock_consul_client.kv.get.call_count == 2
 
     @pytest.mark.asyncio

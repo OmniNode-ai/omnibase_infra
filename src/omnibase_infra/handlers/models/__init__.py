@@ -10,8 +10,16 @@ Exports:
     ModelDbQueryResponse: Full database query response envelope
     ModelDbHealthResponse: Database adapter health check response
     ModelDbDescribeResponse: Database adapter metadata and capabilities
+    ModelConsulHandlerPayload: Payload containing Consul operation results
+    ModelConsulHandlerResponse: Full Consul handler response envelope
 """
 
+from omnibase_infra.handlers.models.model_consul_handler_payload import (
+    ModelConsulHandlerPayload,
+)
+from omnibase_infra.handlers.models.model_consul_handler_response import (
+    ModelConsulHandlerResponse,
+)
 from omnibase_infra.handlers.models.model_db_describe_response import (
     ModelDbDescribeResponse,
 )
@@ -22,6 +30,8 @@ from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPa
 from omnibase_infra.handlers.models.model_db_query_response import ModelDbQueryResponse
 
 __all__: list[str] = [
+    "ModelConsulHandlerPayload",
+    "ModelConsulHandlerResponse",
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
     "ModelDbHealthResponse",

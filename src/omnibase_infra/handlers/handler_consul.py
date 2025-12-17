@@ -42,6 +42,12 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
+from omnibase_infra.handlers.models.model_consul_handler_payload import (
+    ModelConsulHandlerPayload,
+)
+from omnibase_infra.handlers.models.model_consul_handler_response import (
+    ModelConsulHandlerResponse,
+)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 T = TypeVar("T")
@@ -405,7 +411,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             },
         )
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+    async def execute(self, envelope: dict[str, object]) -> ModelConsulHandlerResponse:
         """Execute Consul operation from envelope.
 
         Args:
@@ -415,7 +421,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - correlation_id: Optional correlation ID for tracing
 
         Returns:
-            Response envelope with status, payload, and correlation_id
+            ModelConsulHandlerResponse with status, payload, and correlation_id.
+            This provides type consistency with DbAdapter.execute() which returns
+            ModelDbQueryResponse.
 
         Raises:
             RuntimeHostError: If handler not initialized or invalid input.
@@ -700,7 +708,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
         self,
         payload: dict[str, object],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> ModelConsulHandlerResponse:
         """Get value from Consul KV store.
 
         Args:
@@ -709,7 +717,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - recurse: Optional bool to get all keys under prefix (default: False)
 
         Returns:
-            Response envelope with KV data
+            ModelConsulHandlerResponse with KV data
         """
         key = payload.get("key")
         if not isinstance(key, str) or not key:
@@ -746,21 +754,23 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
         # Handle response - data can be None if key doesn't exist
         if data is None:
-            return {
-                "status": "success",
-                "payload": {
-                    "found": False,
-                    "key": key,
-                    "value": None,
-                    "index": index,
-                },
-                "correlation_id": correlation_id,
-            }
+            return ModelConsulHandlerResponse(
+                status="success",
+                payload=ModelConsulHandlerPayload(
+                    data={
+                        "found": False,
+                        "key": key,
+                        "value": None,
+                        "index": index,
+                    }
+                ),
+                correlation_id=correlation_id,
+            )
 
         # Handle single key or recurse results
         if isinstance(data, list):
             # Recurse mode - multiple keys
-            items = []
+            items: list[dict[str, object]] = []
             for item in data:
                 value = item.get("Value")
                 decoded_value = (
@@ -774,38 +784,42 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                         "modify_index": item.get("ModifyIndex"),
                     }
                 )
-            return {
-                "status": "success",
-                "payload": {
-                    "found": True,
-                    "items": items,
-                    "count": len(items),
-                    "index": index,
-                },
-                "correlation_id": correlation_id,
-            }
+            return ModelConsulHandlerResponse(
+                status="success",
+                payload=ModelConsulHandlerPayload(
+                    data={
+                        "found": True,
+                        "items": items,
+                        "count": len(items),
+                        "index": index,
+                    }
+                ),
+                correlation_id=correlation_id,
+            )
         else:
             # Single key mode
             value = data.get("Value")
             decoded_value = value.decode("utf-8") if isinstance(value, bytes) else value
-            return {
-                "status": "success",
-                "payload": {
-                    "found": True,
-                    "key": data.get("Key"),
-                    "value": decoded_value,
-                    "flags": data.get("Flags"),
-                    "modify_index": data.get("ModifyIndex"),
-                    "index": index,
-                },
-                "correlation_id": correlation_id,
-            }
+            return ModelConsulHandlerResponse(
+                status="success",
+                payload=ModelConsulHandlerPayload(
+                    data={
+                        "found": True,
+                        "key": data.get("Key"),
+                        "value": decoded_value,
+                        "flags": data.get("Flags"),
+                        "modify_index": data.get("ModifyIndex"),
+                        "index": index,
+                    }
+                ),
+                correlation_id=correlation_id,
+            )
 
     async def _kv_put(
         self,
         payload: dict[str, object],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> ModelConsulHandlerResponse:
         """Put value to Consul KV store.
 
         Args:
@@ -816,7 +830,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - cas: Optional check-and-set index for optimistic locking
 
         Returns:
-            Response envelope with operation result
+            ModelConsulHandlerResponse with operation result
         """
         key = payload.get("key")
         if not isinstance(key, str) or not key:
@@ -865,20 +879,22 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             correlation_id,
         )
 
-        return {
-            "status": "success",
-            "payload": {
-                "success": success,
-                "key": key,
-            },
-            "correlation_id": correlation_id,
-        }
+        return ModelConsulHandlerResponse(
+            status="success",
+            payload=ModelConsulHandlerPayload(
+                data={
+                    "success": success,
+                    "key": key,
+                }
+            ),
+            correlation_id=correlation_id,
+        )
 
     async def _register_service(
         self,
         payload: dict[str, object],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> ModelConsulHandlerResponse:
         """Register service with Consul agent.
 
         Args:
@@ -891,7 +907,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - check: Optional health check configuration dict
 
         Returns:
-            Response envelope with registration result
+            ModelConsulHandlerResponse with registration result
         """
         name = payload.get("name")
         if not isinstance(name, str) or not name:
@@ -947,21 +963,23 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             correlation_id,
         )
 
-        return {
-            "status": "success",
-            "payload": {
-                "registered": True,
-                "name": name,
-                "service_id": service_id_str or name,
-            },
-            "correlation_id": correlation_id,
-        }
+        return ModelConsulHandlerResponse(
+            status="success",
+            payload=ModelConsulHandlerPayload(
+                data={
+                    "registered": True,
+                    "name": name,
+                    "service_id": service_id_str or name,
+                }
+            ),
+            correlation_id=correlation_id,
+        )
 
     async def _deregister_service(
         self,
         payload: dict[str, object],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> ModelConsulHandlerResponse:
         """Deregister service from Consul agent.
 
         Args:
@@ -969,7 +987,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - service_id: Service ID to deregister (required)
 
         Returns:
-            Response envelope with deregistration result
+            ModelConsulHandlerResponse with deregistration result
         """
         service_id = payload.get("service_id")
         if not isinstance(service_id, str) or not service_id:
@@ -999,14 +1017,16 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             correlation_id,
         )
 
-        return {
-            "status": "success",
-            "payload": {
-                "deregistered": True,
-                "service_id": service_id,
-            },
-            "correlation_id": correlation_id,
-        }
+        return ModelConsulHandlerResponse(
+            status="success",
+            payload=ModelConsulHandlerPayload(
+                data={
+                    "deregistered": True,
+                    "service_id": service_id,
+                }
+            ),
+            correlation_id=correlation_id,
+        )
 
     async def health_check(self) -> dict[str, object]:
         """Return handler health status with operational metrics.
@@ -1084,22 +1104,22 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
     async def _health_check_operation(
         self,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> ModelConsulHandlerResponse:
         """Execute health check operation from envelope.
 
         Args:
             correlation_id: Correlation ID for tracing
 
         Returns:
-            Response envelope with health check information
+            ModelConsulHandlerResponse with health check information
         """
         health_status = await self.health_check()
 
-        return {
-            "status": "success",
-            "payload": health_status,
-            "correlation_id": correlation_id,
-        }
+        return ModelConsulHandlerResponse(
+            status="success",
+            payload=ModelConsulHandlerPayload(data=health_status),
+            correlation_id=correlation_id,
+        )
 
     def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities.
