@@ -300,14 +300,14 @@ class TestPolicyRegistrySyncEnforcement:
 
     This is CRITICAL functionality per OMN-812 acceptance criteria.
     Policy plugins must be synchronous by default. Async policies
-    require explicit deterministic_async=True flag.
+    require explicit allow_async=True flag.
     """
 
     def test_sync_policy_registration_succeeds(
         self, policy_registry: PolicyRegistry
     ) -> None:
         """Test that synchronous policy registers without issues."""
-        # Should not raise - sync policy with default deterministic_async=False
+        # Should not raise - sync policy with default allow_async=False
         policy_registry.register_policy(
             policy_id="sync-policy",
             policy_class=MockSyncPolicy,  # type: ignore[arg-type]
@@ -321,31 +321,42 @@ class TestPolicyRegistrySyncEnforcement:
     def test_async_policy_without_flag_raises(
         self, policy_registry: PolicyRegistry
     ) -> None:
-        """Test that async policy without deterministic_async=True raises error."""
+        """Test that async policy without allow_async=True raises error.
+
+        Note: The validation checks methods in order (reduce, decide, evaluate),
+        so the error may mention whichever async method is found first.
+        MockAsyncPolicy has both async decide() and async evaluate(), so either
+        may appear in the error message.
+        """
         with pytest.raises(PolicyRegistryError) as exc_info:
             policy_registry.register_policy(
                 policy_id="async-policy",
                 policy_class=MockAsyncPolicy,  # type: ignore[arg-type]
                 policy_type=EnumPolicyType.REDUCER,
                 version="1.0.0",
-                # deterministic_async defaults to False
+                # allow_async defaults to False
             )  # type: ignore[arg-type]
         error_msg = str(exc_info.value)
         assert "async-policy" in error_msg
         assert "async" in error_msg.lower()
-        assert "evaluate" in error_msg.lower() or "deterministic" in error_msg.lower()
+        # The error may mention any async method found (decide or evaluate)
+        assert (
+            "evaluate" in error_msg.lower()
+            or "decide" in error_msg.lower()
+            or "deterministic" in error_msg.lower()
+        )
 
     def test_async_policy_with_flag_succeeds(
         self, policy_registry: PolicyRegistry
     ) -> None:
-        """Test that async policy with deterministic_async=True registers OK."""
+        """Test that async policy with allow_async=True registers OK."""
         # Should not raise with explicit flag
         policy_registry.register_policy(
             policy_id="async-policy",
             policy_class=MockAsyncPolicy,  # type: ignore[arg-type]
             policy_type=EnumPolicyType.REDUCER,
             version="1.0.0",
-            deterministic_async=True,
+            allow_async=True,
         )  # type: ignore[arg-type]
         assert policy_registry.is_registered("async-policy")
         policy_cls = policy_registry.get("async-policy")
@@ -361,7 +372,7 @@ class TestPolicyRegistrySyncEnforcement:
                 policy_class=MockAsyncPolicy,  # type: ignore[arg-type]
                 policy_type=EnumPolicyType.ORCHESTRATOR,
                 version="1.0.0",
-                deterministic_async=False,
+                allow_async=False,
             )  # type: ignore[arg-type]
         error_msg = str(exc_info.value)
         # Should mention the async evaluate method
@@ -377,7 +388,7 @@ class TestPolicyRegistrySyncEnforcement:
                 policy_class=MockAsyncDecidePolicy,  # type: ignore[arg-type]
                 policy_type=EnumPolicyType.ORCHESTRATOR,
                 version="1.0.0",
-                deterministic_async=False,
+                allow_async=False,
             )  # type: ignore[arg-type]
         error_msg = str(exc_info.value)
         # Should mention the async decide method
@@ -393,7 +404,7 @@ class TestPolicyRegistrySyncEnforcement:
                 policy_class=MockAsyncReducePolicy,  # type: ignore[arg-type]
                 policy_type=EnumPolicyType.REDUCER,
                 version="1.0.0",
-                deterministic_async=False,
+                allow_async=False,
             )  # type: ignore[arg-type]
         error_msg = str(exc_info.value)
         # Should mention the async reduce method
@@ -1348,14 +1359,14 @@ class TestPolicyRegistryIntegration:
     def test_async_policy_workflow_with_flag(
         self, policy_registry: PolicyRegistry
     ) -> None:
-        """Test async policy workflow with deterministic_async=True."""
+        """Test async policy workflow with allow_async=True."""
         # This should succeed with the flag
         policy_registry.register_policy(
             policy_id="async-workflow",
             policy_class=MockAsyncPolicy,  # type: ignore[arg-type]
             policy_type=EnumPolicyType.REDUCER,
             version="1.0.0",
-            deterministic_async=True,
+            allow_async=True,
         )  # type: ignore[arg-type]
         assert policy_registry.is_registered("async-workflow")
         policy_cls = policy_registry.get("async-workflow")
@@ -1686,6 +1697,97 @@ class TestPolicyRegistryInvalidVersions:
             )
         assert "Invalid semantic version format" in str(exc_info.value)
 
+    def test_invalid_version_format_empty_prerelease_suffix(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that dash with no prerelease suffix raises ProtocolConfigurationError.
+
+        Semver prerelease suffix must be non-empty when dash is present:
+        - "1.2.3-" is INVALID (dash with no suffix)
+        - "1.2.3-alpha" is VALID
+        - "1.2.3" is VALID (no prerelease)
+        """
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="empty-prerelease",
+                policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="1.2.3-",  # Invalid: dash with empty prerelease
+            )
+        error_msg = str(exc_info.value)
+        assert "Invalid semantic version format" in error_msg
+        assert "1.2.3-" in error_msg
+        assert "Prerelease suffix cannot be empty" in error_msg
+
+        # Verify registry is empty (registration failed)
+        assert len(policy_registry) == 0
+
+    def test_valid_prerelease_versions_accepted(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that valid prerelease versions are still accepted."""
+        # Valid prerelease formats should work
+        policy_registry.register_policy(
+            policy_id="alpha-version",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.0.0-alpha",
+        )
+        policy_registry.register_policy(
+            policy_id="beta-version",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="2.0.0-beta.1",
+        )
+        policy_registry.register_policy(
+            policy_id="rc-version",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="3.0.0-rc.1.2.3",
+        )
+        # Version without prerelease should also work
+        policy_registry.register_policy(
+            policy_id="release-version",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="4.0.0",
+        )
+
+        assert policy_registry.is_registered("alpha-version", version="1.0.0-alpha")
+        assert policy_registry.is_registered("beta-version", version="2.0.0-beta.1")
+        assert policy_registry.is_registered("rc-version", version="3.0.0-rc.1.2.3")
+        assert policy_registry.is_registered("release-version", version="4.0.0")
+
+    def test_empty_prerelease_suffix_various_formats(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test empty prerelease suffix is rejected for various version formats."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        invalid_versions = [
+            "1-",  # major only with trailing dash
+            "1.2-",  # major.minor with trailing dash
+            "1.2.3-",  # full semver with trailing dash
+            "0.0.0-",  # zero version with trailing dash
+            "10.20.30-",  # larger numbers with trailing dash
+        ]
+
+        for version in invalid_versions:
+            policy_registry.clear()  # Reset for each test
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
+                policy_registry.register_policy(
+                    policy_id=f"test-{version}",
+                    policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+                    policy_type=EnumPolicyType.ORCHESTRATOR,
+                    version=version,
+                )
+            error_msg = str(exc_info.value)
+            assert "Prerelease suffix cannot be empty" in error_msg, (
+                f"Expected error for version '{version}'"
+            )
+
     def test_invalid_version_format_non_numeric(
         self, policy_registry: PolicyRegistry
     ) -> None:
@@ -1753,6 +1855,167 @@ class TestPolicyRegistryInvalidVersions:
             version="1.2",
         )
         assert policy_registry.is_registered("major-minor", version="1.2")
+
+    def test_version_with_leading_spaces(self, policy_registry: PolicyRegistry) -> None:
+        """Test that leading spaces are trimmed from version strings."""
+        policy_registry.register_policy(
+            policy_id="leading-space",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="  1.2.3",
+        )
+        # The version should be stored as trimmed "1.2.3"
+        assert policy_registry.is_registered("leading-space")
+        # Lookup with trimmed version should work
+        policy_cls = policy_registry.get("leading-space", version="1.2.3")
+        assert policy_cls is MockSyncPolicy
+
+    def test_version_with_trailing_spaces(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that trailing spaces are trimmed from version strings."""
+        policy_registry.register_policy(
+            policy_id="trailing-space",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.2.3  ",
+        )
+        assert policy_registry.is_registered("trailing-space")
+        policy_cls = policy_registry.get("trailing-space", version="1.2.3")
+        assert policy_cls is MockSyncPolicy
+
+    def test_version_with_surrounding_spaces(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that surrounding spaces are trimmed from version strings."""
+        policy_registry.register_policy(
+            policy_id="surrounding-space",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version=" 1.2.3 ",
+        )
+        assert policy_registry.is_registered("surrounding-space")
+        policy_cls = policy_registry.get("surrounding-space", version="1.2.3")
+        assert policy_cls is MockSyncPolicy
+
+    def test_version_with_newline(self, policy_registry: PolicyRegistry) -> None:
+        """Test that newlines are trimmed from version strings."""
+        policy_registry.register_policy(
+            policy_id="newline-version",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="1.2.3\n",
+        )
+        assert policy_registry.is_registered("newline-version")
+        policy_cls = policy_registry.get("newline-version", version="1.2.3")
+        assert policy_cls is MockSyncPolicy
+
+    def test_version_with_leading_newline(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that leading newlines are trimmed from version strings."""
+        policy_registry.register_policy(
+            policy_id="leading-newline",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="\n1.2.3",
+        )
+        assert policy_registry.is_registered("leading-newline")
+        policy_cls = policy_registry.get("leading-newline", version="1.2.3")
+        assert policy_cls is MockSyncPolicy
+
+    def test_version_with_tabs(self, policy_registry: PolicyRegistry) -> None:
+        """Test that tabs are trimmed from version strings."""
+        policy_registry.register_policy(
+            policy_id="tab-version",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="\t1.2.3\t",
+        )
+        assert policy_registry.is_registered("tab-version")
+        policy_cls = policy_registry.get("tab-version", version="1.2.3")
+        assert policy_cls is MockSyncPolicy
+
+    def test_version_with_mixed_whitespace(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that mixed whitespace is trimmed from version strings."""
+        policy_registry.register_policy(
+            policy_id="mixed-whitespace",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version=" \t\n1.2.3\n\t ",
+        )
+        assert policy_registry.is_registered("mixed-whitespace")
+        policy_cls = policy_registry.get("mixed-whitespace", version="1.2.3")
+        assert policy_cls is MockSyncPolicy
+
+    def test_prerelease_version_with_whitespace(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that whitespace is trimmed from prerelease version strings."""
+        policy_registry.register_policy(
+            policy_id="prerelease-whitespace",
+            policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version="  1.2.3-alpha  ",
+        )
+        assert policy_registry.is_registered("prerelease-whitespace")
+        policy_cls = policy_registry.get("prerelease-whitespace", version="1.2.3-alpha")
+        assert policy_cls is MockSyncPolicy
+
+    def test_whitespace_only_version_raises_error(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that whitespace-only version strings raise ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            policy_registry.register_policy(
+                policy_id="whitespace-only",
+                policy_class=MockSyncPolicy,  # type: ignore[arg-type]
+                policy_type=EnumPolicyType.ORCHESTRATOR,
+                version="   ",
+            )
+        assert "empty version string" in str(exc_info.value).lower()
+
+    def test_parse_semver_whitespace_trimming(self) -> None:
+        """Test _parse_semver directly with whitespace inputs."""
+        # Reset cache to ensure clean state
+        PolicyRegistry._reset_semver_cache()
+
+        # Test various whitespace scenarios
+        result1 = PolicyRegistry._parse_semver(" 1.2.3 ")
+        result2 = PolicyRegistry._parse_semver("1.2.3\n")
+        result3 = PolicyRegistry._parse_semver("\t1.2.3\t")
+        result4 = PolicyRegistry._parse_semver("1.2.3")
+
+        # All should parse to the same result
+        assert result1 == result4
+        assert result2 == result4
+        assert result3 == result4
+        assert result1 == (1, 2, 3, chr(127))
+
+    def test_whitespace_versions_with_latest_selection(
+        self, policy_registry: PolicyRegistry
+    ) -> None:
+        """Test that whitespace versions work correctly with latest version selection."""
+        policy_registry.register_policy(
+            policy_id="whitespace-latest",
+            policy_class=MockPolicyV1,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version=" 1.0.0 ",
+        )
+        policy_registry.register_policy(
+            policy_id="whitespace-latest",
+            policy_class=MockPolicyV2,  # type: ignore[arg-type]
+            policy_type=EnumPolicyType.ORCHESTRATOR,
+            version=" 2.0.0 ",
+        )
+
+        # Get latest should return V2 (2.0.0 > 1.0.0)
+        latest_cls = policy_registry.get("whitespace-latest")
+        assert latest_cls is MockPolicyV2
 
     def test_semver_comparison_edge_case_1_9_vs_1_10(
         self, policy_registry: PolicyRegistry
