@@ -67,14 +67,16 @@ import inspect
 import json
 import logging
 import time
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 if TYPE_CHECKING:
+    from omnibase_core.protocols.event_bus import ProtocolEventBus
+
     from omnibase_infra.event_bus.models import ModelEventMessage
 
 logger = logging.getLogger(__name__)
@@ -83,6 +85,15 @@ logger = logging.getLogger(__name__)
 INTROSPECTION_TOPIC = "node.introspection"
 HEARTBEAT_TOPIC = "node.heartbeat"
 REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
+
+# Type alias for introspection cache structure
+# The cache stores JSON-serializable data from ModelNodeIntrospectionEvent.model_dump()
+IntrospectionCacheValue = str | int | float | bool | list[str] | dict[str, str]
+
+# Type alias for capabilities dictionary structure
+# operations: list of method names, protocols: list of protocol names
+# has_fsm: boolean, method_signatures: dict of method name to signature string
+CapabilitiesDict = dict[str, list[str] | bool | dict[str, str]]
 
 
 class MixinNodeIntrospection:
@@ -125,7 +136,7 @@ class MixinNodeIntrospection:
     """
 
     # Caching attributes (class-level defaults, instance overrides in initialize)
-    _introspection_cache: dict[str, Any] | None = None
+    _introspection_cache: dict[str, IntrospectionCacheValue] | None = None
     _introspection_cache_ttl: float = 300.0  # 5 minutes
     _introspection_cached_at: float | None = None
 
@@ -133,12 +144,14 @@ class MixinNodeIntrospection:
     _heartbeat_task: asyncio.Task[None] | None = None
     _registry_listener_task: asyncio.Task[None] | None = None
     _introspection_stop_event: asyncio.Event | None = None
-    _registry_unsubscribe: Callable[[], Any] | None = None
+    _registry_unsubscribe: Callable[[], None] | Callable[[], Awaitable[None]] | None = (
+        None
+    )
 
     # Configuration attributes
     _introspection_node_id: str | None = None
     _introspection_node_type: str | None = None
-    _introspection_event_bus: Any | None = None
+    _introspection_event_bus: ProtocolEventBus | None = None
     _introspection_version: str = "1.0.0"
     _introspection_start_time: float | None = None
 
@@ -146,7 +159,7 @@ class MixinNodeIntrospection:
         self,
         node_id: str,
         node_type: str,
-        event_bus: Any | None = None,
+        event_bus: ProtocolEventBus | None = None,
         version: str = "1.0.0",
         cache_ttl: float = 300.0,
     ) -> None:
@@ -221,7 +234,30 @@ class MixinNodeIntrospection:
             },
         )
 
-    async def get_capabilities(self) -> dict[str, Any]:
+    def _ensure_initialized(self) -> None:
+        """Ensure introspection has been initialized.
+
+        This method validates that `initialize_introspection()` was called
+        before using introspection methods. It should be called at the start
+        of public entry point methods.
+
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
+        Example:
+            ```python
+            async def get_introspection_data(self) -> ModelNodeIntrospectionEvent:
+                self._ensure_initialized()
+                # ... rest of method
+            ```
+        """
+        if self._introspection_node_id is None:
+            raise RuntimeError(
+                "MixinNodeIntrospection not initialized. "
+                "Call initialize_introspection() before using introspection methods."
+            )
+
+    async def get_capabilities(self) -> CapabilitiesDict:
         """Extract node capabilities via reflection.
 
         Uses the inspect module to discover:
@@ -250,7 +286,7 @@ class MixinNodeIntrospection:
             # }
             ```
         """
-        capabilities: dict[str, Any] = {
+        capabilities: CapabilitiesDict = {
             "operations": [],
             "protocols": [],
             "has_fsm": False,
@@ -260,6 +296,10 @@ class MixinNodeIntrospection:
         # Discover operations from public methods
         operation_keywords = {"execute", "handle", "process", "run", "invoke", "call"}
         exclude_prefixes = {"_", "get_", "set_", "initialize", "start_", "stop_"}
+
+        # Get the operations and method_signatures as mutable lists/dicts
+        operations: list[str] = []
+        method_signatures: dict[str, str] = {}
 
         for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
             # Skip private/special methods
@@ -280,28 +320,36 @@ class MixinNodeIntrospection:
                 keyword in name.lower() for keyword in operation_keywords
             )
             if is_operation or name in {"execute", "handle", "process"}:
-                capabilities["operations"].append(name)
+                operations.append(name)
 
             # Capture method signature
             try:
                 sig = inspect.signature(method)
-                capabilities["method_signatures"][name] = str(sig)
+                method_signatures[name] = str(sig)
             except (ValueError, TypeError):
                 # Some methods don't have inspectable signatures
-                capabilities["method_signatures"][name] = "(...)"
+                method_signatures[name] = "(...)"
 
         # Discover protocols from base classes
+        protocols: list[str] = []
         for base in type(self).__mro__:
             base_name = base.__name__
             if base_name.startswith(("Protocol", "Mixin")):
-                capabilities["protocols"].append(base_name)
+                protocols.append(base_name)
 
         # Check for FSM state attributes
+        has_fsm = False
         fsm_indicators = {"_state", "current_state", "_current_state", "state"}
         for indicator in fsm_indicators:
             if hasattr(self, indicator):
-                capabilities["has_fsm"] = True
+                has_fsm = True
                 break
+
+        # Assign to capabilities dict
+        capabilities["operations"] = operations
+        capabilities["protocols"] = protocols
+        capabilities["has_fsm"] = has_fsm
+        capabilities["method_signatures"] = method_signatures
 
         return capabilities
 
@@ -428,12 +476,16 @@ class MixinNodeIntrospection:
         Returns:
             ModelNodeIntrospectionEvent containing full introspection data.
 
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
         Example:
             ```python
             data = await node.get_introspection_data()
             print(f"Node {data.node_id} has capabilities: {data.capabilities}")
             ```
         """
+        self._ensure_initialized()
         current_time = time.time()
 
         # Check cache validity
@@ -464,14 +516,14 @@ class MixinNodeIntrospection:
         )
 
         # Update cache
-        self._introspection_cache = event.model_dump(mode="json")
+        self._introspection_cache = event.model_dump(mode="json")  # type: ignore[assignment]
         self._introspection_cached_at = current_time
 
         logger.debug(
             f"Introspection data refreshed for {self._introspection_node_id}",
             extra={
                 "node_id": self._introspection_node_id,
-                "capabilities_count": len(capabilities.get("operations", [])),
+                "capabilities_count": len(capabilities.get("operations", [])),  # type: ignore[arg-type]
                 "endpoints_count": len(endpoints),
             },
         )
@@ -496,6 +548,9 @@ class MixinNodeIntrospection:
         Returns:
             True if published successfully, False otherwise
 
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
         Example:
             ```python
             # On startup
@@ -505,6 +560,7 @@ class MixinNodeIntrospection:
             success = await node.publish_introspection(reason="shutdown")
             ```
         """
+        self._ensure_initialized()
         if self._introspection_event_bus is None:
             logger.warning(
                 f"Cannot publish introspection - no event bus configured for {self._introspection_node_id}",
@@ -519,28 +575,25 @@ class MixinNodeIntrospection:
             # Get introspection data
             event = await self.get_introspection_data()
 
-            # Update with specific reason and correlation_id
-            event_data = event.model_dump(mode="json")
-            event_data["reason"] = reason
-            event_data["correlation_id"] = str(correlation_id or uuid4())
-            event_data["timestamp"] = event.timestamp.isoformat()
-
-            # Recreate event with updates
-            publish_event = ModelNodeIntrospectionEvent(
-                **{
-                    **event_data,
-                    "correlation_id": correlation_id or uuid4(),
+            # Create publish event with updated reason and correlation_id
+            # Use model_copy for clean field updates (Pydantic v2)
+            final_correlation_id = correlation_id or uuid4()
+            publish_event = event.model_copy(
+                update={
+                    "reason": reason,
+                    "correlation_id": final_correlation_id,
                 }
             )
 
             # Publish to event bus
             if hasattr(self._introspection_event_bus, "publish_envelope"):
-                await self._introspection_event_bus.publish_envelope(
+                await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
                     envelope=publish_event,
                     topic=INTROSPECTION_TOPIC,
                 )
             else:
                 # Fallback to publish method with raw bytes
+                event_data = publish_event.model_dump(mode="json")
                 value = json.dumps(event_data).encode("utf-8")
                 await self._introspection_event_bus.publish(
                     topic=INTROSPECTION_TOPIC,
@@ -555,7 +608,7 @@ class MixinNodeIntrospection:
                 extra={
                     "node_id": self._introspection_node_id,
                     "reason": reason,
-                    "correlation_id": str(correlation_id),
+                    "correlation_id": str(final_correlation_id),
                 },
             )
             return True
@@ -599,7 +652,7 @@ class MixinNodeIntrospection:
 
             # Publish to event bus
             if hasattr(self._introspection_event_bus, "publish_envelope"):
-                await self._introspection_event_bus.publish_envelope(
+                await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
                     envelope=heartbeat,
                     topic=HEARTBEAT_TOPIC,
                 )
@@ -720,11 +773,22 @@ class MixinNodeIntrospection:
                     if target_node_id and target_node_id != self._introspection_node_id:
                         return
 
-                    correlation_id = request_data.get("correlation_id")
-                    if correlation_id:
-                        correlation_id = UUID(correlation_id)
-                    else:
-                        correlation_id = None
+                    correlation_id_str = request_data.get("correlation_id")
+                    correlation_id: UUID | None = None
+                    if correlation_id_str:
+                        try:
+                            correlation_id = UUID(correlation_id_str)
+                        except (ValueError, AttributeError):
+                            logger.warning(
+                                "Invalid correlation_id format in introspection request",
+                                extra={
+                                    "node_id": self._introspection_node_id,
+                                    "received_correlation_id": str(correlation_id_str)[
+                                        :50
+                                    ],  # Truncate for safety
+                                },
+                            )
+                            correlation_id = None
                 else:
                     correlation_id = None
 
@@ -802,6 +866,9 @@ class MixinNodeIntrospection:
             heartbeat_interval_seconds: Interval between heartbeats in seconds
             enable_registry_listener: Whether to start the registry listener
 
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
         Example:
             ```python
             await node.start_introspection_tasks(
@@ -811,6 +878,7 @@ class MixinNodeIntrospection:
             )
             ```
         """
+        self._ensure_initialized()
         # Reset stop event if previously set
         if self._introspection_stop_event is None:
             self._introspection_stop_event = asyncio.Event()

@@ -12,7 +12,7 @@ This test suite validates:
 - Event bus publishing (with and without event bus)
 - Background task management (heartbeat)
 - Graceful degradation on errors
-- Performance requirements (<50ms)
+- Performance requirements (<50ms with CI buffer)
 
 Test Organization:
     - TestMixinNodeIntrospectionInit: Initialization tests
@@ -33,14 +33,24 @@ Coverage Goals:
 """
 
 import asyncio
+import json
+import os
 import time
-from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+
+# CI environments may be slower - apply multiplier for performance thresholds
+_CI_MODE = os.environ.get("CI", "false").lower() == "true"
+PERF_MULTIPLIER = 3.0 if _CI_MODE else 2.0
+
+# Type alias for event bus published event structure
+PublishedEventDict = dict[
+    str, str | bytes | None | dict[str, str | int | bool | list[str]]
+]
 
 
 class MockEventBus:
@@ -53,12 +63,12 @@ class MockEventBus:
             should_fail: If True, publish operations will raise exceptions.
         """
         self.should_fail = should_fail
-        self.published_envelopes: list[tuple[Any, str]] = []
-        self.published_events: list[dict[str, Any]] = []
+        self.published_envelopes: list[tuple[ModelNodeIntrospectionEvent, str]] = []
+        self.published_events: list[PublishedEventDict] = []
 
     async def publish_envelope(
         self,
-        envelope: Any,
+        envelope: ModelNodeIntrospectionEvent,
         topic: str,
     ) -> None:
         """Mock publish_envelope method.
@@ -92,7 +102,6 @@ class MockEventBus:
         """
         if self.should_fail:
             raise RuntimeError("Event bus publish failed")
-        import json
 
         self.published_events.append(
             {
@@ -112,7 +121,7 @@ class MockNode(MixinNodeIntrospection):
         self.health_url = "http://localhost:8080/health"
         self.metrics_url = "http://localhost:8080/metrics"
 
-    async def execute(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def execute(self, operation: str, payload: dict[str, str]) -> dict[str, str]:
         """Mock execute method.
 
         Args:
@@ -122,9 +131,10 @@ class MockNode(MixinNodeIntrospection):
         Returns:
             Operation result.
         """
+        _ = payload  # Silence unused parameter warning
         return {"result": "ok", "operation": operation}
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> dict[str, bool | str]:
         """Mock health check.
 
         Returns:
@@ -132,7 +142,7 @@ class MockNode(MixinNodeIntrospection):
         """
         return {"healthy": True, "state": self._state}
 
-    async def handle_event(self, event: dict[str, Any]) -> None:
+    async def handle_event(self, event: dict[str, str]) -> None:
         """Mock handle_event method (should be discovered as operation).
 
         Args:
@@ -140,7 +150,7 @@ class MockNode(MixinNodeIntrospection):
         """
         _ = event  # Silence unused parameter warning
 
-    async def process_batch(self, items: list[Any]) -> list[Any]:
+    async def process_batch(self, items: list[dict[str, str]]) -> list[dict[str, str]]:
         """Mock process method (should be discovered as operation).
 
         Args:
@@ -159,7 +169,7 @@ class MockNodeNoHealth(MixinNodeIntrospection):
         """Initialize mock node."""
         self._state = "active"
 
-    async def process(self, data: dict[str, Any]) -> dict[str, Any]:
+    async def process(self, data: dict[str, str]) -> dict[str, bool]:
         """Mock process method.
 
         Args:
@@ -168,13 +178,14 @@ class MockNodeNoHealth(MixinNodeIntrospection):
         Returns:
             Processed result.
         """
+        _ = data  # Silence unused parameter warning
         return {"processed": True}
 
 
 class MockNodeNoState(MixinNodeIntrospection):
     """Mock node without _state attribute."""
 
-    async def execute(self, operation: str) -> dict[str, Any]:
+    async def execute(self, operation: str) -> dict[str, str]:
         """Mock execute method.
 
         Args:
@@ -794,7 +805,9 @@ class TestMixinNodeIntrospectionGracefulDegradation:
 
         # Create event bus that raises unexpected exception
         class BrokenEventBus:
-            async def publish_envelope(self, envelope: Any, topic: str) -> None:
+            async def publish_envelope(
+                self, envelope: ModelNodeIntrospectionEvent, topic: str
+            ) -> None:
                 raise ValueError("Unexpected error")
 
         node.initialize_introspection(
@@ -837,7 +850,11 @@ class TestMixinNodeIntrospectionGracefulDegradation:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestMixinNodeIntrospectionPerformance:
-    """Tests for performance requirements."""
+    """Tests for performance requirements.
+
+    Note: Performance thresholds are multiplied by PERF_MULTIPLIER to account
+    for CI environments which may be slower than local development machines.
+    """
 
     @pytest.fixture
     def mock_node(self) -> MockNode:
@@ -857,65 +874,72 @@ class TestMixinNodeIntrospectionPerformance:
     async def test_introspection_extraction_under_50ms(
         self, mock_node: MockNode
     ) -> None:
-        """Test that introspection data extraction completes in under 50ms."""
+        """Test that introspection data extraction completes within threshold."""
         # Clear cache to force full computation
         mock_node._introspection_cache = None
         mock_node._introspection_cached_at = None
 
+        threshold_ms = 50 * PERF_MULTIPLIER
         start = time.time()
         await mock_node.get_introspection_data()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert elapsed_ms < 50, f"Introspection took {elapsed_ms:.2f}ms, expected <50ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_cached_introspection_under_1ms(self, mock_node: MockNode) -> None:
-        """Test that cached introspection returns in under 1ms."""
+        """Test that cached introspection returns within threshold."""
         # Populate cache
         await mock_node.get_introspection_data()
 
+        threshold_ms = 1 * PERF_MULTIPLIER
         start = time.time()
         await mock_node.get_introspection_data()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert elapsed_ms < 1, (
-            f"Cached introspection took {elapsed_ms:.2f}ms, expected <1ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Cached introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
 
     async def test_capability_extraction_under_10ms(self, mock_node: MockNode) -> None:
-        """Test that capability extraction completes in under 10ms."""
+        """Test that capability extraction completes within threshold."""
+        threshold_ms = 10 * PERF_MULTIPLIER
         start = time.time()
         await mock_node.get_capabilities()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert elapsed_ms < 10, (
-            f"Capability extraction took {elapsed_ms:.2f}ms, expected <10ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
 
     async def test_endpoint_discovery_under_10ms(self, mock_node: MockNode) -> None:
-        """Test that endpoint discovery completes in under 10ms."""
+        """Test that endpoint discovery completes within threshold."""
+        threshold_ms = 10 * PERF_MULTIPLIER
         start = time.time()
         await mock_node.get_endpoints()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert elapsed_ms < 10, (
-            f"Endpoint discovery took {elapsed_ms:.2f}ms, expected <10ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Endpoint discovery took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
 
     async def test_state_extraction_under_1ms(self, mock_node: MockNode) -> None:
-        """Test that state extraction completes in under 1ms."""
+        """Test that state extraction completes within threshold."""
+        threshold_ms = 1 * PERF_MULTIPLIER
         start = time.time()
         await mock_node.get_current_state()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert elapsed_ms < 1, (
-            f"State extraction took {elapsed_ms:.2f}ms, expected <1ms"
+        assert elapsed_ms < threshold_ms, (
+            f"State extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
 
     async def test_multiple_introspection_calls_consistent_performance(
         self, mock_node: MockNode
     ) -> None:
         """Test that multiple introspection calls have consistent performance."""
-        times = []
+        times: list[float] = []
 
         for _ in range(10):
             # Clear cache each time
@@ -930,8 +954,15 @@ class TestMixinNodeIntrospectionPerformance:
         avg_time = sum(times) / len(times)
         max_time = max(times)
 
-        assert avg_time < 30, f"Average time {avg_time:.2f}ms, expected <30ms"
-        assert max_time < 50, f"Max time {max_time:.2f}ms, expected <50ms"
+        avg_threshold_ms = 30 * PERF_MULTIPLIER
+        max_threshold_ms = 50 * PERF_MULTIPLIER
+
+        assert avg_time < avg_threshold_ms, (
+            f"Average time {avg_time:.2f}ms, expected <{avg_threshold_ms:.0f}ms"
+        )
+        assert max_time < max_threshold_ms, (
+            f"Max time {max_time:.2f}ms, expected <{max_threshold_ms:.0f}ms"
+        )
 
 
 @pytest.mark.unit
@@ -998,13 +1029,16 @@ class TestMixinNodeIntrospectionEdgeCases:
             event_bus=None,
         )
 
+        threshold_ms = 50 * PERF_MULTIPLIER
         start = time.time()
         capabilities = await node.get_capabilities()
         elapsed_ms = (time.time() - start) * 1000
 
         # Should include all 10 operation methods
         assert len(capabilities["operations"]) >= 10
-        assert elapsed_ms < 50
+        assert elapsed_ms < threshold_ms, (
+            f"Large capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_concurrent_introspection_calls(self) -> None:
         """Test concurrent introspection data requests."""

@@ -52,7 +52,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
     node_type: str = Field(..., description="Node type classification")
 
     # Capabilities discovered via reflection
-    capabilities: dict[str, object] = Field(
+    capabilities: dict[str, list[str] | bool | dict[str, str]] = Field(
         default_factory=dict,
         description="Node capabilities discovered via reflection",
     )
@@ -118,3 +118,6 @@ class ModelNodeIntrospectionEvent(BaseModel):
             ]
         },
     )
+
+
+__all__ = ["ModelNodeIntrospectionEvent"]
