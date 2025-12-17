@@ -11,7 +11,6 @@ All queries MUST use parameterized statements for SQL injection protection.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -61,7 +60,7 @@ class DbAdapter:
         See CLAUDE.md "Error Sanitization Guidelines" for the full security policy
         on what information is safe vs unsafe to include in errors and logs.
 
-    TODO(Beta): Consider implementing circuit breaker pattern for connection
+    TODO(OMN-42): Consider implementing circuit breaker pattern for connection
     resilience. See CLAUDE.md "Error Recovery Patterns" for implementation guidance.
     """
 

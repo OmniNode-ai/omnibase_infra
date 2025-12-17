@@ -68,7 +68,7 @@ Integration Points:
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.runtime.models import ModelProtocolRegistrationConfig
@@ -148,8 +148,8 @@ class RegistryError(RuntimeHostError):
     def __init__(
         self,
         message: str,
-        protocol_type: Optional[str] = None,
-        context: Optional[ModelInfraErrorContext] = None,
+        protocol_type: str | None = None,
+        context: ModelInfraErrorContext | None = None,
         **extra_context: object,
     ) -> None:
         """Initialize RegistryError.
@@ -185,6 +185,12 @@ class ProtocolBindingRegistry:
     The registry maintains a mapping from protocol type identifiers (strings like
     "http", "db", "kafka") to handler classes that implement the ProtocolHandler
     protocol.
+
+    TODO(OMN-40): Migrate handler signature from tuple[str, str] to structured model.
+        Current implementation uses bare strings for protocol types. Should migrate
+        to ModelHandlerKey(handler_type: str, handler_kind: str) for consistency
+        with PolicyRegistry's ModelPolicyKey pattern and improved type safety.
+        See: https://linear.app/omninode/issue/OMN-880
 
     Thread Safety:
         All registration operations are protected by a threading.Lock to ensure
@@ -516,8 +522,8 @@ class EventBusBindingRegistry:
 # =============================================================================
 
 # Module-level singleton instances (lazy initialized)
-_handler_registry: Optional[ProtocolBindingRegistry] = None
-_event_bus_registry: Optional[EventBusBindingRegistry] = None
+_handler_registry: ProtocolBindingRegistry | None = None
+_event_bus_registry: EventBusBindingRegistry | None = None
 _singleton_lock: threading.Lock = threading.Lock()
 
 
@@ -664,7 +670,7 @@ def register_handlers_from_config(
             continue
 
         if config.type and config.protocol_class:
-            # TODO: Resolve handler class from name using importlib
+            # TODO(OMN-41): Resolve handler class from name using importlib
             # For now, just validate config structure is correct
             # The actual handler instantiation will be done by RuntimeHostProcess
             pass

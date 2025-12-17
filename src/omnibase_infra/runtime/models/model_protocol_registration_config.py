@@ -8,8 +8,6 @@ configuration within contract-driven runtime setup.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.runtime.models.model_enabled_protocols_config import ProtocolName
