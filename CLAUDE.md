@@ -104,6 +104,41 @@ def parse_input(data: Optional[Union[str, int]]) -> ParsedResult:  # Avoid this
 - **Protocol Resolution** - Duck typing through protocols, never isinstance
 - **OnexError Only** - `raise OnexError(...) from e`
 
+### Node Archetypes & Core Models (from `omnibase_core`)
+
+**All node base classes and their I/O models come from `omnibase_core.nodes`:**
+
+```python
+from omnibase_core.nodes import (
+    # Node base classes (archetypes)
+    NodeEffect,           # External I/O operations
+    NodeCompute,          # Pure transformations
+    NodeReducer,          # State aggregation (FSM-driven)
+    NodeOrchestrator,     # Workflow coordination
+
+    # I/O models for each archetype
+    ModelEffectInput, ModelEffectOutput, ModelEffectTransaction,
+    ModelComputeInput, ModelComputeOutput,
+    ModelReducerInput, ModelReducerOutput,
+    ModelOrchestratorInput, ModelOrchestratorOutput,
+
+    # Enums for node behavior
+    EnumReductionType,      # sum, count, avg, min, max, custom
+    EnumConflictResolution, # last_write_wins, merge, error
+    EnumStreamingMode,      # batch, streaming, hybrid
+    EnumExecutionMode,      # sequential, parallel, conditional
+    EnumWorkflowState,      # pending, running, completed, failed
+)
+```
+
+**Architecture Rule**: `omnibase_infra` implements infrastructure-specific nodes by extending these base classes. Never define new node archetypes in infra - they belong in core.
+
+| Layer | Responsibility | Example |
+|-------|---------------|---------|
+| `omnibase_core` | Node archetypes, I/O models, enums | `NodeReducer`, `ModelReducerInput` |
+| `omnibase_spi` | Protocol definitions | `ProtocolReducerNode` |
+| `omnibase_infra` | Infrastructure implementations | `NodeDualRegistrationReducer` |
+
 ### Container-Based Dependency Injection
 
 **All services MUST use ModelONEXContainer for dependency injection.**
