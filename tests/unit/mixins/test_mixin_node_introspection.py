@@ -877,9 +877,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_introspection_data()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < 1
-        ), f"Cached introspection took {elapsed_ms:.2f}ms, expected <1ms"
+        assert elapsed_ms < 1, (
+            f"Cached introspection took {elapsed_ms:.2f}ms, expected <1ms"
+        )
 
     async def test_capability_extraction_under_10ms(self, mock_node: MockNode) -> None:
         """Test that capability extraction completes in under 10ms."""
@@ -887,9 +887,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_capabilities()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < 10
-        ), f"Capability extraction took {elapsed_ms:.2f}ms, expected <10ms"
+        assert elapsed_ms < 10, (
+            f"Capability extraction took {elapsed_ms:.2f}ms, expected <10ms"
+        )
 
     async def test_endpoint_discovery_under_10ms(self, mock_node: MockNode) -> None:
         """Test that endpoint discovery completes in under 10ms."""
@@ -897,9 +897,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_endpoints()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < 10
-        ), f"Endpoint discovery took {elapsed_ms:.2f}ms, expected <10ms"
+        assert elapsed_ms < 10, (
+            f"Endpoint discovery took {elapsed_ms:.2f}ms, expected <10ms"
+        )
 
     async def test_state_extraction_under_1ms(self, mock_node: MockNode) -> None:
         """Test that state extraction completes in under 1ms."""
@@ -907,9 +907,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_current_state()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < 1
-        ), f"State extraction took {elapsed_ms:.2f}ms, expected <1ms"
+        assert elapsed_ms < 1, (
+            f"State extraction took {elapsed_ms:.2f}ms, expected <1ms"
+        )
 
     async def test_multiple_introspection_calls_consistent_performance(
         self, mock_node: MockNode

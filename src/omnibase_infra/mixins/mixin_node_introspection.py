@@ -276,7 +276,9 @@ class MixinNodeIntrospection:
                 continue
 
             # Add methods that look like operations
-            is_operation = any(keyword in name.lower() for keyword in operation_keywords)
+            is_operation = any(
+                keyword in name.lower() for keyword in operation_keywords
+            )
             if is_operation or name in {"execute", "handle", "process"}:
                 capabilities["operations"].append(name)
 
@@ -438,7 +440,8 @@ class MixinNodeIntrospection:
         if (
             self._introspection_cache is not None
             and self._introspection_cached_at is not None
-            and current_time - self._introspection_cached_at < self._introspection_cache_ttl
+            and current_time - self._introspection_cached_at
+            < self._introspection_cache_ttl
         ):
             # Return cached data with updated timestamp
             cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
@@ -523,10 +526,12 @@ class MixinNodeIntrospection:
             event_data["timestamp"] = event.timestamp.isoformat()
 
             # Recreate event with updates
-            publish_event = ModelNodeIntrospectionEvent(**{
-                **event_data,
-                "correlation_id": correlation_id or uuid4(),
-            })
+            publish_event = ModelNodeIntrospectionEvent(
+                **{
+                    **event_data,
+                    "correlation_id": correlation_id or uuid4(),
+                }
+            )
 
             # Publish to event bus
             if hasattr(self._introspection_event_bus, "publish_envelope"):
@@ -539,7 +544,9 @@ class MixinNodeIntrospection:
                 value = json.dumps(event_data).encode("utf-8")
                 await self._introspection_event_bus.publish(
                     topic=INTROSPECTION_TOPIC,
-                    key=self._introspection_node_id.encode("utf-8") if self._introspection_node_id else None,
+                    key=self._introspection_node_id.encode("utf-8")
+                    if self._introspection_node_id
+                    else None,
                     value=value,
                 )
 
@@ -600,7 +607,9 @@ class MixinNodeIntrospection:
                 value = json.dumps(heartbeat.model_dump(mode="json")).encode("utf-8")
                 await self._introspection_event_bus.publish(
                     topic=HEARTBEAT_TOPIC,
-                    key=self._introspection_node_id.encode("utf-8") if self._introspection_node_id else None,
+                    key=self._introspection_node_id.encode("utf-8")
+                    if self._introspection_node_id
+                    else None,
                     value=value,
                 )
 
