@@ -183,7 +183,7 @@ def validate_infra_patterns(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **strict** (`bool`, optional): Enable strict mode. Defaults to `True`.
+- **strict** (`bool`, optional): Enable strict mode. Defaults to `False`.
 
 ### Returns
 
@@ -615,7 +615,7 @@ INFRA_MAX_UNIONS = 185          # Maximum allowed complex union types
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
 
 # Strict mode flags
-INFRA_PATTERNS_STRICT = True    # Strict pattern enforcement
+INFRA_PATTERNS_STRICT = False   # Relaxed pattern enforcement for infrastructure
 INFRA_UNIONS_STRICT = False     # Allow necessary unions for infrastructure
 ```
 
