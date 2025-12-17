@@ -9,10 +9,17 @@ and their capabilities.
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Type aliases for strongly-typed capability and metadata values
+# Capabilities support: lists of strings (operations/protocols), booleans (flags),
+# and string dictionaries (method signatures)
+CapabilityValue = list[str] | bool | dict[str, str]
+
+# Metadata supports primitive JSON-serializable types
+MetadataValue = str | int | float | bool | None
 
 
 class ModelNodeRegistration(BaseModel):
@@ -35,7 +42,7 @@ class ModelNodeRegistration(BaseModel):
 
     Example:
         >>> from omnibase_infra.models.registration import ModelNodeRegistration
-        >>> from datetime import datetime
+        >>> from datetime import UTC, datetime
         >>> registration = ModelNodeRegistration(
         ...     node_id="node-postgres-adapter-001",
         ...     node_type="effect",
@@ -43,8 +50,8 @@ class ModelNodeRegistration(BaseModel):
         ...     capabilities={"database": True, "transactions": True},
         ...     endpoints={"api": "http://localhost:8080"},
         ...     health_endpoint="http://localhost:8080/health",
-        ...     registered_at=datetime.now(),
-        ...     updated_at=datetime.now(),
+        ...     registered_at=datetime.now(UTC),
+        ...     updated_at=datetime.now(UTC),
         ... )
     """
 
@@ -66,7 +73,7 @@ class ModelNodeRegistration(BaseModel):
         default="1.0.0",
         description="Semantic version of the node",
     )
-    capabilities: dict[str, Any] = Field(
+    capabilities: dict[str, CapabilityValue] = Field(
         default_factory=dict,
         description="Dictionary of node capabilities and features",
     )
@@ -74,7 +81,7 @@ class ModelNodeRegistration(BaseModel):
         default_factory=dict,
         description="Dictionary mapping endpoint names to their URLs",
     )
-    metadata: dict[str, Any] = Field(
+    metadata: dict[str, MetadataValue] = Field(
         default_factory=dict,
         description="Additional metadata associated with the node",
     )
@@ -96,4 +103,4 @@ class ModelNodeRegistration(BaseModel):
     )
 
 
-__all__: list[str] = ["ModelNodeRegistration"]
+__all__: list[str] = ["ModelNodeRegistration", "CapabilityValue", "MetadataValue"]

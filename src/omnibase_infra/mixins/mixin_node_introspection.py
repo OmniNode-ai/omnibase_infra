@@ -72,7 +72,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from uuid import UUID, uuid4
 
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
@@ -138,6 +138,12 @@ class MixinNodeIntrospection:
                 ...
         ```
     """
+
+    # Class-level cache for method signatures (populated once per class)
+    # Maps class -> {method_name: signature_string}
+    # This avoids expensive reflection on each introspection call since
+    # method signatures don't change after class definition.
+    _class_method_cache: ClassVar[dict[type, dict[str, str]]] = {}
 
     # Caching attributes (class-level defaults, instance overrides in initialize)
     _introspection_cache: dict[str, IntrospectionCacheValue] | None = None
@@ -261,6 +267,80 @@ class MixinNodeIntrospection:
                 "Call initialize_introspection() before using introspection methods."
             )
 
+    def _get_class_method_signatures(self) -> dict[str, str]:
+        """Get method signatures from class-level cache.
+
+        This method returns cached method signatures for the current class,
+        populating the cache on first access. The cache is shared across all
+        instances of the same class, avoiding expensive reflection operations
+        on each introspection call.
+
+        Returns:
+            Dictionary mapping public method names to signature strings.
+
+        Note:
+            The cache is populated lazily on first access and persists for
+            the lifetime of the class. Use `_invalidate_class_method_cache()`
+            if methods are added dynamically at runtime.
+
+        Example:
+            ```python
+            # First call populates cache
+            signatures = self._get_class_method_signatures()
+            # {"execute": "(query: str) -> list[dict]", ...}
+
+            # Subsequent calls return cached data
+            signatures = self._get_class_method_signatures()
+            ```
+        """
+        cls = type(self)
+        if cls not in MixinNodeIntrospection._class_method_cache:
+            # Populate cache for this class
+            signatures: dict[str, str] = {}
+            for name in dir(self):
+                if name.startswith("_"):
+                    continue
+                attr = getattr(self, name, None)
+                if callable(attr) and inspect.ismethod(attr):
+                    try:
+                        sig = inspect.signature(attr)
+                        signatures[name] = str(sig)
+                    except (ValueError, TypeError):
+                        # Some methods don't have inspectable signatures
+                        signatures[name] = "(...)"
+            MixinNodeIntrospection._class_method_cache[cls] = signatures
+        return MixinNodeIntrospection._class_method_cache[cls]
+
+    @classmethod
+    def _invalidate_class_method_cache(cls, target_class: type | None = None) -> None:
+        """Invalidate the class-level method signature cache.
+
+        Call this method when methods are dynamically added or removed from
+        a class at runtime. For most use cases, this is not necessary as
+        class methods are defined at class creation time.
+
+        Args:
+            target_class: Specific class to invalidate cache for.
+                If None, clears cache for all classes.
+
+        Example:
+            ```python
+            # Invalidate cache for a specific class
+            MixinNodeIntrospection._invalidate_class_method_cache(MyNodeClass)
+
+            # Invalidate cache for all classes
+            MixinNodeIntrospection._invalidate_class_method_cache()
+            ```
+
+        Note:
+            This is typically only needed in testing scenarios or when
+            using dynamic method registration patterns.
+        """
+        if target_class is not None:
+            cls._class_method_cache.pop(target_class, None)
+        else:
+            cls._class_method_cache.clear()
+
     async def get_capabilities(self) -> CapabilitiesDict:
         """Extract node capabilities via reflection.
 
@@ -268,6 +348,9 @@ class MixinNodeIntrospection:
         - Public methods (potential operations)
         - Protocol implementations
         - FSM state attributes
+
+        Method signatures are cached at the class level for performance
+        optimization, as they don't change after class definition.
 
         Returns:
             Dictionary containing:
@@ -301,42 +384,29 @@ class MixinNodeIntrospection:
             "method_signatures": {},
         }
 
-        # Discover operations from public methods
+        # Discover operations from public methods using class-level cached signatures
         operation_keywords = {"execute", "handle", "process", "run", "invoke", "call"}
         exclude_prefixes = {"_", "get_", "set_", "initialize", "start_", "stop_"}
 
-        # Get the operations and method_signatures as mutable lists/dicts
+        # Get cached method signatures (class-level, computed once per class)
+        cached_signatures = self._get_class_method_signatures()
+
+        # Filter signatures and identify operations
         operations: list[str] = []
         method_signatures: dict[str, str] = {}
 
-        for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
-            # Skip private/special methods
-            if name.startswith("_"):
+        for name, sig in cached_signatures.items():
+            # Skip common utility methods based on prefix
+            if any(name.startswith(prefix) for prefix in exclude_prefixes):
                 continue
 
-            # Skip common utility methods
-            skip = False
-            for prefix in exclude_prefixes:
-                if name.startswith(prefix):
-                    skip = True
-                    break
-            if skip:
-                continue
+            # Add method signature to filtered results
+            method_signatures[name] = sig
 
             # Add methods that look like operations
-            is_operation = any(
-                keyword in name.lower() for keyword in operation_keywords
-            )
-            if is_operation or name in {"execute", "handle", "process"}:
+            name_lower = name.lower()
+            if any(keyword in name_lower for keyword in operation_keywords):
                 operations.append(name)
-
-            # Capture method signature
-            try:
-                sig = inspect.signature(method)
-                method_signatures[name] = str(sig)
-            except (ValueError, TypeError):
-                # Some methods don't have inspectable signatures
-                method_signatures[name] = "(...)"
 
         # Discover protocols from base classes
         protocols: list[str] = []
@@ -629,13 +699,18 @@ class MixinNodeIntrospection:
             )
             return True
 
-        except Exception:
-            logger.exception(
+        except Exception as e:
+            # Use error() with exc_info=True instead of exception() to include
+            # structured error_type and error_message fields for log aggregation
+            logger.error(  # noqa: G201
                 f"Failed to publish introspection for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
                     "reason": reason,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
                 },
+                exc_info=True,
             )
             return False
 
@@ -696,12 +771,17 @@ class MixinNodeIntrospection:
             )
             return True
 
-        except Exception:
-            logger.exception(
+        except Exception as e:
+            # Use error() with exc_info=True instead of exception() to include
+            # structured error_type and error_message fields for log aggregation
+            logger.error(  # noqa: G201
                 f"Failed to publish heartbeat for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
                 },
+                exc_info=True,
             )
             return False
 
@@ -735,12 +815,17 @@ class MixinNodeIntrospection:
                     extra={"node_id": self._introspection_node_id},
                 )
                 break
-            except Exception:
-                logger.exception(
+            except Exception as e:
+                # Use error() with exc_info=True instead of exception() to include
+                # structured error_type and error_message fields for log aggregation
+                logger.error(  # noqa: G201
                     f"Error in heartbeat loop for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
                     },
+                    exc_info=True,
                 )
 
             # Wait for next interval or stop event
@@ -799,14 +884,17 @@ class MixinNodeIntrospection:
                     if correlation_id_str:
                         try:
                             correlation_id = UUID(correlation_id_str)
-                        except (ValueError, AttributeError):
+                        except (ValueError, TypeError, AttributeError) as e:
                             logger.warning(
                                 "Invalid correlation_id format in introspection request",
                                 extra={
                                     "node_id": self._introspection_node_id,
-                                    "received_correlation_id": str(correlation_id_str)[
-                                        :50
-                                    ],  # Truncate for safety
+                                    "error_type": type(e).__name__,
+                                    "received_value_length": len(
+                                        str(correlation_id_str)[:50]
+                                    )
+                                    if correlation_id_str
+                                    else 0,
                                 },
                             )
                             correlation_id = None
@@ -819,12 +907,17 @@ class MixinNodeIntrospection:
                     correlation_id=correlation_id,
                 )
 
-            except Exception:
-                logger.exception(
+            except Exception as e:
+                # Use error() with exc_info=True instead of exception() to include
+                # structured error_type and error_message fields for log aggregation
+                logger.error(  # noqa: G201
                     f"Error handling introspection request for {self._introspection_node_id}",
                     extra={
                         "node_id": self._introspection_node_id,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
                     },
+                    exc_info=True,
                 )
 
         try:
@@ -845,12 +938,17 @@ class MixinNodeIntrospection:
                 f"Registry listener cancelled for {self._introspection_node_id}",
                 extra={"node_id": self._introspection_node_id},
             )
-        except Exception:
-            logger.exception(
+        except Exception as e:
+            # Use error() with exc_info=True instead of exception() to include
+            # structured error_type and error_message fields for log aggregation
+            logger.error(  # noqa: G201
                 f"Error in registry listener for {self._introspection_node_id}",
                 extra={
                     "node_id": self._introspection_node_id,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
                 },
+                exc_info=True,
             )
         finally:
             # Clean up subscription
@@ -999,4 +1097,6 @@ __all__ = [
     "INTROSPECTION_TOPIC",
     "HEARTBEAT_TOPIC",
     "REQUEST_INTROSPECTION_TOPIC",
+    "CapabilitiesDict",
+    "IntrospectionCacheValue",
 ]

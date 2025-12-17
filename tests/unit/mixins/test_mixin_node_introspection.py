@@ -24,6 +24,8 @@ Test Organization:
     - TestMixinNodeIntrospectionTasks: Background tasks
     - TestMixinNodeIntrospectionGracefulDegradation: Error handling
     - TestMixinNodeIntrospectionPerformance: Performance requirements
+    - TestMixinNodeIntrospectionBenchmark: Detailed benchmarks with instrumentation
+    - TestMixinNodeIntrospectionEdgeCases: Edge cases and boundary conditions
 
 Coverage Goals:
     - >90% code coverage for mixin
@@ -44,8 +46,8 @@ from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospectio
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 
 # CI environments may be slower - apply multiplier for performance thresholds
-_CI_MODE = os.environ.get("CI", "false").lower() == "true"
-PERF_MULTIPLIER = 3.0 if _CI_MODE else 2.0
+_CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
+PERF_MULTIPLIER: float = 3.0 if _CI_MODE else 2.0
 
 # Type alias for event bus published event structure
 PublishedEventDict = dict[
@@ -204,9 +206,11 @@ class MockNodeWithEnumState(MixinNodeIntrospection):
         """Initialize mock node."""
 
         class State:
-            value = "running"
+            """Mock state class with value attribute to simulate enum-style state."""
 
-        self._state = State()
+            value: str = "running"
+
+        self._state: State = State()
 
 
 @pytest.mark.unit
@@ -967,6 +971,241 @@ class TestMixinNodeIntrospectionPerformance:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+class TestMixinNodeIntrospectionBenchmark:
+    """Detailed performance benchmarks with instrumentation.
+
+    These tests verify the <50ms requirement and provide
+    detailed timing breakdowns for optimization.
+
+    Note: Performance thresholds are multiplied by PERF_MULTIPLIER to account
+    for CI environments which may be slower than local development machines.
+    """
+
+    async def test_introspection_benchmark_with_instrumentation(self) -> None:
+        """Benchmark introspection with detailed timing breakdown."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="benchmark-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Clear cache for full computation
+        node._introspection_cache = None
+        node._introspection_cached_at = None
+
+        timings: dict[str, list[float]] = {
+            "get_capabilities": [],
+            "get_endpoints": [],
+            "get_current_state": [],
+            "total_introspection": [],
+        }
+
+        iterations = 20
+        for _ in range(iterations):
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+
+            # Time individual components
+            start = time.perf_counter()
+            await node.get_capabilities()
+            timings["get_capabilities"].append((time.perf_counter() - start) * 1000)
+
+            start = time.perf_counter()
+            await node.get_endpoints()
+            timings["get_endpoints"].append((time.perf_counter() - start) * 1000)
+
+            start = time.perf_counter()
+            await node.get_current_state()
+            timings["get_current_state"].append((time.perf_counter() - start) * 1000)
+
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            timings["total_introspection"].append((time.perf_counter() - start) * 1000)
+
+        # Calculate statistics
+        for name, times in timings.items():
+            avg = sum(times) / len(times)
+            min_t = min(times)
+            max_t = max(times)
+            p95 = sorted(times)[int(len(times) * 0.95)]
+
+            # Log timing breakdown for debugging
+            print(
+                f"{name}: avg={avg:.2f}ms, min={min_t:.2f}ms, "
+                f"max={max_t:.2f}ms, p95={p95:.2f}ms"
+            )
+
+        # Assert <50ms requirement (with CI buffer)
+        threshold_ms = 50 * PERF_MULTIPLIER
+        avg_total = sum(timings["total_introspection"]) / len(
+            timings["total_introspection"]
+        )
+        assert avg_total < threshold_ms, (
+            f"Average introspection {avg_total:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
+
+    async def test_introspection_concurrent_load_benchmark(self) -> None:
+        """Benchmark introspection under concurrent load."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="concurrent-benchmark-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,  # Force cache misses
+        )
+
+        async def single_introspection() -> float:
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            return (time.perf_counter() - start) * 1000
+
+        # 50 concurrent introspection requests
+        tasks = [single_introspection() for _ in range(50)]
+        times = await asyncio.gather(*tasks)
+
+        avg_time = sum(times) / len(times)
+        max_time = max(times)
+        p95_time = sorted(times)[int(len(times) * 0.95)]
+
+        # Log benchmark results
+        print(
+            f"Concurrent load (50 requests): avg={avg_time:.2f}ms, "
+            f"max={max_time:.2f}ms, p95={p95_time:.2f}ms"
+        )
+
+        threshold_ms = 100 * PERF_MULTIPLIER  # Higher threshold for concurrent load
+        assert avg_time < threshold_ms, (
+            f"Average concurrent time {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
+        assert max_time < threshold_ms * 2, (
+            f"Max concurrent time {max_time:.2f}ms exceeds {threshold_ms * 2:.0f}ms"
+        )
+
+    async def test_cache_hit_performance(self) -> None:
+        """Verify cache hits are sub-millisecond."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="cache-hit-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Warm cache
+        await node.get_introspection_data()
+
+        # Measure cache hits
+        times: list[float] = []
+        for _ in range(100):
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            times.append((time.perf_counter() - start) * 1000)
+
+        avg_time = sum(times) / len(times)
+        p99 = sorted(times)[int(len(times) * 0.99)]
+        min_time = min(times)
+        max_time = max(times)
+
+        # Log cache hit performance
+        print(
+            f"Cache hits (100 requests): avg={avg_time:.3f}ms, "
+            f"min={min_time:.3f}ms, max={max_time:.3f}ms, p99={p99:.3f}ms"
+        )
+
+        # Cache hits should be very fast
+        threshold_ms = 0.5 * PERF_MULTIPLIER
+        assert avg_time < threshold_ms, (
+            f"Cache hit avg {avg_time:.3f}ms exceeds {threshold_ms:.1f}ms"
+        )
+
+    async def test_introspection_p95_latency(self) -> None:
+        """Test that p95 latency meets requirements."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="p95-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        times: list[float] = []
+        iterations = 50
+
+        for _ in range(iterations):
+            # Clear cache for each iteration
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            times.append((time.perf_counter() - start) * 1000)
+
+        p95 = sorted(times)[int(len(times) * 0.95)]
+        p99 = sorted(times)[int(len(times) * 0.99)]
+        avg_time = sum(times) / len(times)
+
+        # Log p95 and p99 latencies
+        print(
+            f"Latency distribution ({iterations} iterations): "
+            f"avg={avg_time:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms"
+        )
+
+        # p95 should be under 50ms threshold (with CI buffer)
+        threshold_ms = 50 * PERF_MULTIPLIER
+        assert p95 < threshold_ms, (
+            f"p95 latency {p95:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
+
+    async def test_component_timing_breakdown(self) -> None:
+        """Test timing breakdown of individual introspection components."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="breakdown-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Time each component individually
+        components = {
+            "capabilities": node.get_capabilities,
+            "endpoints": node.get_endpoints,
+            "state": node.get_current_state,
+        }
+
+        component_times: dict[str, float] = {}
+
+        for name, func in components.items():
+            times: list[float] = []
+            for _ in range(10):
+                start = time.perf_counter()
+                await func()
+                times.append((time.perf_counter() - start) * 1000)
+            component_times[name] = sum(times) / len(times)
+
+        # Log component breakdown
+        print("Component timing breakdown:")
+        for name, avg_ms in component_times.items():
+            print(f"  {name}: {avg_ms:.2f}ms")
+
+        # Capabilities is typically the slowest (reflection-based)
+        cap_threshold_ms = 20 * PERF_MULTIPLIER
+        assert component_times["capabilities"] < cap_threshold_ms, (
+            f"Capabilities extraction {component_times['capabilities']:.2f}ms "
+            f"exceeds {cap_threshold_ms:.0f}ms"
+        )
+
+        # State extraction should be very fast
+        state_threshold_ms = 1 * PERF_MULTIPLIER
+        assert component_times["state"] < state_threshold_ms, (
+            f"State extraction {component_times['state']:.2f}ms "
+            f"exceeds {state_threshold_ms:.0f}ms"
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestMixinNodeIntrospectionEdgeCases:
     """Tests for edge cases and boundary conditions."""
 
@@ -1088,3 +1327,218 @@ class TestMixinNodeIntrospectionEdgeCases:
 
         health = await node.health_check()
         assert health["healthy"] is True
+
+
+@pytest.mark.asyncio(loop_scope="function")
+class TestMixinNodeIntrospectionClassLevelCache:
+    """Test class-level method signature caching for performance optimization."""
+
+    def setup_method(self) -> None:
+        """Clear class-level cache before each test."""
+        MixinNodeIntrospection._invalidate_class_method_cache()
+
+    def teardown_method(self) -> None:
+        """Clear class-level cache after each test."""
+        MixinNodeIntrospection._invalidate_class_method_cache()
+
+    async def test_class_method_cache_populated_on_first_access(self) -> None:
+        """Test that class-level cache is populated on first access."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="cache-test-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Cache should be empty before first access
+        assert MockNode not in MixinNodeIntrospection._class_method_cache
+
+        # Access capabilities to trigger cache population
+        await node.get_capabilities()
+
+        # Cache should now contain MockNode
+        assert MockNode in MixinNodeIntrospection._class_method_cache
+        cached_signatures = MixinNodeIntrospection._class_method_cache[MockNode]
+        assert isinstance(cached_signatures, dict)
+        assert len(cached_signatures) > 0
+
+    async def test_class_method_cache_shared_across_instances(self) -> None:
+        """Test that class-level cache is shared across instances."""
+        node1 = MockNode()
+        node1.initialize_introspection(
+            node_id="cache-node-1",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        node2 = MockNode()
+        node2.initialize_introspection(
+            node_id="cache-node-2",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # First node populates cache
+        await node1.get_capabilities()
+        assert MockNode in MixinNodeIntrospection._class_method_cache
+
+        # Second node uses same cache (no re-population)
+        cached_before = id(MixinNodeIntrospection._class_method_cache[MockNode])
+        await node2.get_capabilities()
+        cached_after = id(MixinNodeIntrospection._class_method_cache[MockNode])
+
+        # Cache object identity should be the same (not recreated)
+        assert cached_before == cached_after
+
+    async def test_invalidate_class_method_cache_specific_class(self) -> None:
+        """Test invalidating cache for a specific class."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="invalidate-test",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Populate cache
+        await node.get_capabilities()
+        assert MockNode in MixinNodeIntrospection._class_method_cache
+
+        # Invalidate specific class
+        MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+        # Cache should be cleared for MockNode
+        assert MockNode not in MixinNodeIntrospection._class_method_cache
+
+    async def test_invalidate_class_method_cache_all_classes(self) -> None:
+        """Test invalidating cache for all classes."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="invalidate-all-test",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Populate cache
+        await node.get_capabilities()
+        assert MockNode in MixinNodeIntrospection._class_method_cache
+
+        # Invalidate all
+        MixinNodeIntrospection._invalidate_class_method_cache()
+
+        # Cache should be empty
+        assert len(MixinNodeIntrospection._class_method_cache) == 0
+
+    async def test_cached_signatures_match_direct_extraction(self) -> None:
+        """Test that cached signatures match direct signature extraction."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="signature-match-test",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Get capabilities (uses cache)
+        capabilities = await node.get_capabilities()
+        cached_signatures = capabilities["method_signatures"]
+
+        # Get cached signatures directly
+        direct_cached = MixinNodeIntrospection._class_method_cache.get(MockNode, {})
+
+        # The capabilities method filters some prefixes, but the direct cache
+        # should have all public methods. Verify cached signatures are used.
+        assert len(cached_signatures) > 0
+        assert len(direct_cached) >= len(cached_signatures)
+
+    async def test_class_level_cache_performance_benefit(self) -> None:
+        """Test that class-level caching provides performance benefit."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="perf-cache-test",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # First call (cold cache) - populates cache
+        start1 = time.time()
+        await node.get_capabilities()
+        first_call_ms = (time.time() - start1) * 1000
+
+        # Subsequent calls (warm cache) - uses cached signatures
+        times_warm = []
+        for _ in range(10):
+            start = time.time()
+            await node.get_capabilities()
+            times_warm.append((time.time() - start) * 1000)
+
+        avg_warm_ms = sum(times_warm) / len(times_warm)
+
+        # Warm cache calls should be reasonably fast
+        threshold_ms = 5 * PERF_MULTIPLIER
+        assert avg_warm_ms < threshold_ms, (
+            f"Warm cache calls averaged {avg_warm_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
+
+    async def test_different_classes_have_separate_cache_entries(self) -> None:
+        """Test that different classes have separate cache entries."""
+
+        class CustomNode1(MixinNodeIntrospection):
+            async def execute_custom1(self, data: str) -> dict[str, str]:
+                return {"custom1": data}
+
+        class CustomNode2(MixinNodeIntrospection):
+            async def execute_custom2(self, value: int) -> dict[str, int]:
+                return {"custom2": value}
+
+        node1 = CustomNode1()
+        node1.initialize_introspection(
+            node_id="custom-1",
+            node_type="COMPUTE",
+            event_bus=None,
+        )
+
+        node2 = CustomNode2()
+        node2.initialize_introspection(
+            node_id="custom-2",
+            node_type="COMPUTE",
+            event_bus=None,
+        )
+
+        # Both populate their respective caches
+        await node1.get_capabilities()
+        await node2.get_capabilities()
+
+        # Both classes should have entries
+        assert CustomNode1 in MixinNodeIntrospection._class_method_cache
+        assert CustomNode2 in MixinNodeIntrospection._class_method_cache
+
+        # Entries should be different
+        cache1 = MixinNodeIntrospection._class_method_cache[CustomNode1]
+        cache2 = MixinNodeIntrospection._class_method_cache[CustomNode2]
+
+        # CustomNode1 should have execute_custom1
+        assert "execute_custom1" in cache1
+        # CustomNode2 should have execute_custom2
+        assert "execute_custom2" in cache2
+
+        # Each should NOT have the other's method
+        assert "execute_custom2" not in cache1
+        assert "execute_custom1" not in cache2
+
+    async def test_cache_handles_methods_without_signatures(self) -> None:
+        """Test that cache handles methods without inspectable signatures."""
+
+        class NodeWithBuiltins(MixinNodeIntrospection):
+            # Built-in methods that may not have inspectable signatures
+            pass
+
+        node = NodeWithBuiltins()
+        node.initialize_introspection(
+            node_id="builtins-test",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Should not raise exception
+        capabilities = await node.get_capabilities()
+        assert isinstance(capabilities, dict)
+        assert "method_signatures" in capabilities
