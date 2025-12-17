@@ -39,7 +39,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -76,6 +76,12 @@ MIN_HEALTH_CHECK_TIMEOUT = 1.0
 MAX_HEALTH_CHECK_TIMEOUT = 60.0
 DEFAULT_HEALTH_CHECK_TIMEOUT = 5.0
 
+# Drain timeout bounds for graceful shutdown (OMN-756)
+# Controls how long to wait for in-flight messages to complete before shutdown
+MIN_DRAIN_TIMEOUT_SECONDS = 1.0
+MAX_DRAIN_TIMEOUT_SECONDS = 300.0
+DEFAULT_DRAIN_TIMEOUT_SECONDS = 30.0
+
 
 class RuntimeHostProcess:
     """Runtime host process that owns event bus and coordinates handlers.
@@ -99,17 +105,19 @@ class RuntimeHostProcess:
         await process.stop()
         ```
 
-    Note:
-        MVP Limitation: The stop() method performs immediate shutdown without
-        draining in-flight messages. See stop() docstring for details.
+    Graceful Shutdown:
+        The stop() method implements graceful shutdown with a configurable drain
+        period. After unsubscribing from topics, it waits for in-flight messages
+        to complete before shutting down handlers and closing the event bus.
+        See stop() docstring for configuration details.
     """
 
     def __init__(
         self,
-        event_bus: Optional[InMemoryEventBus] = None,
+        event_bus: InMemoryEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
-        config: Optional[dict[str, object]] = None,
+        config: dict[str, object] | None = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -127,6 +135,10 @@ class RuntimeHostProcess:
                       ModelLifecycleSubcontract). Values outside this range are
                       clamped to the nearest bound with a warning logged.
                       Invalid string values fall back to the default with a warning.
+                    - drain_timeout_seconds: Maximum time to wait for in-flight
+                      messages to complete during graceful shutdown (default: 30.0
+                      seconds, valid range: 1-300). Values outside this range are
+                      clamped to the nearest bound with a warning logged.
         """
         # Create or use provided event bus
         self._event_bus: InMemoryEventBus = event_bus or InMemoryEventBus()
@@ -183,6 +195,50 @@ class RuntimeHostProcess:
 
         self._health_check_timeout_seconds: float = timeout_value
 
+        # Drain timeout configuration for graceful shutdown (OMN-756)
+        # Default: 30.0 seconds, valid range: 1-300 seconds
+        # Values outside bounds are clamped with a warning
+        _drain_timeout_raw = config.get("drain_timeout_seconds")
+        drain_timeout_value: float = DEFAULT_DRAIN_TIMEOUT_SECONDS
+        if isinstance(_drain_timeout_raw, (int, float)):
+            drain_timeout_value = float(_drain_timeout_raw)
+        elif isinstance(_drain_timeout_raw, str):
+            try:
+                drain_timeout_value = float(_drain_timeout_raw)
+            except ValueError:
+                logger.warning(
+                    "Invalid drain_timeout_seconds string value, using default",
+                    extra={
+                        "invalid_value": _drain_timeout_raw,
+                        "default_value": DEFAULT_DRAIN_TIMEOUT_SECONDS,
+                    },
+                )
+                drain_timeout_value = DEFAULT_DRAIN_TIMEOUT_SECONDS
+
+        # Validate drain timeout bounds and clamp if necessary
+        if (
+            drain_timeout_value < MIN_DRAIN_TIMEOUT_SECONDS
+            or drain_timeout_value > MAX_DRAIN_TIMEOUT_SECONDS
+        ):
+            logger.warning(
+                "drain_timeout_seconds out of valid range, clamping",
+                extra={
+                    "original_value": drain_timeout_value,
+                    "min_value": MIN_DRAIN_TIMEOUT_SECONDS,
+                    "max_value": MAX_DRAIN_TIMEOUT_SECONDS,
+                    "clamped_value": max(
+                        MIN_DRAIN_TIMEOUT_SECONDS,
+                        min(drain_timeout_value, MAX_DRAIN_TIMEOUT_SECONDS),
+                    ),
+                },
+            )
+            drain_timeout_value = max(
+                MIN_DRAIN_TIMEOUT_SECONDS,
+                min(drain_timeout_value, MAX_DRAIN_TIMEOUT_SECONDS),
+            )
+
+        self._drain_timeout_seconds: float = drain_timeout_value
+
         # Handler executor for lifecycle operations (shutdown, health check)
         self._lifecycle_executor = ProtocolLifecycleExecutor(
             health_check_timeout_seconds=self._health_check_timeout_seconds
@@ -195,7 +251,7 @@ class RuntimeHostProcess:
         self._is_running: bool = False
 
         # Subscription handle (callable to unsubscribe)
-        self._subscription: Optional[Callable[[], Awaitable[None]]] = None
+        self._subscription: Callable[[], Awaitable[None]] | None = None
 
         # Handler registry (handler_type -> handler instance)
         # This will be populated from the singleton registry during start()
@@ -205,6 +261,15 @@ class RuntimeHostProcess:
         # Used by health_check() to report degraded state
         self._failed_handlers: dict[str, str] = {}
 
+        # Pending message tracking for graceful shutdown (OMN-756)
+        # Tracks count of in-flight messages currently being processed
+        self._pending_message_count: int = 0
+        self._pending_lock: asyncio.Lock = asyncio.Lock()
+
+        # Drain state tracking for graceful shutdown (OMN-756)
+        # True when stop() has been called and we're waiting for messages to drain
+        self._is_draining: bool = False
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
@@ -212,6 +277,7 @@ class RuntimeHostProcess:
                 "output_topic": self._output_topic,
                 "group_id": self._group_id,
                 "health_check_timeout_seconds": self._health_check_timeout_seconds,
+                "drain_timeout_seconds": self._drain_timeout_seconds,
             },
         )
 
@@ -259,6 +325,89 @@ class RuntimeHostProcess:
             The consumer group ID for this process.
         """
         return self._group_id
+
+    @property
+    def is_draining(self) -> bool:
+        """Return True if the process is draining pending messages during shutdown.
+
+        This property indicates whether the runtime host is in the graceful shutdown
+        drain period - the phase where stop() has been called, new messages are no
+        longer being accepted, and the process is waiting for in-flight messages to
+        complete before shutting down handlers and the event bus.
+
+        Drain State Transitions:
+            - False: Normal operation (accepting and processing messages)
+            - True: Drain period active (stop() called, waiting for pending messages)
+            - False: After drain completes and shutdown finishes
+
+        Use Cases:
+            - Health check reporting (indicate service is shutting down)
+            - Load balancer integration (remove from rotation during drain)
+            - Monitoring dashboards (show lifecycle state)
+            - Debugging shutdown behavior
+
+        Returns:
+            True if currently in drain period during graceful shutdown, False otherwise.
+        """
+        return self._is_draining
+
+    @property
+    def pending_message_count(self) -> int:
+        """Return the current count of in-flight messages being processed.
+
+        This property provides visibility into how many messages are currently
+        being processed by the runtime host. Used for graceful shutdown to
+        determine when it's safe to complete the shutdown process.
+
+        Atomicity Guarantees:
+            This property returns the raw counter value WITHOUT acquiring the
+            async lock (_pending_lock). This is safe because:
+
+            1. Single int read is atomic under CPython's GIL - reading a single
+               integer value cannot be interrupted mid-operation
+            2. The value is only used for observability/monitoring purposes
+               where exact precision is not required
+            3. The slight possibility of reading a stale value during concurrent
+               increment/decrement is acceptable for monitoring use cases
+
+        Thread Safety Considerations:
+            While the read itself is atomic, the value may be approximate if
+            read occurs during concurrent message processing:
+            - Another coroutine may be in the middle of incrementing/decrementing
+            - The value represents a point-in-time snapshot, not a synchronized view
+            - For observability, this approximation is acceptable and avoids
+              lock contention that would impact performance
+
+        Use Cases (appropriate for this property):
+            - Logging current message count for debugging
+            - Metrics/observability dashboards
+            - Approximate health status reporting
+            - Monitoring drain progress during shutdown
+
+        When to use shutdown_ready() instead:
+            For shutdown decisions requiring precise count, use the async
+            shutdown_ready() method which acquires the lock to ensure no
+            race condition with in-flight message processing. The stop()
+            method uses shutdown_ready() internally for this reason.
+
+        Returns:
+            Current count of messages being processed. May be approximate
+            if reads occur during concurrent increment/decrement operations.
+        """
+        return self._pending_message_count
+
+    async def shutdown_ready(self) -> bool:
+        """Check if process is ready for shutdown (no pending messages).
+
+        This method acquires the pending message lock to ensure an accurate
+        count of in-flight messages. Use this method during graceful shutdown
+        to determine when all pending messages have been processed.
+
+        Returns:
+            True if no messages are currently being processed, False otherwise.
+        """
+        async with self._pending_lock:
+            return self._pending_message_count == 0
 
     async def start(self) -> None:
         """Start the runtime host.
@@ -320,15 +469,28 @@ class RuntimeHostProcess:
         )
 
     async def stop(self) -> None:
-        """Stop the runtime host.
+        """Stop the runtime host with graceful drain period.
 
         Performs the following steps:
-        1. Unsubscribe from topics
-        2. Shutdown all registered handlers by priority (release resources)
-        3. Close event bus
+        1. Unsubscribe from topics (stop receiving new messages)
+        2. Wait for in-flight messages to drain (up to drain_timeout_seconds)
+        3. Shutdown all registered handlers by priority (release resources)
+        4. Close event bus
 
         This method is idempotent - calling stop() on an already stopped
         process is safe and has no effect.
+
+        Drain Period:
+            After unsubscribing from topics, the process waits for in-flight
+            messages to complete processing. The drain period is controlled by
+            the drain_timeout_seconds configuration parameter (default: 30.0
+            seconds, valid range: 1-300).
+
+            During the drain period:
+            - No new messages are received (unsubscribed from topics)
+            - Messages currently being processed are allowed to complete
+            - shutdown_ready() is polled every 100ms to check completion
+            - If timeout is exceeded, shutdown proceeds with a warning
 
         Handler Shutdown Order:
             Handlers are shutdown in priority order, with higher priority handlers
@@ -350,18 +512,6 @@ class RuntimeHostProcess:
             - Consumers shutdown before producers
             - Connections shutdown before connection pools
             - Downstream resources shutdown before upstream resources
-
-        Note:
-            MVP Limitation: This implementation immediately unsubscribes without
-            draining in-flight envelopes. Any messages currently being processed
-            may be lost. For production use cases requiring graceful shutdown,
-            a drain period should be implemented.
-
-        TODO(OMN-XXX): Implement graceful shutdown with configurable drain period:
-            - Add drain_timeout_seconds parameter (default: 30)
-            - Wait for in-flight messages to complete before unsubscribing
-            - Track pending message count for shutdown readiness
-            - Add shutdown_ready() method to check drain status
         """
         if not self._is_running:
             logger.debug("RuntimeHostProcess already stopped, skipping")
@@ -369,10 +519,72 @@ class RuntimeHostProcess:
 
         logger.info("Stopping RuntimeHostProcess")
 
-        # Step 1: Unsubscribe from topics
+        # Step 1: Unsubscribe from topics (stop receiving new messages)
         if self._subscription is not None:
             await self._subscription()
             self._subscription = None
+
+        # Step 1.5: Wait for in-flight messages to drain (OMN-756)
+        # This allows messages currently being processed to complete
+        loop = asyncio.get_running_loop()
+        drain_start = loop.time()
+        drain_deadline = drain_start + self._drain_timeout_seconds
+        last_progress_log = drain_start
+
+        # Mark drain state for health check visibility (OMN-756)
+        self._is_draining = True
+
+        # Log drain start for observability
+        logger.info(
+            "Starting drain period",
+            extra={
+                "pending_messages": self._pending_message_count,
+                "drain_timeout_seconds": self._drain_timeout_seconds,
+            },
+        )
+
+        while not await self.shutdown_ready():
+            remaining = drain_deadline - loop.time()
+            if remaining <= 0:
+                logger.warning(
+                    "Drain timeout exceeded, forcing shutdown",
+                    extra={
+                        "pending_messages": self._pending_message_count,
+                        "drain_timeout_seconds": self._drain_timeout_seconds,
+                        "metric.drain_timeout_exceeded": True,
+                        "metric.pending_at_timeout": self._pending_message_count,
+                    },
+                )
+                break
+
+            # Wait a short interval before checking again
+            await asyncio.sleep(min(0.1, remaining))
+
+            # Log progress every 5 seconds during long drains for observability
+            elapsed = loop.time() - drain_start
+            if elapsed - (last_progress_log - drain_start) >= 5.0:
+                logger.info(
+                    "Drain in progress",
+                    extra={
+                        "pending_messages": self._pending_message_count,
+                        "elapsed_seconds": round(elapsed, 2),
+                        "remaining_seconds": round(remaining, 2),
+                    },
+                )
+                last_progress_log = loop.time()
+
+        # Clear drain state after drain period completes
+        self._is_draining = False
+
+        logger.info(
+            "Drain period completed",
+            extra={
+                "drain_duration_seconds": loop.time() - drain_start,
+                "pending_messages": self._pending_message_count,
+                "metric.drain_duration": loop.time() - drain_start,
+                "metric.forced_shutdown": self._pending_message_count > 0,
+            },
+        )
 
         # Step 2: Shutdown all handlers by priority (release resources like DB/Kafka connections)
         # Delegates to ProtocolLifecycleExecutor which handles:
@@ -515,9 +727,17 @@ class RuntimeHostProcess:
         This is the callback invoked by the event bus when a message arrives
         on the input topic. It deserializes the envelope and routes it.
 
+        The method tracks pending messages for graceful shutdown support (OMN-756).
+        The pending message count is incremented at the start of processing and
+        decremented when processing completes (success or failure).
+
         Args:
             message: The event message containing the envelope payload.
         """
+        # Increment pending message count (OMN-756: graceful shutdown tracking)
+        async with self._pending_lock:
+            self._pending_message_count += 1
+
         try:
             # Deserialize envelope from message value
             envelope = json.loads(message.value.decode("utf-8"))
@@ -553,6 +773,10 @@ class RuntimeHostProcess:
                 correlation_id=correlation_id,
             )
             await self._publish_envelope_safe(error_response, self._output_topic)
+        finally:
+            # Decrement pending message count (OMN-756: graceful shutdown tracking)
+            async with self._pending_lock:
+                self._pending_message_count -= 1
 
     async def _handle_envelope(self, envelope: dict[str, object]) -> None:
         """Route envelope to appropriate handler.
@@ -573,7 +797,7 @@ class RuntimeHostProcess:
         # Pre-validation: Get correlation_id for error responses if validation fails
         # This handles the case where validation itself throws before normalizing
         raw_correlation_id = envelope.get("correlation_id")
-        pre_validation_correlation_id: Optional[UUID] = None
+        pre_validation_correlation_id: UUID | None = None
         if isinstance(raw_correlation_id, UUID):
             pre_validation_correlation_id = raw_correlation_id
         elif raw_correlation_id is not None:
@@ -735,7 +959,7 @@ class RuntimeHostProcess:
     def _create_error_response(
         self,
         error: str,
-        correlation_id: Optional[UUID],
+        correlation_id: UUID | None,
     ) -> dict[str, object]:
         """Create a standardized error response envelope.
 
@@ -804,6 +1028,13 @@ class RuntimeHostProcess:
                   failed to instantiate. Indicates partial functionality -
                   the system is operational but not at full capacity.
                 - is_running: Whether the process is running
+                - is_draining: Whether the process is in graceful shutdown drain
+                  period, waiting for in-flight messages to complete (OMN-756).
+                  Load balancers can use this to remove the service from rotation
+                  before the container becomes unhealthy.
+                - pending_message_count: Number of messages currently being
+                  processed. Useful for monitoring drain progress and determining
+                  when the service is ready for shutdown.
                 - event_bus: Event bus health status (if running)
                 - event_bus_healthy: Boolean indicating event bus health
                 - failed_handlers: Dict of handler_type -> error message for
@@ -816,6 +1047,13 @@ class RuntimeHostProcess:
             - healthy=True, degraded=False: Fully operational
             - healthy=False, degraded=True: Running with reduced functionality
             - healthy=False, degraded=False: Not running or event bus unhealthy
+
+        Drain State:
+            When is_draining=True, the service is shutting down gracefully:
+            - New messages are no longer being accepted
+            - In-flight messages are being allowed to complete
+            - Health status may still show healthy during drain
+            - Load balancers should remove the service from rotation
 
         Note:
             Handler health checks are performed concurrently using asyncio.gather()
@@ -896,6 +1134,8 @@ class RuntimeHostProcess:
             "healthy": healthy,
             "degraded": degraded,
             "is_running": self._is_running,
+            "is_draining": self._is_draining,
+            "pending_message_count": self._pending_message_count,
             "event_bus": event_bus_health,
             "event_bus_healthy": event_bus_healthy,
             "failed_handlers": self._failed_handlers,
@@ -919,7 +1159,7 @@ class RuntimeHostProcess:
             },
         )
 
-    def get_handler(self, handler_type: str) -> Optional[ProtocolHandler]:
+    def get_handler(self, handler_type: str) -> ProtocolHandler | None:
         """Get handler for type, returns None if not registered.
 
         Args:
