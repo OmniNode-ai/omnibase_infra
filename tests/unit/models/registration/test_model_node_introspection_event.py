@@ -419,3 +419,176 @@ class TestModelNodeIntrospectionEventFromAttributes:
         event = ModelNodeIntrospectionEvent.model_validate(obj)
         assert event.node_id == test_node_id
         assert event.node_type == "compute"
+
+
+class TestModelNodeIntrospectionEventEquality:
+    """Tests for model equality comparison."""
+
+    def test_equal_events_are_equal(self) -> None:
+        """Test that two events with same values are equal."""
+        test_node_id = uuid4()
+        timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        event1 = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            timestamp=timestamp,
+        )
+        event2 = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            timestamp=timestamp,
+        )
+        assert event1 == event2
+
+    def test_different_node_id_not_equal(self) -> None:
+        """Test that events with different node_id are not equal."""
+        timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        event1 = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            timestamp=timestamp,
+        )
+        event2 = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            timestamp=timestamp,
+        )
+        assert event1 != event2
+
+    def test_different_node_type_not_equal(self) -> None:
+        """Test that events with different node_type are not equal."""
+        test_node_id = uuid4()
+        timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        event1 = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            timestamp=timestamp,
+        )
+        event2 = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="compute",
+            timestamp=timestamp,
+        )
+        assert event1 != event2
+
+    def test_not_equal_to_non_model(self) -> None:
+        """Test that event is not equal to non-model objects."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+        )
+        assert event != "not a model"
+        assert event != 42
+        assert event != None
+
+
+class TestModelNodeIntrospectionEventHashing:
+    """Tests for model hashing behavior.
+
+    Note: Even though this model is frozen (immutable), it contains dict fields
+    (capabilities, endpoints, metadata) which are unhashable in Python.
+    Pydantic's frozen config prevents field reassignment but doesn't make the
+    model hashable if it contains unhashable types.
+    """
+
+    def test_frozen_model_with_dict_fields_not_hashable(self) -> None:
+        """Test that frozen model with dict fields is not hashable.
+
+        Even frozen Pydantic models are not hashable if they contain
+        unhashable types like dict. This is because Pydantic uses the
+        field values for hashing, and dict is inherently unhashable.
+        """
+        test_node_id = uuid4()
+        timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            timestamp=timestamp,
+        )
+        # Model has dict fields (capabilities, endpoints, metadata) so it's not hashable
+        with pytest.raises(TypeError):
+            hash(event)
+
+
+class TestModelNodeIntrospectionEventStringRepresentation:
+    """Tests for model string representation."""
+
+    def test_str_contains_model_name(self) -> None:
+        """Test that __str__ contains the model name."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+        )
+        str_repr = str(event)
+        # Pydantic models include field values in string representation
+        assert "node_id" in str_repr or str(test_node_id) in str_repr
+
+    def test_repr_is_valid(self) -> None:
+        """Test that __repr__ produces valid representation."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+        )
+        repr_str = repr(event)
+        assert isinstance(repr_str, str)
+        assert len(repr_str) > 0
+
+    def test_str_and_repr_contain_node_type(self) -> None:
+        """Test that string representations contain node_type."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="orchestrator",
+        )
+        str_repr = str(event)
+        repr_str = repr(event)
+        # At least one should contain the node_type value
+        assert "orchestrator" in str_repr or "orchestrator" in repr_str
+
+
+class TestModelNodeIntrospectionEventCopying:
+    """Tests for model copying behavior."""
+
+    def test_model_copy_creates_new_instance(self) -> None:
+        """Test that model_copy creates a new instance."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+        )
+        copied = event.model_copy()
+        assert copied is not event
+        assert copied == event
+
+    def test_model_copy_with_update(self) -> None:
+        """Test that model_copy can update fields."""
+        test_node_id = uuid4()
+        new_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+        )
+        copied = event.model_copy(update={"node_id": new_node_id})
+        assert copied.node_id == new_node_id
+        assert copied.node_type == event.node_type
+        # Original is unchanged
+        assert event.node_id == test_node_id
+
+    def test_model_copy_deep(self) -> None:
+        """Test that deep copy creates independent nested objects."""
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            capabilities={"key": "value"},
+        )
+        copied = event.model_copy(deep=True)
+        # Both should have same values
+        assert copied.capabilities == event.capabilities
+        # But dict should be independent (deep copy)
+        # Note: For frozen models, we can't modify in place, but the dict
+        # reference should still be different
+        assert copied.capabilities is not event.capabilities

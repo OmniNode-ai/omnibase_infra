@@ -741,3 +741,213 @@ class TestModelNodeRegistrationMutableDicts:
         assert registration.capabilities == {}
         assert registration.endpoints == {}
         assert registration.metadata == {}
+
+
+class TestModelNodeRegistrationEquality:
+    """Tests for model equality comparison."""
+
+    def test_equal_registrations_are_equal(self) -> None:
+        """Test that two registrations with same values are equal."""
+        test_node_id = uuid4()
+        now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        reg1 = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        reg2 = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert reg1 == reg2
+
+    def test_different_node_id_not_equal(self) -> None:
+        """Test that registrations with different node_id are not equal."""
+        now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        reg1 = ModelNodeRegistration(
+            node_id=uuid4(),
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        reg2 = ModelNodeRegistration(
+            node_id=uuid4(),
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert reg1 != reg2
+
+    def test_different_node_type_not_equal(self) -> None:
+        """Test that registrations with different node_type are not equal."""
+        test_node_id = uuid4()
+        now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        reg1 = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        reg2 = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="compute",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert reg1 != reg2
+
+    def test_not_equal_to_non_model(self) -> None:
+        """Test that registration is not equal to non-model objects."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        assert registration != "not a model"
+        assert registration != 42
+        assert registration != None
+
+
+class TestModelNodeRegistrationStringRepresentation:
+    """Tests for model string representation."""
+
+    def test_str_contains_node_id(self) -> None:
+        """Test that __str__ contains field information."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        str_repr = str(registration)
+        # Pydantic models include field values in string representation
+        assert "node_id" in str_repr or str(test_node_id) in str_repr
+
+    def test_repr_is_valid(self) -> None:
+        """Test that __repr__ produces valid representation."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        repr_str = repr(registration)
+        assert isinstance(repr_str, str)
+        assert len(repr_str) > 0
+
+    def test_str_and_repr_contain_node_type(self) -> None:
+        """Test that string representations contain node_type."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="orchestrator",
+            registered_at=now,
+            updated_at=now,
+        )
+        str_repr = str(registration)
+        repr_str = repr(registration)
+        # At least one should contain the node_type value
+        assert "orchestrator" in str_repr or "orchestrator" in repr_str
+
+
+class TestModelNodeRegistrationCopying:
+    """Tests for model copying behavior."""
+
+    def test_model_copy_creates_new_instance(self) -> None:
+        """Test that model_copy creates a new instance."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        copied = registration.model_copy()
+        assert copied is not registration
+        assert copied == registration
+
+    def test_model_copy_with_update(self) -> None:
+        """Test that model_copy can update fields."""
+        test_node_id = uuid4()
+        new_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        copied = registration.model_copy(update={"node_id": new_node_id})
+        assert copied.node_id == new_node_id
+        assert copied.node_type == registration.node_type
+        # Original is unchanged
+        assert registration.node_id == test_node_id
+
+    def test_model_copy_deep(self) -> None:
+        """Test that deep copy creates independent nested objects."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            capabilities={"key": "value"},
+            registered_at=now,
+            updated_at=now,
+        )
+        copied = registration.model_copy(deep=True)
+        # Both should have same values
+        assert copied.capabilities == registration.capabilities
+        # But dict should be independent (deep copy)
+        assert copied.capabilities is not registration.capabilities
+        # Modifying copy should not affect original
+        copied.capabilities["new_key"] = "new_value"
+        assert "new_key" not in registration.capabilities
+
+    def test_model_copy_shallow_shares_dict_reference(self) -> None:
+        """Test that shallow copy shares nested dict references."""
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            capabilities={"key": "value"},
+            registered_at=now,
+            updated_at=now,
+        )
+        copied = registration.model_copy(deep=False)
+        # Shallow copy shares the same dict reference
+        assert copied.capabilities is registration.capabilities
+
+
+class TestModelNodeRegistrationHashing:
+    """Tests for model hashing behavior (mutable model)."""
+
+    def test_mutable_model_not_hashable_by_default(self) -> None:
+        """Test that mutable model is not hashable by default.
+
+        Note: Mutable Pydantic models are not hashable because their
+        fields can change, which would break hash consistency.
+        """
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        registration = ModelNodeRegistration(
+            node_id=test_node_id,
+            node_type="effect",
+            registered_at=now,
+            updated_at=now,
+        )
+        # Mutable models should raise TypeError when hashed
+        with pytest.raises(TypeError):
+            hash(registration)
