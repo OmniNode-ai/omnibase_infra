@@ -22,7 +22,7 @@ class ModelRegistryRequest(BaseModel):
     introspection_event: ModelNodeIntrospectionPayload | None = Field(
         None, description="Introspection data for registration"
     )
-    filters: dict[str, object] | None = Field(
+    filters: dict[str, str] | None = Field(
         None, description="Filters for discover operation"
     )
     correlation_id: UUID = Field(..., description="Request correlation ID")

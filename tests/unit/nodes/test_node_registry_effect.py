@@ -34,7 +34,7 @@ import asyncio
 import json
 from datetime import datetime
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -1533,3 +1533,179 @@ class TestNodeRegistryEffectCorrelationId:
         assert exc_info.value.model.correlation_id == correlation_id
 
         await node.shutdown()
+
+
+# =============================================================================
+# Test: Error Sanitization
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNodeRegistryEffectErrorSanitization:
+    """Tests for error message sanitization."""
+
+    def test_sanitize_error_includes_exception_type(self) -> None:
+        """Test that exception type is included in sanitized error."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        error = ValueError("Test error message")
+        result = node._sanitize_error(error)
+        assert result.startswith("ValueError: ")
+        assert "Test error message" in result
+
+    def test_sanitize_error_redacts_password(self) -> None:
+        """Test that passwords are redacted from error messages."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        error = Exception("Connection failed: password=secret123")
+        result = node._sanitize_error(error)
+        assert "secret123" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_error_redacts_token(self) -> None:
+        """Test that tokens are redacted from error messages."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        error = Exception("Auth failed: token=abc123xyz")
+        result = node._sanitize_error(error)
+        assert "abc123xyz" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_error_redacts_api_key(self) -> None:
+        """Test that API keys are redacted from error messages."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        error = Exception("Request failed: api_key=my-secret-key")
+        result = node._sanitize_error(error)
+        assert "my-secret-key" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_error_redacts_connection_string(self) -> None:
+        """Test that connection string credentials are redacted."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        error = Exception("Failed: postgresql://user:password123@host:5432/db")
+        result = node._sanitize_error(error)
+        assert "password123" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_error_truncates_long_messages(self) -> None:
+        """Test that long error messages are truncated."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        # Use a mixed message with spaces to avoid base64-like pattern matching
+        long_message = "Error: " + " ".join(["word"] * 200)  # Long message with spaces
+        error = Exception(long_message)
+        result = node._sanitize_error(error)
+        # Message should be truncated to 500 chars + type prefix + "..."
+        assert len(result) <= 520  # Type name + ": " + 500 chars + "..."
+        assert result.endswith("...")
+
+    def test_sanitize_error_redacts_secret(self) -> None:
+        """Test that secrets are redacted from error messages."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        error = Exception("Config error: secret=mysupersecret")
+        result = node._sanitize_error(error)
+        assert "mysupersecret" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_error_redacts_bearer_token(self) -> None:
+        """Test that bearer tokens are redacted."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+        error = Exception("Auth header: Bearer eyJhbGciOiJIUzI1NiJ9.test")
+        result = node._sanitize_error(error)
+        assert "eyJhbGciOiJIUzI1NiJ9" not in result
+        assert "[REDACTED]" in result
+
+    @pytest.mark.asyncio
+    async def test_sanitize_error_used_in_consul_registration(self) -> None:
+        """Test that _sanitize_error is used for Consul registration failures."""
+        mock_consul_handler = Mock()
+        mock_consul_handler.execute = AsyncMock(
+            side_effect=Exception("Consul error: api_key=supersecret123")
+        )
+        mock_db_handler = Mock()
+        mock_db_handler.execute = AsyncMock(
+            return_value={"status": "success", "payload": {"rows_affected": 1}}
+        )
+
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+        )
+        await node.initialize()
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="test-node",
+            node_type="effect",
+            node_version="1.0.0",
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=uuid4(),
+        )
+        response = await node.execute(request)
+
+        # Consul failed, Postgres succeeded = partial success
+        assert response.status == "partial"
+        assert response.consul_result is not None
+        assert response.consul_result.error is not None
+        # Verify sensitive data is redacted
+        assert "supersecret123" not in response.consul_result.error
+        assert "[REDACTED]" in response.consul_result.error
+        assert "Exception:" in response.consul_result.error
+
+    @pytest.mark.asyncio
+    async def test_sanitize_error_in_registration_failure(self) -> None:
+        """Test that registration failures sanitize error messages."""
+        mock_consul_handler = Mock()
+        mock_consul_handler.execute = AsyncMock(
+            side_effect=Exception("Consul error: token=secret123")
+        )
+        mock_db_handler = Mock()
+        mock_db_handler.execute = AsyncMock(return_value={"status": "success"})
+
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+        )
+        await node.initialize()
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="test-node",
+            node_type="effect",
+            node_version="1.0.0",
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=uuid4(),
+        )
+        response = await node.execute(request)
+
+        # Should be partial success (postgres succeeded, consul failed)
+        assert response.status == "partial"
+        assert response.consul_result is not None
+        assert response.consul_result.error is not None
+        assert "secret123" not in response.consul_result.error
+        assert "[REDACTED]" in response.consul_result.error

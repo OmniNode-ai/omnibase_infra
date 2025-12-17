@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from uuid import UUID
@@ -54,6 +55,9 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Whitelist of allowed filter keys for SQL query building (SQL injection prevention)
+ALLOWED_FILTER_KEYS: frozenset[str] = frozenset({"node_type", "node_id", "node_version"})
 
 
 class NodeRegistryEffect(MixinAsyncCircuitBreaker):
@@ -111,6 +115,79 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             service_name="node_registry_effect",
             transport_type=EnumInfraTransportType.RUNTIME,
         )
+
+    def _sanitize_error(self, exception: BaseException) -> str:
+        """Sanitize exception message for safe logging and response.
+
+        Removes potential sensitive information and includes exception type.
+        Redacts patterns like passwords, tokens, API keys, and connection strings.
+
+        Args:
+            exception: The exception to sanitize
+
+        Returns:
+            Sanitized error string in format: "{ExceptionType}: {sanitized_message}"
+        """
+        exception_type = type(exception).__name__
+        message = str(exception)
+
+        # Redact potential secrets using case-insensitive patterns
+        sensitive_patterns = [
+            (r"password[=:]\s*\S+", "password=[REDACTED]"),
+            (r"passwd[=:]\s*\S+", "passwd=[REDACTED]"),
+            (r"pwd[=:]\s*\S+", "pwd=[REDACTED]"),
+            (r"token[=:]\s*\S+", "token=[REDACTED]"),
+            (r"api_key[=:]\s*\S+", "api_key=[REDACTED]"),
+            (r"apikey[=:]\s*\S+", "apikey=[REDACTED]"),
+            (r"key[=:]\s*\S+", "key=[REDACTED]"),
+            (r"secret[=:]\s*\S+", "secret=[REDACTED]"),
+            (r"credential[s]?[=:]\s*\S+", "credentials=[REDACTED]"),
+            (r"auth[=:]\s*\S+", "auth=[REDACTED]"),
+            (r"bearer\s+\S+", "bearer [REDACTED]"),
+            # Connection string credentials (user:pass@host)
+            (r"://[^:]+:[^@]+@", "://[REDACTED]@"),
+            # AWS-style keys
+            (r"AKIA[A-Z0-9]{16}", "[REDACTED_AWS_KEY]"),
+            # Long base64-like tokens
+            (r"[A-Za-z0-9+/]{40,}={0,2}", "[REDACTED_TOKEN]"),
+        ]
+
+        for pattern, replacement in sensitive_patterns:
+            message = re.sub(pattern, replacement, message, flags=re.IGNORECASE)
+
+        # Truncate if too long
+        if len(message) > 500:
+            message = message[:497] + "..."
+
+        return f"{exception_type}: {message}"
+
+    def _safe_json_dumps(
+        self,
+        data: object,
+        correlation_id: UUID | None = None,
+        field_name: str = "unknown",
+    ) -> str:
+        """Safely serialize data to JSON with error handling.
+
+        Args:
+            data: The data to serialize
+            correlation_id: Optional correlation ID for logging
+            field_name: Name of the field being serialized for logging
+
+        Returns:
+            JSON string, or "{}" on serialization failure
+        """
+        try:
+            return json.dumps(data)
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                f"JSON serialization failed for {field_name}: {type(e).__name__}",
+                extra={
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                    "field_name": field_name,
+                },
+            )
+            return "{}"
 
     async def initialize(self) -> None:
         """Initialize the effect node and verify backend connectivity."""
@@ -296,7 +373,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
         except Exception as e:
             logger.warning(
-                f"Consul registration failed: {e}",
+                f"Consul registration failed: {type(e).__name__}",
                 extra={
                     "node_id": introspection.node_id,
                     "correlation_id": str(correlation_id),
@@ -304,7 +381,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
             return ModelConsulOperationResult(
                 success=False,
-                error=str(e),
+                error=self._sanitize_error(e),
             )
 
     async def _register_postgres(
@@ -343,9 +420,15 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                             introspection.node_id,
                             introspection.node_type,
                             introspection.node_version,
-                            json.dumps(introspection.capabilities),
-                            json.dumps(introspection.endpoints),
-                            json.dumps(introspection.metadata),
+                            self._safe_json_dumps(
+                                introspection.capabilities, correlation_id, "capabilities"
+                            ),
+                            self._safe_json_dumps(
+                                introspection.endpoints, correlation_id, "endpoints"
+                            ),
+                            self._safe_json_dumps(
+                                introspection.metadata, correlation_id, "metadata"
+                            ),
                             introspection.health_endpoint,
                         ],
                     },
@@ -366,7 +449,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
         except Exception as e:
             logger.warning(
-                f"PostgreSQL registration failed: {e}",
+                f"PostgreSQL registration failed: {type(e).__name__}",
                 extra={
                     "node_id": introspection.node_id,
                     "correlation_id": str(correlation_id),
@@ -374,7 +457,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
             return ModelPostgresOperationResult(
                 success=False,
-                error=str(e),
+                error=self._sanitize_error(e),
             )
 
     async def _deregister_node(
@@ -463,7 +546,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 service_id=node_id,
             )
         except Exception as e:
-            return ModelConsulOperationResult(success=False, error=str(e))
+            return ModelConsulOperationResult(success=False, error=self._sanitize_error(e))
 
     async def _deregister_postgres(
         self,
@@ -498,7 +581,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 rows_affected=rows_affected,
             )
         except Exception as e:
-            return ModelPostgresOperationResult(success=False, error=str(e))
+            return ModelPostgresOperationResult(success=False, error=self._sanitize_error(e))
 
     async def _discover_nodes(
         self,
@@ -509,22 +592,21 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         try:
             # Build query with filters
             sql = "SELECT * FROM node_registrations"
-            params: list[object] = []
+            params: list[str] = []
 
             if request.filters:
                 conditions = []
                 param_idx = 1
-
-                if "node_type" in request.filters:
-                    conditions.append(f"node_type = ${param_idx}")
-                    params.append(request.filters["node_type"])
+                for key, value in request.filters.items():
+                    if key not in ALLOWED_FILTER_KEYS:
+                        logger.warning(
+                            f"Unknown filter key ignored: {key}",
+                            extra={"correlation_id": str(request.correlation_id)},
+                        )
+                        continue
+                    conditions.append(f"{key} = ${param_idx}")
+                    params.append(value)
                     param_idx += 1
-
-                if "node_id" in request.filters:
-                    conditions.append(f"node_id = ${param_idx}")
-                    params.append(request.filters["node_id"])
-                    param_idx += 1
-
                 if conditions:
                     sql += " WHERE " + " AND ".join(conditions)
 
@@ -568,7 +650,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 operation="discover",
                 success=False,
                 status="failed",
-                error=str(e),
+                error=self._sanitize_error(e),
                 processing_time_ms=processing_time_ms,
                 correlation_id=request.correlation_id,
             )
@@ -595,14 +677,15 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             publish_method = getattr(self._event_bus, "publish", None)
             if publish_method is None:
                 raise AttributeError("event_bus must have publish method")
+            event_payload = {
+                "event_type": "REGISTRY_REQUEST_INTROSPECTION",
+                "correlation_id": str(request.correlation_id),
+            }
             await publish_method(
                 topic="onex.evt.registry-request-introspection.v1",
                 key=b"registry",
-                value=json.dumps(
-                    {
-                        "event_type": "REGISTRY_REQUEST_INTROSPECTION",
-                        "correlation_id": str(request.correlation_id),
-                    }
+                value=self._safe_json_dumps(
+                    event_payload, request.correlation_id, "introspection_event"
                 ).encode("utf-8"),
             )
 
@@ -624,7 +707,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 operation="request_introspection",
                 success=False,
                 status="failed",
-                error=str(e),
+                error=self._sanitize_error(e),
                 processing_time_ms=processing_time_ms,
                 correlation_id=request.correlation_id,
             )
@@ -637,7 +720,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         if isinstance(result, BaseException):
             return ModelConsulOperationResult(
                 success=False,
-                error=str(result),
+                error=self._sanitize_error(result),
             )
         return result
 
@@ -649,7 +732,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         if isinstance(result, BaseException):
             return ModelPostgresOperationResult(
                 success=False,
-                error=str(result),
+                error=self._sanitize_error(result),
             )
         return result
 
@@ -658,13 +741,17 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
     ) -> ModelNodeRegistration:
         """Convert database row to ModelNodeRegistration."""
 
-        def parse_json(val: object) -> dict[str, object]:
+        def parse_json(val: object, field_name: str = "unknown") -> dict[str, object]:
             if isinstance(val, dict):
                 return val
             if isinstance(val, str):
-                parsed = json.loads(val)
-                if isinstance(parsed, dict):
-                    return parsed
+                try:
+                    parsed = json.loads(val)
+                    if isinstance(parsed, dict):
+                        return parsed
+                    logger.warning(f"JSON parse result not a dict for {field_name}")
+                except json.JSONDecodeError:
+                    logger.warning(f"JSON parse failed for {field_name}")
             return {}
 
         def parse_datetime(val: object) -> datetime:
@@ -690,9 +777,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             node_id=str(row.get("node_id", "")),
             node_type=str(row.get("node_type", "")),
             node_version=str(row.get("node_version", "1.0.0")),
-            capabilities=parse_json(row.get("capabilities", {})),
-            endpoints=parse_json(row.get("endpoints", {})),
-            metadata=parse_json(row.get("metadata", {})),
+            capabilities=parse_json(row.get("capabilities", {}), "capabilities"),
+            endpoints=parse_json(row.get("endpoints", {}), "endpoints"),
+            metadata=parse_json(row.get("metadata", {}), "metadata"),
             health_endpoint=health_endpoint,
             last_heartbeat=last_heartbeat,
             registered_at=parse_datetime(row.get("registered_at", datetime.now(UTC))),
