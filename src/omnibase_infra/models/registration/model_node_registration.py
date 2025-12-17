@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
@@ -61,7 +61,16 @@ class ModelNodeRegistration(BaseModel):
 
     # Identity
     node_id: UUID = Field(..., description="Unique node identifier")
-    node_type: str = Field(..., description="ONEX node type")
+    # Design Note: node_type uses strict Literal validation to match the source
+    # introspection event constraints. ModelNodeRegistration is created from
+    # ModelNodeIntrospectionEvent data, so type constraints must align. Unlike
+    # ModelNodeHeartbeatEvent (which uses relaxed str validation to support
+    # experimental node types), registrations represent canonical node catalog
+    # entries that require strict ONEX type compliance.
+    # See ModelNodeIntrospectionEvent for source validation.
+    node_type: Literal["effect", "compute", "reducer", "orchestrator"] = Field(
+        ..., description="ONEX node type"
+    )
     node_version: str = Field(
         default="1.0.0", description="Semantic version of the node"
     )

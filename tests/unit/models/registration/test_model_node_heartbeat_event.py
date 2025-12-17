@@ -133,6 +133,17 @@ class TestModelNodeHeartbeatEventNodeVersion:
         )
         assert event.node_version == "1.0.0+build.123"
 
+    def test_node_version_with_prerelease_and_build_metadata(self) -> None:
+        """Test that node_version accepts combined prerelease and build metadata."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0-alpha.1+build.123",
+            uptime_seconds=100.0,
+        )
+        assert event.node_version == "1.0.0-alpha.1+build.123"
+
     def test_node_version_serialization_roundtrip(self) -> None:
         """Test that node_version is preserved in JSON serialization."""
         test_node_id = uuid4()
@@ -158,6 +169,130 @@ class TestModelNodeHeartbeatEventNodeVersion:
         data = event.model_dump()
         assert "node_version" in data
         assert data["node_version"] == "4.5.6"
+
+
+class TestModelNodeHeartbeatEventSemverValidation:
+    """Tests for node_version semver validator edge cases."""
+
+    def test_invalid_semver_missing_patch_raises_validation_error(self) -> None:
+        """Test that missing patch version raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="1.0",
+                uptime_seconds=100.0,
+            )
+        assert "node_version" in str(exc_info.value)
+
+    def test_invalid_semver_extra_parts_raises_validation_error(self) -> None:
+        """Test that extra version parts raise ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="1.0.0.0",
+                uptime_seconds=100.0,
+            )
+        assert "node_version" in str(exc_info.value)
+
+    def test_invalid_semver_non_numeric_raises_validation_error(self) -> None:
+        """Test that non-numeric version parts raise ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="a.b.c",
+                uptime_seconds=100.0,
+            )
+        assert "node_version" in str(exc_info.value)
+
+    def test_invalid_semver_empty_string_raises_validation_error(self) -> None:
+        """Test that empty string raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="",
+                uptime_seconds=100.0,
+            )
+        assert "node_version" in str(exc_info.value)
+
+    def test_invalid_semver_missing_minor_raises_validation_error(self) -> None:
+        """Test that missing minor version raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="1",
+                uptime_seconds=100.0,
+            )
+        assert "node_version" in str(exc_info.value)
+
+    def test_invalid_semver_invalid_prerelease_chars_raises_validation_error(
+        self,
+    ) -> None:
+        """Test that invalid characters in prerelease raise ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="1.0.0-beta@1",
+                uptime_seconds=100.0,
+            )
+        assert "node_version" in str(exc_info.value)
+
+    def test_invalid_semver_spaces_raises_validation_error(self) -> None:
+        """Test that version with spaces raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="1.0.0 alpha",
+                uptime_seconds=100.0,
+            )
+        assert "node_version" in str(exc_info.value)
+
+    def test_invalid_semver_leading_v_raises_validation_error(self) -> None:
+        """Test that 'v' prefix raises ValidationError (not valid semver)."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                node_version="v1.0.0",
+                uptime_seconds=100.0,
+            )
+        assert "node_version" in str(exc_info.value)
+
+    def test_valid_semver_complex_prerelease(self) -> None:
+        """Test that complex prerelease identifiers are valid."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0-alpha.beta.1.2.3",
+            uptime_seconds=100.0,
+        )
+        assert event.node_version == "1.0.0-alpha.beta.1.2.3"
+
+    def test_valid_semver_complex_build_metadata(self) -> None:
+        """Test that complex build metadata is valid."""
+        test_node_id = uuid4()
+        event = ModelNodeHeartbeatEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0+20130313144700.sha.abc123",
+            uptime_seconds=100.0,
+        )
+        assert event.node_version == "1.0.0+20130313144700.sha.abc123"
 
 
 class TestModelNodeHeartbeatEventUptimeValidation:
@@ -650,6 +785,71 @@ class TestModelNodeHeartbeatEventResourceMetrics:
             memory_usage_mb=1024 * 1024,  # 1 TB
         )
         assert event.memory_usage_mb == 1024 * 1024
+
+
+class TestModelNodeHeartbeatEventRequiredFields:
+    """Tests for required field validation."""
+
+    def test_missing_node_id_raises_validation_error(self) -> None:
+        """Test that missing node_id raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_type="effect",
+                uptime_seconds=100.0,
+            )
+        assert "node_id" in str(exc_info.value)
+
+    def test_missing_node_type_raises_validation_error(self) -> None:
+        """Test that missing node_type raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                uptime_seconds=100.0,
+            )
+        assert "node_type" in str(exc_info.value)
+
+    def test_missing_uptime_seconds_raises_validation_error(self) -> None:
+        """Test that missing uptime_seconds raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+            )
+        assert "uptime_seconds" in str(exc_info.value)
+
+    def test_none_node_id_raises_validation_error(self) -> None:
+        """Test that None node_id raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=None,  # type: ignore[arg-type]
+                node_type="effect",
+                uptime_seconds=100.0,
+            )
+        assert "node_id" in str(exc_info.value)
+
+    def test_none_node_type_raises_validation_error(self) -> None:
+        """Test that None node_type raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type=None,  # type: ignore[arg-type]
+                uptime_seconds=100.0,
+            )
+        assert "node_type" in str(exc_info.value)
+
+    def test_none_uptime_seconds_raises_validation_error(self) -> None:
+        """Test that None uptime_seconds raises ValidationError."""
+        test_node_id = uuid4()
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeHeartbeatEvent(
+                node_id=test_node_id,
+                node_type="effect",
+                uptime_seconds=None,  # type: ignore[arg-type]
+            )
+        assert "uptime_seconds" in str(exc_info.value)
 
 
 class TestModelNodeHeartbeatEventEdgeCases:

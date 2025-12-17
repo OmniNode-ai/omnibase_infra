@@ -475,17 +475,24 @@ class TestModelNodeRegistrationEdgeCases:
                 updated_at=now,
             )
 
-    def test_empty_string_node_type(self) -> None:
-        """Test that empty string is allowed for node_type."""
+    def test_empty_string_node_type_rejected(self) -> None:
+        """Test that empty string is rejected for node_type.
+
+        ModelNodeRegistration uses strict Literal validation matching
+        ModelNodeIntrospectionEvent. Only "effect", "compute", "reducer",
+        and "orchestrator" are valid node types.
+        """
         test_node_id = uuid4()
         now = datetime.now(UTC)
-        registration = ModelNodeRegistration(
-            node_id=test_node_id,
-            node_type="",
-            registered_at=now,
-            updated_at=now,
-        )
-        assert registration.node_type == ""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="",
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "node_type" in str(exc_info.value)
+        assert "literal_error" in str(exc_info.value)
 
     def test_complex_capabilities_dict(self) -> None:
         """Test capabilities with complex nested values."""
@@ -533,22 +540,45 @@ class TestModelNodeRegistrationEdgeCases:
         assert registration.metadata["tags"] == ["primary", "critical"]
         assert registration.metadata["config"]["replicas"] == 3
 
-    def test_unicode_in_node_type(self) -> None:
-        """Test Unicode characters in string fields (except node_version which requires semver)."""
+    def test_unicode_in_node_type_rejected(self) -> None:
+        """Test that Unicode node_type is rejected.
+
+        ModelNodeRegistration uses strict Literal validation matching
+        ModelNodeIntrospectionEvent. Only the four canonical ONEX node types
+        are allowed. This test verifies unicode metadata is still allowed
+        while node_type is strictly validated.
+        """
+        test_node_id = uuid4()
+        now = datetime.now(UTC)
+        # Unicode node_type should be rejected
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistration(
+                node_id=test_node_id,
+                node_type="效果节点",
+                node_version="1.0.0",
+                metadata={"description": "Узел обработки"},
+                registered_at=now,
+                updated_at=now,
+            )
+        assert "node_type" in str(exc_info.value)
+        assert "literal_error" in str(exc_info.value)
+
+    def test_unicode_in_metadata_allowed(self) -> None:
+        """Test that Unicode characters are allowed in metadata fields."""
         test_node_id = uuid4()
         now = datetime.now(UTC)
         registration = ModelNodeRegistration(
             node_id=test_node_id,
-            node_type="效果节点",
-            node_version="1.0.0",  # Must be valid semver
-            metadata={"description": "Узел обработки"},
+            node_type="effect",  # Valid canonical node type
+            node_version="1.0.0",
+            metadata={"description": "Узел обработки", "名前": "効果ノード"},
             registered_at=now,
             updated_at=now,
         )
         assert registration.node_id == test_node_id
-        assert registration.node_type == "效果节点"
-        assert registration.node_version == "1.0.0"
+        assert registration.node_type == "effect"
         assert registration.metadata["description"] == "Узел обработки"
+        assert registration.metadata["名前"] == "効果ノード"
 
     def test_extra_fields_forbidden(self) -> None:
         """Test that extra fields are forbidden by model config."""

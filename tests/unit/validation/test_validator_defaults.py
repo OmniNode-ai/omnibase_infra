@@ -54,10 +54,11 @@ class TestInfraValidatorConstants:
     def test_infra_patterns_strict_constant(self) -> None:
         """Verify INFRA_PATTERNS_STRICT constant has expected value.
 
-        Set to False to allow legitimate infrastructure patterns (registry classes
-        with many methods, functions with multiple parameters for configuration).
+        Set to True to enforce strict pattern compliance per ONEX CLAUDE.md mandates.
+        Specific exemptions (KafkaEventBus, RuntimeHostProcess) are handled via
+        exempted_patterns list, NOT via global relaxation.
         """
-        assert INFRA_PATTERNS_STRICT is False, "INFRA_PATTERNS_STRICT should be False"
+        assert INFRA_PATTERNS_STRICT is True, "INFRA_PATTERNS_STRICT should be True"
 
     def test_infra_unions_strict_constant(self) -> None:
         """Verify INFRA_UNIONS_STRICT constant has expected value."""
@@ -139,11 +140,11 @@ class TestValidateInfraPatternsDefaults:
         directory_param = sig.parameters["directory"]
         assert directory_param.default == INFRA_SRC_PATH
 
-        # Check strict default - False to allow legitimate infrastructure patterns
+        # Check strict default - True for strict ONEX compliance with exemptions
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_PATTERNS_STRICT
-        assert strict_param.default is False, (
-            "Should default to non-strict mode via INFRA_PATTERNS_STRICT (False)"
+        assert strict_param.default is True, (
+            "Should default to strict mode via INFRA_PATTERNS_STRICT (True)"
         )
 
     @patch("omnibase_infra.validation.infra_validators.validate_patterns")
