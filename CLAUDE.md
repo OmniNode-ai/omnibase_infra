@@ -743,6 +743,67 @@ if is_open:
 - Never suppress InfraUnavailableError from circuit breaker
 - Never use circuit breaker for non-transient errors
 
+### Node Introspection Security Considerations
+
+The `MixinNodeIntrospection` mixin uses Python reflection (via the `inspect` module) to automatically discover node capabilities. This provides powerful service discovery but has security implications that developers should understand.
+
+**What Gets Exposed via Introspection**:
+- Public method names (potential operations a node can perform)
+- Method signatures (parameter names and type annotations)
+- Protocol and mixin implementations (discovered capabilities)
+- FSM state information (if `MixinFSM` is present)
+- Endpoint URLs (health, API, metrics paths)
+- Node metadata (name, version, type from contract)
+
+**Built-in Protections**:
+The mixin includes several filtering mechanisms to limit exposure:
+- **Private method exclusion**: Methods prefixed with `_` are excluded from capability discovery
+- **Utility method filtering**: Common utility prefixes (`get_*`, `set_*`, `initialize*`, `start_*`, `stop_*`) are filtered out
+- **Operation keyword matching**: Only methods matching operation keywords (`execute`, `process`, `handle`, `run`, `perform`, `compute`, `validate`, `transform`, `aggregate`, `orchestrate`) are reported as capabilities
+- **Configurable exclusions**: The `exclude_prefixes` parameter allows additional filtering
+
+**Best Practices for Node Developers**:
+- Prefix internal/sensitive methods with `_` to exclude them from introspection
+- Avoid exposing sensitive business logic in public method names
+- Use generic operation names that don't reveal implementation details (e.g., `process_request` instead of `decrypt_and_forward_to_payment_gateway`)
+- Review exposed capabilities before deploying to production environments
+- Consider network segmentation for introspection event topics in multi-tenant environments
+- Use the `exclude_prefixes` parameter to filter additional method patterns if needed
+
+**Example - Reviewing Exposed Capabilities**:
+```python
+from omnibase_infra.mixins import MixinNodeIntrospection
+
+class MyNode(MixinNodeIntrospection):
+    def execute_operation(self, data: dict) -> dict:
+        """Public operation - WILL be exposed."""
+        return self._internal_process(data)
+
+    def _internal_process(self, data: dict) -> dict:
+        """Private method - will NOT be exposed."""
+        return {"processed": True}
+
+    def get_status(self) -> str:
+        """Utility method - will NOT be exposed (get_* prefix filtered)."""
+        return "healthy"
+
+# Review what gets exposed
+node = MyNode()
+capabilities = node.get_capabilities()
+# capabilities will only include "execute_operation"
+```
+
+**Network Security Considerations**:
+- Introspection data is published to Kafka topics (`*.introspection.*`)
+- In multi-tenant environments, ensure proper topic ACLs
+- Consider whether introspection topics should be accessible outside the cluster
+- Monitor introspection topic consumers for unauthorized access
+
+**Related**:
+- Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
+- Ticket: OMN-893
+- See `MixinNodeIntrospection.get_capabilities()` for filtering logic details
+
 ### Service Integration Architecture
 - **Adapter Pattern** - External services wrapped in ONEX adapters (Consul, Kafka, Vault)
 - **Connection Pooling** - Database connections managed through dedicated pool managers

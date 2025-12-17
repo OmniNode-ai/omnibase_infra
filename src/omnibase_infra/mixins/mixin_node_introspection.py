@@ -16,6 +16,10 @@ Features:
     - Registry listener for REQUEST_INTROSPECTION events
     - Graceful degradation when event bus is unavailable
 
+Note:
+    - active_operations_count in heartbeats is currently hardcoded to 0.
+      Full implementation deferred - see TODO in _publish_heartbeat().
+
 Usage:
     ```python
     from omnibase_infra.mixins import MixinNodeIntrospection
@@ -272,6 +276,9 @@ class MixinNodeIntrospection:
             - has_fsm: Boolean indicating if node has FSM state management
             - method_signatures: Dict of method names to signature strings
 
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
         Example:
             ```python
             capabilities = await node.get_capabilities()
@@ -286,6 +293,7 @@ class MixinNodeIntrospection:
             # }
             ```
         """
+        self._ensure_initialized()
         capabilities: CapabilitiesDict = {
             "operations": [],
             "protocols": [],
@@ -363,6 +371,9 @@ class MixinNodeIntrospection:
             Dictionary mapping endpoint names to URLs.
             Common keys: health, api, metrics, readiness, liveness
 
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
         Example:
             ```python
             endpoints = await node.get_endpoints()
@@ -372,6 +383,7 @@ class MixinNodeIntrospection:
             # }
             ```
         """
+        self._ensure_initialized()
         endpoints: dict[str, str] = {}
 
         # Check for endpoint attributes
@@ -429,12 +441,16 @@ class MixinNodeIntrospection:
         Returns:
             Current state string if FSM state is found, None otherwise.
 
+        Raises:
+            RuntimeError: If initialize_introspection() was not called.
+
         Example:
             ```python
             state = await node.get_current_state()
             # "connected" or None
             ```
         """
+        self._ensure_initialized()
         # Check for state attributes in order of preference
         state_attrs = ["_state", "current_state", "_current_state", "state"]
 
@@ -646,7 +662,12 @@ class MixinNodeIntrospection:
                 node_id=self._introspection_node_id or "unknown",
                 node_type=self._introspection_node_type or "unknown",
                 uptime_seconds=uptime_seconds,
-                active_operations_count=0,  # Could be extended to track actual operations
+                # TODO(OMN-XXX): Implement active operation tracking
+                # Currently hardcoded to 0. Full implementation requires:
+                # - Operation counter increment/decrement around async operations
+                # - Thread-safe counter for concurrent operations
+                # - Integration with node's actual execution context
+                active_operations_count=0,
                 correlation_id=uuid4(),
             )
 
