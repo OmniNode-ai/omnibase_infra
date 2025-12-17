@@ -18,9 +18,15 @@ from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 # JSON-serializable value type for strong typing (per ONEX guidelines: never use Any/object).
-# We use str | int | float | bool | None | dict | list to represent JSON values
-# without recursion (which causes issues with type checkers and Pydantic schema generation).
-# This is a documented ONEX exception for JSON-value containers.
+#
+# DESIGN NOTE: Why we use `dict | list` instead of recursive `dict[str, JsonValue]`:
+# 1. Recursive type aliases cause infinite recursion in mypy/pyright during type inference
+# 2. Pydantic v2 cannot generate JSON schema for recursively-defined type aliases
+# 3. The runtime behavior is identical - Python's dict/list accept any JSON-serializable values
+#
+# This is a documented ONEX exception for JSON-value containers. The trade-off is reduced
+# static type safety for nested structures in exchange for practical tooling compatibility.
+# For strongly-typed nested data, prefer explicit Pydantic models over JsonValue.
 JsonPrimitive = str | int | float | bool | None
 JsonValue = str | int | float | bool | None | dict | list
 
