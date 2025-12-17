@@ -35,9 +35,14 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
+from typing import Literal, cast
 from uuid import UUID
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+# Type alias for registry operation status (must match ModelRegistryResponse.status)
+RegistryStatus = Literal["success", "partial", "failed"]
+
 from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
@@ -352,7 +357,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         any_success = consul_op_result.success or postgres_op_result.success
 
         if both_success:
-            status = "success"
+            status: RegistryStatus = "success"
             success = True
         elif any_success:
             status = "partial"
@@ -371,7 +376,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         return ModelRegistryResponse(
             operation="register",
             success=success,
-            status=status,  # type: ignore[arg-type]
+            status=status,
             consul_result=consul_op_result,
             postgres_result=postgres_op_result,
             processing_time_ms=processing_time_ms,
@@ -539,7 +544,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         any_success = consul_op_result.success or postgres_op_result.success
 
         if both_success:
-            status = "success"
+            status: RegistryStatus = "success"
             success = True
         elif any_success:
             status = "partial"
@@ -557,7 +562,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         return ModelRegistryResponse(
             operation="deregister",
             success=success,
-            status=status,  # type: ignore[arg-type]
+            status=status,
             consul_result=consul_op_result,
             postgres_result=postgres_op_result,
             processing_time_ms=processing_time_ms,
@@ -679,7 +684,10 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 raw_rows = payload.get("rows", [])
                 if isinstance(raw_rows, list):
                     rows = raw_rows
-            nodes = [self._row_to_node_registration(row) for row in rows]
+            nodes = [
+                self._row_to_node_registration(row, request.correlation_id)
+                for row in rows
+            ]
 
             processing_time_ms = (time.perf_counter() - start_time) * 1000
 
@@ -695,6 +703,10 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 correlation_id=request.correlation_id,
             )
         except Exception as e:
+            # Record circuit breaker failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("discover", request.correlation_id)
+
             logger.warning(
                 f"Node discovery failed: {type(e).__name__}",
                 extra={
@@ -811,9 +823,16 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         return result
 
     def _row_to_node_registration(
-        self, row: dict[str, object]
+        self,
+        row: dict[str, object],
+        correlation_id: UUID | None = None,
     ) -> ModelNodeRegistration:
-        """Convert database row to ModelNodeRegistration."""
+        """Convert database row to ModelNodeRegistration.
+
+        Args:
+            row: Database row dictionary
+            correlation_id: Optional correlation ID for logging
+        """
 
         def parse_json(val: object, field_name: str = "unknown") -> dict[str, object]:
             if isinstance(val, dict):
@@ -823,10 +842,25 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     parsed = json.loads(val)
                     if isinstance(parsed, dict):
                         return parsed
-                    logger.warning(f"JSON parse result not a dict for {field_name}")
+                    logger.warning(
+                        f"JSON parse result not a dict for {field_name}",
+                        extra={
+                            "correlation_id": (
+                                str(correlation_id) if correlation_id else None
+                            ),
+                            "field_name": field_name,
+                        },
+                    )
                 except json.JSONDecodeError as e:
                     logger.warning(
-                        f"JSON parse failed for {field_name}: {type(e).__name__}"
+                        f"JSON parse failed for {field_name}: {type(e).__name__}",
+                        extra={
+                            "correlation_id": (
+                                str(correlation_id) if correlation_id else None
+                            ),
+                            "field_name": field_name,
+                            "error_type": type(e).__name__,
+                        },
                     )
             return {}
 
