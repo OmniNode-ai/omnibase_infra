@@ -176,8 +176,9 @@ def wire_default_handlers() -> dict[str, list[str]]:
     way to initialize the handler ecosystem.
 
     Registered Handlers:
-        - HTTP: HttpRestAdapter for HTTP/REST protocol operations
+        - CONSUL: ConsulHandler for HashiCorp Consul service discovery
         - DB: DbAdapter for PostgreSQL database operations
+        - HTTP: HttpRestAdapter for HTTP/REST protocol operations
         - VAULT: VaultAdapter for HashiCorp Vault secret management
 
     Registered Event Buses:
@@ -191,7 +192,7 @@ def wire_default_handlers() -> dict[str, list[str]]:
     Example:
         >>> summary = wire_default_handlers()
         >>> print(summary)
-        {'handlers': ['db', 'http'], 'event_buses': ['inmemory']}
+        {'handlers': ['consul', 'db', 'http', 'vault'], 'event_buses': ['inmemory']}
 
     Note:
         This function uses the singleton registries returned by

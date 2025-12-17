@@ -1101,7 +1101,7 @@ class TestConsulHandlerErrorHandling:
                 "correlation_id": uuid4(),
             }
 
-            with pytest.raises((InfraTimeoutError, InfraConnectionError)):
+            with pytest.raises(InfraTimeoutError):
                 await handler.execute(envelope)
 
     @pytest.mark.asyncio
@@ -1291,6 +1291,81 @@ class TestConsulHandlerErrorCodes:
             assert exc_info.value.model.error_code.name == "AUTHENTICATION_ERROR"
 
 
+class TestConsulHandlerSecuritySanitization:
+    """Test ConsulHandler security sanitization of error messages."""
+
+    @pytest.mark.asyncio
+    async def test_validation_error_does_not_expose_token(self) -> None:
+        """Test that validation errors do not expose token values.
+
+        Security: Pydantic ValidationError can contain actual field values,
+        which could expose sensitive tokens. This test verifies the handler
+        sanitizes validation errors to only show field names, not values.
+        """
+        handler = ConsulHandler()
+
+        # Configuration with an invalid token type that will trigger validation error
+        # The sensitive value should NOT appear in the error message
+        sensitive_token = "super_secret_acl_token_that_should_never_appear"
+        invalid_config: dict[str, object] = {
+            "token": sensitive_token,
+            "timeout_seconds": 500.0,  # Invalid - max is 300.0
+        }
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await handler.initialize(invalid_config)
+
+        error_message = str(exc_info.value)
+
+        # The sensitive token should NEVER appear in the error message
+        assert sensitive_token not in error_message
+
+        # The error should indicate which field failed validation
+        assert "validation failed for fields" in error_message
+        assert "timeout_seconds" in error_message
+
+    @pytest.mark.asyncio
+    async def test_error_messages_exclude_credentials(
+        self,
+        mock_consul_client: MagicMock,
+    ) -> None:
+        """Test that error messages never include credential information."""
+        handler = ConsulHandler()
+
+        sensitive_token = "my_acl_token_credential_xyz123"
+        config: dict[str, object] = {
+            "host": "consul.example.com",
+            "port": 8500,
+            "token": sensitive_token,
+        }
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+
+            await handler.initialize(config)
+
+            # Simulate connection error
+            mock_consul_client.kv.get.side_effect = consul.ConsulException(
+                "Connection failed"
+            )
+
+            envelope = {
+                "operation": "consul.kv_get",
+                "payload": {"key": "test/key"},
+                "correlation_id": uuid4(),
+            }
+
+            with pytest.raises(InfraConnectionError) as exc_info:
+                await handler.execute(envelope)
+
+            error_message = str(exc_info.value)
+
+            # Sensitive token should never appear in error message
+            assert sensitive_token not in error_message
+
+
 class TestConsulHandlerThreadPool:
     """Test ConsulHandler thread pool functionality."""
 
@@ -1351,5 +1426,6 @@ __all__: list[str] = [
     "TestConsulHandlerErrorHandling",
     "TestConsulHandlerRetryLogic",
     "TestConsulHandlerErrorCodes",
+    "TestConsulHandlerSecuritySanitization",
     "TestConsulHandlerThreadPool",
 ]

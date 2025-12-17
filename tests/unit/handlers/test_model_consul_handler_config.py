@@ -633,6 +633,200 @@ class TestModelConsulConfigEquality:
         restored = ModelConsulRetryConfig(**dumped)
         assert original == restored
 
+    def test_handler_config_equality_with_token(self) -> None:
+        """Test handler config equality when both have tokens."""
+        config1 = ModelConsulHandlerConfig(token=SecretStr("same-token"))
+        config2 = ModelConsulHandlerConfig(token=SecretStr("same-token"))
+        # SecretStr with same value should be equal
+        assert config1 == config2
+
+    def test_handler_config_inequality_with_different_tokens(self) -> None:
+        """Test handler config inequality with different token values."""
+        config1 = ModelConsulHandlerConfig(token=SecretStr("token-a"))
+        config2 = ModelConsulHandlerConfig(token=SecretStr("token-b"))
+        assert config1 != config2
+
+    def test_handler_config_inequality_one_token_none(self) -> None:
+        """Test handler config inequality when one token is None."""
+        config1 = ModelConsulHandlerConfig(token=SecretStr("some-token"))
+        config2 = ModelConsulHandlerConfig(token=None)
+        assert config1 != config2
+
+    def test_handler_config_equality_both_tokens_none(self) -> None:
+        """Test handler config equality when both tokens are None."""
+        config1 = ModelConsulHandlerConfig(token=None)
+        config2 = ModelConsulHandlerConfig(token=None)
+        assert config1 == config2
+
+    def test_hash_stability_after_roundtrip(self) -> None:
+        """Test hash remains consistent after serialization roundtrip."""
+        original = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+            scheme="https",
+        )
+        original_hash = hash(original)
+        dumped = original.model_dump()
+        restored = ModelConsulHandlerConfig(**dumped)
+        assert hash(restored) == original_hash
+
+    def test_retry_config_hash_stability_after_roundtrip(self) -> None:
+        """Test retry config hash remains consistent after roundtrip."""
+        original = ModelConsulRetryConfig(max_attempts=5, initial_delay_seconds=2.0)
+        original_hash = hash(original)
+        dumped = original.model_dump()
+        restored = ModelConsulRetryConfig(**dumped)
+        assert hash(restored) == original_hash
+
+    def test_handler_config_model_copy(self) -> None:
+        """Test handler config model_copy creates independent equal copy."""
+        original = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+            timeout_seconds=45.0,
+        )
+        copied = original.model_copy()
+        assert original == copied
+        assert original is not copied
+        assert hash(original) == hash(copied)
+
+    def test_handler_config_model_copy_with_update(self) -> None:
+        """Test handler config model_copy with field updates."""
+        original = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8500,
+        )
+        updated = original.model_copy(update={"port": 8501})
+        assert original.port == 8500
+        assert updated.port == 8501
+        assert original.host == updated.host
+        assert original != updated
+
+    def test_retry_config_model_copy(self) -> None:
+        """Test retry config model_copy creates independent equal copy."""
+        original = ModelConsulRetryConfig(max_attempts=5)
+        copied = original.model_copy()
+        assert original == copied
+        assert original is not copied
+
+    def test_retry_config_model_copy_with_update(self) -> None:
+        """Test retry config model_copy with field updates."""
+        original = ModelConsulRetryConfig(max_attempts=3)
+        updated = original.model_copy(update={"max_attempts": 5})
+        assert original.max_attempts == 3
+        assert updated.max_attempts == 5
+        assert original != updated
+
+    def test_handler_config_model_dump_exclude(self) -> None:
+        """Test model_dump with field exclusion."""
+        config = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+            token=SecretStr("secret"),
+        )
+        dumped = config.model_dump(exclude={"token", "retry"})
+        assert "token" not in dumped
+        assert "retry" not in dumped
+        assert dumped["host"] == "consul.example.com"
+        assert dumped["port"] == 8501
+
+    def test_handler_config_model_dump_include(self) -> None:
+        """Test model_dump with field inclusion."""
+        config = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+        )
+        dumped = config.model_dump(include={"host", "port"})
+        assert "host" in dumped
+        assert "port" in dumped
+        assert "scheme" not in dumped
+        assert "retry" not in dumped
+
+    def test_handler_config_json_roundtrip(self) -> None:
+        """Test JSON serialization roundtrip."""
+        import json
+
+        original = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            port=8501,
+            scheme="https",
+        )
+        json_str = original.model_dump_json()
+        parsed = json.loads(json_str)
+        restored = ModelConsulHandlerConfig(**parsed)
+        assert original == restored
+
+    def test_retry_config_json_roundtrip(self) -> None:
+        """Test retry config JSON serialization roundtrip."""
+        import json
+
+        original = ModelConsulRetryConfig(
+            max_attempts=5,
+            initial_delay_seconds=2.0,
+        )
+        json_str = original.model_dump_json()
+        parsed = json.loads(json_str)
+        restored = ModelConsulRetryConfig(**parsed)
+        assert original == restored
+
+    def test_equality_not_equal_to_other_types(self) -> None:
+        """Test config is not equal to non-config types."""
+        config = ModelConsulHandlerConfig()
+        assert config != "not a config"
+        assert config != 42
+        assert config != {"host": "localhost", "port": 8500}
+        assert config != None
+
+    def test_retry_config_not_equal_to_other_types(self) -> None:
+        """Test retry config is not equal to non-config types."""
+        config = ModelConsulRetryConfig()
+        assert config != "not a config"
+        assert config != 42
+        assert config != {"max_attempts": 3}
+        assert config != None
+
+    def test_handler_config_hash_with_token(self) -> None:
+        """Test handler config hash consistency with SecretStr token."""
+        config1 = ModelConsulHandlerConfig(token=SecretStr("token"))
+        config2 = ModelConsulHandlerConfig(token=SecretStr("token"))
+        assert hash(config1) == hash(config2)
+
+    def test_handler_config_hash_different_tokens(self) -> None:
+        """Test handler config hash differs with different tokens."""
+        config1 = ModelConsulHandlerConfig(token=SecretStr("token-a"))
+        config2 = ModelConsulHandlerConfig(token=SecretStr("token-b"))
+        # Different tokens should (usually) produce different hashes
+        assert hash(config1) != hash(config2)
+
+    def test_handler_config_model_dump_json_indent(self) -> None:
+        """Test model_dump_json with indentation for readability."""
+        config = ModelConsulHandlerConfig(host="consul.example.com")
+        json_str = config.model_dump_json(indent=2)
+        assert isinstance(json_str, str)
+        # Indented JSON should have newlines
+        assert "\n" in json_str
+        assert "  " in json_str  # Two-space indent
+
+    def test_retry_config_model_dump_mode_json(self) -> None:
+        """Test model_dump with mode='json' for JSON-compatible output."""
+        config = ModelConsulRetryConfig(max_attempts=5)
+        dumped = config.model_dump(mode="json")
+        # All values should be JSON-serializable primitives
+        assert isinstance(dumped["max_attempts"], int)
+        assert isinstance(dumped["initial_delay_seconds"], float)
+
+    def test_handler_config_model_dump_mode_json(self) -> None:
+        """Test handler config model_dump with mode='json'."""
+        config = ModelConsulHandlerConfig(
+            host="consul.example.com",
+            token=SecretStr("secret"),
+        )
+        dumped = config.model_dump(mode="json")
+        # In JSON mode, SecretStr should be serialized as string
+        assert isinstance(dumped["host"], str)
+        # Token should be present but value depends on serialization mode
+        assert "token" in dumped
+
 
 __all__: list[str] = [
     "TestModelConsulRetryConfig",

@@ -62,12 +62,6 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
     }
 )
 
-# Default values
-DEFAULT_MAX_CONCURRENT_OPERATIONS: int = 10
-DEFAULT_MAX_QUEUE_SIZE_MULTIPLIER: int = 3
-DEFAULT_CIRCUIT_BREAKER_THRESHOLD: int = 5
-DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT: float = 30.0
-
 
 class ConsulHandler(MixinAsyncCircuitBreaker):
     """HashiCorp Consul handler using python-consul client (MVP: KV, service registration).
@@ -240,8 +234,13 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 target_name="consul_handler",
                 correlation_id=init_correlation_id,
             )
+            # Security: Sanitize validation error to prevent token exposure.
+            # Pydantic ValidationError can contain actual field values in error details,
+            # which could expose sensitive token values. Only expose field names and
+            # error types, never the actual values.
+            sanitized_fields = [err.get("loc", ("unknown",))[-1] for err in e.errors()]
             raise ProtocolConfigurationError(
-                f"Invalid Consul configuration: {e}",
+                f"Invalid Consul configuration - validation failed for fields: {sanitized_fields}",
                 context=ctx,
             ) from e
         except Exception as e:
@@ -298,56 +297,24 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 ) from e
 
             # Create bounded thread pool executor for production safety
-            max_concurrent = config.get(
-                "max_concurrent_operations", DEFAULT_MAX_CONCURRENT_OPERATIONS
-            )
-            if isinstance(max_concurrent, int) and 1 <= max_concurrent <= 100:
-                self._max_workers = max_concurrent
-            else:
-                self._max_workers = DEFAULT_MAX_CONCURRENT_OPERATIONS
+            # Use validated config values (Pydantic ensures type correctness)
+            self._max_workers = self._config.max_concurrent_operations
 
             self._executor = ThreadPoolExecutor(
                 max_workers=self._max_workers,
                 thread_name_prefix="consul_handler_",
             )
 
-            # Calculate max queue size
-            queue_multiplier = config.get(
-                "max_queue_size_multiplier", DEFAULT_MAX_QUEUE_SIZE_MULTIPLIER
+            # Calculate max queue size using validated config values
+            self._max_queue_size = (
+                self._max_workers * self._config.max_queue_size_multiplier
             )
-            if isinstance(queue_multiplier, int) and 1 <= queue_multiplier <= 10:
-                self._max_queue_size = self._max_workers * queue_multiplier
-            else:
-                self._max_queue_size = (
-                    self._max_workers * DEFAULT_MAX_QUEUE_SIZE_MULTIPLIER
-                )
 
-            # Initialize circuit breaker using mixin
-            circuit_enabled = config.get("circuit_breaker_enabled", True)
-            if circuit_enabled is True or circuit_enabled == "true":
-                threshold = config.get(
-                    "circuit_breaker_failure_threshold",
-                    DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
-                )
-                reset_timeout = config.get(
-                    "circuit_breaker_reset_timeout_seconds",
-                    DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT,
-                )
-
-                threshold_int = (
-                    threshold
-                    if isinstance(threshold, int)
-                    else DEFAULT_CIRCUIT_BREAKER_THRESHOLD
-                )
-                reset_float = (
-                    float(reset_timeout)
-                    if isinstance(reset_timeout, (int, float))
-                    else DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT
-                )
-
+            # Initialize circuit breaker using mixin (if enabled via config)
+            if self._config.circuit_breaker_enabled:
                 self._init_circuit_breaker(
-                    threshold=threshold_int,
-                    reset_timeout=reset_float,
+                    threshold=self._config.circuit_breaker_failure_threshold,
+                    reset_timeout=self._config.circuit_breaker_reset_timeout_seconds,
                     service_name=f"consul.{self._config.datacenter or 'default'}",
                     transport_type=EnumInfraTransportType.CONSUL,
                 )
@@ -633,6 +600,28 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                     "Consul ACL permission denied - check token permissions",
                     context=ctx,
                 ) from e
+
+            except consul.Timeout as e:
+                # Handle consul.Timeout (subclass of ConsulException) specifically
+                # to raise InfraTimeoutError instead of InfraConnectionError
+                last_exception = e
+                if attempt == retry_config.max_attempts - 1:
+                    if self._circuit_breaker_initialized:
+                        async with self._circuit_breaker_lock:
+                            await self._record_circuit_failure(
+                                operation, correlation_id
+                            )
+                    ctx = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.CONSUL,
+                        operation=operation,
+                        target_name="consul_handler",
+                        correlation_id=correlation_id,
+                    )
+                    raise InfraTimeoutError(
+                        f"Consul operation timed out: {e}",
+                        context=ctx,
+                        timeout_seconds=self._config.timeout_seconds,
+                    ) from e
 
             except consul.ConsulException as e:
                 last_exception = e

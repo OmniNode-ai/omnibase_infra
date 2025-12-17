@@ -109,6 +109,34 @@ class ModelConsulHandlerConfig(BaseModel):
         default=None,
         description="Consul datacenter for multi-datacenter deployments",
     )
+    circuit_breaker_enabled: bool = Field(
+        default=True,
+        description="Enable automatic failure detection and recovery via circuit breaker",
+    )
+    circuit_breaker_failure_threshold: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Consecutive failures required to open circuit",
+    )
+    circuit_breaker_reset_timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=300.0,
+        description="Wait time before testing recovery after circuit opens",
+    )
+    max_concurrent_operations: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Thread pool size for concurrent operations",
+    )
+    max_queue_size_multiplier: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Multiplier to calculate queue capacity from thread pool size",
+    )
 
     @property
     def base_url(self) -> str:
