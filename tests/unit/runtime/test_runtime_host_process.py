@@ -2349,6 +2349,155 @@ class TestRuntimeHostProcessPendingMessageTracking:
 
 
 # =============================================================================
+# TestRuntimeHostProcessDrainState
+# =============================================================================
+
+
+class TestRuntimeHostProcessDrainState:
+    """Tests for drain state tracking during graceful shutdown (OMN-756).
+
+    These tests verify that the RuntimeHostProcess properly tracks and exposes
+    its drain state during graceful shutdown:
+    - is_draining property indicates when drain is active
+    - health_check() includes is_draining and pending_message_count
+    """
+
+    @pytest.fixture
+    def runtime_process(self) -> RuntimeHostProcess:
+        """Create a RuntimeHostProcess instance for testing."""
+        return RuntimeHostProcess(config={"drain_timeout_seconds": 5.0})
+
+    def test_is_draining_starts_false(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that is_draining is False on initialization.
+
+        The RuntimeHostProcess should start with is_draining=False since
+        no shutdown has been initiated.
+        """
+        assert runtime_process.is_draining is False
+
+    def test_is_draining_property_returns_current_state(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that is_draining property returns the internal state.
+
+        The property should correctly reflect the _is_draining attribute.
+        """
+        # Initial state
+        assert runtime_process.is_draining is False
+
+        # Directly manipulate for testing
+        runtime_process._is_draining = True
+        assert runtime_process.is_draining is True
+
+        runtime_process._is_draining = False
+        assert runtime_process.is_draining is False
+
+    @pytest.mark.asyncio
+    async def test_health_check_includes_drain_state(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that health_check includes is_draining and pending_message_count.
+
+        The health check response should include drain-related fields for
+        load balancer integration and monitoring purposes.
+        """
+
+        # Start the process
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(
+            runtime_process, "_populate_handlers_from_registry", noop_populate
+        ):
+            await runtime_process.start()
+
+            # Get health check
+            health = await runtime_process.health_check()
+
+            # Verify drain state fields are present
+            assert "is_draining" in health, "Expected 'is_draining' in health check"
+            assert "pending_message_count" in health, (
+                "Expected 'pending_message_count' in health check"
+            )
+
+            # Normal operation - not draining
+            assert health["is_draining"] is False
+            assert health["pending_message_count"] == 0
+
+            await runtime_process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_reflects_drain_state_changes(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that health check accurately reflects drain state changes.
+
+        When _is_draining changes, health_check() should reflect the new state.
+        """
+
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(
+            runtime_process, "_populate_handlers_from_registry", noop_populate
+        ):
+            await runtime_process.start()
+
+            # Before drain
+            health = await runtime_process.health_check()
+            assert health["is_draining"] is False
+
+            # Simulate drain started (without actually stopping)
+            runtime_process._is_draining = True
+            health = await runtime_process.health_check()
+            assert health["is_draining"] is True
+
+            # Simulate drain completed
+            runtime_process._is_draining = False
+            health = await runtime_process.health_check()
+            assert health["is_draining"] is False
+
+            await runtime_process.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_pending_count_reflects_in_flight_messages(
+        self,
+        runtime_process: RuntimeHostProcess,
+    ) -> None:
+        """Test that health check pending_message_count reflects actual count.
+
+        The pending_message_count in health check should match the actual
+        number of in-flight messages.
+        """
+
+        async def noop_populate() -> None:
+            pass
+
+        with patch.object(
+            runtime_process, "_populate_handlers_from_registry", noop_populate
+        ):
+            await runtime_process.start()
+
+            # No pending messages
+            health = await runtime_process.health_check()
+            assert health["pending_message_count"] == 0
+
+            # Simulate pending messages
+            runtime_process._pending_message_count = 5
+            health = await runtime_process.health_check()
+            assert health["pending_message_count"] == 5
+
+            runtime_process._pending_message_count = 0
+            await runtime_process.stop()
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
@@ -2367,6 +2516,7 @@ __all__: list[str] = [
     "TestRuntimeHostProcessShutdownPriority",
     "TestRuntimeHostProcessGracefulDrain",
     "TestRuntimeHostProcessPendingMessageTracking",
+    "TestRuntimeHostProcessDrainState",
     "MockHandler",
     "MockFailingHandler",
     "MockEventBus",

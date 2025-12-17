@@ -266,6 +266,10 @@ class RuntimeHostProcess:
         self._pending_message_count: int = 0
         self._pending_lock: asyncio.Lock = asyncio.Lock()
 
+        # Drain state tracking for graceful shutdown (OMN-756)
+        # True when stop() has been called and we're waiting for messages to drain
+        self._is_draining: bool = False
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
@@ -321,6 +325,31 @@ class RuntimeHostProcess:
             The consumer group ID for this process.
         """
         return self._group_id
+
+    @property
+    def is_draining(self) -> bool:
+        """Return True if the process is draining pending messages during shutdown.
+
+        This property indicates whether the runtime host is in the graceful shutdown
+        drain period - the phase where stop() has been called, new messages are no
+        longer being accepted, and the process is waiting for in-flight messages to
+        complete before shutting down handlers and the event bus.
+
+        Drain State Transitions:
+            - False: Normal operation (accepting and processing messages)
+            - True: Drain period active (stop() called, waiting for pending messages)
+            - False: After drain completes and shutdown finishes
+
+        Use Cases:
+            - Health check reporting (indicate service is shutting down)
+            - Load balancer integration (remove from rotation during drain)
+            - Monitoring dashboards (show lifecycle state)
+            - Debugging shutdown behavior
+
+        Returns:
+            True if currently in drain period during graceful shutdown, False otherwise.
+        """
+        return self._is_draining
 
     @property
     def pending_message_count(self) -> int:
@@ -502,6 +531,9 @@ class RuntimeHostProcess:
         drain_deadline = drain_start + self._drain_timeout_seconds
         last_progress_log = drain_start
 
+        # Mark drain state for health check visibility (OMN-756)
+        self._is_draining = True
+
         # Log drain start for observability
         logger.info(
             "Starting drain period",
@@ -519,6 +551,8 @@ class RuntimeHostProcess:
                     extra={
                         "pending_messages": self._pending_message_count,
                         "drain_timeout_seconds": self._drain_timeout_seconds,
+                        "metric.drain_timeout_exceeded": True,
+                        "metric.pending_at_timeout": self._pending_message_count,
                     },
                 )
                 break
@@ -539,11 +573,16 @@ class RuntimeHostProcess:
                 )
                 last_progress_log = loop.time()
 
+        # Clear drain state after drain period completes
+        self._is_draining = False
+
         logger.info(
             "Drain period completed",
             extra={
                 "drain_duration_seconds": loop.time() - drain_start,
                 "pending_messages": self._pending_message_count,
+                "metric.drain_duration": loop.time() - drain_start,
+                "metric.forced_shutdown": self._pending_message_count > 0,
             },
         )
 
@@ -989,6 +1028,13 @@ class RuntimeHostProcess:
                   failed to instantiate. Indicates partial functionality -
                   the system is operational but not at full capacity.
                 - is_running: Whether the process is running
+                - is_draining: Whether the process is in graceful shutdown drain
+                  period, waiting for in-flight messages to complete (OMN-756).
+                  Load balancers can use this to remove the service from rotation
+                  before the container becomes unhealthy.
+                - pending_message_count: Number of messages currently being
+                  processed. Useful for monitoring drain progress and determining
+                  when the service is ready for shutdown.
                 - event_bus: Event bus health status (if running)
                 - event_bus_healthy: Boolean indicating event bus health
                 - failed_handlers: Dict of handler_type -> error message for
@@ -1001,6 +1047,13 @@ class RuntimeHostProcess:
             - healthy=True, degraded=False: Fully operational
             - healthy=False, degraded=True: Running with reduced functionality
             - healthy=False, degraded=False: Not running or event bus unhealthy
+
+        Drain State:
+            When is_draining=True, the service is shutting down gracefully:
+            - New messages are no longer being accepted
+            - In-flight messages are being allowed to complete
+            - Health status may still show healthy during drain
+            - Load balancers should remove the service from rotation
 
         Note:
             Handler health checks are performed concurrently using asyncio.gather()
@@ -1081,6 +1134,8 @@ class RuntimeHostProcess:
             "healthy": healthy,
             "degraded": degraded,
             "is_running": self._is_running,
+            "is_draining": self._is_draining,
+            "pending_message_count": self._pending_message_count,
             "event_bus": event_bus_health,
             "event_bus_healthy": event_bus_healthy,
             "failed_handlers": self._failed_handlers,
