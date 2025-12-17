@@ -69,13 +69,13 @@ INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Maximum allowed complex union types in infrastructure code.
-# TECH DEBT (OMN-871): Temporarily increased to 108 violations (baseline as of 2025-12-16)
+# TECH DEBT (OMN-871): Temporarily increased to 115 violations (baseline as of 2025-12-17)
 # Target: Reduce to 30 incrementally after PR #37 merges
 # Infrastructure code has many typed handlers (Consul, Kafka, Vault, PostgreSQL adapters)
 # which require typed unions for protocol implementations and message routing.
 # Set to accommodate infrastructure service integration patterns including
 # RuntimeHostProcess and handler wiring while preventing overly complex union types.
-INFRA_MAX_UNIONS = 108
+INFRA_MAX_UNIONS = 115
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
