@@ -6,14 +6,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
 from pydantic import BaseModel, ConfigDict, Field
 
-# JSON-serializable value type for Pydantic models.
-# We use str | int | float | bool | None | dict | list to represent JSON values
-# without recursion (which Pydantic 2.x cannot handle in schema generation).
-# This is a documented ONEX exception for JSON-value containers, as the full
-# structure is validated at runtime by JSON serialization.
-JsonValue = str | int | float | bool | None | dict | list
+from .model_node_registration_metadata import ModelNodeRegistrationMetadata
 
 
 class ModelNodeIntrospectionPayload(BaseModel):
@@ -23,10 +19,11 @@ class ModelNodeIntrospectionPayload(BaseModel):
         node_id: Unique identifier for the node being registered.
         node_type: ONEX node classification (effect, compute, reducer, orchestrator).
         node_version: Semantic version of the node (default: "1.0.0").
-        capabilities: Key-value pairs describing node capabilities (e.g., protocols,
-            supported operations). Values can be primitives or nested structures.
+        capabilities: Structured node capabilities information including supported
+            operations, dependencies, and performance metrics.
         endpoints: Map of endpoint names to URLs (e.g., {"health": "http://..."}).
-        metadata: Additional node metadata (e.g., tags, labels, runtime info).
+        runtime_metadata: Runtime/deployment metadata including environment,
+            tags, labels, release channel, and region information.
         health_endpoint: Optional dedicated health check URL for monitoring.
     """
 
@@ -35,16 +32,16 @@ class ModelNodeIntrospectionPayload(BaseModel):
     node_id: str = Field(..., description="Unique node identifier")
     node_type: Literal["effect", "compute", "reducer", "orchestrator"]
     node_version: str = Field(default="1.0.0", description="Node version")
-    capabilities: dict[str, JsonValue] = Field(
-        default_factory=dict,
-        description="Node capabilities as key-value pairs (e.g., supported protocols)",
+    capabilities: ModelNodeCapabilitiesInfo = Field(
+        default_factory=ModelNodeCapabilitiesInfo,
+        description="Structured node capabilities including operations and dependencies",
     )
     endpoints: dict[str, str] = Field(
         default_factory=dict,
         description="Map of endpoint names to URLs",
     )
-    metadata: dict[str, JsonValue] = Field(
-        default_factory=dict,
-        description="Additional node metadata (tags, labels, runtime info)",
+    runtime_metadata: ModelNodeRegistrationMetadata = Field(
+        ...,
+        description="Runtime/deployment metadata (environment, tags, labels)",
     )
     health_endpoint: str | None = Field(None, description="Health check URL")

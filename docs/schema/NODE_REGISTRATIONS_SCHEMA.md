@@ -255,13 +255,16 @@ The `ModelNodeRegistration` class maps directly to this table:
 | `node_id` | `node_id` | `str` |
 | `node_type` | `node_type` | `str` |
 | `node_version` | `node_version` | `str` |
-| `capabilities` | `capabilities` | `dict[str, object]` |
+| `capabilities` | `capabilities` | `dict[str, JsonValue]` |
 | `endpoints` | `endpoints` | `dict[str, str]` |
-| `metadata` | `metadata` | `dict[str, object]` |
+| `metadata` | `metadata` | `dict[str, JsonValue]` |
 | `health_endpoint` | `health_endpoint` | `str \| None` |
 | `last_heartbeat` | `last_heartbeat` | `datetime \| None` |
 | `registered_at` | `registered_at` | `datetime` |
 | `updated_at` | `updated_at` | `datetime` |
+
+> **Note:** `JsonValue` is the ONEX-approved type alias for JSON-serializable values:
+> `JsonValue = str | int | float | bool | None | dict | list`
 
 ## Design Decisions
 

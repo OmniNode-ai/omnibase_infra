@@ -47,8 +47,13 @@ from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
 
 from omnibase_infra.errors import InfraUnavailableError, RuntimeHostError
+from omnibase_infra.nodes.node_registry_effect.v1_0_0.models.model_node_registration_metadata import (
+    EnumEnvironment,
+    ModelNodeRegistrationMetadata,
+)
 
 # Fixed timestamp for deterministic test results.
 # Using a specific point in time avoids flaky CI tests due to timing variations.
@@ -186,9 +191,11 @@ def introspection_payload() -> ModelNodeIntrospectionPayload:
         node_id="test-node-1",
         node_type="effect",
         node_version="1.0.0",
-        capabilities={"operations": ["read", "write"]},
+        capabilities=ModelNodeCapabilitiesInfo(supported_operations=["read", "write"]),
         endpoints={"health": "http://localhost:8080/health"},
-        metadata={"environment": "test"},
+        runtime_metadata=ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING
+        ),
         health_endpoint="http://localhost:8080/health",
     )
 
@@ -200,9 +207,11 @@ def introspection_payload_no_health() -> ModelNodeIntrospectionPayload:
         node_id="test-node-no-health",
         node_type="compute",
         node_version="2.0.0",
-        capabilities={"operations": ["compute"]},
+        capabilities=ModelNodeCapabilitiesInfo(supported_operations=["compute"]),
         endpoints={},
-        metadata={},
+        runtime_metadata=ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING
+        ),
         health_endpoint=None,
     )
 
@@ -1716,6 +1725,9 @@ class TestNodeRegistryEffectErrorSanitization:
             node_id="test-node",
             node_type="effect",
             node_version="1.0.0",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
         )
         request = ModelRegistryRequest(
             operation="register",
@@ -1753,6 +1765,9 @@ class TestNodeRegistryEffectErrorSanitization:
             node_id="test-node",
             node_type="effect",
             node_version="1.0.0",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
         )
         request = ModelRegistryRequest(
             operation="register",
@@ -1939,15 +1954,19 @@ class TestNodeRegistryEffectJsonSerialization:
         await node.initialize()
 
         # Create introspection with complex nested data
-        # Note: The ModelNodeIntrospectionPayload accepts dict[str, object]
-        # which allows for nested structures
+        # Note: capabilities is now ModelNodeCapabilitiesInfo (typed model)
+        # and runtime_metadata is ModelNodeRegistrationMetadata
         introspection = ModelNodeIntrospectionPayload(
             node_id="test-node",
             node_type="effect",
             node_version="1.0.0",
-            capabilities={"operations": ["read", "write"]},
+            capabilities=ModelNodeCapabilitiesInfo(
+                supported_operations=["read", "write"]
+            ),
             endpoints={"health": "http://localhost:8080/health"},
-            metadata={"environment": "test"},
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
         )
 
         correlation_id = uuid4()

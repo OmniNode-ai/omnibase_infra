@@ -38,6 +38,8 @@ from datetime import UTC, datetime
 from typing import Literal, cast
 from uuid import UUID
 
+from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
+
 from omnibase_infra.enums import EnumInfraTransportType
 
 # Type alias for registry operation status (must match ModelRegistryResponse.status)
@@ -50,9 +52,11 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
+    EnumEnvironment,
     ModelConsulOperationResult,
     ModelNodeIntrospectionPayload,
     ModelNodeRegistration,
+    ModelNodeRegistrationMetadata,
     ModelNodeRegistryEffectConfig,
     ModelPostgresOperationResult,
     ModelRegistryRequest,
@@ -543,7 +547,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                             introspection.node_type,
                             introspection.node_version,
                             self._safe_json_dumps(
-                                introspection.capabilities,
+                                introspection.capabilities.model_dump(),
                                 correlation_id,
                                 "capabilities",
                             ),
@@ -551,7 +555,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                                 introspection.endpoints, correlation_id, "endpoints"
                             ),
                             self._safe_json_dumps(
-                                introspection.metadata, correlation_id, "metadata"
+                                introspection.runtime_metadata.model_dump(),
+                                correlation_id,
+                                "runtime_metadata",
                             ),
                             introspection.health_endpoint,
                         ],
@@ -1052,13 +1058,52 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             str(k): str(v) for k, v in raw_endpoints.items() if isinstance(v, str)
         }
 
+        # Parse capabilities from database and convert to ModelNodeCapabilitiesInfo
+        raw_capabilities = parse_json(row.get("capabilities", {}), "capabilities")
+        capabilities = ModelNodeCapabilitiesInfo(
+            capabilities=raw_capabilities.get("capabilities", [])
+            if isinstance(raw_capabilities.get("capabilities"), list)
+            else [],
+            supported_operations=raw_capabilities.get("supported_operations", [])
+            if isinstance(raw_capabilities.get("supported_operations"), list)
+            else [],
+        )
+
+        # Parse runtime_metadata from database and convert to ModelNodeRegistrationMetadata
+        # Database column is 'metadata', but model field is 'runtime_metadata'
+        raw_metadata = parse_json(row.get("metadata", {}), "metadata")
+        env_str = raw_metadata.get("environment", "testing")
+        try:
+            environment = (
+                EnumEnvironment(env_str)
+                if isinstance(env_str, str)
+                else EnumEnvironment.TESTING
+            )
+        except ValueError:
+            environment = EnumEnvironment.TESTING
+        runtime_metadata = ModelNodeRegistrationMetadata(
+            environment=environment,
+            tags=raw_metadata.get("tags", [])
+            if isinstance(raw_metadata.get("tags"), list)
+            else [],
+            labels=raw_metadata.get("labels", {})
+            if isinstance(raw_metadata.get("labels"), dict)
+            else {},
+            release_channel=raw_metadata.get("release_channel")
+            if isinstance(raw_metadata.get("release_channel"), str)
+            else None,
+            region=raw_metadata.get("region")
+            if isinstance(raw_metadata.get("region"), str)
+            else None,
+        )
+
         return ModelNodeRegistration(
             node_id=str(row.get("node_id", "")),
             node_type=str(row.get("node_type", "")),
             node_version=str(row.get("node_version", "1.0.0")),
-            capabilities=parse_json(row.get("capabilities", {}), "capabilities"),
+            capabilities=capabilities,
             endpoints=endpoints,
-            metadata=parse_json(row.get("metadata", {}), "metadata"),
+            runtime_metadata=runtime_metadata,
             health_endpoint=health_endpoint,
             last_heartbeat=last_heartbeat,
             registered_at=registered_at,
