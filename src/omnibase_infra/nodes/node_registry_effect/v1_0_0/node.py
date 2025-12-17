@@ -73,8 +73,21 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
 logger = logging.getLogger(__name__)
 
 # Whitelist of allowed filter keys for SQL query building (SQL injection prevention)
+# These correspond to actual columns in the node_registrations table that support
+# direct equality filtering. JSONB columns (capabilities, endpoints, metadata) are
+# excluded as they require specialized query operators.
+#
+# SECURITY: This whitelist prevents SQL injection by ensuring only known-safe
+# column names can be interpolated into SQL queries. Filter VALUES are always
+# parameterized (never interpolated). Invalid filter keys cause the request to
+# be rejected with an error, not silently ignored.
 ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
-    {"node_type", "node_id", "node_version"}
+    {
+        "node_id",  # Primary key, VARCHAR(255)
+        "node_type",  # Node classification (effect, compute, reducer, orchestrator)
+        "node_version",  # Semantic version string
+        "health_endpoint",  # Health check URL (nullable)
+    }
 )
 
 # Default performance threshold for slow operation warnings (milliseconds)
@@ -248,6 +261,139 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         return f"{exception_type}: {message}"
 
+    def _json_default_serializer(
+        self, obj: object
+    ) -> str | list[str] | dict[str, JsonValue]:
+        """Default serializer for non-standard JSON types.
+
+        This method is used as the `default` parameter for json.dumps() to handle
+        types that are not natively JSON serializable.
+
+        Supported types:
+            - datetime: Converted to ISO 8601 format string
+            - UUID: Converted to string representation
+            - Enum: Converted to its value
+            - bytes: Decoded as UTF-8, with fallback to repr()
+            - set/frozenset: Converted to sorted list
+            - Pydantic BaseModel: Converted via model_dump()
+            - Other: Falls back to str() representation
+
+        Args:
+            obj: The object to serialize
+
+        Returns:
+            A JSON-serializable representation of the object
+
+        Note:
+            This method should handle serialization gracefully without raising
+            exceptions. If an object cannot be converted, it returns a string
+            representation with a warning indicator.
+        """
+        from enum import Enum
+
+        from pydantic import BaseModel
+
+        # datetime types
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+
+        # UUID
+        if isinstance(obj, UUID):
+            return str(obj)
+
+        # Enum values - convert to string value
+        if isinstance(obj, Enum):
+            return str(obj.value)
+
+        # bytes
+        if isinstance(obj, bytes):
+            try:
+                return obj.decode("utf-8")
+            except UnicodeDecodeError:
+                return repr(obj)
+
+        # set/frozenset - convert to sorted list for consistent output
+        if isinstance(obj, (set, frozenset)):
+            try:
+                return sorted(str(item) for item in obj)
+            except TypeError:
+                # Items not comparable, just convert to list
+                return [str(item) for item in obj]
+
+        # Pydantic models
+        if isinstance(obj, BaseModel):
+            try:
+                return cast(dict[str, JsonValue], obj.model_dump(mode="json"))
+            except Exception:
+                # If model_dump fails, try dict conversion
+                return str(obj)
+
+        # Fallback: string representation with warning indicator
+        return f"<non-serializable: {type(obj).__name__}>"
+
+    def _safe_model_dump(
+        self,
+        model: object,
+        correlation_id: UUID | None = None,
+        field_name: str = "unknown",
+    ) -> dict[str, JsonValue]:
+        """Safely dump a Pydantic model to a dictionary.
+
+        This method wraps Pydantic's model_dump() with proper error handling,
+        returning an empty dict on failure rather than raising an exception.
+
+        Args:
+            model: The Pydantic model to dump (or any object with model_dump method)
+            correlation_id: Optional correlation ID for logging
+            field_name: Name of the field being serialized for logging
+
+        Returns:
+            Dictionary representation of the model, or empty dict on failure
+        """
+        try:
+            # Check if object has model_dump method (Pydantic v2)
+            if hasattr(model, "model_dump"):
+                result = model.model_dump(mode="json")
+                if isinstance(result, dict):
+                    return cast(dict[str, JsonValue], result)
+                logger.warning(
+                    f"model_dump() returned non-dict for {field_name}",
+                    extra={
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
+                        "field_name": field_name,
+                        "result_type": type(result).__name__,
+                    },
+                )
+                return {}
+
+            # Fallback for dict-like objects
+            if hasattr(model, "__dict__"):
+                return cast(dict[str, JsonValue], dict(model.__dict__))
+
+            logger.warning(
+                f"Object has no model_dump or __dict__ for {field_name}",
+                extra={
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                    "field_name": field_name,
+                    "object_type": type(model).__name__,
+                },
+            )
+            return {}
+
+        except (TypeError, ValueError, AttributeError, RecursionError) as e:
+            logger.warning(
+                f"Model serialization failed for {field_name}: {type(e).__name__}",
+                extra={
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                    "field_name": field_name,
+                    "error_type": type(e).__name__,
+                    "model_type": type(model).__name__,
+                },
+            )
+            return {}
+
     def _log_operation_performance(
         self,
         operation: str,
@@ -319,6 +465,12 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
     ) -> str:
         """Safely serialize data to JSON with error handling.
 
+        This method provides robust JSON serialization with:
+        - Custom default serializer for non-standard types (datetime, UUID, Enum, etc.)
+        - RecursionError handling for deeply nested or circular structures
+        - Detailed logging with correlation_id and data type for debugging
+        - Fallback value support for graceful degradation
+
         Args:
             data: The data to serialize (any JSON-serializable value)
             correlation_id: Optional correlation ID for logging
@@ -327,16 +479,21 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         Returns:
             JSON string, or fallback value on serialization failure
+
+        See Also:
+            _json_default_serializer: Custom serializer for non-standard types
+            _safe_json_dumps_strict: Version that reports errors to caller
         """
         try:
-            return json.dumps(data)
-        except (TypeError, ValueError) as e:
+            return json.dumps(data, default=self._json_default_serializer)
+        except (TypeError, ValueError, RecursionError) as e:
             logger.warning(
                 f"JSON serialization failed for {field_name}: {type(e).__name__}",
                 extra={
                     "correlation_id": str(correlation_id) if correlation_id else None,
                     "field_name": field_name,
                     "error_type": type(e).__name__,
+                    "data_type": type(data).__name__,
                 },
             )
             return fallback
@@ -352,6 +509,15 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         Unlike _safe_json_dumps, this method returns both the result and any error
         that occurred, allowing callers to decide how to handle serialization failures.
 
+        This method is used for critical serialization paths (like event publishing)
+        where the caller needs to know if serialization failed and handle it explicitly.
+
+        Features:
+        - Custom default serializer for non-standard types (datetime, UUID, Enum, etc.)
+        - RecursionError handling for deeply nested or circular structures
+        - Returns error message to caller instead of silently falling back
+        - Detailed logging with correlation_id and data type for debugging
+
         Args:
             data: The data to serialize
             correlation_id: Optional correlation ID for logging
@@ -360,10 +526,14 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         Returns:
             Tuple of (json_string, error_message). If successful, error_message is None.
             If failed, json_string is "{}" and error_message describes the failure.
+
+        See Also:
+            _json_default_serializer: Custom serializer for non-standard types
+            _safe_json_dumps: Version that returns fallback on error
         """
         try:
-            return json.dumps(data), None
-        except (TypeError, ValueError) as e:
+            return json.dumps(data, default=self._json_default_serializer), None
+        except (TypeError, ValueError, RecursionError) as e:
             error_msg = (
                 f"JSON serialization failed for {field_name}: {type(e).__name__}"
             )
@@ -373,6 +543,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     "correlation_id": str(correlation_id) if correlation_id else None,
                     "field_name": field_name,
                     "error_type": type(e).__name__,
+                    "data_type": type(data).__name__,
                 },
             )
             return "{}", error_msg
@@ -682,6 +853,11 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             """
 
             # Execute via db handler (Protocol-typed)
+            # Use _safe_model_dump to handle Pydantic serialization errors
+            # before passing to _safe_json_dumps for JSON encoding.
+            # This provides two layers of error handling:
+            # 1. _safe_model_dump catches Pydantic model_dump() failures
+            # 2. _safe_json_dumps catches json.dumps() failures
             result = await self._db_handler.execute(
                 {
                     "operation": "db.execute",
@@ -692,7 +868,11 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                             introspection.node_type,
                             introspection.node_version,
                             self._safe_json_dumps(
-                                introspection.capabilities.model_dump(),
+                                self._safe_model_dump(
+                                    introspection.capabilities,
+                                    correlation_id,
+                                    "capabilities",
+                                ),
                                 correlation_id,
                                 "capabilities",
                             ),
@@ -700,7 +880,11 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                                 introspection.endpoints, correlation_id, "endpoints"
                             ),
                             self._safe_json_dumps(
-                                introspection.runtime_metadata.model_dump(),
+                                self._safe_model_dump(
+                                    introspection.runtime_metadata,
+                                    correlation_id,
+                                    "runtime_metadata",
+                                ),
                                 correlation_id,
                                 "runtime_metadata",
                             ),
@@ -880,14 +1064,88 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 success=False, error=self._sanitize_error(e)
             )
 
+    def _validate_filter_keys(
+        self,
+        filters: dict[str, str],
+        correlation_id: UUID,
+    ) -> list[str]:
+        """Validate filter keys against the whitelist.
+
+        SECURITY: This method prevents SQL injection by ensuring only known-safe
+        column names can be used in SQL queries. Invalid keys are rejected, not
+        silently ignored, to prevent attackers from probing for vulnerabilities.
+
+        Args:
+            filters: Dictionary of filter key-value pairs from the request.
+            correlation_id: Correlation ID for security logging.
+
+        Returns:
+            List of invalid filter keys (empty if all keys are valid).
+
+        Security Note:
+            Invalid filter keys are logged at WARNING level for security monitoring.
+            The log includes a sanitized version of the key (truncated, special chars
+            removed) to prevent log injection attacks while still enabling detection
+            of SQL injection attempts.
+        """
+        invalid_keys: list[str] = []
+
+        for key in filters:
+            if key not in ALLOWED_FILTER_KEYS:
+                invalid_keys.append(key)
+                # Log security event with sanitized key to prevent log injection
+                # Truncate and remove special characters for safe logging
+                sanitized_key = re.sub(r"[^a-zA-Z0-9_\-]", "_", key[:50])
+                logger.warning(
+                    "Invalid filter key rejected in discover operation",
+                    extra={
+                        "event_type": "security_filter_key_rejected",
+                        "correlation_id": str(correlation_id),
+                        "sanitized_key": sanitized_key,
+                        "key_length": len(key),
+                        "allowed_keys": list(ALLOWED_FILTER_KEYS),
+                    },
+                )
+
+        return invalid_keys
+
     async def _discover_nodes(
         self,
         request: ModelRegistryRequest,
         start_time: float,
     ) -> ModelRegistryResponse:
-        """Query registered nodes from PostgreSQL with optional filters."""
+        """Query registered nodes from PostgreSQL with optional filters.
+
+        Security:
+            Filter keys are validated against ALLOWED_FILTER_KEYS whitelist.
+            Invalid filter keys cause the request to be rejected with a
+            RuntimeHostError, preventing SQL injection attempts. Filter values
+            are always parameterized (never interpolated into SQL).
+        """
+        # Validate filter keys BEFORE building SQL query (SQL injection prevention)
+        if request.filters:
+            invalid_keys = self._validate_filter_keys(
+                request.filters, request.correlation_id
+            )
+            if invalid_keys:
+                # Reject request with invalid filter keys - do not silently ignore
+                # Sanitize invalid keys for error message (no SQL structure leaked)
+                sanitized_invalid = [
+                    re.sub(r"[^a-zA-Z0-9_\-]", "_", k[:30]) for k in invalid_keys[:5]
+                ]
+                raise RuntimeHostError(
+                    f"Invalid filter keys: {sanitized_invalid}. "
+                    f"Allowed keys: {sorted(ALLOWED_FILTER_KEYS)}",
+                    context=ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.DATABASE,
+                        operation="discover",
+                        target_name="node_registry_effect",
+                        correlation_id=request.correlation_id,
+                    ),
+                )
+
         try:
-            # Build query with filters
+            # Build query with validated filters
             sql = "SELECT * FROM node_registrations"
             params: list[str] = []
 
@@ -895,12 +1153,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 conditions = []
                 param_idx = 1
                 for key, value in request.filters.items():
-                    if key not in ALLOWED_FILTER_KEYS:
-                        logger.warning(
-                            f"Unknown filter key ignored: {key}",
-                            extra={"correlation_id": str(request.correlation_id)},
-                        )
-                        continue
+                    # Keys already validated above - safe to interpolate column names
                     conditions.append(f"{key} = ${param_idx}")
                     params.append(value)
                     param_idx += 1

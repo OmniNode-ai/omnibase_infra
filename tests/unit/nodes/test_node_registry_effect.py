@@ -810,20 +810,24 @@ class TestNodeRegistryEffectDiscover:
 
         response = await node.execute(request)
 
+        # Defensive None checks before accessing attributes
+        assert response is not None, "Response should not be None"
         assert response.success is True
         assert response.status == "success"
         assert response.operation == "discover"
-        assert response.nodes is not None
+        assert response.nodes is not None, "nodes list should not be None"
         assert len(response.nodes) == 2
 
-        # Verify first node
+        # Verify first node with defensive None check
         node1 = response.nodes[0]
+        assert node1 is not None, "First node should not be None"
         assert node1.node_id == "test-node-1"
         assert node1.node_type == "effect"
         assert node1.node_version == "1.0.0"
 
-        # Verify second node
+        # Verify second node with defensive None check
         node2 = response.nodes[1]
+        assert node2 is not None, "Second node should not be None"
         assert node2.node_id == "test-node-2"
         assert node2.node_type == "compute"
 
@@ -1069,6 +1073,181 @@ class TestNodeRegistryEffectDiscover:
         assert response.status == "failed"
         assert response.error is not None
         assert "PostgreSQL" in response.error
+
+        await node.shutdown()
+
+    async def test_discover_rejects_sql_injection_filter_key(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        mock_event_bus: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test discover rejects malicious filter keys (SQL injection prevention).
+
+        SECURITY: This test verifies that filter keys containing SQL injection
+        attempts are rejected with RuntimeHostError rather than being silently
+        ignored or interpolated into the query.
+        """
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            event_bus=mock_event_bus,
+        )
+        await node.initialize()
+
+        # Attempt SQL injection via filter key
+        malicious_filters = {
+            '"; DROP TABLE--': "attack",
+            "node_type": "effect",  # Valid key alongside malicious one
+        }
+
+        request = ModelRegistryRequest(
+            operation="discover",
+            filters=malicious_filters,
+            correlation_id=correlation_id,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await node.execute(request)
+
+        # Verify error message mentions invalid filter keys
+        assert "invalid filter keys" in exc_info.value.message.lower()
+        # Verify allowed keys are mentioned for guidance
+        assert "allowed keys" in exc_info.value.message.lower()
+        # Verify the malicious key is sanitized in the error message (no special chars)
+        assert '"; DROP' not in exc_info.value.message
+
+        # Verify db_handler was never called (attack blocked before SQL executed)
+        mock_db_handler.execute.assert_not_called()
+
+        await node.shutdown()
+
+    async def test_discover_rejects_unknown_filter_keys(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        mock_event_bus: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test discover rejects unknown filter keys (not in whitelist).
+
+        SECURITY: Even benign-looking but unknown filter keys must be rejected
+        to prevent any possibility of SQL injection through column names.
+        """
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            event_bus=mock_event_bus,
+        )
+        await node.initialize()
+
+        # Use a plausible but non-whitelisted column name
+        request = ModelRegistryRequest(
+            operation="discover",
+            filters={"environment": "production"},  # Not in whitelist
+            correlation_id=correlation_id,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await node.execute(request)
+
+        assert "invalid filter keys" in exc_info.value.message.lower()
+        assert "environment" in exc_info.value.message.lower()
+
+        # Verify db_handler was never called
+        mock_db_handler.execute.assert_not_called()
+
+        await node.shutdown()
+
+    async def test_discover_accepts_all_whitelisted_filter_keys(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        mock_event_bus: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test discover accepts all keys in ALLOWED_FILTER_KEYS whitelist."""
+        mock_db_handler.execute = AsyncMock(
+            return_value={
+                "status": "success",
+                "payload": {"rows": []},
+            }
+        )
+
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            event_bus=mock_event_bus,
+        )
+        await node.initialize()
+
+        # Use all whitelisted filter keys
+        request = ModelRegistryRequest(
+            operation="discover",
+            filters={
+                "node_id": "test-node",
+                "node_type": "effect",
+                "node_version": "1.0.0",
+                "health_endpoint": "http://localhost:8080/health",
+            },
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+
+        # Should succeed without raising RuntimeHostError
+        assert response.success is True
+        assert response.status == "success"
+
+        # Verify all 4 filters were applied
+        call_args = mock_db_handler.execute.call_args[0][0]
+        params = call_args["payload"]["params"]
+        assert len(params) == 4
+
+        await node.shutdown()
+
+    async def test_discover_sanitizes_malicious_keys_in_error_message(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        mock_event_bus: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test that malicious filter keys are sanitized in error messages.
+
+        SECURITY: Error messages must not leak SQL structure or contain
+        unescaped special characters that could enable log injection.
+        The original malicious keys should be transformed to safe versions.
+        """
+        node = NodeRegistryEffect(
+            consul_handler=mock_consul_handler,
+            db_handler=mock_db_handler,
+            event_bus=mock_event_bus,
+        )
+        await node.initialize()
+
+        # SQL injection pattern
+        malicious_key = '"; DROP TABLE users--'
+
+        request = ModelRegistryRequest(
+            operation="discover",
+            filters={malicious_key: "attack"},
+            correlation_id=correlation_id,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await node.execute(request)
+
+        error_message = exc_info.value.message
+
+        # The original malicious key should NOT appear in error message
+        assert '"; DROP TABLE' not in error_message
+        # The key should be sanitized (special chars replaced with underscore)
+        # Original: '"; DROP TABLE users--' -> Sanitized: '__DROP_TABLE_users--'
+        assert "__DROP_TABLE" in error_message
+        # Semicolons and quotes from the original key should be replaced
+        assert '";' not in error_message
 
         await node.shutdown()
 
@@ -1804,22 +1983,40 @@ class TestNodeRegistryEffectJsonSerialization:
         result = node._safe_json_dumps(data, uuid4(), "test_field")
         assert result == json.dumps(data)
 
-    def test_safe_json_dumps_handles_unserializable_object(self) -> None:
-        """Test that _safe_json_dumps handles unserializable objects gracefully."""
+    def test_safe_json_dumps_handles_sets_gracefully(self) -> None:
+        """Test that _safe_json_dumps converts sets to sorted lists."""
         node = NodeRegistryEffect(
             consul_handler=Mock(),
             db_handler=Mock(),
         )
 
-        # Create an unserializable object (set is not JSON serializable)
-        unserializable_data = {"items": {1, 2, 3}}  # set is not serializable
+        # Sets are converted to sorted lists by the default serializer
+        data_with_set = {"items": {3, 1, 2}}
+        correlation_id = uuid4()
+        result = node._safe_json_dumps(data_with_set, correlation_id, "test_field")
+
+        # Should serialize successfully with set converted to sorted list
+        parsed = json.loads(result)
+        assert parsed["items"] == ["1", "2", "3"]  # sorted string representation
+
+    def test_safe_json_dumps_handles_truly_unserializable_object(self) -> None:
+        """Test that _safe_json_dumps handles truly unserializable objects gracefully."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+
+        # Create a truly unserializable object - a lambda function
+        # Note: The default serializer will convert this to a string representation
+        unserializable_data = {"func": lambda x: x}
         correlation_id = uuid4()
         result = node._safe_json_dumps(
             unserializable_data, correlation_id, "test_field"
         )
 
-        # Should return fallback value
-        assert result == "{}"
+        # Should serialize successfully (lambda converted to string)
+        parsed = json.loads(result)
+        assert "non-serializable" in parsed["func"]
 
     def test_safe_json_dumps_handles_circular_reference(self) -> None:
         """Test that _safe_json_dumps handles circular references."""
@@ -1838,19 +2035,51 @@ class TestNodeRegistryEffectJsonSerialization:
         # Should return fallback value
         assert result == "{}"
 
-    def test_safe_json_dumps_custom_fallback(self) -> None:
-        """Test that _safe_json_dumps uses custom fallback."""
+    def test_safe_json_dumps_custom_fallback_on_recursion_error(self) -> None:
+        """Test that _safe_json_dumps uses custom fallback on RecursionError."""
         node = NodeRegistryEffect(
             consul_handler=Mock(),
             db_handler=Mock(),
         )
 
-        unserializable = {"items": {1, 2, 3}}
-        result = node._safe_json_dumps(
-            unserializable, uuid4(), "test_field", fallback="[]"
+        # Create deeply nested structure that triggers RecursionError
+        circular: dict[str, object] = {}
+        circular["self"] = circular
+
+        result = node._safe_json_dumps(circular, uuid4(), "test_field", fallback="[]")
+
+        # Should return custom fallback value due to RecursionError
+        assert result == "[]"
+
+    def test_safe_json_dumps_converts_datetime(self) -> None:
+        """Test that _safe_json_dumps converts datetime to ISO format."""
+        from datetime import datetime, timezone
+
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
         )
 
-        assert result == "[]"
+        test_time = datetime(2024, 1, 15, 10, 30, 45, tzinfo=UTC)
+        data = {"timestamp": test_time}
+        result = node._safe_json_dumps(data, uuid4(), "test_field")
+
+        parsed = json.loads(result)
+        assert parsed["timestamp"] == "2024-01-15T10:30:45+00:00"
+
+    def test_safe_json_dumps_converts_uuid(self) -> None:
+        """Test that _safe_json_dumps converts UUID to string."""
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+
+        test_uuid = uuid4()
+        data = {"id": test_uuid}
+        result = node._safe_json_dumps(data, uuid4(), "test_field")
+
+        parsed = json.loads(result)
+        assert parsed["id"] == str(test_uuid)
 
     def test_safe_json_dumps_strict_success(self) -> None:
         """Test that _safe_json_dumps_strict returns None error on success."""
@@ -1864,24 +2093,49 @@ class TestNodeRegistryEffectJsonSerialization:
         assert error is None
         assert json_str == json.dumps(data)
 
-    def test_safe_json_dumps_strict_failure(self) -> None:
-        """Test that _safe_json_dumps_strict returns error message on failure."""
+    def test_safe_json_dumps_strict_handles_sets(self) -> None:
+        """Test that _safe_json_dumps_strict converts sets to sorted lists."""
         node = NodeRegistryEffect(
             consul_handler=Mock(),
             db_handler=Mock(),
         )
 
-        # Create unserializable data
-        unserializable = {"items": {1, 2, 3}}
+        # Sets are now converted by the default serializer
+        data_with_set = {"items": {3, 1, 2}}
         json_str, error = node._safe_json_dumps_strict(
-            unserializable, uuid4(), "unserializable_field"
+            data_with_set, uuid4(), "set_field"
+        )
+
+        # Should succeed with set converted to sorted list
+        assert error is None
+        parsed = json.loads(json_str)
+        assert parsed["items"] == ["1", "2", "3"]
+
+    def test_safe_json_dumps_strict_failure_on_recursion(self) -> None:
+        """Test that _safe_json_dumps_strict returns error message on circular reference.
+
+        Note: Circular references trigger ValueError when json.dumps detects a circular
+        reference in the data structure. The exact error type depends on how the
+        serialization handles the circular reference detection.
+        """
+        node = NodeRegistryEffect(
+            consul_handler=Mock(),
+            db_handler=Mock(),
+        )
+
+        # Create circular reference that causes serialization failure
+        circular: dict[str, object] = {}
+        circular["self"] = circular
+        json_str, error = node._safe_json_dumps_strict(
+            circular, uuid4(), "circular_field"
         )
 
         assert json_str == "{}"
         assert error is not None
         assert "JSON serialization failed" in error
-        assert "unserializable_field" in error
-        assert "TypeError" in error
+        assert "circular_field" in error
+        # ValueError is raised by json.dumps when it detects circular reference
+        assert "ValueError" in error or "RecursionError" in error
 
     async def test_request_introspection_fails_on_serialization_error(
         self,
@@ -2106,7 +2360,8 @@ class TestNodeRegistryEffectSlowOperationThreshold:
 
         # Verify slow operation warning was logged with configured threshold
         slow_warnings = [
-            record for record in caplog.records
+            record
+            for record in caplog.records
             if "Slow registry operation" in record.message
         ]
         assert len(slow_warnings) >= 1
@@ -2153,7 +2408,8 @@ class TestNodeRegistryEffectSlowOperationThreshold:
 
         # Verify no slow operation warning was logged
         slow_warnings = [
-            record for record in caplog.records
+            record
+            for record in caplog.records
             if "Slow registry operation" in record.message
         ]
         assert len(slow_warnings) == 0
