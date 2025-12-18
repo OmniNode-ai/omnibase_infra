@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -74,7 +75,51 @@ _VALID_NODE_TYPES: frozenset[str] = frozenset(
     {"effect", "compute", "reducer", "orchestrator"}
 )
 
+# Patterns that indicate sensitive data that should be redacted.
+# Per CLAUDE.md error sanitization guidelines, exception messages should
+# never include passwords, API keys, tokens, secrets, or credentials.
+_SENSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"password\s*[=:]\s*\S+", re.IGNORECASE),
+    re.compile(r"api[_-]?key\s*[=:]\s*\S+", re.IGNORECASE),
+    re.compile(r"token\s*[=:]\s*\S+", re.IGNORECASE),
+    re.compile(r"secret\s*[=:]\s*\S+", re.IGNORECASE),
+    re.compile(r"credential\s*[=:]\s*\S+", re.IGNORECASE),
+    re.compile(r"://[^:]+:[^@]+@", re.IGNORECASE),  # user:pass@host in URLs
+    # Email pattern (basic PII protection)
+    re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+    # Phone number patterns (basic PII protection)
+    re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"),
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_error_message(exc: BaseException) -> str:
+    """Sanitize exception message to remove sensitive information.
+
+    Per CLAUDE.md error sanitization guidelines, exception messages should
+    never include passwords, API keys, tokens, secrets, or credentials.
+
+    This function extracts the exception type name and message, then filters
+    out sensitive patterns like:
+    - Passwords, API keys, tokens, secrets
+    - Connection strings with credentials (user:pass@host in URLs)
+    - Basic PII patterns (email addresses, phone numbers)
+
+    Args:
+        exc: The exception to sanitize.
+
+    Returns:
+        Sanitized error string with format "ExceptionType: sanitized message".
+    """
+    exc_type = type(exc).__name__
+    message = str(exc)
+
+    # Redact sensitive patterns
+    for pattern in _SENSITIVE_PATTERNS:
+        message = pattern.sub("[REDACTED]", message)
+
+    return f"{exc_type}: {message}"
 
 
 def _find_contracts_dir() -> Path:
@@ -83,21 +128,29 @@ def _find_contracts_dir() -> Path:
     This is more robust than multiple .parent calls and handles
     different installation/development environments.
 
+    The function validates that the found contracts directory contains the
+    expected FSM contract file (fsm/dual_registration_reducer_fsm.yaml).
+    If a contracts/ directory is found but lacks the expected file, the
+    search continues up the directory tree.
+
     Returns:
-        Path to the contracts directory.
+        Path to the contracts directory containing the expected FSM contract.
 
     Raises:
-        RuntimeError: If contracts directory cannot be found.
+        RuntimeError: If contracts directory with expected FSM file cannot be found.
     """
     # Start from current file's directory and walk up the tree until we find
-    # a directory containing 'contracts/'. This handles both development
-    # (source checkout) and installed package scenarios where the relative
-    # path depth may vary.
+    # a directory containing 'contracts/' with the expected FSM contract.
+    # This handles both development (source checkout) and installed package
+    # scenarios where the relative path depth may vary.
     current = Path(__file__).resolve().parent
     while current != current.parent:
         contracts_dir = current / "contracts"
+        # Validate that the expected FSM contract exists before returning
         if contracts_dir.is_dir():
-            return contracts_dir
+            expected_fsm = contracts_dir / "fsm" / "dual_registration_reducer_fsm.yaml"
+            if expected_fsm.exists():
+                return contracts_dir
         current = current.parent
     raise RuntimeError(
         "Could not find contracts directory. "
@@ -145,15 +198,17 @@ class NodeDualRegistrationReducer:
         >>> print(result.status)  # "success", "partial", or "failed"
     """
 
-    # Performance target constants
-    _TARGET_DUAL_REGISTRATION_MS: float = 300.0
-    _TARGET_AGGREGATION_OVERHEAD_MS: float = 10.0
+    # Default performance target constants
+    _DEFAULT_TARGET_DUAL_REGISTRATION_MS: float = 300.0
+    _DEFAULT_TARGET_AGGREGATION_OVERHEAD_MS: float = 10.0
 
     def __init__(
         self,
         consul_handler: ConsulHandler,
         db_adapter: DbAdapter,
         fsm_contract_path: Path | None = None,
+        target_dual_registration_ms: float | None = None,
+        target_aggregation_overhead_ms: float | None = None,
     ) -> None:
         """Initialize dual registration reducer.
 
@@ -186,11 +241,28 @@ class NodeDualRegistrationReducer:
                 and returns a response with a status attribute.
             fsm_contract_path: Optional path to FSM contract YAML. If not provided,
                 defaults to contracts/fsm/dual_registration_reducer_fsm.yaml.
+            target_dual_registration_ms: Optional performance target for dual
+                registration in milliseconds. Defaults to 300.0ms. Exceeded
+                thresholds trigger warning logs.
+            target_aggregation_overhead_ms: Optional performance target for
+                aggregation overhead in milliseconds. Defaults to 10.0ms.
         """
         self._consul_handler = consul_handler
         self._db_adapter = db_adapter
         self._metrics = ModelReducerMetrics()
         self._initialized = False
+
+        # Performance thresholds (configurable for different environments)
+        self._target_dual_registration_ms = (
+            target_dual_registration_ms
+            if target_dual_registration_ms is not None
+            else self._DEFAULT_TARGET_DUAL_REGISTRATION_MS
+        )
+        self._target_aggregation_overhead_ms = (
+            target_aggregation_overhead_ms
+            if target_aggregation_overhead_ms is not None
+            else self._DEFAULT_TARGET_AGGREGATION_OVERHEAD_MS
+        )
 
         # FSM state management
         self._current_state = EnumFSMState.IDLE
@@ -882,17 +954,13 @@ class NodeDualRegistrationReducer:
         consul_registered = params.consul_result is True
         consul_error: str | None = None
         if isinstance(params.consul_result, BaseException):
-            consul_error = (
-                f"{type(params.consul_result).__name__}: {params.consul_result}"
-            )
+            consul_error = _sanitize_error_message(params.consul_result)
 
         # Determine PostgreSQL success
         postgres_registered = params.postgres_result is True
         postgres_error: str | None = None
         if isinstance(params.postgres_result, BaseException):
-            postgres_error = (
-                f"{type(params.postgres_result).__name__}: {params.postgres_result}"
-            )
+            postgres_error = _sanitize_error_message(params.postgres_result)
 
         # Update FSM context
         self._fsm_context.consul_registered = consul_registered
@@ -919,12 +987,12 @@ class NodeDualRegistrationReducer:
         self._metrics.total_registrations += 1
 
         # Log performance metrics
-        if params.registration_time_ms > self._TARGET_DUAL_REGISTRATION_MS:
+        if params.registration_time_ms > self._target_dual_registration_ms:
             logger.warning(
                 "Dual registration exceeded performance target",
                 extra={
                     "registration_time_ms": params.registration_time_ms,
-                    "target_ms": self._TARGET_DUAL_REGISTRATION_MS,
+                    "target_ms": self._target_dual_registration_ms,
                     "node_id": str(params.node_id),
                     "correlation_id": str(params.correlation_id),
                 },
