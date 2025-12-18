@@ -35,8 +35,11 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
 
 from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
 
@@ -127,44 +130,32 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         with connection pooling (recommended pool size: 10-20 connections).
 
     Dependency Injection:
-        TODO(OMN-901): Migrate to container-based dependency injection.
+        Supports both direct constructor injection and container-based DI.
 
-        Per ONEX patterns (CLAUDE.md), all services should use ModelONEXContainer
-        for dependency injection. Current implementation uses direct constructor
-        injection because:
-
-        1. The container infrastructure (wire_infrastructure_services) does not
-           yet support registration/resolution of:
-           - ProtocolEnvelopeExecutor handlers (consul, db)
-           - ProtocolEventBus implementations
-
-        2. These handlers require runtime configuration (connection strings,
-           credentials from Vault) that would need container-level wiring.
-
-        Migration path when container support is ready:
+        **Container-Based DI (Recommended)**:
+        Use the `create_from_container()` class method for container-based creation:
         ```python
-        # Future container-based implementation
-        @classmethod
-        async def create_from_container(
-            cls, container: ModelONEXContainer
-        ) -> NodeRegistryEffect:
-            consul_handler = await container.service_registry.resolve_service(
-                ProtocolEnvelopeExecutor, name="consul"
-            )
-            db_handler = await container.service_registry.resolve_service(
-                ProtocolEnvelopeExecutor, name="postgres"
-            )
-            event_bus = await container.service_registry.resolve_service(
-                ProtocolEventBus
-            )
-            return cls(consul_handler, db_handler, event_bus)
+        container = ModelONEXContainer()
+        await wire_infrastructure_services(container)
+        # Register handlers first (consul, postgres) with container
+        node = await NodeRegistryEffect.create_from_container(container)
         ```
 
-        Required infrastructure work:
-        - Add handler registration to wire_infrastructure_services()
-        - Add event bus registration to wire_infrastructure_services()
-        - Support named service resolution for multiple handlers of same protocol
-        - Ensure handlers are wired with proper Vault/Consul credentials
+        **Direct Constructor Injection**:
+        For testing or when handlers are created manually:
+        ```python
+        node = NodeRegistryEffect(consul_handler, db_handler, event_bus, config)
+        ```
+
+        **Prerequisites for Container DI**:
+        Before calling `create_from_container()`, the following must be registered:
+        - ProtocolEnvelopeExecutor with name="consul" (Consul handler)
+        - ProtocolEnvelopeExecutor with name="postgres" (PostgreSQL handler)
+        - ProtocolEventBus (optional, for request_introspection operation)
+
+        See Also:
+            - `registry/__init__.py`: RegistryInfraNodeRegistryEffect for container registration
+            - `container_wiring.py`: wire_infrastructure_services() for base service wiring
     """
 
     def __init__(
@@ -193,9 +184,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             must handle connection pooling internally to prevent connection exhaustion
             under high load. See class docstring for production recommendations.
 
-            TODO(OMN-901): This constructor uses direct injection. When container
-            infrastructure supports handler registration, add a factory method
-            `create_from_container()` to resolve dependencies from container.
+            For container-based dependency injection, use the `create_from_container()`
+            class method instead of this constructor.
         """
         self._consul_handler: ProtocolEnvelopeExecutor = consul_handler
         self._db_handler: ProtocolEnvelopeExecutor = db_handler
@@ -215,6 +205,105 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             service_name="node_registry_effect",
             transport_type=EnumInfraTransportType.RUNTIME,
         )
+
+    @classmethod
+    async def create_from_container(
+        cls,
+        container: ModelONEXContainer,
+        config: ModelNodeRegistryEffectConfig | None = None,
+    ) -> NodeRegistryEffect:
+        """Create NodeRegistryEffect with dependencies from container.
+
+        Factory method for container-based dependency injection.
+        Resolves consul_handler, db_handler, and event_bus from container.
+
+        Prerequisites:
+            Before calling this method, the following services must be registered
+            in the container's service_registry:
+            - ProtocolEnvelopeExecutor with name="consul" (required)
+            - ProtocolEnvelopeExecutor with name="postgres" (required)
+            - ProtocolEventBus (optional, only needed for request_introspection)
+
+        Args:
+            container: ONEX container with registered services.
+            config: Optional configuration override. If not provided, uses
+                ModelNodeRegistryEffectConfig with default values.
+
+        Returns:
+            Configured NodeRegistryEffect instance ready for use.
+
+        Raises:
+            RuntimeError: If required services (consul_handler, db_handler)
+                are not registered in the container.
+
+        Example:
+            ```python
+            from omnibase_core.container import ModelONEXContainer
+            from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
+
+            # Bootstrap container and wire services
+            container = ModelONEXContainer()
+            await wire_infrastructure_services(container)
+
+            # Register handlers (implementation-specific)
+            await container.service_registry.register_instance(
+                interface=ProtocolEnvelopeExecutor,
+                instance=consul_handler,
+                scope="global",
+                metadata={"name": "consul"},
+            )
+
+            # Create node via container
+            node = await NodeRegistryEffect.create_from_container(container)
+            await node.initialize()
+            ```
+
+        See Also:
+            - RegistryInfraNodeRegistryEffect: Registry class for container integration
+            - wire_infrastructure_services(): Base infrastructure wiring
+        """
+        # Resolve required consul handler
+        try:
+            consul_handler: ProtocolEnvelopeExecutor = (
+                await container.service_registry.resolve_service(
+                    ProtocolEnvelopeExecutor, name="consul"
+                )
+            )
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to resolve consul handler from container. "
+                "Ensure ProtocolEnvelopeExecutor with name='consul' is registered. "
+                f"Original error: {e}"
+            ) from e
+
+        # Resolve required postgres handler
+        try:
+            db_handler: ProtocolEnvelopeExecutor = (
+                await container.service_registry.resolve_service(
+                    ProtocolEnvelopeExecutor, name="postgres"
+                )
+            )
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to resolve postgres handler from container. "
+                "Ensure ProtocolEnvelopeExecutor with name='postgres' is registered. "
+                f"Original error: {e}"
+            ) from e
+
+        # Resolve optional event bus (not all deployments need it)
+        event_bus: ProtocolEventBus | None = None
+        try:
+            event_bus = await container.service_registry.resolve_service(
+                ProtocolEventBus
+            )
+        except Exception:
+            # Event bus is optional - only needed for request_introspection operation
+            logger.debug(
+                "ProtocolEventBus not registered in container; "
+                "request_introspection operation will not be available"
+            )
+
+        return cls(consul_handler, db_handler, event_bus, config)
 
     def _sanitize_error(self, exception: BaseException) -> str:
         """Sanitize exception message for safe logging and response.
