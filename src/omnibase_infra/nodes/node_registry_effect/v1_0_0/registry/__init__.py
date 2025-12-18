@@ -9,17 +9,17 @@ Usage:
     ```python
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.nodes.node_registry_effect.v1_0_0.registry import (
-        RegistryInfraNodeRegistryEffect,
+        RegistryInfraRegistryEffect,
     )
 
     # Bootstrap container (handlers must be registered first)
     container = ModelONEXContainer()
 
     # Option 1: Register factory for lazy creation
-    await RegistryInfraNodeRegistryEffect.register(container)
+    await RegistryInfraRegistryEffect.register(container)
 
     # Option 2: Directly resolve with optional config
-    node = await RegistryInfraNodeRegistryEffect.resolve(container, config)
+    node = await RegistryInfraRegistryEffect.resolve(container, config)
     ```
 
 Prerequisites:
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class RegistryInfraNodeRegistryEffect:
+class RegistryInfraRegistryEffect:
     """Registry configuration for NodeRegistryEffect DI container integration.
 
     This class provides static methods for registering and resolving
@@ -75,14 +75,14 @@ class RegistryInfraNodeRegistryEffect:
     Example:
         ```python
         # Register factory for lazy instantiation
-        await RegistryInfraNodeRegistryEffect.register(container)
+        await RegistryInfraRegistryEffect.register(container)
 
         # Later, resolve when needed
         node = await container.service_registry.resolve_service(NodeRegistryEffect)
 
         # Or resolve directly with custom config
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=10)
-        node = await RegistryInfraNodeRegistryEffect.resolve(container, config)
+        node = await RegistryInfraRegistryEffect.resolve(container, config)
         ```
     """
 
@@ -107,7 +107,7 @@ class RegistryInfraNodeRegistryEffect:
             ```python
             container = ModelONEXContainer()
             # Register handlers first...
-            await RegistryInfraNodeRegistryEffect.register(container)
+            await RegistryInfraRegistryEffect.register(container)
 
             # Later, resolve the node
             node = await container.service_registry.resolve_service(NodeRegistryEffect)
@@ -187,14 +187,14 @@ class RegistryInfraNodeRegistryEffect:
         Example:
             ```python
             # With default config
-            node = await RegistryInfraNodeRegistryEffect.resolve(container)
+            node = await RegistryInfraRegistryEffect.resolve(container)
 
             # With custom config
             config = ModelNodeRegistryEffectConfig(
                 circuit_breaker_threshold=10,
                 circuit_breaker_reset_timeout=120.0,
             )
-            node = await RegistryInfraNodeRegistryEffect.resolve(container, config)
+            node = await RegistryInfraRegistryEffect.resolve(container, config)
 
             # Don't forget to initialize
             await node.initialize()
@@ -203,4 +203,4 @@ class RegistryInfraNodeRegistryEffect:
         return await NodeRegistryEffect.create_from_container(container, config)
 
 
-__all__ = ["RegistryInfraNodeRegistryEffect"]
+__all__ = ["RegistryInfraRegistryEffect"]

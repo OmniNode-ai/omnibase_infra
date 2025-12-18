@@ -25,7 +25,7 @@ Node Registration:
     To register NodeRegistryEffect:
     ```python
     from omnibase_infra.nodes.node_registry_effect.v1_0_0.registry import (
-        RegistryInfraNodeRegistryEffect,
+        RegistryInfraRegistryEffect,
     )
 
     # Step 1: Wire base infrastructure services
@@ -47,7 +47,7 @@ Node Registration:
     )
 
     # Step 3: Register NodeRegistryEffect factory
-    await RegistryInfraNodeRegistryEffect.register(container)
+    await RegistryInfraRegistryEffect.register(container)
 
     # Step 4: Resolve and use
     node = await container.service_registry.resolve_service(NodeRegistryEffect)

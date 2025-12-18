@@ -154,7 +154,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         - ProtocolEventBus (optional, for request_introspection operation)
 
         See Also:
-            - `registry/__init__.py`: RegistryInfraNodeRegistryEffect for container registration
+            - `registry/__init__.py`: RegistryInfraRegistryEffect for container registration
             - `container_wiring.py`: wire_infrastructure_services() for base service wiring
     """
 
@@ -259,7 +259,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             ```
 
         See Also:
-            - RegistryInfraNodeRegistryEffect: Registry class for container integration
+            - RegistryInfraRegistryEffect: Registry class for container integration
             - wire_infrastructure_services(): Base infrastructure wiring
         """
         # Resolve required consul handler
