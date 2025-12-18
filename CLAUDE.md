@@ -21,6 +21,30 @@
 | Complex workflows | `agent-onex-coordinator` → `agent-workflow-coordinator` |
 | Multi-domain | `agent-ticket-manager` for planning, orchestrators for execution |
 
+## 🚫 NO BACKGROUND AGENTS
+
+**NEVER use `run_in_background: true` for Task tool invocations.**
+
+- All agents run in **foreground** (blocking until complete)
+- Parallel execution is achieved by calling multiple Task tools in a **single message** - they run concurrently and all complete before continuing
+- Background + polling wastes tokens and provides no benefit
+- If you need parallelism, launch multiple foreground agents in one turn
+
+## 🔮 USE POLYMORPHIC AGENTS
+
+**Prefer `subagent_type: "polymorphic-agent"` for all development tasks.**
+
+The polymorphic-agent is the primary agent for ONEX development workflows:
+- Intelligent routing and multi-agent orchestration
+- ONEX 4-node architecture navigation (Effect/Compute/Reducer/Orchestrator)
+- Workflow coordination with quality gates
+
+**Other specialized subagent_types:**
+- `Explore` - Fast codebase exploration and search
+- `Plan` - Architecture planning and implementation design
+- `claude-code-guide` - Claude Code documentation queries
+- `general-purpose` - Fallback for non-ONEX tasks
+
 ## 🚫 CRITICAL POLICY: NO BACKWARDS COMPATIBILITY
 
 - Breaking changes are always acceptable
@@ -40,12 +64,21 @@
 |------|-------------|---------------|---------|
 | Model | `model_<name>.py` | `Model<Name>` | `model_kafka_message.py` → `ModelKafkaMessage` |
 | Enum | `enum_<name>.py` | `Enum<Name>` | `enum_handler_type.py` → `EnumHandlerType` |
-| Protocol | `protocol_<name>.py` | `Protocol<Name>` | `protocol_event_bus.py` → `ProtocolEventBus` |
+| Protocol | `protocol_<name>.py` or `protocols.py` | `Protocol<Name>` | See note below |
 | Mixin | `mixin_<name>.py` | `Mixin<Name>` | `mixin_health_check.py` → `MixinHealthCheck` |
 | Service | `service_<name>.py` | `Service<Name>` | `service_discovery.py` → `ServiceDiscovery` |
 | Util | `util_<name>.py` | (functions) | `util_retry.py` → `retry_with_backoff()` |
 | Error | In `errors/` | `<Domain><Type>Error` | `InfraConnectionError` |
 | Node | `node.py` | `Node<Name><Type>` | `NodePostgresAdapterEffect` |
+
+**Protocol File Naming**:
+- **Single protocol**: Use `protocol_<name>.py` for standalone protocols (e.g., `protocol_event_bus.py` contains `ProtocolEventBus`)
+- **Domain-grouped protocols**: Use `protocols.py` when multiple cohesive protocols belong to a specific domain or node module (e.g., `nodes/<name>/v1_0_0/protocols.py` containing `ProtocolNodeInput`, `ProtocolNodeOutput`, `ProtocolNodeConfig`)
+
+Domain grouping is preferred when:
+- Protocols are tightly coupled and always used together
+- Protocols define the complete interface for a single node or module
+- Protocols share common type dependencies within the same bounded context
 
 ### Registry Naming Conventions
 

@@ -223,6 +223,9 @@ markers = [
     "performance: Performance and benchmark tests",
     "infrastructure: Infrastructure-specific tests",
     "validation: Validation framework tests",
+    "consul: Tests requiring real Consul instance (CONSUL_HTTP_ADDR)",
+    "postgres: Tests requiring real PostgreSQL instance (POSTGRES_DSN)",
+    "kafka: Tests requiring real Kafka instance (KAFKA_BOOTSTRAP_SERVERS)",
 ]
 addopts = [
     "--strict-markers",
