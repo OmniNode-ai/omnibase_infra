@@ -31,10 +31,10 @@ io_operations:
       - "query"
     target: "postgresql"
   - type: "event_bus"
-    description: "Kafka event bus operations for publishing registry state changes."
+    description: "Event bus operations for publishing registry state changes. Resolved via ProtocolEventBus interface - production uses KafkaEventBus, testing uses InMemoryEventBus."
     operations:
       - "publish"
-    target: "kafka"
+    target: "protocol:ProtocolEventBus" # Protocol-based: KafkaEventBus (prod), InMemoryEventBus (test)
 dependencies:
   - name: "consul_handler"
     type: "handler"
@@ -48,9 +48,10 @@ dependencies:
     description: "PostgreSQL database handler for persistent state operations."
   - name: "event_bus"
     type: "event_bus"
-    class_name: "InMemoryEventBus"
-    module: "omnibase_infra.event_bus"
-    description: "Event bus for publishing registry state change events."
+    protocol: "ProtocolEventBus"
+    production_class: "KafkaEventBus"
+    production_module: "omnibase_infra.event_bus.kafka_event_bus"
+    description: "Event bus for publishing registry state change events (introspection requests). Resolved via ProtocolEventBus - production uses KafkaEventBus, testing uses InMemoryEventBus."
 error_handling:
   retry_policy:
     max_retries: 3

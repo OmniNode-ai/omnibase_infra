@@ -60,6 +60,22 @@ CREATE INDEX IF NOT EXISTS idx_node_registrations_capabilities
 ON node_registrations USING GIN (capabilities);
 
 -- =============================================================================
+-- Optional Indexes (Recommended for Specific Use Cases)
+-- =============================================================================
+
+-- RECOMMENDED: Index for stale node detection queries
+-- Uncomment if you frequently query for nodes with outdated heartbeats.
+-- This supports health monitoring and cleanup of abandoned registrations.
+--
+-- Typical query patterns this optimizes:
+--   SELECT * FROM node_registrations WHERE last_heartbeat < NOW() - INTERVAL '5 minutes'
+--   SELECT * FROM node_registrations WHERE last_heartbeat IS NULL AND health_endpoint IS NOT NULL
+--
+-- CREATE INDEX IF NOT EXISTS idx_node_registrations_last_heartbeat
+-- ON node_registrations(last_heartbeat DESC)
+-- WHERE last_heartbeat IS NOT NULL;
+
+-- =============================================================================
 -- Comments
 -- =============================================================================
 

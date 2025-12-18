@@ -17,6 +17,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .enum_environment import EnumEnvironment
 
+# Maximum limits for bounded collections
+MAX_TAGS: int = 20
+MAX_LABELS: int = 50
+
 # Pre-compiled regex for label key validation (k8s-style)
 _LABEL_KEY_PATTERN = re.compile(
     r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
@@ -43,11 +47,11 @@ class ModelNodeRegistrationMetadata(BaseModel):
     environment: EnumEnvironment = Field(..., description="Deployment environment")
     tags: list[str] = Field(
         default_factory=list,
-        description="Categorization tags (max 20)",
+        description=f"Categorization tags (max {MAX_TAGS})",
     )
     labels: dict[str, str] = Field(
         default_factory=dict,
-        description="Kubernetes-style labels (validated keys, max 50)",
+        description=f"Kubernetes-style labels (validated keys, max {MAX_LABELS})",
     )
     release_channel: str | None = Field(
         default=None,
@@ -61,25 +65,74 @@ class ModelNodeRegistrationMetadata(BaseModel):
     @field_validator("tags", mode="before")
     @classmethod
     def normalize_tags(cls, v: list[str]) -> list[str]:
-        """Normalize tags to lowercase and deduplicate."""
+        """Normalize tags to lowercase, deduplicate, and enforce maximum limit.
+
+        SECURITY NOTE: This validator enforces a maximum of MAX_TAGS to prevent
+        DoS via oversized payloads. When the limit is exceeded, an explicit error
+        is raised to prevent silent data loss.
+
+        Args:
+            v: List of tags to normalize
+
+        Returns:
+            Normalized, deduplicated, and bounded list of tags
+
+        Raises:
+            ValueError: If too many tags after normalization and deduplication
+        """
         if not v:
             return []
         normalized = [tag.lower().strip() for tag in v if tag and tag.strip()]
         # Deduplicate while preserving order
-        return list(dict.fromkeys(normalized))[:20]  # Max 20 tags
+        unique_tags = list(dict.fromkeys(normalized))
+
+        # EXPLICIT ERROR: Tags exceeding limit is an error (not silent truncation)
+        # This is consistent with label validation behavior (see validate_labels)
+        if len(unique_tags) > MAX_TAGS:
+            raise ValueError(
+                f"Maximum {MAX_TAGS} tags allowed, received {len(unique_tags)} "
+                f"(after normalization and deduplication). "
+                f"Reduce the number of tags or split across multiple registrations."
+            )
+
+        return unique_tags
 
     @field_validator("labels", mode="before")
     @classmethod
     def validate_labels(cls, v: dict[str, str]) -> dict[str, str]:
-        """Validate label keys follow k8s naming conventions."""
+        """Validate label keys follow k8s naming conventions.
+
+        SECURITY NOTE: This validator enforces a maximum of MAX_LABELS to prevent
+        DoS via oversized payloads. Unlike tags, labels raise an error when the
+        limit is exceeded because label semantics are stricter (k8s-style).
+
+        Args:
+            v: Dictionary of labels to validate
+
+        Returns:
+            Validated and normalized labels dictionary
+
+        Raises:
+            ValueError: If too many labels or invalid key format
+        """
         if not v:
             return {}
-        if len(v) > 50:
-            raise ValueError("Maximum 50 labels allowed")
+        if len(v) > MAX_LABELS:
+            # EXPLICIT ERROR: Labels exceeding limit is an error (not silent truncation)
+            # This is intentional - labels have stricter semantics than tags
+            raise ValueError(
+                f"Maximum {MAX_LABELS} labels allowed, received {len(v)}. "
+                f"Reduce the number of labels or split across multiple registrations."
+            )
         result = {}
         for key, val in v.items():
             key_lower = key.lower()
             if not _LABEL_KEY_PATTERN.match(key_lower):
-                raise ValueError(f"Invalid label key format: {key}")
+                # Sanitize key for error message (truncate and remove special chars)
+                sanitized_key = key[:30].replace("\n", "").replace("\r", "")
+                raise ValueError(
+                    f"Invalid label key format: '{sanitized_key}'. "
+                    f"Keys must follow k8s naming: lowercase alphanumeric with hyphens/dots."
+                )
             result[key_lower] = str(val)
         return result
