@@ -492,9 +492,6 @@ class MixinNodeIntrospection:
             ModelIntrospectionConfig: Configuration model with all available options.
         """
         # Note: Pydantic validates node_id is a valid UUID and node_type has min_length=1
-        # This check is kept for explicit error message
-        if not config.node_type:
-            raise ValueError("node_type cannot be empty")
 
         # Configuration - extract from config model
         self._introspection_node_id = config.node_id
