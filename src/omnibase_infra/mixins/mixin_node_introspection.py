@@ -1207,7 +1207,7 @@ class MixinNodeIntrospection:
                 value = json.dumps(event_data).encode("utf-8")
                 await self._introspection_event_bus.publish(
                     topic=INTROSPECTION_TOPIC,
-                    key=self._introspection_node_id.encode("utf-8")
+                    key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id
                     else None,
                     value=value,
