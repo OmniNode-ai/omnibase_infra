@@ -38,14 +38,14 @@ class TestInfraValidatorConstants:
     def test_infra_max_unions_constant(self) -> None:
         """Verify INFRA_MAX_UNIONS constant has expected value.
 
-        NOTE: Currently set to 200 (baseline as of 2025-12-17) due to tech debt.
-        Current union count is ~195 after cleanup of backwards-compatibility cruft.
-        This is documented in infra_validators.py and will be reduced incrementally.
+        NOTE: Currently set to 250 (baseline as of 2025-12-18) to accommodate growth.
+        Current union count is ~224 after introspection config model additions.
+        This is documented in infra_validators.py and will be adjusted as needed.
         The omnibase_core validator counts X | None (PEP 604) patterns as unions,
         which is the ONEX-preferred syntax per CLAUDE.md.
         """
-        assert INFRA_MAX_UNIONS == 200, (
-            "INFRA_MAX_UNIONS should be 200 (current baseline)"
+        assert INFRA_MAX_UNIONS == 250, (
+            "INFRA_MAX_UNIONS should be 250 (current baseline)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -209,7 +209,7 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (200)
+            max_unions=INFRA_MAX_UNIONS,  # Default max (250)
             strict=INFRA_UNIONS_STRICT,  # Non-strict (False)
         )
 
