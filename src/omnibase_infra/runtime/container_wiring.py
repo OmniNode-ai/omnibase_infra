@@ -17,16 +17,14 @@ Service Keys:
 - ProtocolBindingRegistry: Registered as interface=ProtocolBindingRegistry
 
 Node Registration:
-    Effect nodes like NodeRegistryEffect have their own registry modules
-    that handle container integration. These are NOT registered by
+    Effect nodes like NodeRegistryEffect take a container in their __init__
+    and resolve dependencies internally. They are NOT registered by
     wire_infrastructure_services() because they depend on handler services
     that must be registered first.
 
-    To register NodeRegistryEffect:
+    To use NodeRegistryEffect:
     ```python
-    from omnibase_infra.nodes.node_registry_effect.v1_0_0.registry import (
-        RegistryInfraRegistryEffect,
-    )
+    from omnibase_infra.nodes.node_registry_effect.v1_0_0.node import NodeRegistryEffect
 
     # Step 1: Wire base infrastructure services
     await wire_infrastructure_services(container)
@@ -46,11 +44,8 @@ Node Registration:
         metadata={"name": "postgres"},
     )
 
-    # Step 3: Register NodeRegistryEffect factory
-    await RegistryInfraRegistryEffect.register(container)
-
-    # Step 4: Resolve and use
-    node = await container.service_registry.resolve_service(NodeRegistryEffect)
+    # Step 3: Create node (resolves dependencies from container)
+    node = await NodeRegistryEffect.create(container)
     await node.initialize()
     ```
 
@@ -83,7 +78,7 @@ Integration Notes:
 - Services registered as global scope (singleton per container)
 - Type-safe resolution via interface types
 - Compatible with omnibase_core 0.4.x API
-- Effect nodes have separate registry modules (see Node Registration above)
+- Effect nodes take container in __init__ (see Node Registration above)
 """
 
 from __future__ import annotations

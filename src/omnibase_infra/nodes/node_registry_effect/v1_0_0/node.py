@@ -130,142 +130,82 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         with connection pooling (recommended pool size: 10-20 connections).
 
     Dependency Injection:
-        Supports both direct constructor injection and container-based DI.
+        Takes a ModelONEXContainer and resolves dependencies internally.
 
-        **Container-Based DI (Recommended)**:
-        Use the `create_from_container()` class method for container-based creation:
-        ```python
-        container = ModelONEXContainer()
-        await wire_infrastructure_services(container)
-        # Register handlers first (consul, postgres) with container
-        node = await NodeRegistryEffect.create_from_container(container)
-        ```
-
-        **Direct Constructor Injection**:
-        For testing or when handlers are created manually:
-        ```python
-        node = NodeRegistryEffect(consul_handler, db_handler, event_bus, config)
-        ```
-
-        **Prerequisites for Container DI**:
-        Before calling `create_from_container()`, the following must be registered:
+        **Prerequisites**:
+        Before constructing, the following must be registered in the container:
         - ProtocolEnvelopeExecutor with name="consul" (Consul handler)
         - ProtocolEnvelopeExecutor with name="postgres" (PostgreSQL handler)
         - ProtocolEventBus (optional, for request_introspection operation)
 
-        See Also:
-            - `registry/__init__.py`: RegistryInfraRegistryEffect for container registration
-            - `container_wiring.py`: wire_infrastructure_services() for base service wiring
+        **Usage**:
+        ```python
+        container = ModelONEXContainer()
+        await wire_infrastructure_services(container)
+        # Register handlers first (consul, postgres) with container
+        node = await NodeRegistryEffect(container)
+        await node.initialize()
+        ```
     """
 
     def __init__(
         self,
-        consul_handler: ProtocolEnvelopeExecutor,
-        db_handler: ProtocolEnvelopeExecutor,
-        event_bus: ProtocolEventBus | None = None,
+        container: ModelONEXContainer,
         config: ModelNodeRegistryEffectConfig | None = None,
     ) -> None:
-        """Initialize Registry Effect Node.
+        """Initialize Registry Effect Node with dependencies from container.
 
         Args:
-            consul_handler: Handler for Consul operations.
-                Must implement: async execute(envelope: EnvelopeDict) -> ResultDict
-            db_handler: Handler for PostgreSQL operations.
-                Must implement: async execute(envelope: EnvelopeDict) -> ResultDict
-                The handler is responsible for connection lifecycle management,
-                including connection pooling and automatic reconnection.
-            event_bus: Optional event bus for publishing events.
-                Must implement: async publish(topic: str, key: bytes, value: bytes) -> None
+            container: ONEX container with registered handler services.
+                Must have ProtocolEnvelopeExecutor with name="consul" and
+                name="postgres" registered.
             config: Configuration for circuit breaker and resilience settings.
                 Uses defaults if not provided.
 
         Note:
-            This node does not manage database connections directly. The db_handler
-            must handle connection pooling internally to prevent connection exhaustion
-            under high load. See class docstring for production recommendations.
+            This is an async-style __init__ pattern. The actual dependency
+            resolution happens in _resolve_dependencies() which must be
+            awaited after construction. Use the async create() factory
+            for cleaner usage:
 
-            For container-based dependency injection, use the `create_from_container()`
-            class method instead of this constructor.
+            ```python
+            node = await NodeRegistryEffect.create(container, config)
+            ```
         """
-        self._consul_handler: ProtocolEnvelopeExecutor = consul_handler
-        self._db_handler: ProtocolEnvelopeExecutor = db_handler
-        self._event_bus: ProtocolEventBus | None = event_bus
+        self._container = container
+        self._config = config or ModelNodeRegistryEffectConfig()
+        self._consul_handler: ProtocolEnvelopeExecutor | None = None
+        self._db_handler: ProtocolEnvelopeExecutor | None = None
+        self._event_bus: ProtocolEventBus | None = None
         self._initialized = False
-
-        # Use defaults if config not provided
-        config = config or ModelNodeRegistryEffectConfig()
+        self._dependencies_resolved = False
 
         # Store slow operation threshold from config (configurable per environment)
-        self._slow_operation_threshold_ms: float = config.slow_operation_threshold_ms
+        self._slow_operation_threshold_ms: float = self._config.slow_operation_threshold_ms
 
         # Initialize circuit breaker
         self._init_circuit_breaker(
-            threshold=config.circuit_breaker_threshold,
-            reset_timeout=config.circuit_breaker_reset_timeout,
+            threshold=self._config.circuit_breaker_threshold,
+            reset_timeout=self._config.circuit_breaker_reset_timeout,
             service_name="node_registry_effect",
             transport_type=EnumInfraTransportType.RUNTIME,
         )
 
-    @classmethod
-    async def create_from_container(
-        cls,
-        container: ModelONEXContainer,
-        config: ModelNodeRegistryEffectConfig | None = None,
-    ) -> NodeRegistryEffect:
-        """Create NodeRegistryEffect with dependencies from container.
+    async def _resolve_dependencies(self) -> None:
+        """Resolve handler dependencies from container.
 
-        Factory method for container-based dependency injection.
-        Resolves consul_handler, db_handler, and event_bus from container.
-
-        Prerequisites:
-            Before calling this method, the following services must be registered
-            in the container's service_registry:
-            - ProtocolEnvelopeExecutor with name="consul" (required)
-            - ProtocolEnvelopeExecutor with name="postgres" (required)
-            - ProtocolEventBus (optional, only needed for request_introspection)
-
-        Args:
-            container: ONEX container with registered services.
-            config: Optional configuration override. If not provided, uses
-                ModelNodeRegistryEffectConfig with default values.
-
-        Returns:
-            Configured NodeRegistryEffect instance ready for use.
+        Called automatically by initialize() if not already resolved.
 
         Raises:
-            RuntimeError: If required services (consul_handler, db_handler)
-                are not registered in the container.
-
-        Example:
-            ```python
-            from omnibase_core.container import ModelONEXContainer
-            from omnibase_infra.runtime.container_wiring import wire_infrastructure_services
-
-            # Bootstrap container and wire services
-            container = ModelONEXContainer()
-            await wire_infrastructure_services(container)
-
-            # Register handlers (implementation-specific)
-            await container.service_registry.register_instance(
-                interface=ProtocolEnvelopeExecutor,
-                instance=consul_handler,
-                scope="global",
-                metadata={"name": "consul"},
-            )
-
-            # Create node via container
-            node = await NodeRegistryEffect.create_from_container(container)
-            await node.initialize()
-            ```
-
-        See Also:
-            - RegistryInfraRegistryEffect: Registry class for container integration
-            - wire_infrastructure_services(): Base infrastructure wiring
+            RuntimeError: If required handlers are not registered.
         """
+        if self._dependencies_resolved:
+            return
+
         # Resolve required consul handler
         try:
-            consul_handler: ProtocolEnvelopeExecutor = (
-                await container.service_registry.resolve_service(
+            self._consul_handler = (
+                await self._container.service_registry.resolve_service(
                     ProtocolEnvelopeExecutor, name="consul"
                 )
             )
@@ -278,8 +218,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         # Resolve required postgres handler
         try:
-            db_handler: ProtocolEnvelopeExecutor = (
-                await container.service_registry.resolve_service(
+            self._db_handler = (
+                await self._container.service_registry.resolve_service(
                     ProtocolEnvelopeExecutor, name="postgres"
                 )
             )
@@ -291,9 +231,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             ) from e
 
         # Resolve optional event bus (not all deployments need it)
-        event_bus: ProtocolEventBus | None = None
         try:
-            event_bus = await container.service_registry.resolve_service(
+            self._event_bus = await self._container.service_registry.resolve_service(
                 ProtocolEventBus
             )
         except Exception:
@@ -303,7 +242,65 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 "request_introspection operation will not be available"
             )
 
-        return cls(consul_handler, db_handler, event_bus, config)
+        self._dependencies_resolved = True
+
+    def _ensure_dependencies(self) -> None:
+        """Ensure dependencies are resolved before operations.
+
+        Raises:
+            RuntimeError: If dependencies haven't been resolved yet.
+        """
+        if not self._dependencies_resolved:
+            raise RuntimeError(
+                "Dependencies not resolved. Call _resolve_dependencies() or use "
+                "NodeRegistryEffect.create() factory method."
+            )
+        if self._consul_handler is None or self._db_handler is None:
+            raise RuntimeError(
+                "Required handlers (consul_handler, db_handler) are None. "
+                "Dependency resolution may have failed."
+            )
+
+    @property
+    def consul_handler(self) -> ProtocolEnvelopeExecutor:
+        """Get consul handler, ensuring it's resolved."""
+        self._ensure_dependencies()
+        assert self._consul_handler is not None  # for mypy
+        return self._consul_handler
+
+    @property
+    def db_handler(self) -> ProtocolEnvelopeExecutor:
+        """Get db handler, ensuring it's resolved."""
+        self._ensure_dependencies()
+        assert self._db_handler is not None  # for mypy
+        return self._db_handler
+
+    @classmethod
+    async def create(
+        cls,
+        container: ModelONEXContainer,
+        config: ModelNodeRegistryEffectConfig | None = None,
+    ) -> NodeRegistryEffect:
+        """Factory method to create and initialize NodeRegistryEffect.
+
+        This is the recommended way to create NodeRegistryEffect instances.
+
+        Args:
+            container: ONEX container with registered services.
+            config: Optional configuration override.
+
+        Returns:
+            Fully initialized NodeRegistryEffect ready for use.
+
+        Example:
+            ```python
+            node = await NodeRegistryEffect.create(container)
+            result = await node.register(request)
+            ```
+        """
+        node = cls(container, config)
+        await node._resolve_dependencies()
+        return node
 
     def _sanitize_error(self, exception: BaseException) -> str:
         """Sanitize exception message for safe logging and response.
@@ -893,7 +890,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 }
 
             # Execute via consul handler (Protocol-typed)
-            result = await self._consul_handler.execute(
+            result = await self.consul_handler.execute(
                 {
                     "operation": "consul.register",
                     "payload": consul_payload,
@@ -947,7 +944,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             # This provides two layers of error handling:
             # 1. _safe_model_dump catches Pydantic model_dump() failures
             # 2. _safe_json_dumps catches json.dumps() failures
-            result = await self._db_handler.execute(
+            result = await self.db_handler.execute(
                 {
                     "operation": "db.execute",
                     "payload": {
@@ -1089,7 +1086,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         """Deregister node from Consul."""
         try:
             # Execute via consul handler (Protocol-typed)
-            result = await self._consul_handler.execute(
+            result = await self.consul_handler.execute(
                 {
                     "operation": "consul.deregister",
                     "payload": {"service_id": node_id},
@@ -1120,7 +1117,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         """Delete node from PostgreSQL."""
         try:
             # Execute via db handler (Protocol-typed)
-            result = await self._db_handler.execute(
+            result = await self.db_handler.execute(
                 {
                     "operation": "db.execute",
                     "payload": {
@@ -1250,7 +1247,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     sql += " WHERE " + " AND ".join(conditions)
 
             # Execute via db handler (Protocol-typed)
-            result = await self._db_handler.execute(
+            result = await self.db_handler.execute(
                 {
                     "operation": "db.query",
                     "payload": {"sql": sql, "params": params},
