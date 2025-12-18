@@ -48,9 +48,9 @@ dependencies:
     description: "PostgreSQL database handler for persistent state operations."
   - name: "event_bus"
     type: "event_bus"
-    class_name: "InMemoryEventBus"
-    module: "omnibase_infra.event_bus"
-    description: "Event bus for publishing registry state change events."
+    class_name: "KafkaEventBus"
+    module: "omnibase_infra.event_bus.kafka_event_bus"
+    description: "Kafka event bus for publishing registry state change events. Used for request_introspection operation to broadcast introspection requests across the cluster."
 error_handling:
   retry_policy:
     max_retries: 3

@@ -52,6 +52,7 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     ModelInfraErrorContext,
     RuntimeHostError,
+    ServiceResolutionError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
@@ -75,6 +76,10 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# SECURITY CONSTANTS
+# =============================================================================
+
 # Whitelist of allowed filter keys for SQL query building (SQL injection prevention)
 # These correspond to actual columns in the node_registrations table that support
 # direct equality filtering. JSONB columns (capabilities, endpoints, metadata) are
@@ -92,6 +97,38 @@ ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
         "health_endpoint",  # Health check URL (nullable)
     }
 )
+
+# Maximum length for string inputs to prevent DoS via oversized inputs
+# These limits align with typical database column sizes and prevent memory exhaustion
+MAX_NODE_ID_LENGTH: int = 255  # VARCHAR(255) in PostgreSQL
+MAX_NODE_VERSION_LENGTH: int = 50  # Semantic versions rarely exceed 20 chars
+MAX_FILTER_VALUE_LENGTH: int = 1024  # Reasonable max for filter values
+MAX_HEALTH_ENDPOINT_LENGTH: int = 2048  # URLs can be long but should be bounded
+MAX_ENDPOINT_KEY_LENGTH: int = 64  # Endpoint names (e.g., "health", "api")
+MAX_ENDPOINT_VALUE_LENGTH: int = 2048  # URLs for endpoints
+
+# Character validation pattern for node_id and other identifiers
+# Allows: alphanumeric, hyphens, underscores, periods (for domain-style naming)
+# Prevents: SQL injection characters, null bytes, control characters, Unicode exploits
+# Pattern explanation: ^[a-zA-Z0-9][a-zA-Z0-9._-]*$
+#   - Must start with alphanumeric
+#   - Can contain alphanumeric, periods, underscores, hyphens
+#   - No spaces, quotes, semicolons, or special SQL characters
+NODE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+# Semantic version pattern (relaxed to allow common formats)
+# Allows: X.Y.Z, X.Y.Z-alpha, X.Y.Z-beta.1, X.Y.Z+build
+VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+([-.+][a-zA-Z0-9._-]*)?$")
+
+# URL pattern for health endpoints (basic validation, not comprehensive)
+# Allows: http:// and https:// URLs with standard characters
+URL_PATTERN = re.compile(
+    r"^https?://[a-zA-Z0-9][-a-zA-Z0-9.:]*[a-zA-Z0-9](:[0-9]+)?(/[-a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=%]*)?$"
+)
+
+# =============================================================================
+# PERFORMANCE CONSTANTS
+# =============================================================================
 
 # Default performance threshold for slow operation warnings (milliseconds)
 # Used as fallback when config not provided
@@ -138,14 +175,30 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         - ProtocolEnvelopeExecutor with name="postgres" (PostgreSQL handler)
         - ProtocolEventBus (optional, for request_introspection operation)
 
-        **Usage**:
+        **Usage** (recommended - use factory method):
         ```python
         container = ModelONEXContainer()
         await wire_infrastructure_services(container)
         # Register handlers first (consul, postgres) with container
-        node = await NodeRegistryEffect(container)
-        await node.initialize()
+        node = await NodeRegistryEffect.create(container)
+        # Node is ready to use - create() handles dependency resolution
         ```
+
+        **Usage** (alternative - manual initialization):
+        ```python
+        container = ModelONEXContainer()
+        await wire_infrastructure_services(container)
+        node = NodeRegistryEffect(container)  # __init__ is NOT awaitable
+        await node._resolve_dependencies()     # Must call before use
+        ```
+
+    Key Operations:
+        - **register()**: Dual registration to Consul AND PostgreSQL in parallel.
+          Use when a node starts up and needs to announce itself.
+        - **resolve()** (via discover): Query registered nodes from PostgreSQL.
+          Use for service discovery and dependency resolution.
+        - **deregister()**: Remove from both Consul and PostgreSQL.
+          Use during graceful shutdown.
     """
 
     def __init__(
@@ -181,7 +234,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         self._dependencies_resolved = False
 
         # Store slow operation threshold from config (configurable per environment)
-        self._slow_operation_threshold_ms: float = self._config.slow_operation_threshold_ms
+        self._slow_operation_threshold_ms: float = (
+            self._config.slow_operation_threshold_ms
+        )
 
         # Initialize circuit breaker
         self._init_circuit_breaker(
@@ -196,53 +251,208 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         Called automatically by initialize() if not already resolved.
 
+        This method uses specific exception handling to distinguish between:
+        - Service not registered (KeyError, LookupError, ServiceResolutionError): Expected
+          when a service simply hasn't been registered in the container.
+        - Configuration/validation errors (ValueError, TypeError): Unexpected errors
+          that indicate a problem with the service configuration.
+        - Other exceptions: Unexpected errors that may indicate infrastructure issues.
+
         Raises:
-            RuntimeError: If required handlers are not registered.
+            RuntimeError: If required handlers are not registered or resolution fails.
         """
         if self._dependencies_resolved:
             return
 
         # Resolve required consul handler
-        try:
-            self._consul_handler = (
-                await self._container.service_registry.resolve_service(
-                    ProtocolEnvelopeExecutor, name="consul"
-                )
-            )
-        except Exception as e:
-            raise RuntimeError(
-                "Failed to resolve consul handler from container. "
-                "Ensure ProtocolEnvelopeExecutor with name='consul' is registered. "
-                f"Original error: {e}"
-            ) from e
+        self._consul_handler = await self._resolve_required_handler(
+            protocol_type=ProtocolEnvelopeExecutor,
+            handler_name="consul",
+            handler_description="Consul handler",
+        )
 
         # Resolve required postgres handler
-        try:
-            self._db_handler = (
-                await self._container.service_registry.resolve_service(
-                    ProtocolEnvelopeExecutor, name="postgres"
-                )
-            )
-        except Exception as e:
-            raise RuntimeError(
-                "Failed to resolve postgres handler from container. "
-                "Ensure ProtocolEnvelopeExecutor with name='postgres' is registered. "
-                f"Original error: {e}"
-            ) from e
+        self._db_handler = await self._resolve_required_handler(
+            protocol_type=ProtocolEnvelopeExecutor,
+            handler_name="postgres",
+            handler_description="PostgreSQL handler",
+        )
 
         # Resolve optional event bus (not all deployments need it)
-        try:
-            self._event_bus = await self._container.service_registry.resolve_service(
-                ProtocolEventBus
-            )
-        except Exception:
-            # Event bus is optional - only needed for request_introspection operation
-            logger.debug(
-                "ProtocolEventBus not registered in container; "
-                "request_introspection operation will not be available"
-            )
+        self._event_bus = await self._resolve_optional_service(
+            service_type=ProtocolEventBus,
+            service_name=None,  # No name qualifier for event bus
+            service_description="ProtocolEventBus",
+            fallback_message=("request_introspection operation will not be available"),
+        )
 
         self._dependencies_resolved = True
+
+    async def _resolve_required_handler(
+        self,
+        protocol_type: type,
+        handler_name: str,
+        handler_description: str,
+    ) -> ProtocolEnvelopeExecutor:
+        """Resolve a required handler from the container.
+
+        Args:
+            protocol_type: The protocol type to resolve (e.g., ProtocolEnvelopeExecutor).
+            handler_name: The name qualifier for the handler (e.g., "consul", "postgres").
+            handler_description: Human-readable description for error messages.
+
+        Returns:
+            The resolved handler instance.
+
+        Raises:
+            RuntimeError: If the handler is not registered or resolution fails.
+        """
+        try:
+            handler = await self._container.service_registry.resolve_service(
+                protocol_type, name=handler_name
+            )
+            logger.debug(
+                f"Successfully resolved {handler_description}",
+                extra={
+                    "handler_name": handler_name,
+                    "protocol_type": protocol_type.__name__,
+                },
+            )
+            return cast(ProtocolEnvelopeExecutor, handler)
+
+        except (KeyError, LookupError, ServiceResolutionError) as e:
+            # Service not registered - this is the expected error type when
+            # a service simply hasn't been registered in the container
+            logger.debug(
+                f"Handler '{handler_name}' not registered in container",
+                extra={
+                    "handler_name": handler_name,
+                    "handler_description": handler_description,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            raise RuntimeError(
+                f"Failed to resolve {handler_description} (name='{handler_name}') "
+                f"from container. "
+                f"Ensure {protocol_type.__name__} with name='{handler_name}' is registered. "
+                f"Error type: {type(e).__name__}"
+            ) from e
+
+        except (ValueError, TypeError) as e:
+            # Configuration or type mismatch errors - these indicate a problem
+            # with the service configuration rather than missing registration
+            logger.warning(
+                f"Configuration error resolving {handler_description}",
+                extra={
+                    "handler_name": handler_name,
+                    "handler_description": handler_description,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            raise RuntimeError(
+                f"Configuration error resolving {handler_description} "
+                f"(name='{handler_name}'): {type(e).__name__}: {e}"
+            ) from e
+
+        except Exception as e:
+            # Unexpected error - log at warning level for investigation
+            logger.warning(
+                f"Unexpected error resolving {handler_description}",
+                extra={
+                    "handler_name": handler_name,
+                    "handler_description": handler_description,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            raise RuntimeError(
+                f"Unexpected error resolving {handler_description} "
+                f"(name='{handler_name}'): {type(e).__name__}: {e}"
+            ) from e
+
+    async def _resolve_optional_service(
+        self,
+        service_type: type,
+        service_name: str | None,
+        service_description: str,
+        fallback_message: str,
+    ) -> ProtocolEventBus | None:
+        """Resolve an optional service from the container.
+
+        Unlike required handlers, optional services return None instead of raising
+        an error when not registered. This allows the node to operate with reduced
+        functionality when certain services are not available.
+
+        Args:
+            service_type: The service type to resolve.
+            service_name: Optional name qualifier for the service.
+            service_description: Human-readable description for logging.
+            fallback_message: Message describing what functionality is unavailable.
+
+        Returns:
+            The resolved service instance, or None if not registered.
+        """
+        try:
+            if service_name:
+                service = await self._container.service_registry.resolve_service(
+                    service_type, name=service_name
+                )
+            else:
+                service = await self._container.service_registry.resolve_service(
+                    service_type
+                )
+            logger.debug(
+                f"Successfully resolved {service_description}",
+                extra={
+                    "service_name": service_name,
+                    "service_type": service_type.__name__,
+                },
+            )
+            return cast(ProtocolEventBus, service)
+
+        except (KeyError, LookupError, ServiceResolutionError) as e:
+            # Service not registered - this is expected for optional services
+            logger.debug(
+                f"{service_description} not registered in container; {fallback_message}",
+                extra={
+                    "service_name": service_name,
+                    "service_description": service_description,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            return None
+
+        except (ValueError, TypeError) as e:
+            # Configuration error for optional service - log warning but don't fail
+            logger.warning(
+                f"Configuration error resolving optional {service_description}; "
+                f"{fallback_message}",
+                extra={
+                    "service_name": service_name,
+                    "service_description": service_description,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            return None
+
+        except Exception as e:
+            # Unexpected error for optional service - log warning but don't fail
+            # This allows graceful degradation when there are infrastructure issues
+            logger.warning(
+                f"Unexpected error resolving optional {service_description}; "
+                f"{fallback_message}",
+                extra={
+                    "service_name": service_name,
+                    "service_description": service_description,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            return None
 
     def _ensure_dependencies(self) -> None:
         """Ensure dependencies are resolved before operations.
@@ -284,6 +494,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         """Factory method to create and initialize NodeRegistryEffect.
 
         This is the recommended way to create NodeRegistryEffect instances.
+        The returned node is fully initialized and ready for use.
 
         Args:
             container: ONEX container with registered services.
@@ -292,14 +503,17 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         Returns:
             Fully initialized NodeRegistryEffect ready for use.
 
+        Raises:
+            RuntimeError: If required handlers are not registered in the container.
+
         Example:
             ```python
             node = await NodeRegistryEffect.create(container)
-            result = await node.register(request)
+            result = await node.execute(request)
             ```
         """
         node = cls(container, config)
-        await node._resolve_dependencies()
+        await node.initialize()  # initialize() calls _resolve_dependencies() if needed
         return node
 
     def _sanitize_error(self, exception: BaseException) -> str:
@@ -307,6 +521,26 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         Removes potential sensitive information and includes exception type.
         Redacts patterns like passwords, tokens, API keys, and connection strings.
+
+        Security Considerations:
+            This method is critical for preventing credential leakage in error messages.
+            All error messages that may be exposed to clients or logged MUST pass through
+            this sanitization. The patterns are intentionally broad to catch variations.
+
+            Covered credential types:
+            - Password/passwd/pwd variants with various delimiters
+            - Tokens (API tokens, access tokens, refresh tokens)
+            - API keys (api_key, apikey, x-api-key)
+            - Secrets (client_secret, secret_key)
+            - Credentials/auth values
+            - Bearer tokens in Authorization headers
+            - Connection string credentials (user:pass@host)
+            - AWS access keys (AKIA pattern)
+            - GCP/Azure service account keys (long JSON or base64)
+            - Private keys (BEGIN PRIVATE KEY markers)
+            - SSH keys (ssh-rsa, ssh-ed25519 patterns)
+            - JWT tokens (eyJ pattern)
+            - Generic long alphanumeric tokens (40+ chars)
 
         Args:
             exception: The exception to sanitize
@@ -318,34 +552,289 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         message = str(exception)
 
         # Redact potential secrets using case-insensitive patterns
+        # Order matters: more specific patterns should come before generic ones
         sensitive_patterns = [
-            (r"password[=:]\s*\S+", "password=[REDACTED]"),
-            (r"passwd[=:]\s*\S+", "passwd=[REDACTED]"),
-            (r"pwd[=:]\s*\S+", "pwd=[REDACTED]"),
-            (r"token[=:]\s*\S+", "token=[REDACTED]"),
-            (r"api_key[=:]\s*\S+", "api_key=[REDACTED]"),
-            (r"apikey[=:]\s*\S+", "apikey=[REDACTED]"),
-            (r"key[=:]\s*\S+", "key=[REDACTED]"),
-            (r"secret[=:]\s*\S+", "secret=[REDACTED]"),
-            (r"credential[s]?[=:]\s*\S+", "credentials=[REDACTED]"),
-            (r"auth[=:]\s*\S+", "auth=[REDACTED]"),
-            (r"bearer\s+\S+", "bearer [REDACTED]"),
+            # Private keys and certificates (multiline patterns)
+            (
+                r"-----BEGIN\s+[A-Z\s]+KEY-----[\s\S]*?-----END\s+[A-Z\s]+KEY-----",
+                "[REDACTED_PRIVATE_KEY]",
+            ),
+            (
+                r"-----BEGIN\s+CERTIFICATE-----[\s\S]*?-----END\s+CERTIFICATE-----",
+                "[REDACTED_CERTIFICATE]",
+            ),
+            # SSH keys
+            (r"ssh-rsa\s+[A-Za-z0-9+/=]+", "[REDACTED_SSH_KEY]"),
+            (r"ssh-ed25519\s+[A-Za-z0-9+/=]+", "[REDACTED_SSH_KEY]"),
+            # JWT tokens (header.payload.signature)
+            (
+                r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+                "[REDACTED_JWT]",
+            ),
+            # Password variants with various delimiters
+            (r"password[=:\"'\s]+\S+", "password=[REDACTED]"),
+            (r"passwd[=:\"'\s]+\S+", "passwd=[REDACTED]"),
+            (r"pwd[=:\"'\s]+\S+", "pwd=[REDACTED]"),
+            # Token variants
+            (r"access_token[=:\"'\s]+\S+", "access_token=[REDACTED]"),
+            (r"refresh_token[=:\"'\s]+\S+", "refresh_token=[REDACTED]"),
+            (r"token[=:\"'\s]+\S+", "token=[REDACTED]"),
+            # API key variants
+            (r"x-api-key[=:\"'\s]+\S+", "x-api-key=[REDACTED]"),
+            (r"api[-_]?key[=:\"'\s]+\S+", "api_key=[REDACTED]"),
+            (r"apikey[=:\"'\s]+\S+", "apikey=[REDACTED]"),
+            # Secret variants
+            (r"client[-_]?secret[=:\"'\s]+\S+", "client_secret=[REDACTED]"),
+            (r"secret[-_]?key[=:\"'\s]+\S+", "secret_key=[REDACTED]"),
+            (r"secret[=:\"'\s]+\S+", "secret=[REDACTED]"),
+            # Credentials and auth
+            (r"credential[s]?[=:\"'\s]+\S+", "credentials=[REDACTED]"),
+            (r"auth[-_]?token[=:\"'\s]+\S+", "auth_token=[REDACTED]"),
+            (r"authorization[=:\"'\s]+\S+", "authorization=[REDACTED]"),
+            (r"auth[=:\"'\s]+\S+", "auth=[REDACTED]"),
+            # Bearer tokens
+            (r"bearer\s+[A-Za-z0-9._-]+", "bearer [REDACTED]"),
             # Connection string credentials (user:pass@host)
-            (r"://[^:]+:[^@]+@", "://[REDACTED]@"),
-            # AWS-style keys
+            (r"://[^/:]+:[^/@]+@", "://[REDACTED]:[REDACTED]@"),
+            # AWS access keys (AKIA followed by 16 alphanumeric chars)
             (r"AKIA[A-Z0-9]{16}", "[REDACTED_AWS_KEY]"),
-            # Long base64-like tokens
+            # AWS secret keys
+            (
+                r"aws[-_]?secret[-_]?access[-_]?key[=:\"'\s]+\S+",
+                "aws_secret=[REDACTED]",
+            ),
+            # GCP/Azure style service account JSON keys
+            (r'"private_key"\s*:\s*"[^"]+"', '"private_key": "[REDACTED]"'),
+            (r'"client_secret"\s*:\s*"[^"]+"', '"client_secret": "[REDACTED]"'),
+            # Database connection strings with passwords
+            (r"(postgres|mysql|mongodb|redis)://[^:]+:[^@]+@", r"\1://[REDACTED]@"),
+            # Generic long alphanumeric tokens (40+ chars, likely tokens/keys)
+            # This is intentionally last and broad to catch anything missed
             (r"[A-Za-z0-9+/]{40,}={0,2}", "[REDACTED_TOKEN]"),
         ]
 
         for pattern, replacement in sensitive_patterns:
-            message = re.sub(pattern, replacement, message, flags=re.IGNORECASE)
+            message = re.sub(
+                pattern, replacement, message, flags=re.IGNORECASE | re.DOTALL
+            )
 
-        # Truncate if too long
+        # Truncate if too long (prevents DoS via large error messages)
         if len(message) > 500:
             message = message[:497] + "..."
 
         return f"{exception_type}: {message}"
+
+    def _validate_node_id(
+        self,
+        node_id: str,
+        correlation_id: UUID,
+        operation: str,
+    ) -> None:
+        """Validate node_id for security constraints.
+
+        Security Checks:
+            1. Non-empty string
+            2. Maximum length (prevents DoS via oversized inputs)
+            3. Character whitelist (prevents injection attacks)
+            4. No null bytes or control characters
+
+        Args:
+            node_id: The node identifier to validate
+            correlation_id: Correlation ID for logging
+            operation: Operation name for error context
+
+        Raises:
+            RuntimeHostError: If validation fails with sanitized error details
+        """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation=operation,
+            target_name="node_registry_effect",
+            correlation_id=correlation_id,
+        )
+
+        # Check for empty/whitespace-only
+        if not node_id or not node_id.strip():
+            raise RuntimeHostError(
+                "node_id cannot be empty or whitespace-only",
+                context=context,
+            )
+
+        # Check length
+        if len(node_id) > MAX_NODE_ID_LENGTH:
+            raise RuntimeHostError(
+                f"node_id exceeds maximum length of {MAX_NODE_ID_LENGTH} characters "
+                f"(received: {len(node_id)} characters)",
+                context=context,
+            )
+
+        # Check for null bytes (critical security check)
+        if "\x00" in node_id:
+            logger.warning(
+                "Null byte detected in node_id - potential attack attempt",
+                extra={
+                    "event_type": "security_null_byte_detected",
+                    "correlation_id": str(correlation_id),
+                    "operation": operation,
+                    "field": "node_id",
+                },
+            )
+            raise RuntimeHostError(
+                "node_id contains invalid characters (null bytes not allowed)",
+                context=context,
+            )
+
+        # Check character pattern
+        if not NODE_ID_PATTERN.match(node_id):
+            # Sanitize for logging (replace non-allowed chars)
+            sanitized = re.sub(r"[^a-zA-Z0-9._-]", "_", node_id[:50])
+            logger.warning(
+                "Invalid node_id format rejected",
+                extra={
+                    "event_type": "security_invalid_node_id",
+                    "correlation_id": str(correlation_id),
+                    "operation": operation,
+                    "sanitized_node_id": sanitized,
+                },
+            )
+            raise RuntimeHostError(
+                "node_id contains invalid characters. "
+                "Must start with alphanumeric and contain only alphanumeric, "
+                "periods, underscores, and hyphens",
+                context=context,
+            )
+
+    def _validate_filter_values(
+        self,
+        filters: dict[str, str],
+        correlation_id: UUID,
+    ) -> None:
+        """Validate filter values for security constraints.
+
+        Security Checks:
+            1. Maximum value length (prevents DoS via oversized inputs)
+            2. No null bytes (prevents null byte injection)
+            3. Values are properly parameterized (not interpolated into SQL)
+
+        Note: Filter KEYS are validated separately in _validate_filter_keys().
+        This method only validates the VALUES to ensure they are safe for
+        parameterized queries.
+
+        Args:
+            filters: Dictionary of filter key-value pairs
+            correlation_id: Correlation ID for logging
+
+        Raises:
+            RuntimeHostError: If any filter value fails validation
+        """
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="discover",
+            target_name="node_registry_effect",
+            correlation_id=correlation_id,
+        )
+
+        for key, value in filters.items():
+            # Check for null bytes
+            if "\x00" in value:
+                sanitized_key = re.sub(r"[^a-zA-Z0-9_-]", "_", key[:30])
+                logger.warning(
+                    "Null byte detected in filter value - potential attack attempt",
+                    extra={
+                        "event_type": "security_null_byte_in_filter",
+                        "correlation_id": str(correlation_id),
+                        "filter_key": sanitized_key,
+                    },
+                )
+                raise RuntimeHostError(
+                    f"Filter value for '{sanitized_key}' contains invalid characters",
+                    context=context,
+                )
+
+            # Check value length
+            if len(value) > MAX_FILTER_VALUE_LENGTH:
+                sanitized_key = re.sub(r"[^a-zA-Z0-9_-]", "_", key[:30])
+                raise RuntimeHostError(
+                    f"Filter value for '{sanitized_key}' exceeds maximum length "
+                    f"of {MAX_FILTER_VALUE_LENGTH} characters",
+                    context=context,
+                )
+
+    def _validate_introspection_payload(
+        self,
+        introspection: ModelNodeIntrospectionPayload,
+        correlation_id: UUID,
+    ) -> None:
+        """Validate introspection payload fields for security constraints.
+
+        Security Checks:
+            1. node_id: Format, length, and character validation
+            2. node_version: Format validation (semver pattern)
+            3. health_endpoint: URL format and length validation
+            4. endpoints: Key/value length and format validation
+
+        Args:
+            introspection: The introspection payload to validate
+            correlation_id: Correlation ID for logging
+
+        Raises:
+            RuntimeHostError: If any field fails validation
+        """
+        # Validate node_id (reuse existing validation)
+        self._validate_node_id(introspection.node_id, correlation_id, "register")
+
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="register",
+            target_name="node_registry_effect",
+            correlation_id=correlation_id,
+        )
+
+        # Validate node_version length and format
+        if len(introspection.node_version) > MAX_NODE_VERSION_LENGTH:
+            raise RuntimeHostError(
+                f"node_version exceeds maximum length of {MAX_NODE_VERSION_LENGTH} "
+                f"characters (received: {len(introspection.node_version)})",
+                context=context,
+            )
+
+        if not VERSION_PATTERN.match(introspection.node_version):
+            raise RuntimeHostError(
+                f"node_version '{introspection.node_version}' does not match "
+                "semantic version format (X.Y.Z with optional suffix)",
+                context=context,
+            )
+
+        # Validate health_endpoint if provided
+        if introspection.health_endpoint:
+            if len(introspection.health_endpoint) > MAX_HEALTH_ENDPOINT_LENGTH:
+                raise RuntimeHostError(
+                    "health_endpoint exceeds maximum length of "
+                    f"{MAX_HEALTH_ENDPOINT_LENGTH} characters",
+                    context=context,
+                )
+
+            if not URL_PATTERN.match(introspection.health_endpoint):
+                raise RuntimeHostError(
+                    "health_endpoint must be a valid HTTP/HTTPS URL",
+                    context=context,
+                )
+
+        # Validate endpoints dictionary
+        for endpoint_key, endpoint_value in introspection.endpoints.items():
+            if len(endpoint_key) > MAX_ENDPOINT_KEY_LENGTH:
+                raise RuntimeHostError(
+                    f"Endpoint key '{endpoint_key[:20]}...' exceeds maximum "
+                    f"length of {MAX_ENDPOINT_KEY_LENGTH} characters",
+                    context=context,
+                )
+
+            if len(endpoint_value) > MAX_ENDPOINT_VALUE_LENGTH:
+                raise RuntimeHostError(
+                    f"Endpoint value for '{endpoint_key}' exceeds maximum "
+                    f"length of {MAX_ENDPOINT_VALUE_LENGTH} characters",
+                    context=context,
+                )
 
     def _json_default_serializer(
         self, obj: object
@@ -635,7 +1124,37 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             return "{}", error_msg
 
     async def initialize(self) -> None:
-        """Initialize the effect node and verify backend connectivity."""
+        """Initialize the effect node and verify backend connectivity.
+
+        This method ensures all dependencies are resolved before marking the node
+        as initialized. It is idempotent - calling multiple times is safe.
+
+        Behavior:
+            - If dependencies have not been resolved, calls _resolve_dependencies()
+            - Sets _initialized flag to True
+            - Safe to call multiple times (idempotent)
+
+        Raises:
+            RuntimeError: If dependency resolution fails (missing handlers).
+
+        Example:
+            ```python
+            node = NodeRegistryEffect(container, config)
+            await node.initialize()  # Resolves dependencies and initializes
+            await node.initialize()  # Safe to call again (no-op for dependencies)
+            ```
+
+        Note:
+            The recommended way to create and initialize a node is via the
+            create() factory method, which handles both construction and
+            initialization in a single async call.
+        """
+        # Ensure dependencies are resolved before initializing
+        # This makes the node resilient to incorrect usage patterns where
+        # users forget to call _resolve_dependencies() before initialize()
+        if not self._dependencies_resolved:
+            await self._resolve_dependencies()
+
         self._initialized = True
         logger.info("NodeRegistryEffect initialized")
 
@@ -807,6 +1326,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
 
         introspection = request.introspection_event
+
+        # Security: Validate all input fields before proceeding
+        self._validate_introspection_payload(introspection, request.correlation_id)
 
         # Execute dual registration in parallel
         consul_task = asyncio.create_task(
@@ -1022,6 +1544,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 ),
             )
 
+        # Security: Validate node_id format before proceeding
+        self._validate_node_id(request.node_id, request.correlation_id, "deregister")
+
         # Execute dual deregistration in parallel
         consul_task = asyncio.create_task(
             self._deregister_consul(request.node_id, request.correlation_id)
@@ -1229,6 +1754,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                         correlation_id=request.correlation_id,
                     ),
                 )
+
+            # Security: Validate filter values for length and null bytes
+            self._validate_filter_values(request.filters, request.correlation_id)
 
         try:
             # Build query with validated filters
@@ -1450,6 +1978,51 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
         return result
 
+    def _validate_metadata_field_type(
+        self,
+        value: JsonValue,
+        expected_type: type,
+        field_name: str,
+        parent_field: str,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Validate metadata field type and log warning if unexpected.
+
+        This method ensures no silent data loss occurs when parsing database
+        rows. When a field has an unexpected type, a warning is logged with
+        full context for debugging and auditing.
+
+        Args:
+            value: The value to validate
+            expected_type: The expected Python type (list, dict, str, etc.)
+            field_name: Name of the specific field (e.g., "tags", "labels")
+            parent_field: Name of the parent field (e.g., "metadata", "capabilities")
+            correlation_id: Optional correlation ID for logging
+
+        Returns:
+            True if the value is of the expected type, False otherwise
+        """
+        if isinstance(value, expected_type):
+            return True
+
+        # Log detailed warning about unexpected type
+        actual_type = type(value).__name__ if value is not None else "None"
+        logger.warning(
+            f"Unexpected type for {parent_field}.{field_name}: "
+            f"expected {expected_type.__name__}, got {actual_type}. "
+            f"Using default value to prevent data corruption.",
+            extra={
+                "event_type": "metadata_type_validation_warning",
+                "correlation_id": str(correlation_id) if correlation_id else None,
+                "field_name": field_name,
+                "parent_field": parent_field,
+                "expected_type": expected_type.__name__,
+                "actual_type": actual_type,
+                "actual_value_repr": repr(value)[:100] if value is not None else "None",
+            },
+        )
+        return False
+
     def _row_to_node_registration(
         self,
         row: dict[str, JsonValue],
@@ -1460,6 +2033,11 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         Args:
             row: Database row dictionary with JSON-serializable values
             correlation_id: Optional correlation ID for logging
+
+        Note:
+            This method validates all metadata field types and logs warnings
+            when unexpected types are encountered. This prevents silent data
+            loss while maintaining backward compatibility with graceful degradation.
         """
 
         def parse_json(
@@ -1543,42 +2121,112 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         }
 
         # Parse capabilities from database and convert to ModelNodeCapabilitiesInfo
+        # Validate field types and log warnings for unexpected values
         raw_capabilities = parse_json(row.get("capabilities", {}), "capabilities")
+
+        raw_capabilities_list = raw_capabilities.get("capabilities", [])
+        capabilities_list: list[str] = (
+            cast(list[str], raw_capabilities_list)
+            if self._validate_metadata_field_type(
+                raw_capabilities_list,
+                list,
+                "capabilities",
+                "capabilities",
+                correlation_id,
+            )
+            else []
+        )
+
+        raw_supported_operations = raw_capabilities.get("supported_operations", [])
+        supported_operations_list: list[str] = (
+            cast(list[str], raw_supported_operations)
+            if self._validate_metadata_field_type(
+                raw_supported_operations,
+                list,
+                "supported_operations",
+                "capabilities",
+                correlation_id,
+            )
+            else []
+        )
+
         capabilities = ModelNodeCapabilitiesInfo(
-            capabilities=raw_capabilities.get("capabilities", [])
-            if isinstance(raw_capabilities.get("capabilities"), list)
-            else [],
-            supported_operations=raw_capabilities.get("supported_operations", [])
-            if isinstance(raw_capabilities.get("supported_operations"), list)
-            else [],
+            capabilities=capabilities_list,
+            supported_operations=supported_operations_list,
         )
 
         # Parse runtime_metadata from database and convert to ModelNodeRegistrationMetadata
         # Database column is 'metadata', but model field is 'runtime_metadata'
+        # Validate field types and log warnings for unexpected values to prevent silent data loss
         raw_metadata = parse_json(row.get("metadata", {}), "metadata")
+
+        # Validate environment field
         env_str = raw_metadata.get("environment", "testing")
+        if not self._validate_metadata_field_type(
+            env_str, str, "environment", "metadata", correlation_id
+        ):
+            env_str = "testing"
         try:
             environment = (
-                EnumEnvironment(env_str)
-                if isinstance(env_str, str)
-                else EnumEnvironment.TESTING
+                EnumEnvironment(env_str) if env_str else EnumEnvironment.TESTING
             )
         except ValueError:
+            logger.warning(
+                f"Invalid environment value '{env_str}', using TESTING as default",
+                extra={
+                    "event_type": "metadata_type_validation_warning",
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                    "field_name": "environment",
+                    "parent_field": "metadata",
+                    "invalid_value": str(env_str)[:50],
+                },
+            )
             environment = EnumEnvironment.TESTING
+
+        # Validate tags field (must be list)
+        raw_tags = raw_metadata.get("tags", [])
+        tags_list: list[str] = (
+            cast(list[str], raw_tags)
+            if self._validate_metadata_field_type(
+                raw_tags, list, "tags", "metadata", correlation_id
+            )
+            else []
+        )
+
+        # Validate labels field (must be dict)
+        raw_labels = raw_metadata.get("labels", {})
+        labels_dict: dict[str, str] = (
+            cast(dict[str, str], raw_labels)
+            if self._validate_metadata_field_type(
+                raw_labels, dict, "labels", "metadata", correlation_id
+            )
+            else {}
+        )
+
+        # Validate release_channel field (must be str or None)
+        raw_release_channel = raw_metadata.get("release_channel")
+        release_channel: str | None = None
+        if raw_release_channel is not None:
+            if self._validate_metadata_field_type(
+                raw_release_channel, str, "release_channel", "metadata", correlation_id
+            ):
+                release_channel = cast(str, raw_release_channel)
+
+        # Validate region field (must be str or None)
+        raw_region = raw_metadata.get("region")
+        region: str | None = None
+        if raw_region is not None:
+            if self._validate_metadata_field_type(
+                raw_region, str, "region", "metadata", correlation_id
+            ):
+                region = cast(str, raw_region)
+
         runtime_metadata = ModelNodeRegistrationMetadata(
             environment=environment,
-            tags=raw_metadata.get("tags", [])
-            if isinstance(raw_metadata.get("tags"), list)
-            else [],
-            labels=raw_metadata.get("labels", {})
-            if isinstance(raw_metadata.get("labels"), dict)
-            else {},
-            release_channel=raw_metadata.get("release_channel")
-            if isinstance(raw_metadata.get("release_channel"), str)
-            else None,
-            region=raw_metadata.get("region")
-            if isinstance(raw_metadata.get("region"), str)
-            else None,
+            tags=tags_list,
+            labels=labels_dict,
+            release_channel=release_channel,
+            region=region,
         )
 
         return ModelNodeRegistration(
