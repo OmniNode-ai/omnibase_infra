@@ -2256,3 +2256,173 @@ class TestMixinNodeIntrospectionThresholdDetection:
         # If it exceeds 1ms, there might be an issue
         if metrics.total_introspection_ms < PERF_THRESHOLD_CACHE_HIT_MS:
             assert "cache_hit" not in metrics.slow_operations
+
+
+class TestMixinNodeIntrospectionConfigModel:
+    """Test ModelIntrospectionConfig usage with initialize_introspection."""
+
+    async def test_initialize_with_config_model(self) -> None:
+        """Test initialization using ModelIntrospectionConfig."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        config = ModelIntrospectionConfig(
+            node_id="config-model-node",
+            node_type="EFFECT",
+            version="2.0.0",
+            cache_ttl=600.0,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        assert node._introspection_node_id == "config-model-node"
+        assert node._introspection_node_type == "EFFECT"
+        assert node._introspection_version == "2.0.0"
+        assert node._introspection_cache_ttl == 600.0
+
+    async def test_config_model_with_event_bus(self) -> None:
+        """Test config model with event bus."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        event_bus = MockEventBus()
+        config = ModelIntrospectionConfig(
+            node_id="config-eventbus-node",
+            node_type="COMPUTE",
+            event_bus=event_bus,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        assert node._introspection_event_bus is event_bus
+
+        # Verify publishing works
+        success = await node.publish_introspection(reason="test")
+        assert success is True
+
+    async def test_config_model_with_custom_keywords(self) -> None:
+        """Test config model with custom operation keywords."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        custom_keywords = {"fetch", "upload", "download"}
+        config = ModelIntrospectionConfig(
+            node_id="config-keywords-node",
+            node_type="EFFECT",
+            operation_keywords=custom_keywords,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        assert node._introspection_operation_keywords == custom_keywords
+
+    async def test_config_model_with_custom_topics(self) -> None:
+        """Test config model with custom topic configuration."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        config = ModelIntrospectionConfig(
+            node_id="config-topics-node",
+            node_type="EFFECT",
+            introspection_topic="custom.introspection.topic",
+            heartbeat_topic="custom.heartbeat.topic",
+            request_introspection_topic="custom.request.topic",
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        assert node._introspection_topic == "custom.introspection.topic"
+        assert node._heartbeat_topic == "custom.heartbeat.topic"
+        assert node._request_introspection_topic == "custom.request.topic"
+
+    async def test_legacy_params_still_work(self) -> None:
+        """Test that legacy individual parameters still work."""
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="legacy-node",
+            node_type="REDUCER",
+            version="1.5.0",
+        )
+
+        assert node._introspection_node_id == "legacy-node"
+        assert node._introspection_node_type == "REDUCER"
+        assert node._introspection_version == "1.5.0"
+
+    async def test_config_model_overrides_legacy_params(self) -> None:
+        """Test that config model takes precedence over individual params."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        config = ModelIntrospectionConfig(
+            node_id="config-priority-node",
+            node_type="ORCHESTRATOR",
+            version="3.0.0",
+        )
+
+        node = MockNode()
+        # Pass both config and legacy params - config should win
+        node.initialize_introspection(
+            config=config,
+            node_id="should-be-ignored",
+            node_type="SHOULD-BE-IGNORED",
+            version="0.0.1",
+        )
+
+        assert node._introspection_node_id == "config-priority-node"
+        assert node._introspection_node_type == "ORCHESTRATOR"
+        assert node._introspection_version == "3.0.0"
+
+    async def test_error_when_neither_config_nor_required_params(self) -> None:
+        """Test error raised when neither config nor required params provided."""
+        node = MockNode()
+
+        with pytest.raises(ValueError, match="Either config or both node_id"):
+            node.initialize_introspection()
+
+        with pytest.raises(ValueError, match="Either config or both node_id"):
+            node.initialize_introspection(node_id="only-id")
+
+        with pytest.raises(ValueError, match="Either config or both node_id"):
+            node.initialize_introspection(node_type="only-type")
+
+    async def test_config_model_validation(self) -> None:
+        """Test that config model validates inputs."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Empty node_id should fail validation
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="",
+                node_type="EFFECT",
+            )
+
+        # Empty node_type should fail validation
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="valid-id",
+                node_type="",
+            )
+
+        # Negative cache_ttl should fail validation
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="valid-id",
+                node_type="EFFECT",
+                cache_ttl=-1.0,
+            )
+
+    async def test_config_model_exports(self) -> None:
+        """Test that ModelIntrospectionConfig is properly exported."""
+        # Test module-level export
+        from omnibase_infra.mixins.mixin_node_introspection import (
+            ModelIntrospectionConfig,
+        )
+
+        assert ModelIntrospectionConfig is not None
+
+        # Test package-level export
+        from omnibase_infra.mixins import ModelIntrospectionConfig as PkgConfig
+
+        assert PkgConfig is not None
+        assert PkgConfig is ModelIntrospectionConfig

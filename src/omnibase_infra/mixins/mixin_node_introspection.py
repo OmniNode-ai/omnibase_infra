@@ -71,15 +71,18 @@ Security Considerations:
 
 Usage:
     ```python
-    from omnibase_infra.mixins import MixinNodeIntrospection
+    from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
 
+    # Recommended: Using config model
     class MyNode(MixinNodeIntrospection):
         def __init__(self, config, event_bus=None):
-            self.initialize_introspection(
+            introspection_config = ModelIntrospectionConfig(
                 node_id=config.node_id,
                 node_type="EFFECT",
                 event_bus=event_bus,
+                version="1.0.0",
             )
+            self.initialize_introspection(config=introspection_config)
 
         async def startup(self):
             # Publish initial introspection on startup
@@ -98,6 +101,15 @@ Usage:
 
             # Stop background tasks
             await self.stop_introspection_tasks()
+
+    # Legacy: Using individual parameters (backwards compatible)
+    class MyLegacyNode(MixinNodeIntrospection):
+        def __init__(self, config, event_bus=None):
+            self.initialize_introspection(
+                node_id=config.node_id,
+                node_type="EFFECT",
+                event_bus=event_bus,
+            )
     ```
 
 Integration Requirements:
@@ -125,6 +137,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
@@ -156,6 +170,121 @@ PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
 PERF_THRESHOLD_DISCOVER_CAPABILITIES_MS = 30.0
 PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS = 50.0
 PERF_THRESHOLD_CACHE_HIT_MS = 1.0
+
+
+class ModelIntrospectionConfig(BaseModel):
+    """Configuration model for node introspection initialization.
+
+    This model groups all configuration parameters for ``initialize_introspection()``,
+    reducing the method's parameter count and improving maintainability. The model
+    supports both required and optional parameters with sensible defaults.
+
+    Attributes:
+        node_id: Unique identifier for this node instance. Required.
+        node_type: Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR). Required.
+        event_bus: Optional event bus for publishing introspection and heartbeat events.
+            Must have ``publish_envelope()`` method if provided.
+        version: Node version string (default: "1.0.0").
+        cache_ttl: Cache time-to-live in seconds (default: 300.0).
+        operation_keywords: Optional set of keywords to identify operation methods.
+            Methods containing these keywords are reported as operations.
+            If None, uses DEFAULT_OPERATION_KEYWORDS from the mixin.
+        exclude_prefixes: Optional set of prefixes to exclude from capability discovery.
+            Methods starting with these prefixes are filtered out.
+            If None, uses DEFAULT_EXCLUDE_PREFIXES from the mixin.
+        introspection_topic: Optional topic for publishing introspection events.
+            If None, uses module-level INTROSPECTION_TOPIC constant.
+        heartbeat_topic: Optional topic for publishing heartbeat events.
+            If None, uses module-level HEARTBEAT_TOPIC constant.
+        request_introspection_topic: Optional topic for listening to introspection requests.
+            If None, uses module-level REQUEST_INTROSPECTION_TOPIC constant.
+
+    Example:
+        ```python
+        from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
+
+        class MyNode(MixinNodeIntrospection):
+            def __init__(self, config, event_bus=None):
+                introspection_config = ModelIntrospectionConfig(
+                    node_id=config.node_id,
+                    node_type="EFFECT",
+                    event_bus=event_bus,
+                    version="1.2.0",
+                    cache_ttl=600.0,
+                )
+                self.initialize_introspection(config=introspection_config)
+
+        # With custom operation keywords
+        config = ModelIntrospectionConfig(
+            node_id="my-effect-node",
+            node_type="EFFECT",
+            operation_keywords={"fetch", "upload", "download"},
+        )
+
+        # With contract-driven topic configuration
+        config = ModelIntrospectionConfig(
+            node_id="contract-node",
+            node_type="COMPUTE",
+            introspection_topic="custom.introspection.topic",
+            heartbeat_topic="custom.heartbeat.topic",
+        )
+        ```
+
+    See Also:
+        - ``MixinNodeIntrospection.initialize_introspection()`` for usage patterns
+        - Module constants for default topic values
+    """
+
+    node_id: str = Field(
+        ...,
+        description="Unique identifier for this node instance",
+        min_length=1,
+    )
+    node_type: str = Field(
+        ...,
+        description="Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)",
+        min_length=1,
+    )
+    # Using Any for event_bus since ProtocolEventBus is only available at TYPE_CHECKING
+    # The actual type is ProtocolEventBus | None, validated at runtime
+    event_bus: object | None = Field(
+        default=None,
+        description="Event bus for publishing introspection and heartbeat events",
+    )
+    version: str = Field(
+        default="1.0.0",
+        description="Node version string",
+    )
+    cache_ttl: float = Field(
+        default=300.0,
+        description="Cache time-to-live in seconds",
+        ge=0.0,
+    )
+    operation_keywords: set[str] | None = Field(
+        default=None,
+        description="Keywords to identify operation methods",
+    )
+    exclude_prefixes: set[str] | None = Field(
+        default=None,
+        description="Prefixes to exclude from capability discovery",
+    )
+    introspection_topic: str | None = Field(
+        default=None,
+        description="Topic for publishing introspection events",
+    )
+    heartbeat_topic: str | None = Field(
+        default=None,
+        description="Topic for publishing heartbeat events",
+    )
+    request_introspection_topic: str | None = Field(
+        default=None,
+        description="Topic for introspection requests",
+    )
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        frozen=False,
+    )
 
 
 @dataclass
@@ -448,8 +577,11 @@ class MixinNodeIntrospection:
 
     def initialize_introspection(
         self,
-        node_id: str,
-        node_type: str,
+        config: ModelIntrospectionConfig | None = None,
+        *,
+        # Legacy parameters for backwards compatibility
+        node_id: str | None = None,
+        node_type: str | None = None,
         event_bus: ProtocolEventBus | None = None,
         version: str = "1.0.0",
         cache_ttl: float = 300.0,
@@ -464,13 +596,29 @@ class MixinNodeIntrospection:
         Must be called during class initialization before any introspection
         operations are performed.
 
+        This method supports two usage patterns:
+
+        1. **Config model (recommended)**: Pass a ``ModelIntrospectionConfig`` instance
+           as the ``config`` parameter. This groups all configuration in a single
+           validated object.
+
+        2. **Individual parameters (legacy)**: Pass parameters directly as keyword
+           arguments. This maintains backwards compatibility with existing code.
+
+        When ``config`` is provided, all individual parameters are ignored.
+
         Args:
-            node_id: Unique identifier for this node instance
-            node_type: Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
+            config: Configuration model containing all introspection settings.
+                When provided, all other parameters are ignored. Recommended
+                for new code.
+            node_id: Unique identifier for this node instance. Required if
+                ``config`` is not provided.
+            node_type: Node type classification (EFFECT, COMPUTE, REDUCER,
+                ORCHESTRATOR). Required if ``config`` is not provided.
             event_bus: Optional event bus for publishing introspection events.
-                Must have `publish_envelope()` method if provided.
-            version: Node version string (default: "1.0.0")
-            cache_ttl: Cache time-to-live in seconds (default: 300.0)
+                Must have ``publish_envelope()`` method if provided.
+            version: Node version string (default: "1.0.0").
+            cache_ttl: Cache time-to-live in seconds (default: 300.0).
             operation_keywords: Optional set of keywords to identify operation methods.
                 Methods containing these keywords are reported as operations.
                 If None, uses DEFAULT_OPERATION_KEYWORDS.
@@ -488,11 +636,24 @@ class MixinNodeIntrospection:
                 Allows contract-driven topic configuration per node.
 
         Raises:
-            ValueError: If node_id or node_type is empty
+            ValueError: If neither ``config`` nor (``node_id`` and ``node_type``)
+                are provided, or if node_id/node_type are empty strings.
 
         Example:
             ```python
+            # Using config model (recommended)
             class MyNode(MixinNodeIntrospection):
+                def __init__(self, app_config, event_bus=None):
+                    introspection_config = ModelIntrospectionConfig(
+                        node_id=app_config.node_id,
+                        node_type="EFFECT",
+                        event_bus=event_bus,
+                        version="1.2.0",
+                    )
+                    self.initialize_introspection(config=introspection_config)
+
+            # Using individual parameters (legacy, backwards compatible)
+            class MyLegacyNode(MixinNodeIntrospection):
                 def __init__(self, config):
                     self.initialize_introspection(
                         node_id=config.node_id,
@@ -501,31 +662,49 @@ class MixinNodeIntrospection:
                         version="1.2.0",
                     )
 
-            # With custom operation keywords
-            class MyEffectNode(MixinNodeIntrospection):
-                def __init__(self, config):
-                    self.initialize_introspection(
-                        node_id=config.node_id,
-                        node_type="EFFECT",
-                        event_bus=config.event_bus,
-                        operation_keywords={"fetch", "upload", "download"},
-                    )
+            # With custom operation keywords (config model)
+            config = ModelIntrospectionConfig(
+                node_id="my-effect-node",
+                node_type="EFFECT",
+                operation_keywords={"fetch", "upload", "download"},
+            )
+            node.initialize_introspection(config=config)
 
-            # With contract-driven topic configuration
-            class MyContractNode(MixinNodeIntrospection):
-                def __init__(self, config, contract):
-                    # Load topics from node contract
-                    topics = contract.get("topics", {})
-                    self.initialize_introspection(
-                        node_id=config.node_id,
-                        node_type="EFFECT",
-                        event_bus=config.event_bus,
-                        introspection_topic=topics.get("introspection_published"),
-                        heartbeat_topic=topics.get("heartbeat_published"),
-                        request_introspection_topic=topics.get("introspection_requested"),
-                    )
+            # With contract-driven topic configuration (config model)
+            config = ModelIntrospectionConfig(
+                node_id="contract-node",
+                node_type="EFFECT",
+                introspection_topic=contract.topics.introspection_published,
+                heartbeat_topic=contract.topics.heartbeat_published,
+            )
+            node.initialize_introspection(config=config)
             ```
+
+        See Also:
+            - ``ModelIntrospectionConfig`` for configuration model details
+            - Module docstring for usage examples
         """
+        # Resolve configuration - either from config model or individual params
+        if config is not None:
+            # Use config model - extract all values
+            node_id = config.node_id
+            node_type = config.node_type
+            # Cast event_bus since ModelIntrospectionConfig uses object | None
+            # for compatibility, but we know it's ProtocolEventBus | None
+            event_bus = config.event_bus  # type: ignore[assignment]
+            version = config.version
+            cache_ttl = config.cache_ttl
+            operation_keywords = config.operation_keywords
+            exclude_prefixes = config.exclude_prefixes
+            introspection_topic = config.introspection_topic
+            heartbeat_topic = config.heartbeat_topic
+            request_introspection_topic = config.request_introspection_topic
+        elif node_id is None or node_type is None:
+            raise ValueError(
+                "Either config or both node_id and node_type must be provided"
+            )
+
+        # Validate required fields
         if not node_id:
             raise ValueError("node_id cannot be empty")
         if not node_type:
@@ -1918,6 +2097,7 @@ class MixinNodeIntrospection:
 
 __all__ = [
     "MixinNodeIntrospection",
+    "ModelIntrospectionConfig",
     "INTROSPECTION_TOPIC",
     "HEARTBEAT_TOPIC",
     "REQUEST_INTROSPECTION_TOPIC",

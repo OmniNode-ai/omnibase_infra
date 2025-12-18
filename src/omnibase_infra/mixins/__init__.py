@@ -17,6 +17,7 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     CapabilitiesDict,
     IntrospectionCacheDict,
     MixinNodeIntrospection,
+    ModelIntrospectionConfig,
 )
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "IntrospectionCacheDict",
     "MixinAsyncCircuitBreaker",
     "MixinNodeIntrospection",
+    "ModelIntrospectionConfig",
 ]
