@@ -14,6 +14,42 @@ Design Principles:
 
 Service Keys:
 - PolicyRegistry: Registered as interface=PolicyRegistry
+- ProtocolBindingRegistry: Registered as interface=ProtocolBindingRegistry
+
+Node Registration:
+    Effect nodes like NodeRegistryEffect take a container in their __init__
+    and resolve dependencies internally. They are NOT registered by
+    wire_infrastructure_services() because they depend on handler services
+    that must be registered first.
+
+    To use NodeRegistryEffect:
+    ```python
+    from omnibase_infra.nodes.node_registry_effect.v1_0_0.node import NodeRegistryEffect
+
+    # Step 1: Wire base infrastructure services
+    await wire_infrastructure_services(container)
+
+    # Step 2: Register handler services (consul, postgres, event_bus)
+    # This is deployment-specific and depends on your infrastructure setup
+    await container.service_registry.register_instance(
+        interface=ProtocolEnvelopeExecutor,
+        instance=consul_handler,
+        scope="global",
+        metadata={"name": "consul"},
+    )
+    await container.service_registry.register_instance(
+        interface=ProtocolEnvelopeExecutor,
+        instance=postgres_handler,
+        scope="global",
+        metadata={"name": "postgres"},
+    )
+
+    # Step 3: Create node (resolves dependencies from container)
+    # Note: create() is a factory method that constructs the node AND calls
+    # initialize() internally, so the returned node is ready to use immediately.
+    node = await NodeRegistryEffect.create(container)
+    # node is now fully initialized and ready for execute() calls
+    ```
 
 Example Usage:
     ```python
@@ -25,11 +61,11 @@ Example Usage:
     container = ModelONEXContainer()
 
     # Wire infrastructure services
-    summary = wire_infrastructure_services(container)
+    summary = await wire_infrastructure_services(container)
     print(f"Registered {len(summary['services'])} services")
 
     # Resolve services using type interface
-    policy_registry = container.service_registry.resolve_service(PolicyRegistry)
+    policy_registry = await container.service_registry.resolve_service(PolicyRegistry)
 
     # Use the registry
     policy_registry.register_policy(
@@ -44,6 +80,7 @@ Integration Notes:
 - Services registered as global scope (singleton per container)
 - Type-safe resolution via interface types
 - Compatible with omnibase_core 0.4.x API
+- Effect nodes take container in __init__ (see Node Registration above)
 """
 
 from __future__ import annotations
@@ -325,12 +362,12 @@ async def get_or_create_policy_registry(
 ) -> PolicyRegistry:
     """Get PolicyRegistry from container, creating if not registered.
 
-    Helper function for backwards compatibility during migration.
+    Convenience function that provides lazy initialization semantics.
     Attempts to resolve PolicyRegistry from container, and if not found,
     creates and registers a new instance.
 
-    This function is useful during incremental migration when some code paths
-    may not have called wire_infrastructure_services() yet.
+    This function is useful when code paths may not have called
+    wire_infrastructure_services() yet or when lazy initialization is desired.
 
     Note: This function is async because ModelONEXContainer.service_registry methods
     (resolve_service and register_instance) are async in omnibase_core 0.4.x+.

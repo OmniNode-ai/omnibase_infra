@@ -240,45 +240,147 @@ def correlation_id() -> UUID:
     return uuid4()
 
 
+def create_mock_container(
+    consul_handler: AsyncMock,
+    db_handler: AsyncMock,
+    event_bus: AsyncMock | None = None,
+) -> Mock:
+    """Create mock ONEX container configured for NodeRegistryEffect.
+
+    This helper creates a mock ModelONEXContainer with service_registry
+    that resolves the protocol handlers needed by NodeRegistryEffect:
+    - ProtocolConsulExecutor with name="consul" -> consul_handler
+    - ProtocolDbExecutor with name="postgres" -> db_handler
+    - ProtocolEventBus -> event_bus (or raises if None)
+
+    Args:
+        consul_handler: Mock consul handler implementing ProtocolConsulExecutor.
+        db_handler: Mock PostgreSQL handler implementing ProtocolDbExecutor.
+        event_bus: Optional mock event bus implementing ProtocolEventBus.
+            If None, event bus resolution will raise an exception.
+
+    Returns:
+        Mock container configured for NodeRegistryEffect dependency resolution.
+    """
+    from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        ProtocolConsulExecutor,
+        ProtocolDbExecutor,
+        ProtocolEventBus,
+    )
+
+    container = Mock()
+    container.service_registry = Mock()
+
+    async def resolve_service_side_effect(
+        interface_type: type,
+        name: str | None = None,
+    ) -> AsyncMock:
+        """Resolve mock services based on protocol type and name."""
+        if interface_type is ProtocolConsulExecutor and name == "consul":
+            if name == "consul":
+                return consul_handler
+            raise ValueError(f"Unknown consul executor name: {name}")
+        if interface_type is ProtocolDbExecutor:
+            if name == "postgres":
+                return db_handler
+            raise ValueError(f"Unknown db executor name: {name}")
+        if interface_type is ProtocolEventBus:
+            if event_bus is None:
+                raise ValueError("ProtocolEventBus not registered")
+            return event_bus
+        raise ValueError(f"Service not registered: {interface_type}")
+
+    container.service_registry.resolve_service = AsyncMock(
+        side_effect=resolve_service_side_effect
+    )
+
+    return container
+
+
 @pytest.fixture
-async def registry_node(
+def mock_container(
     mock_consul_handler: AsyncMock,
     mock_db_handler: AsyncMock,
     mock_event_bus: AsyncMock,
+) -> Mock:
+    """Create mock container with all handlers registered."""
+    return create_mock_container(mock_consul_handler, mock_db_handler, mock_event_bus)
+
+
+@pytest.fixture
+def mock_container_no_event_bus(
+    mock_consul_handler: AsyncMock,
+    mock_db_handler: AsyncMock,
+) -> Mock:
+    """Create mock container without event bus."""
+    return create_mock_container(mock_consul_handler, mock_db_handler, None)
+
+
+async def create_test_node(
+    consul_handler: AsyncMock,
+    db_handler: AsyncMock,
+    event_bus: AsyncMock | None = None,
+    config: ModelNodeRegistryEffectConfig | None = None,
 ) -> NodeRegistryEffect:
-    """Create initialized registry effect node with mocked handlers."""
+    """Factory function to create a fully initialized NodeRegistryEffect for tests.
+
+    This helper function creates a NodeRegistryEffect instance using
+    container-based DI, suitable for test methods that need custom
+    handler configurations.
+
+    IMPORTANT: The returned node is ALREADY INITIALIZED. Do NOT call
+    node.initialize() after using this factory - it is redundant since
+    NodeRegistryEffect.create() handles initialization internally.
+
+    Args:
+        consul_handler: Mock consul handler.
+        db_handler: Mock PostgreSQL handler.
+        event_bus: Optional mock event bus. If None, event bus operations
+            will raise RuntimeHostError.
+        config: Optional node configuration. Uses defaults if not provided.
+
+    Returns:
+        Fully initialized NodeRegistryEffect instance ready for use.
+        The node has dependencies resolved and is marked as initialized.
+        No additional initialization is required before calling execute().
+    """
+    container = create_mock_container(consul_handler, db_handler, event_bus)
+    return await NodeRegistryEffect.create(container, config)
+
+
+@pytest.fixture
+async def registry_node(
+    mock_container: Mock,
+) -> NodeRegistryEffect:
+    """Create initialized registry effect node with mocked handlers.
+
+    Uses container-based DI via NodeRegistryEffect.create() factory method.
+    The create() method returns a fully initialized node.
+    """
     config = ModelNodeRegistryEffectConfig(
         circuit_breaker_threshold=3,
         circuit_breaker_reset_timeout=1.0,
     )
-    node = NodeRegistryEffect(
-        consul_handler=mock_consul_handler,
-        db_handler=mock_db_handler,
-        event_bus=mock_event_bus,
-        config=config,
-    )
-    await node.initialize()
+    node = await NodeRegistryEffect.create(mock_container, config)
     yield node
     await node.shutdown()
 
 
 @pytest.fixture
 async def registry_node_no_event_bus(
-    mock_consul_handler: AsyncMock,
-    mock_db_handler: AsyncMock,
+    mock_container_no_event_bus: Mock,
 ) -> NodeRegistryEffect:
-    """Create initialized registry effect node without event bus."""
+    """Create initialized registry effect node without event bus.
+
+    Uses container-based DI where event bus resolution fails, simulating
+    deployments without Kafka configured.
+    The create() method returns a fully initialized node.
+    """
     config = ModelNodeRegistryEffectConfig(
         circuit_breaker_threshold=3,
         circuit_breaker_reset_timeout=1.0,
     )
-    node = NodeRegistryEffect(
-        consul_handler=mock_consul_handler,
-        db_handler=mock_db_handler,
-        event_bus=None,
-        config=config,
-    )
-    await node.initialize()
+    node = await NodeRegistryEffect.create(mock_container_no_event_bus, config)
     yield node
     await node.shutdown()
 
@@ -291,24 +393,23 @@ async def registry_node_no_event_bus(
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestNodeRegistryEffectInitialization:
-    """Tests for node initialization and shutdown lifecycle."""
+    """Tests for node initialization and shutdown lifecycle.
 
-    async def test_initialize_sets_initialized_flag(
+    Note: More comprehensive initialization tests, including the new behavior
+    where initialize() resolves dependencies, are in test_node_registry_effect_init.py.
+    """
+
+    async def test_create_returns_fully_initialized_node(
         self,
         mock_consul_handler: AsyncMock,
         mock_db_handler: AsyncMock,
     ) -> None:
-        """Test that initialize() sets the _initialized flag to True."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=None,
-        )
-        assert node._initialized is False
+        """Test that create() factory returns a fully initialized node."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
 
-        await node.initialize()
-
+        # Node should be fully initialized
         assert node._initialized is True
+        assert node._dependencies_resolved is True
         await node.shutdown()
 
     async def test_shutdown_resets_initialized_flag(
@@ -317,12 +418,7 @@ class TestNodeRegistryEffectInitialization:
         mock_db_handler: AsyncMock,
     ) -> None:
         """Test that shutdown() resets the _initialized flag to False."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=None,
-        )
-        await node.initialize()
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
         assert node._initialized is True
 
         await node.shutdown()
@@ -336,13 +432,9 @@ class TestNodeRegistryEffectInitialization:
     ) -> None:
         """Test that shutdown() resets circuit breaker state."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=2)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=None,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Open circuit breaker by recording failures
         async with node._circuit_breaker_lock:
@@ -364,13 +456,18 @@ class TestNodeRegistryEffectInitialization:
         introspection_payload: ModelNodeIntrospectionPayload,
         correlation_id: UUID,
     ) -> None:
-        """Test that execute() raises RuntimeHostError if not initialized."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=None,
-        )
-        # Do NOT call initialize()
+        """Test that execute() raises RuntimeHostError if not initialized.
+
+        Even with dependencies resolved, execute() requires initialize() to be called.
+        This test creates a node via direct construction (not create() factory) to
+        test the uninitialized state.
+        """
+        container = create_mock_container(mock_consul_handler, mock_db_handler, None)
+        node = NodeRegistryEffect(container)
+        # Resolve dependencies but do NOT call initialize()
+        await node._resolve_dependencies()
+        assert node._dependencies_resolved is True
+        assert node._initialized is False
 
         request = ModelRegistryRequest(
             operation="register",
@@ -435,13 +532,9 @@ class TestNodeRegistryEffectRegister:
     ) -> None:
         """Test partial success when Consul fails but PostgreSQL succeeds."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler_failing,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler_failing, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -477,13 +570,9 @@ class TestNodeRegistryEffectRegister:
     ) -> None:
         """Test partial success when PostgreSQL fails but Consul succeeds."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler_failing,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -519,13 +608,9 @@ class TestNodeRegistryEffectRegister:
     ) -> None:
         """Test complete failure when both backends fail."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler_failing,
-            db_handler=mock_db_handler_failing,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler_failing, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -619,12 +704,9 @@ class TestNodeRegistryEffectRegister:
         mock_consul_handler.execute = AsyncMock(side_effect=consul_execute)
         mock_db_handler.execute = AsyncMock(side_effect=db_execute)
 
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -700,13 +782,9 @@ class TestNodeRegistryEffectDeregister:
     ) -> None:
         """Test partial success when Consul deregister fails."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler_failing,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler_failing, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="deregister",
@@ -732,13 +810,9 @@ class TestNodeRegistryEffectDeregister:
     ) -> None:
         """Test partial success when PostgreSQL deregister fails."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler_failing,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="deregister",
@@ -764,13 +838,9 @@ class TestNodeRegistryEffectDeregister:
     ) -> None:
         """Test complete failure when both backends fail."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler_failing,
-            db_handler=mock_db_handler_failing,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler_failing, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="deregister",
@@ -823,12 +893,9 @@ class TestNodeRegistryEffectDiscover:
         correlation_id: UUID,
     ) -> None:
         """Test discover without filters returns all nodes."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler_with_rows,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler_with_rows, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -891,12 +958,9 @@ class TestNodeRegistryEffectDiscover:
             )
         )
 
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -956,12 +1020,9 @@ class TestNodeRegistryEffectDiscover:
             )
         )
 
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -1007,12 +1068,9 @@ class TestNodeRegistryEffectDiscover:
             )
         )
 
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -1051,12 +1109,9 @@ class TestNodeRegistryEffectDiscover:
         correlation_id: UUID,
     ) -> None:
         """Test discover returns empty list when no nodes found."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler_empty_results,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler_empty_results, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -1082,13 +1137,9 @@ class TestNodeRegistryEffectDiscover:
     ) -> None:
         """Test discover handles database errors gracefully."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler_failing,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -1118,12 +1169,9 @@ class TestNodeRegistryEffectDiscover:
         attempts are rejected with RuntimeHostError rather than being silently
         ignored or interpolated into the query.
         """
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Attempt SQL injection via filter key
         malicious_filters = {
@@ -1164,12 +1212,9 @@ class TestNodeRegistryEffectDiscover:
         SECURITY: Even benign-looking but unknown filter keys must be rejected
         to prevent any possibility of SQL injection through column names.
         """
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Use a plausible but non-whitelisted column name
         request = ModelRegistryRequest(
@@ -1205,12 +1250,9 @@ class TestNodeRegistryEffectDiscover:
             )
         )
 
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Use all whitelisted filter keys
         request = ModelRegistryRequest(
@@ -1250,12 +1292,9 @@ class TestNodeRegistryEffectDiscover:
         unescaped special characters that could enable log injection.
         The original malicious keys should be transformed to safe versions.
         """
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # SQL injection pattern
         malicious_key = '"; DROP TABLE users--'
@@ -1347,12 +1386,9 @@ class TestNodeRegistryEffectRequestIntrospection:
         correlation_id: UUID,
     ) -> None:
         """Test request_introspection handles publish errors gracefully."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus_failing,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus_failing
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="request_introspection",
@@ -1423,13 +1459,9 @@ class TestNodeRegistryEffectCircuitBreaker:
             circuit_breaker_threshold=threshold,
             circuit_breaker_reset_timeout=60.0,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=None,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Manually trip the circuit breaker by recording failures
         correlation_id = uuid4()
@@ -1468,13 +1500,9 @@ class TestNodeRegistryEffectCircuitBreaker:
             circuit_breaker_threshold=5,
             circuit_breaker_reset_timeout=1.0,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         # Record some failures (below threshold)
         async with node._circuit_breaker_lock:
@@ -1511,13 +1539,9 @@ class TestNodeRegistryEffectCircuitBreaker:
             circuit_breaker_threshold=1,
             circuit_breaker_reset_timeout=reset_timeout,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=None,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Open the circuit
         async with node._circuit_breaker_lock:
@@ -1577,13 +1601,9 @@ class TestNodeRegistryEffectCircuitBreaker:
             circuit_breaker_threshold=1,
             circuit_breaker_reset_timeout=reset_timeout,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=None,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Open the circuit
         async with node._circuit_breaker_lock:
@@ -1615,13 +1635,9 @@ class TestNodeRegistryEffectCircuitBreaker:
     ) -> None:
         """Test that partial success (one backend succeeds) resets circuit breaker."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler_failing,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler_failing, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         # Record some failures (below threshold)
         async with node._circuit_breaker_lock:
@@ -1661,13 +1677,9 @@ class TestNodeRegistryEffectCircuitBreaker:
         parallel tasks and don't propagate as exceptions.
         """
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=5)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler_failing,
-            db_handler=mock_db_handler_failing,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler_failing, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         initial_failures = node._circuit_breaker_failures
         assert initial_failures == 0
@@ -1707,12 +1719,9 @@ class TestNodeRegistryEffectCorrelationId:
         introspection_payload: ModelNodeIntrospectionPayload,
     ) -> None:
         """Test that correlation ID is passed to Consul handler."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         correlation_id = uuid4()
         request = ModelRegistryRequest(
@@ -1737,12 +1746,9 @@ class TestNodeRegistryEffectCorrelationId:
         introspection_payload: ModelNodeIntrospectionPayload,
     ) -> None:
         """Test that correlation ID is passed to DB handler."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         correlation_id = uuid4()
         request = ModelRegistryRequest(
@@ -1784,13 +1790,9 @@ class TestNodeRegistryEffectCorrelationId:
     ) -> None:
         """Test that correlation ID is in circuit breaker error."""
         config = ModelNodeRegistryEffectConfig(circuit_breaker_threshold=1)
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=None,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Open the circuit
         async with node._circuit_breaker_lock:
@@ -1821,67 +1823,49 @@ class TestNodeRegistryEffectCorrelationId:
 class TestNodeRegistryEffectErrorSanitization:
     """Tests for error message sanitization."""
 
-    def test_sanitize_error_includes_exception_type(self) -> None:
+    async def test_sanitize_error_includes_exception_type(self) -> None:
         """Test that exception type is included in sanitized error."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         error = ValueError("Test error message")
         result = node._sanitize_error(error)
         assert result.startswith("ValueError: ")
         assert "Test error message" in result
 
-    def test_sanitize_error_redacts_password(self) -> None:
+    async def test_sanitize_error_redacts_password(self) -> None:
         """Test that passwords are redacted from error messages."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         error = Exception("Connection failed: password=secret123")
         result = node._sanitize_error(error)
         assert "secret123" not in result
         assert "[REDACTED]" in result
 
-    def test_sanitize_error_redacts_token(self) -> None:
+    async def test_sanitize_error_redacts_token(self) -> None:
         """Test that tokens are redacted from error messages."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         error = Exception("Auth failed: token=abc123xyz")
         result = node._sanitize_error(error)
         assert "abc123xyz" not in result
         assert "[REDACTED]" in result
 
-    def test_sanitize_error_redacts_api_key(self) -> None:
+    async def test_sanitize_error_redacts_api_key(self) -> None:
         """Test that API keys are redacted from error messages."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         error = Exception("Request failed: api_key=my-secret-key")
         result = node._sanitize_error(error)
         assert "my-secret-key" not in result
         assert "[REDACTED]" in result
 
-    def test_sanitize_error_redacts_connection_string(self) -> None:
+    async def test_sanitize_error_redacts_connection_string(self) -> None:
         """Test that connection string credentials are redacted."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         error = Exception("Failed: postgresql://user:password123@host:5432/db")
         result = node._sanitize_error(error)
         assert "password123" not in result
         assert "[REDACTED]" in result
 
-    def test_sanitize_error_truncates_long_messages(self) -> None:
+    async def test_sanitize_error_truncates_long_messages(self) -> None:
         """Test that long error messages are truncated."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         # Use a mixed message with spaces to avoid base64-like pattern matching
         long_message = "Error: " + " ".join(["word"] * 200)  # Long message with spaces
         error = Exception(long_message)
@@ -1890,23 +1874,17 @@ class TestNodeRegistryEffectErrorSanitization:
         assert len(result) <= 520  # Type name + ": " + 500 chars + "..."
         assert result.endswith("...")
 
-    def test_sanitize_error_redacts_secret(self) -> None:
+    async def test_sanitize_error_redacts_secret(self) -> None:
         """Test that secrets are redacted from error messages."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         error = Exception("Config error: secret=mysupersecret")
         result = node._sanitize_error(error)
         assert "mysupersecret" not in result
         assert "[REDACTED]" in result
 
-    def test_sanitize_error_redacts_bearer_token(self) -> None:
+    async def test_sanitize_error_redacts_bearer_token(self) -> None:
         """Test that bearer tokens are redacted."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         error = Exception("Auth header: Bearer eyJhbGciOiJIUzI1NiJ9.test")
         result = node._sanitize_error(error)
         assert "eyJhbGciOiJIUzI1NiJ9" not in result
@@ -1928,11 +1906,7 @@ class TestNodeRegistryEffectErrorSanitization:
             )
         )
 
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-        )
-        await node.initialize()
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
 
         introspection = ModelNodeIntrospectionPayload(
             node_id="test-node",
@@ -1974,11 +1948,7 @@ class TestNodeRegistryEffectErrorSanitization:
             )
         )
 
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-        )
-        await node.initialize()
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
 
         introspection = ModelNodeIntrospectionPayload(
             node_id="test-node",
@@ -2013,22 +1983,16 @@ class TestNodeRegistryEffectErrorSanitization:
 class TestNodeRegistryEffectJsonSerialization:
     """Tests for JSON serialization error handling."""
 
-    def test_safe_json_dumps_success(self) -> None:
+    async def test_safe_json_dumps_success(self) -> None:
         """Test that _safe_json_dumps serializes valid data."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         data = {"key": "value", "nested": {"list": [1, 2, 3]}}
         result = node._safe_json_dumps(data, uuid4(), "test_field")
         assert result == json.dumps(data)
 
-    def test_safe_json_dumps_handles_sets_gracefully(self) -> None:
+    async def test_safe_json_dumps_handles_sets_gracefully(self) -> None:
         """Test that _safe_json_dumps converts sets to sorted lists."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
 
         # Sets are converted to sorted lists by the default serializer
         data_with_set = {"items": {3, 1, 2}}
@@ -2039,12 +2003,9 @@ class TestNodeRegistryEffectJsonSerialization:
         parsed = json.loads(result)
         assert parsed["items"] == ["1", "2", "3"]  # sorted string representation
 
-    def test_safe_json_dumps_handles_truly_unserializable_object(self) -> None:
+    async def test_safe_json_dumps_handles_truly_unserializable_object(self) -> None:
         """Test that _safe_json_dumps handles truly unserializable objects gracefully."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
 
         # Create a truly unserializable object - a lambda function
         # Note: The default serializer will convert this to a string representation
@@ -2058,12 +2019,9 @@ class TestNodeRegistryEffectJsonSerialization:
         parsed = json.loads(result)
         assert "non-serializable" in parsed["func"]
 
-    def test_safe_json_dumps_handles_circular_reference(self) -> None:
+    async def test_safe_json_dumps_handles_circular_reference(self) -> None:
         """Test that _safe_json_dumps handles circular references."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
 
         # Create circular reference
         circular: dict[str, object] = {}
@@ -2075,12 +2033,9 @@ class TestNodeRegistryEffectJsonSerialization:
         # Should return fallback value
         assert result == "{}"
 
-    def test_safe_json_dumps_custom_fallback_on_recursion_error(self) -> None:
+    async def test_safe_json_dumps_custom_fallback_on_recursion_error(self) -> None:
         """Test that _safe_json_dumps uses custom fallback on RecursionError."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
 
         # Create deeply nested structure that triggers RecursionError
         circular: dict[str, object] = {}
@@ -2091,14 +2046,9 @@ class TestNodeRegistryEffectJsonSerialization:
         # Should return custom fallback value due to RecursionError
         assert result == "[]"
 
-    def test_safe_json_dumps_converts_datetime(self) -> None:
+    async def test_safe_json_dumps_converts_datetime(self) -> None:
         """Test that _safe_json_dumps converts datetime to ISO format."""
-        from datetime import datetime, timezone
-
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
 
         test_time = datetime(2024, 1, 15, 10, 30, 45, tzinfo=UTC)
         data = {"timestamp": test_time}
@@ -2107,12 +2057,9 @@ class TestNodeRegistryEffectJsonSerialization:
         parsed = json.loads(result)
         assert parsed["timestamp"] == "2024-01-15T10:30:45+00:00"
 
-    def test_safe_json_dumps_converts_uuid(self) -> None:
+    async def test_safe_json_dumps_converts_uuid(self) -> None:
         """Test that _safe_json_dumps converts UUID to string."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
 
         test_uuid = uuid4()
         data = {"id": test_uuid}
@@ -2121,24 +2068,18 @@ class TestNodeRegistryEffectJsonSerialization:
         parsed = json.loads(result)
         assert parsed["id"] == str(test_uuid)
 
-    def test_safe_json_dumps_strict_success(self) -> None:
+    async def test_safe_json_dumps_strict_success(self) -> None:
         """Test that _safe_json_dumps_strict returns None error on success."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
         data = {"event_type": "TEST", "correlation_id": "abc123"}
         json_str, error = node._safe_json_dumps_strict(data, uuid4(), "test_field")
 
         assert error is None
         assert json_str == json.dumps(data)
 
-    def test_safe_json_dumps_strict_handles_sets(self) -> None:
+    async def test_safe_json_dumps_strict_handles_sets(self) -> None:
         """Test that _safe_json_dumps_strict converts sets to sorted lists."""
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
 
         # Sets are now converted by the default serializer
         data_with_set = {"items": {3, 1, 2}}
@@ -2151,17 +2092,14 @@ class TestNodeRegistryEffectJsonSerialization:
         parsed = json.loads(json_str)
         assert parsed["items"] == ["1", "2", "3"]
 
-    def test_safe_json_dumps_strict_failure_on_recursion(self) -> None:
+    async def test_safe_json_dumps_strict_failure_on_recursion(self) -> None:
         """Test that _safe_json_dumps_strict returns error message on circular reference.
 
         Note: Circular references trigger ValueError when json.dumps detects a circular
         reference in the data structure. The exact error type depends on how the
         serialization handles the circular reference detection.
         """
-        node = NodeRegistryEffect(
-            consul_handler=Mock(),
-            db_handler=Mock(),
-        )
+        node = await create_test_node(AsyncMock(), AsyncMock())
 
         # Create circular reference that causes serialization failure
         circular: dict[str, object] = {}
@@ -2188,12 +2126,9 @@ class TestNodeRegistryEffectJsonSerialization:
         This test verifies that if the event payload cannot be serialized,
         the operation returns a failure response rather than publishing a malformed event.
         """
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Monkey-patch _safe_json_dumps_strict to simulate serialization failure
         original_method = node._safe_json_dumps_strict
@@ -2240,12 +2175,9 @@ class TestNodeRegistryEffectJsonSerialization:
         mock_event_bus: AsyncMock,
     ) -> None:
         """Test that registration handles unserializable capabilities gracefully."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Create introspection with complex nested data
         # Note: capabilities is now ModelNodeCapabilitiesInfo (typed model)
@@ -2306,10 +2238,7 @@ class TestNodeRegistryEffectSlowOperationThreshold:
         mock_db_handler: AsyncMock,
     ) -> None:
         """Test that default slow operation threshold is 1000ms."""
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-        )
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
         # Default config should set threshold to 1000ms
         assert node._slow_operation_threshold_ms == 1000.0
 
@@ -2323,10 +2252,8 @@ class TestNodeRegistryEffectSlowOperationThreshold:
         config = ModelNodeRegistryEffectConfig(
             slow_operation_threshold_ms=custom_threshold,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, config=config
         )
         assert node._slow_operation_threshold_ms == custom_threshold
 
@@ -2339,10 +2266,8 @@ class TestNodeRegistryEffectSlowOperationThreshold:
         config = ModelNodeRegistryEffectConfig(
             slow_operation_threshold_ms=0.0,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, config=config
         )
         assert node._slow_operation_threshold_ms == 0.0
 
@@ -2357,10 +2282,8 @@ class TestNodeRegistryEffectSlowOperationThreshold:
         config = ModelNodeRegistryEffectConfig(
             slow_operation_threshold_ms=ci_threshold,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, config=config
         )
         assert node._slow_operation_threshold_ms == ci_threshold
 
@@ -2381,13 +2304,9 @@ class TestNodeRegistryEffectSlowOperationThreshold:
         config = ModelNodeRegistryEffectConfig(
             slow_operation_threshold_ms=low_threshold,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -2429,13 +2348,9 @@ class TestNodeRegistryEffectSlowOperationThreshold:
         config = ModelNodeRegistryEffectConfig(
             slow_operation_threshold_ms=high_threshold,
         )
-        node = NodeRegistryEffect(
-            consul_handler=mock_consul_handler,
-            db_handler=mock_db_handler,
-            event_bus=mock_event_bus,
-            config=config,
+        node = await create_test_node(
+            mock_consul_handler, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -2458,37 +2373,297 @@ class TestNodeRegistryEffectSlowOperationThreshold:
 
 
 # =============================================================================
-# Integration Tests Placeholder
+# Test: URL Pattern Validation (Security)
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNodeRegistryEffectUrlValidation:
+    """Tests for URL pattern validation in health_endpoint.
+
+    The URL pattern was enhanced to support:
+    - IPv6 addresses in brackets: http://[::1]:8080/health
+    - Underscores in hostnames: http://my_service.local:8080/health
+    - Standard hostnames and IPv4 addresses
+    """
+
+    async def test_register_with_ipv6_health_endpoint(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration with IPv6 health endpoint."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="ipv6-test-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="http://[::1]:8080/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+        assert response.success is True
+        assert response.status == "success"
+        await node.shutdown()
+
+    async def test_register_with_ipv6_full_address(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration with full IPv6 address."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="ipv6-full-test-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="http://[2001:db8::1]:8080/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+        assert response.success is True
+        assert response.status == "success"
+        await node.shutdown()
+
+    async def test_register_with_underscore_hostname(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration with underscore in hostname."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="underscore-test-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="http://my_service.local:8080/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+        assert response.success is True
+        assert response.status == "success"
+        await node.shutdown()
+
+    async def test_register_rejects_invalid_url_protocol(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration rejects invalid URL protocol (ftp://)."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="invalid-protocol-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="ftp://example.com/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await node.execute(request)
+        assert "valid HTTP/HTTPS URL" in exc_info.value.message
+        await node.shutdown()
+
+    async def test_register_rejects_url_without_host(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration rejects URL without host."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="no-host-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="http://:8080/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await node.execute(request)
+        assert "valid HTTP/HTTPS URL" in exc_info.value.message
+        await node.shutdown()
+
+
+# =============================================================================
+# Test: JWT Pattern Sanitization (Security)
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNodeRegistryEffectJwtSanitization:
+    """Tests for JWT token sanitization in error messages.
+
+    The JWT pattern was tightened to reduce false positives by requiring:
+    - Header: eyJ + 15+ chars (covers minimal {"alg":"HS256"})
+    - Payload: eyJ + 15+ chars (covers minimal claims)
+    - Signature: 40+ chars (HS256=43, ES256=86, RS256=342)
+    """
+
+    async def test_sanitize_error_redacts_real_jwt(self) -> None:
+        """Test that real JWT tokens are properly redacted."""
+        import base64
+
+        node = await create_test_node(AsyncMock(), AsyncMock())
+
+        # Create a realistic JWT structure
+        header = (
+            base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}')
+            .decode()
+            .rstrip("=")
+        )
+        payload = (
+            base64.urlsafe_b64encode(b'{"sub":"1234567890","name":"Test User"}')
+            .decode()
+            .rstrip("=")
+        )
+        signature = "A" * 43  # HS256 signature length
+
+        real_jwt = f"{header}.{payload}.{signature}"
+        error = Exception(f"Auth failed with token: {real_jwt}")
+        result = node._sanitize_error(error)
+
+        # JWT should be redacted
+        assert header not in result
+        assert signature not in result
+        assert "[REDACTED" in result
+
+    async def test_sanitize_error_does_not_redact_short_strings(self) -> None:
+        """Test that short strings are not falsely identified as JWTs."""
+        node = await create_test_node(AsyncMock(), AsyncMock())
+
+        # Short string that looks like JWT structure but is too short
+        short_jwt_like = "eyJhbGci.eyJzdWI.short"
+        error = Exception(f"Error with value: {short_jwt_like}")
+        result = node._sanitize_error(error)
+
+        # Short string should NOT be redacted as JWT (may be redacted by other patterns)
+        # The key is that the specific JWT pattern should not match
+        assert "[REDACTED_JWT]" not in result
+
+    async def test_sanitize_error_redacts_jwt_with_bearer(self) -> None:
+        """Test that JWT with Bearer prefix is properly redacted."""
+        import base64
+
+        node = await create_test_node(AsyncMock(), AsyncMock())
+
+        header = (
+            base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}')
+            .decode()
+            .rstrip("=")
+        )
+        payload = (
+            base64.urlsafe_b64encode(b'{"sub":"user123","iat":1234567890}')
+            .decode()
+            .rstrip("=")
+        )
+        signature = "B" * 50
+
+        jwt = f"{header}.{payload}.{signature}"
+        error = Exception(f"Authorization: Bearer {jwt}")
+        result = node._sanitize_error(error)
+
+        # Either Bearer pattern or JWT pattern should catch it
+        assert header not in result
+        assert "[REDACTED" in result
+
+
+# =============================================================================
+# Integration Tests Reference
 # =============================================================================
 
 
 @pytest.mark.integration
 class TestNodeRegistryEffectIntegration:
-    """Integration tests placeholder for NodeRegistryEffect with real backends.
+    """Integration tests placeholder - see dedicated integration test file.
 
-    These tests require real Consul and PostgreSQL instances to run.
-    They validate end-to-end behavior that cannot be fully tested with mocks.
+    Full integration tests with real backends are located at:
+        tests/integration/nodes/test_node_registry_effect_integration.py
 
-    TODO: Integration tests to implement:
-        - test_register_with_real_consul: Verify Consul service registration
-          with actual health check callbacks
-        - test_register_with_real_postgres: Verify PostgreSQL UPSERT behavior
-          with actual database constraints
-        - test_discover_with_real_postgres: Verify SQL query generation
-          works with real PostgreSQL query planner
-        - test_circuit_breaker_with_real_failures: Test circuit breaker
-          behavior with actual network failures/timeouts
-        - test_concurrent_registrations: Verify idempotent registration
-          under concurrent load with real backends
-        - test_event_bus_with_real_kafka: Verify introspection events
-          are properly published to Kafka
+    That file contains comprehensive tests for:
+        - Consul: Service registration, health checks, catalog validation
+        - PostgreSQL: UPSERT behavior, constraints, query execution
+        - Kafka: Introspection event publishing
+        - Cross-Backend: Dual registration, partial failures, circuit breaker
 
-    Environment Setup Required:
-        - Consul: localhost:8500
-        - PostgreSQL: localhost:5432 with node_registrations table
-        - Kafka: localhost:9092 with registry topics
+    Environment Variables Required:
+        - CONSUL_HTTP_ADDR: Consul agent address (default: "http://localhost:8500")
+        - POSTGRES_DSN: PostgreSQL DSN (default: "postgresql://localhost:5432/onex_test")
+        - KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:9092")
 
-    Run with: pytest -m integration tests/unit/nodes/test_node_registry_effect.py
+    Running Integration Tests:
+        # Run all integration tests
+        pytest -m integration tests/integration/nodes/
+
+        # Run by backend
+        pytest -m "integration and consul" tests/integration/nodes/
+        pytest -m "integration and postgres" tests/integration/nodes/
+        pytest -m "integration and kafka" tests/integration/nodes/
+
+    Database Setup:
+        # Create schema
+        psql -d $DATABASE_NAME -f docs/schema/node_registrations.sql
+
+    Index Recommendation:
+        For stale node detection queries on `last_heartbeat`, add:
+        ```sql
+        CREATE INDEX IF NOT EXISTS idx_node_registrations_last_heartbeat
+        ON node_registrations(last_heartbeat DESC)
+        WHERE last_heartbeat IS NOT NULL;
+        ```
+
+    The minimal placeholder tests below are kept for backwards compatibility
+    with existing test invocation patterns.
     """
 
     @pytest.mark.skip(reason="Requires real Consul instance")
@@ -2537,3 +2712,649 @@ class TestNodeRegistryEffectIntegration:
         4. Verifies event received by consumer
         5. Verifies event schema and correlation ID
         """
+
+
+# =============================================================================
+# Test: Dependency Resolution Error Paths
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNodeRegistryEffectDependencyResolution:
+    """Tests for container-based dependency resolution error handling.
+
+    This test class validates error paths in:
+    - _ensure_dependencies(): Called before operations to verify handlers resolved
+    - _resolve_dependencies(): Called during initialization to get handlers from container
+
+    These tests ensure proper error messages and RuntimeError exceptions when:
+    - Dependencies not resolved (calling operations before initialization)
+    - Container doesn't have consul handler registered
+    - Container doesn't have postgres handler registered
+    - Handler resolution succeeds but returns None
+    """
+
+    async def test_ensure_dependencies_raises_when_not_resolved(self) -> None:
+        """Test _ensure_dependencies raises RuntimeError when not resolved.
+
+        This error occurs when operations are attempted before calling
+        _resolve_dependencies() or using the create() factory method.
+        """
+        container = Mock()
+        container.service_registry = Mock()
+        container.service_registry.resolve_service = AsyncMock()
+
+        node = NodeRegistryEffect(container)
+        # Do NOT call _resolve_dependencies()
+
+        with pytest.raises(RuntimeError) as exc_info:
+            node._ensure_dependencies()
+
+        error_message = str(exc_info.value)
+        assert "Dependencies not resolved" in error_message
+        assert "_resolve_dependencies()" in error_message or "create()" in error_message
+
+    async def test_ensure_dependencies_raises_when_consul_handler_none(self) -> None:
+        """Test _ensure_dependencies raises when consul_handler is None after resolution.
+
+        This scenario can occur if the container's resolve_service returns None
+        instead of raising an exception, or if the handler was explicitly set to None.
+        """
+        container = Mock()
+        container.service_registry = Mock()
+        container.service_registry.resolve_service = AsyncMock()
+
+        node = NodeRegistryEffect(container)
+        # Simulate partially resolved state where consul_handler is None
+        node._dependencies_resolved = True
+        node._consul_handler = None
+        node._db_handler = AsyncMock()  # db_handler is resolved
+
+        with pytest.raises(RuntimeError) as exc_info:
+            node._ensure_dependencies()
+
+        error_message = str(exc_info.value)
+        assert "Required handlers" in error_message
+        assert "consul_handler" in error_message or "db_handler" in error_message
+        assert "None" in error_message
+
+    async def test_ensure_dependencies_raises_when_db_handler_none(self) -> None:
+        """Test _ensure_dependencies raises when db_handler is None after resolution.
+
+        This scenario can occur if the container's resolve_service returns None
+        instead of raising an exception, or if the handler was explicitly set to None.
+        """
+        container = Mock()
+        container.service_registry = Mock()
+        container.service_registry.resolve_service = AsyncMock()
+
+        node = NodeRegistryEffect(container)
+        # Simulate partially resolved state where db_handler is None
+        node._dependencies_resolved = True
+        node._consul_handler = AsyncMock()  # consul_handler is resolved
+        node._db_handler = None
+
+        with pytest.raises(RuntimeError) as exc_info:
+            node._ensure_dependencies()
+
+        error_message = str(exc_info.value)
+        assert "Required handlers" in error_message
+        assert "consul_handler" in error_message or "db_handler" in error_message
+        assert "None" in error_message
+
+    async def test_ensure_dependencies_raises_when_both_handlers_none(self) -> None:
+        """Test _ensure_dependencies raises when both handlers are None."""
+        container = Mock()
+        container.service_registry = Mock()
+        container.service_registry.resolve_service = AsyncMock()
+
+        node = NodeRegistryEffect(container)
+        # Simulate resolved state where both handlers are None
+        node._dependencies_resolved = True
+        node._consul_handler = None
+        node._db_handler = None
+
+        with pytest.raises(RuntimeError) as exc_info:
+            node._ensure_dependencies()
+
+        error_message = str(exc_info.value)
+        assert "Required handlers" in error_message
+
+    async def test_resolve_dependencies_raises_when_consul_not_registered(self) -> None:
+        """Test _resolve_dependencies raises when consul handler not in container.
+
+        This error occurs during node initialization when the container doesn't
+        have a ProtocolConsulExecutor registered with name='consul'.
+        """
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+            ProtocolConsulExecutor,
+        )
+
+        container = Mock()
+        container.service_registry = Mock()
+
+        async def resolve_failing_consul(
+            interface_type: type,
+            name: str | None = None,
+        ) -> None:
+            """Simulate missing consul handler."""
+            if interface_type is ProtocolConsulExecutor and name == "consul":
+                raise ValueError("Service not registered: consul")
+            # Should not reach here in this test
+            raise ValueError(f"Unexpected resolution: {interface_type}, {name}")
+
+        container.service_registry.resolve_service = AsyncMock(
+            side_effect=resolve_failing_consul
+        )
+
+        node = NodeRegistryEffect(container)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await node._resolve_dependencies()
+
+        error_message = str(exc_info.value)
+        assert "consul" in error_message.lower()
+        # Removed: Check is now just for consul keyword
+        assert "name='consul'" in error_message
+
+    async def test_resolve_dependencies_raises_when_postgres_not_registered(
+        self,
+    ) -> None:
+        """Test _resolve_dependencies raises when postgres handler not in container.
+
+        This error occurs during node initialization when the container doesn't
+        have a ProtocolDbExecutor registered with name='postgres'.
+        """
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+            ProtocolConsulExecutor,
+            ProtocolDbExecutor,
+        )
+
+        consul_handler = AsyncMock()
+        container = Mock()
+        container.service_registry = Mock()
+
+        async def resolve_failing_postgres(
+            interface_type: type,
+            name: str | None = None,
+        ) -> AsyncMock:
+            """Simulate consul success, postgres failure."""
+            if interface_type is ProtocolConsulExecutor and name == "consul":
+                return consul_handler
+            if interface_type is ProtocolDbExecutor and name == "postgres":
+                # Use KeyError to simulate "service not registered" scenario
+                # (ValueError would be treated as configuration error)
+                raise KeyError("Service not registered: postgres")
+            raise KeyError(f"Unexpected resolution: {interface_type}, {name}")
+
+        container.service_registry.resolve_service = AsyncMock(
+            side_effect=resolve_failing_postgres
+        )
+
+        node = NodeRegistryEffect(container)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await node._resolve_dependencies()
+
+        error_message = str(exc_info.value)
+        assert "postgresql" in error_message.lower()
+        # Check for handler name in error message
+        assert "name='postgres'" in error_message
+
+    async def test_resolve_dependencies_skips_if_already_resolved(self) -> None:
+        """Test _resolve_dependencies is idempotent - skips if already resolved.
+
+        This ensures we don't unnecessarily re-resolve dependencies or
+        overwrite handlers that may have been customized after initial resolution.
+        """
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+            ProtocolConsulExecutor,
+            ProtocolEventBus,
+        )
+
+        resolve_call_count = 0
+        consul_handler = AsyncMock()
+        db_handler = AsyncMock()
+        event_bus = AsyncMock()
+
+        container = Mock()
+        container.service_registry = Mock()
+
+        async def resolve_and_count(
+            interface_type: type,
+            name: str | None = None,
+        ) -> AsyncMock:
+            nonlocal resolve_call_count
+            resolve_call_count += 1
+            if interface_type is ProtocolConsulExecutor and name == "consul":
+                if name == "consul":
+                    return consul_handler
+                if name == "postgres":
+                    return db_handler
+            if interface_type is ProtocolEventBus:
+                return event_bus
+            raise ValueError(f"Unknown: {interface_type}")
+
+        container.service_registry.resolve_service = AsyncMock(
+            side_effect=resolve_and_count
+        )
+
+        node = NodeRegistryEffect(container)
+
+        # First resolution
+        await node._resolve_dependencies()
+        first_call_count = resolve_call_count
+
+        # Second call should be a no-op
+        await node._resolve_dependencies()
+
+        # Call count should not increase
+        assert resolve_call_count == first_call_count
+        assert node._dependencies_resolved is True
+
+    async def test_resolve_dependencies_continues_without_event_bus(self) -> None:
+        """Test _resolve_dependencies succeeds when event bus not registered.
+
+        The event bus is optional - only needed for request_introspection operation.
+        Resolution should complete successfully even if ProtocolEventBus is not
+        registered in the container.
+        """
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+            ProtocolConsulExecutor,
+            ProtocolEventBus,
+        )
+
+        consul_handler = AsyncMock()
+        db_handler = AsyncMock()
+
+        container = Mock()
+        container.service_registry = Mock()
+
+        async def resolve_without_event_bus(
+            interface_type: type,
+            name: str | None = None,
+        ) -> AsyncMock:
+            """Simulate consul/postgres success, event bus failure."""
+            if interface_type is ProtocolConsulExecutor and name == "consul":
+                if name == "consul":
+                    return consul_handler
+                if name == "postgres":
+                    return db_handler
+            if interface_type is ProtocolEventBus:
+                raise ValueError("ProtocolEventBus not registered")
+            raise ValueError(f"Unknown: {interface_type}")
+
+        container.service_registry.resolve_service = AsyncMock(
+            side_effect=resolve_without_event_bus
+        )
+
+        node = NodeRegistryEffect(container)
+
+        # Should not raise - event bus is optional
+        await node._resolve_dependencies()
+
+        assert node._dependencies_resolved is True
+        assert node._consul_handler is consul_handler
+        assert node._db_handler is db_handler
+        assert node._event_bus is None  # Optional, not resolved
+
+    async def test_consul_handler_property_ensures_dependencies(self) -> None:
+        """Test consul_handler property calls _ensure_dependencies before access."""
+        container = Mock()
+        container.service_registry = Mock()
+        container.service_registry.resolve_service = AsyncMock()
+
+        node = NodeRegistryEffect(container)
+        # Do NOT resolve dependencies
+
+        with pytest.raises(RuntimeError) as exc_info:
+            _ = node.consul_handler  # Property access should trigger check
+
+        assert "Dependencies not resolved" in str(exc_info.value)
+
+    async def test_db_handler_property_ensures_dependencies(self) -> None:
+        """Test db_handler property calls _ensure_dependencies before access."""
+        container = Mock()
+        container.service_registry = Mock()
+        container.service_registry.resolve_service = AsyncMock()
+
+        node = NodeRegistryEffect(container)
+        # Do NOT resolve dependencies
+
+        with pytest.raises(RuntimeError) as exc_info:
+            _ = node.db_handler  # Property access should trigger check
+
+        assert "Dependencies not resolved" in str(exc_info.value)
+
+    async def test_create_factory_method_resolves_dependencies(
+        self,
+        mock_container: Mock,
+    ) -> None:
+        """Test create() factory method resolves dependencies automatically.
+
+        The create() class method is the recommended way to instantiate
+        NodeRegistryEffect. It handles dependency resolution automatically.
+        """
+        node = await NodeRegistryEffect.create(mock_container)
+
+        assert node._dependencies_resolved is True
+        assert node._consul_handler is not None
+        assert node._db_handler is not None
+        # Event bus should be resolved from mock_registry_container
+        assert node._event_bus is not None
+
+    async def test_create_factory_method_with_missing_consul_raises(self) -> None:
+        """Test create() factory raises RuntimeError when consul missing.
+
+        The factory method should propagate the RuntimeError from
+        _resolve_dependencies() when the consul handler is not registered.
+        """
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+            ProtocolConsulExecutor,
+        )
+
+        container = Mock()
+        container.service_registry = Mock()
+
+        async def resolve_missing_consul(
+            interface_type: type,
+            name: str | None = None,
+        ) -> None:
+            if interface_type is ProtocolConsulExecutor and name == "consul":
+                raise ValueError("consul not registered")
+            raise ValueError(f"Unknown: {interface_type}, {name}")
+
+        container.service_registry.resolve_service = AsyncMock(
+            side_effect=resolve_missing_consul
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await NodeRegistryEffect.create(container)
+
+        assert "consul handler" in str(exc_info.value).lower()
+
+    async def test_create_factory_method_with_missing_postgres_raises(self) -> None:
+        """Test create() factory raises RuntimeError when postgres missing.
+
+        The factory method should propagate the RuntimeError from
+        _resolve_dependencies() when the postgres handler is not registered.
+        """
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+            ProtocolConsulExecutor,
+        )
+
+        consul_handler = AsyncMock()
+        container = Mock()
+        container.service_registry = Mock()
+
+        async def resolve_missing_postgres(
+            interface_type: type,
+            name: str | None = None,
+        ) -> AsyncMock:
+            if interface_type is ProtocolConsulExecutor and name == "consul":
+                if name == "consul":
+                    return consul_handler
+                if name == "postgres":
+                    # Use KeyError to simulate "service not registered" scenario
+                    raise KeyError("postgres not registered")
+            raise KeyError(f"Unknown: {interface_type}, {name}")
+
+        container.service_registry.resolve_service = AsyncMock(
+            side_effect=resolve_missing_postgres
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await NodeRegistryEffect.create(container)
+
+        assert "postgresql" in str(exc_info.value).lower()
+
+    async def test_original_error_preserved_in_consul_resolution_failure(self) -> None:
+        """Test that original exception is preserved when consul resolution fails.
+
+        The RuntimeError should chain the original exception via 'from e' to
+        preserve the full error context for debugging.
+        """
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+            ProtocolConsulExecutor,
+        )
+
+        original_error_message = "Consul service discovery failed: timeout"
+        container = Mock()
+        container.service_registry = Mock()
+
+        async def resolve_with_original_error(
+            interface_type: type,
+            name: str | None = None,
+        ) -> None:
+            if interface_type is ProtocolConsulExecutor and name == "consul":
+                raise ConnectionError(original_error_message)
+            raise ValueError(f"Unknown: {interface_type}, {name}")
+
+        container.service_registry.resolve_service = AsyncMock(
+            side_effect=resolve_with_original_error
+        )
+
+        node = NodeRegistryEffect(container)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await node._resolve_dependencies()
+
+        # Verify error chaining
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
+        assert original_error_message in str(exc_info.value.__cause__)
+        # Original error should be mentioned in the RuntimeError message
+        assert original_error_message in str(exc_info.value)
+
+    async def test_original_error_preserved_in_postgres_resolution_failure(
+        self,
+    ) -> None:
+        """Test that original exception is preserved when postgres resolution fails.
+
+        The RuntimeError should chain the original exception via 'from e' to
+        preserve the full error context for debugging.
+        """
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+            ProtocolConsulExecutor,
+        )
+
+        consul_handler = AsyncMock()
+        original_error_message = "PostgreSQL pool exhausted: max connections reached"
+        container = Mock()
+        container.service_registry = Mock()
+
+        async def resolve_with_original_error(
+            interface_type: type,
+            name: str | None = None,
+        ) -> AsyncMock:
+            if interface_type is ProtocolConsulExecutor and name == "consul":
+                if name == "consul":
+                    return consul_handler
+                if name == "postgres":
+                    raise ConnectionError(original_error_message)
+            raise ValueError(f"Unknown: {interface_type}, {name}")
+
+        container.service_registry.resolve_service = AsyncMock(
+            side_effect=resolve_with_original_error
+        )
+
+        node = NodeRegistryEffect(container)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await node._resolve_dependencies()
+
+        # Verify error chaining
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
+        assert original_error_message in str(exc_info.value.__cause__)
+        # Original error should be mentioned in the RuntimeError message
+        assert original_error_message in str(exc_info.value)
+
+
+# =============================================================================
+# Test: Row Parsing Helpers
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestNodeRegistryEffectRowParsingHelpers:
+    """Tests for extracted row parsing helper methods.
+
+    These tests validate the helper methods extracted from _row_to_node_registration:
+    - _parse_json_field: Parses JSONB/JSON string columns
+    - _parse_datetime_field: Parses TIMESTAMP/ISO string columns
+    - _parse_optional_string_field: Parses nullable string columns
+
+    The helpers support graceful degradation with logging for malformed data.
+    """
+
+    @pytest.fixture
+    def mock_node(self) -> NodeRegistryEffect:
+        """Create a NodeRegistryEffect instance for testing helper methods."""
+        container = Mock()
+        container.service_registry = Mock()
+        container.service_registry.resolve_service = AsyncMock()
+        return NodeRegistryEffect(container)
+
+    # =========================================================================
+    # _parse_json_field tests
+    # =========================================================================
+
+    def test_parse_json_field_returns_dict_unchanged(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_json_field returns dict values unchanged."""
+        input_dict = {"key": "value", "nested": {"a": 1}}
+        result = mock_node._parse_json_field(input_dict, "test_field")
+        assert result == input_dict
+
+    def test_parse_json_field_parses_json_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_json_field parses valid JSON strings."""
+        json_string = '{"key": "value", "number": 42}'
+        result = mock_node._parse_json_field(json_string, "test_field")
+        assert result == {"key": "value", "number": 42}
+
+    def test_parse_json_field_returns_empty_dict_for_invalid_json(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_json_field returns empty dict for invalid JSON."""
+        invalid_json = "{invalid json}"
+        result = mock_node._parse_json_field(invalid_json, "test_field")
+        assert result == {}
+        assert "JSON parse failed for test_field" in caplog.text
+
+    def test_parse_json_field_returns_empty_dict_for_non_dict_json(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_json_field returns empty dict when JSON parses to non-dict."""
+        array_json = '["a", "b", "c"]'
+        result = mock_node._parse_json_field(array_json, "test_field")
+        assert result == {}
+        assert "JSON parse result not a dict for test_field" in caplog.text
+
+    def test_parse_json_field_returns_empty_dict_for_other_types(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_json_field returns empty dict for non-dict, non-string."""
+        result = mock_node._parse_json_field(12345, "test_field")
+        assert result == {}
+
+        result = mock_node._parse_json_field(None, "test_field")
+        assert result == {}
+
+    def test_parse_json_field_logs_with_field_name(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_json_field logs include field_name for debugging."""
+        mock_node._parse_json_field("{invalid}", "my_custom_field")
+        assert "my_custom_field" in caplog.text
+
+    # =========================================================================
+    # _parse_datetime_field tests
+    # =========================================================================
+
+    def test_parse_datetime_field_returns_datetime_unchanged(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_datetime_field returns datetime values unchanged."""
+        input_dt = datetime(2025, 1, 15, 12, 30, 0, tzinfo=UTC)
+        result = mock_node._parse_datetime_field(input_dt, "test_field")
+        assert result == input_dt
+
+    def test_parse_datetime_field_parses_iso_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_datetime_field parses ISO-8601 datetime strings."""
+        iso_string = "2025-01-15T12:30:00+00:00"
+        result = mock_node._parse_datetime_field(iso_string, "test_field")
+        assert result.year == 2025
+        assert result.month == 1
+        assert result.day == 15
+        assert result.hour == 12
+        assert result.minute == 30
+
+    def test_parse_datetime_field_handles_z_suffix(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_datetime_field converts 'Z' suffix to +00:00."""
+        z_string = "2025-01-15T12:30:00Z"
+        result = mock_node._parse_datetime_field(z_string, "test_field")
+        assert result.year == 2025
+        assert result.tzinfo is not None
+
+    def test_parse_datetime_field_falls_back_to_now_for_invalid(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_datetime_field falls back to current time for invalid input."""
+        before = datetime.now(UTC)
+        result = mock_node._parse_datetime_field(12345, "test_field")
+        after = datetime.now(UTC)
+
+        # Result should be between before and after
+        assert before <= result <= after
+        assert "Using datetime fallback for test_field" in caplog.text
+
+    def test_parse_datetime_field_logs_with_field_name(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_datetime_field logs include field_name for debugging."""
+        mock_node._parse_datetime_field(None, "my_datetime_field")
+        assert "my_datetime_field" in caplog.text
+
+    # =========================================================================
+    # _parse_optional_string_field tests
+    # =========================================================================
+
+    def test_parse_optional_string_field_returns_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_optional_string_field returns non-empty strings."""
+        result = mock_node._parse_optional_string_field("http://example.com/health")
+        assert result == "http://example.com/health"
+
+    def test_parse_optional_string_field_returns_none_for_empty_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_optional_string_field returns None for empty strings."""
+        result = mock_node._parse_optional_string_field("")
+        assert result is None
+
+    def test_parse_optional_string_field_returns_none_for_none(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_optional_string_field returns None for None input."""
+        result = mock_node._parse_optional_string_field(None)
+        assert result is None
+
+    def test_parse_optional_string_field_returns_none_for_non_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_optional_string_field returns None for non-string types."""
+        result = mock_node._parse_optional_string_field(12345)
+        assert result is None
+
+        result = mock_node._parse_optional_string_field({"key": "value"})
+        assert result is None
