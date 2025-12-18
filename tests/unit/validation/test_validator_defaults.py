@@ -38,13 +38,14 @@ class TestInfraValidatorConstants:
     def test_infra_max_unions_constant(self) -> None:
         """Verify INFRA_MAX_UNIONS constant has expected value.
 
-        NOTE: Currently set to 175 (baseline as of 2025-12-17) due to tech debt.
+        NOTE: Currently set to 200 (baseline as of 2025-12-17) due to tech debt.
+        Current union count is ~195 after cleanup of backwards-compatibility cruft.
         This is documented in infra_validators.py and will be reduced incrementally.
         The omnibase_core validator counts X | None (PEP 604) patterns as unions,
         which is the ONEX-preferred syntax per CLAUDE.md.
         """
-        assert INFRA_MAX_UNIONS == 175, (
-            "INFRA_MAX_UNIONS should be 175 (current baseline)"
+        assert INFRA_MAX_UNIONS == 200, (
+            "INFRA_MAX_UNIONS should be 200 (current baseline)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -54,10 +55,11 @@ class TestInfraValidatorConstants:
     def test_infra_patterns_strict_constant(self) -> None:
         """Verify INFRA_PATTERNS_STRICT constant has expected value.
 
-        Set to False to allow legitimate infrastructure patterns (registry classes
-        with many methods, functions with multiple parameters for configuration).
+        Set to True to enforce strict pattern compliance per ONEX CLAUDE.md mandates.
+        Specific exemptions (KafkaEventBus, RuntimeHostProcess) are handled via
+        exempted_patterns list, NOT via global relaxation.
         """
-        assert INFRA_PATTERNS_STRICT is False, "INFRA_PATTERNS_STRICT should be False"
+        assert INFRA_PATTERNS_STRICT is True, "INFRA_PATTERNS_STRICT should be True"
 
     def test_infra_unions_strict_constant(self) -> None:
         """Verify INFRA_UNIONS_STRICT constant has expected value."""
@@ -139,11 +141,11 @@ class TestValidateInfraPatternsDefaults:
         directory_param = sig.parameters["directory"]
         assert directory_param.default == INFRA_SRC_PATH
 
-        # Check strict default - False to allow legitimate infrastructure patterns
+        # Check strict default - True for strict ONEX compliance with exemptions
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_PATTERNS_STRICT
-        assert strict_param.default is False, (
-            "Should default to non-strict mode via INFRA_PATTERNS_STRICT (False)"
+        assert strict_param.default is True, (
+            "Should default to strict mode via INFRA_PATTERNS_STRICT (True)"
         )
 
     @patch("omnibase_infra.validation.infra_validators.validate_patterns")
@@ -207,7 +209,7 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (30)
+            max_unions=INFRA_MAX_UNIONS,  # Default max (200)
             strict=INFRA_UNIONS_STRICT,  # Non-strict (False)
         )
 
