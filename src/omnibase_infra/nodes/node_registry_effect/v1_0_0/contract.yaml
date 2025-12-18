@@ -31,10 +31,10 @@ io_operations:
       - "query"
     target: "postgresql"
   - type: "event_bus"
-    description: "Event bus operations for publishing registry state changes. Production uses Kafka; testing may use InMemoryEventBus or other protocol-compatible implementations."
+    description: "Event bus operations for publishing registry state changes. Resolved via ProtocolEventBus interface - production uses KafkaEventBus, testing uses InMemoryEventBus."
     operations:
       - "publish"
-    target: "kafka"
+    target: "protocol:ProtocolEventBus" # Protocol-based: KafkaEventBus (prod), InMemoryEventBus (test)
 dependencies:
   - name: "consul_handler"
     type: "handler"

@@ -2,11 +2,19 @@
 # Copyright (c) 2025 OmniNode Team
 """Tests for ModelNodeRegistrationMetadata model.
 
-Tests cover:
-- Tag normalization and limit enforcement (explicit error on overflow)
-- Label validation and limits
-- Environment enum handling
-- Security-related validation behaviors
+Comprehensive test coverage for ModelNodeRegistrationMetadata including:
+- Basic instantiation (minimal and full field sets)
+- Tag normalization (lowercase, whitespace, dedup, empty filtering)
+- Tag limits (max exceeded, boundary cases, after-dedup scenarios)
+- Label validation (k8s-style keys, key normalization, invalid keys)
+- Label limits (max exceeded, exactly max, value type coercion)
+- Label security (sanitized error messages)
+- Environment enum handling (enum and string input, required field)
+- Model immutability (frozen config)
+- Serialization (model_dump, model_dump_json, model_copy)
+- Extra field rejection (extra='forbid' config)
+- Optional field handling (release_channel, region)
+- Boundary inputs (single character tags/labels)
 """
 
 from __future__ import annotations
@@ -393,3 +401,191 @@ class TestModelNodeRegistrationMetadataSerialization:
         # Round-trip
         restored = ModelNodeRegistrationMetadata(**data)
         assert restored == metadata
+
+    def test_model_dump_json_string(self) -> None:
+        """Test that model_dump_json returns valid JSON string."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.PRODUCTION,
+            tags=["tag1"],
+            labels={"app": "test"},
+        )
+
+        json_str = metadata.model_dump_json()
+
+        # Verify it's a string
+        assert isinstance(json_str, str)
+
+        # Verify it can be parsed back
+        import json
+
+        data = json.loads(json_str)
+        assert data["environment"] == "production"
+        assert data["tags"] == ["tag1"]
+        assert data["labels"] == {"app": "test"}
+
+    def test_model_copy_creates_new_instance(self) -> None:
+        """Test that model_copy creates a proper copy."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            tags=["tag1"],
+        )
+
+        # Create copy with updated field
+        copied = metadata.model_copy(update={"region": "us-west-2"})
+
+        assert copied.region == "us-west-2"
+        assert metadata.region is None  # Original unchanged
+        assert copied.tags == metadata.tags
+        assert copied is not metadata
+
+
+class TestModelNodeRegistrationMetadataExtraFields:
+    """Test extra field handling (extra='forbid' config)."""
+
+    def test_extra_fields_rejected(self) -> None:
+        """Test that extra fields raise ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING,
+                unknown_field="value",  # type: ignore[call-arg]
+            )
+
+        error_msg = str(exc_info.value)
+        assert "extra" in error_msg.lower() or "unknown_field" in error_msg.lower()
+
+    def test_multiple_extra_fields_rejected(self) -> None:
+        """Test that multiple extra fields are all caught."""
+        with pytest.raises(ValidationError):
+            ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING,
+                extra1="value1",  # type: ignore[call-arg]
+                extra2="value2",  # type: ignore[call-arg]
+            )
+
+
+class TestModelNodeRegistrationMetadataOptionalFields:
+    """Test optional field handling (release_channel, region)."""
+
+    def test_release_channel_accepts_any_string(self) -> None:
+        """Test that release_channel accepts various string values."""
+        channels = ["stable", "canary", "beta", "alpha", "rc1", "custom-channel"]
+        for channel in channels:
+            metadata = ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING,
+                release_channel=channel,
+            )
+            assert metadata.release_channel == channel
+
+    def test_release_channel_empty_string(self) -> None:
+        """Test that release_channel accepts empty string."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            release_channel="",
+        )
+        assert metadata.release_channel == ""
+
+    def test_region_accepts_any_string(self) -> None:
+        """Test that region accepts various string values."""
+        regions = ["us-east-1", "eu-west-1", "ap-southeast-2", "local", "custom"]
+        for region in regions:
+            metadata = ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING,
+                region=region,
+            )
+            assert metadata.region == region
+
+    def test_region_empty_string(self) -> None:
+        """Test that region accepts empty string."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            region="",
+        )
+        assert metadata.region == ""
+
+
+class TestModelNodeRegistrationMetadataLabelValueCoercion:
+    """Test label value type coercion."""
+
+    def test_label_integer_value_coerced_to_string(self) -> None:
+        """Test that integer label values are coerced to strings."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            labels={"count": 123},  # type: ignore[dict-item]
+        )
+        assert metadata.labels["count"] == "123"
+        assert isinstance(metadata.labels["count"], str)
+
+    def test_label_float_value_coerced_to_string(self) -> None:
+        """Test that float label values are coerced to strings."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            labels={"ratio": 3.14},  # type: ignore[dict-item]
+        )
+        assert metadata.labels["ratio"] == "3.14"
+        assert isinstance(metadata.labels["ratio"], str)
+
+    def test_label_boolean_value_coerced_to_string(self) -> None:
+        """Test that boolean label values are coerced to strings."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            labels={"enabled": True, "disabled": False},  # type: ignore[dict-item]
+        )
+        assert metadata.labels["enabled"] == "True"
+        assert metadata.labels["disabled"] == "False"
+
+
+class TestModelNodeRegistrationMetadataBoundaryInputs:
+    """Test boundary inputs for tags and labels."""
+
+    def test_single_character_tag(self) -> None:
+        """Test that single character tags are valid."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            tags=["a", "b", "c"],
+        )
+        assert metadata.tags == ["a", "b", "c"]
+
+    def test_single_character_label_key(self) -> None:
+        """Test that single character label keys are valid."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            labels={"a": "value1", "b": "value2"},
+        )
+        assert metadata.labels["a"] == "value1"
+        assert metadata.labels["b"] == "value2"
+
+    def test_numeric_single_character_label_key(self) -> None:
+        """Test that numeric single character label keys are valid."""
+        metadata = ModelNodeRegistrationMetadata(
+            environment=EnumEnvironment.TESTING,
+            labels={"1": "value1", "9": "value9"},
+        )
+        assert metadata.labels["1"] == "value1"
+        assert metadata.labels["9"] == "value9"
+
+
+class TestModelNodeRegistrationMetadataEnvironmentStringInput:
+    """Test environment field with string input."""
+
+    def test_environment_accepts_string_value(self) -> None:
+        """Test that environment accepts string values matching enum."""
+        # Pydantic should coerce strings to enum values
+        metadata = ModelNodeRegistrationMetadata(
+            environment="production",  # type: ignore[arg-type]
+        )
+        assert metadata.environment == EnumEnvironment.PRODUCTION
+
+    def test_environment_accepts_all_string_values(self) -> None:
+        """Test that all environment string values are accepted."""
+        for env in EnumEnvironment:
+            metadata = ModelNodeRegistrationMetadata(
+                environment=env.value,  # type: ignore[arg-type]
+            )
+            assert metadata.environment == env
+
+    def test_environment_invalid_string_rejected(self) -> None:
+        """Test that invalid environment string raises error."""
+        with pytest.raises(ValidationError):
+            ModelNodeRegistrationMetadata(
+                environment="invalid_environment",  # type: ignore[arg-type]
+            )
