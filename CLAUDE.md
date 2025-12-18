@@ -21,6 +21,30 @@
 | Complex workflows | `agent-onex-coordinator` → `agent-workflow-coordinator` |
 | Multi-domain | `agent-ticket-manager` for planning, orchestrators for execution |
 
+## 🚫 NO BACKGROUND AGENTS
+
+**NEVER use `run_in_background: true` for Task tool invocations.**
+
+- All agents run in **foreground** (blocking until complete)
+- Parallel execution is achieved by calling multiple Task tools in a **single message** - they run concurrently and all complete before continuing
+- Background + polling wastes tokens and provides no benefit
+- If you need parallelism, launch multiple foreground agents in one turn
+
+## 🔮 USE POLYMORPHIC AGENTS
+
+**Prefer `subagent_type: "polymorphic-agent"` for all development tasks.**
+
+The polymorphic-agent is the primary agent for ONEX development workflows:
+- Intelligent routing and multi-agent orchestration
+- ONEX 4-node architecture navigation (Effect/Compute/Reducer/Orchestrator)
+- Workflow coordination with quality gates
+
+**Other specialized subagent_types:**
+- `Explore` - Fast codebase exploration and search
+- `Plan` - Architecture planning and implementation design
+- `claude-code-guide` - Claude Code documentation queries
+- `general-purpose` - Fallback for non-ONEX tasks
+
 ## 🚫 CRITICAL POLICY: NO BACKWARDS COMPATIBILITY
 
 - Breaking changes are always acceptable

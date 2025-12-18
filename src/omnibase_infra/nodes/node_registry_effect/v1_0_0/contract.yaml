@@ -31,7 +31,7 @@ io_operations:
       - "query"
     target: "postgresql"
   - type: "event_bus"
-    description: "Kafka event bus operations for publishing registry state changes."
+    description: "Event bus operations for publishing registry state changes. Production uses Kafka; testing may use InMemoryEventBus or other protocol-compatible implementations."
     operations:
       - "publish"
     target: "kafka"
@@ -48,9 +48,10 @@ dependencies:
     description: "PostgreSQL database handler for persistent state operations."
   - name: "event_bus"
     type: "event_bus"
-    class_name: "KafkaEventBus"
-    module: "omnibase_infra.event_bus.kafka_event_bus"
-    description: "Kafka event bus for publishing registry state change events. Used for request_introspection operation to broadcast introspection requests across the cluster."
+    protocol: "ProtocolEventBus"
+    production_class: "KafkaEventBus"
+    production_module: "omnibase_infra.event_bus.kafka_event_bus"
+    description: "Event bus for publishing registry state change events (introspection requests). Resolved via ProtocolEventBus - production uses KafkaEventBus, testing uses InMemoryEventBus."
 error_handling:
   retry_policy:
     max_retries: 3

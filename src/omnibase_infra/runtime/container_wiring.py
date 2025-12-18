@@ -45,8 +45,10 @@ Node Registration:
     )
 
     # Step 3: Create node (resolves dependencies from container)
+    # Note: create() is a factory method that constructs the node AND calls
+    # initialize() internally, so the returned node is ready to use immediately.
     node = await NodeRegistryEffect.create(container)
-    await node.initialize()
+    # node is now fully initialized and ready for execute() calls
     ```
 
 Example Usage:
@@ -360,12 +362,12 @@ async def get_or_create_policy_registry(
 ) -> PolicyRegistry:
     """Get PolicyRegistry from container, creating if not registered.
 
-    Helper function for backwards compatibility during migration.
+    Convenience function that provides lazy initialization semantics.
     Attempts to resolve PolicyRegistry from container, and if not found,
     creates and registers a new instance.
 
-    This function is useful during incremental migration when some code paths
-    may not have called wire_infrastructure_services() yet.
+    This function is useful when code paths may not have called
+    wire_infrastructure_services() yet or when lazy initialization is desired.
 
     Note: This function is async because ModelONEXContainer.service_registry methods
     (resolve_service and register_instance) are async in omnibase_core 0.4.x+.

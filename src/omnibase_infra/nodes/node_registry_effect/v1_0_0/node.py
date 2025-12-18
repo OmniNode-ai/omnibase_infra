@@ -18,6 +18,26 @@ Operations:
     - discover: Query registered nodes with filters
     - request_introspection: Publish introspection request to event bus
 
+Terminology - register vs resolve:
+    This module deals with two distinct concepts that use similar terminology:
+
+    1. **External Service Registration** (this node's purpose):
+       - Operations: register, deregister, discover
+       - Target: Consul (service discovery) and PostgreSQL (persistent registry)
+       - Purpose: Allow distributed services to find each other at runtime
+       - Example: `await node.execute(ModelRegistryRequest(operation="register", ...))`
+
+    2. **DI Container Resolution** (used internally for dependencies):
+       - Method: `container.service_registry.resolve_service(ProtocolType)`
+       - Target: ModelONEXContainer's internal service registry
+       - Purpose: Wire up internal dependencies at startup/construction time
+       - Example: `handler = await container.service_registry.resolve_service(
+           ProtocolEnvelopeExecutor, name="consul")`
+
+    These are orthogonal concepts - this node uses DI resolution internally
+    to obtain its handler dependencies, then provides external registration
+    services to callers.
+
 Handler Interface (duck typing):
     consul_handler and db_handler must implement:
         async def execute(self, envelope: EnvelopeDict) -> ResultDict
@@ -122,8 +142,37 @@ VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+([-.+][a-zA-Z0-9._-]*)?$")
 
 # URL pattern for health endpoints (basic validation, not comprehensive)
 # Allows: http:// and https:// URLs with standard characters
+# Supports: hostnames, IP addresses (IPv4 and IPv6), ports, paths with query strings
+# Examples:
+#   - http://localhost:8080/health
+#   - https://api.example.com/v1/status
+#   - http://192.168.1.1:3000/healthz?verbose=true
+#   - https://my-service.internal/health-check
+#   - http://my_service.local:8080/health (underscores allowed)
+#   - http://[::1]:8080/health (IPv6 loopback)
+#   - http://[2001:db8::1]:8080/health (IPv6 with port)
+#
+# Pattern design:
+#   - Protocol: http:// or https://
+#   - Host: Either IPv6 in brackets, or standard hostname/IPv4
+#   - IPv6: [hex:colon:notation] - allows compressed form (::)
+#   - Hostname: alphanumeric start, can contain hyphens, underscores, dots
+#   - Port: Optional, 1-5 digits (allows invalid ports > 65535, but that's fine for validation)
+#   - Path: RFC 3986 compliant characters including query string and fragment
 URL_PATTERN = re.compile(
-    r"^https?://[a-zA-Z0-9][-a-zA-Z0-9.:]*[a-zA-Z0-9](:[0-9]+)?(/[-a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=%]*)?$"
+    r"^https?://"  # Protocol (required)
+    r"(?:"
+    # IPv6 address in brackets: [2001:db8::1] or [::1]
+    r"\[[a-fA-F0-9:]+\]"
+    r"|"
+    # Hostname or IPv4: must start with alphanumeric
+    # Can contain: alphanumeric, hyphens, underscores, dots
+    # Examples: localhost, my-service.internal, my_service.local, 192.168.1.1
+    r"[a-zA-Z0-9][a-zA-Z0-9._-]*"
+    r")"
+    r"(:[0-9]{1,5})?"  # Optional port (1-5 digits)
+    r"(/[-a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=%]*)?"  # Optional path with query string
+    r"$"
 )
 
 # =============================================================================
@@ -133,6 +182,98 @@ URL_PATTERN = re.compile(
 # Default performance threshold for slow operation warnings (milliseconds)
 # Used as fallback when config not provided
 DEFAULT_SLOW_OPERATION_THRESHOLD_MS: float = 1000.0
+
+# =============================================================================
+# ERROR SANITIZATION PATTERNS
+# =============================================================================
+
+# Patterns for redacting sensitive information from error messages.
+# Order matters: more specific patterns should come before generic ones.
+# This list is used by _sanitize_error() to prevent credential leakage.
+#
+# Pattern format: (regex_pattern, replacement_string)
+#
+# JWT Pattern Design:
+#   Real JWTs have three base64url-encoded segments: header.payload.signature
+#   - Header: MUST contain "alg" claim (RFC 7515), base64url encodes to contain "hbGci"
+#     Common headers: {"alg":"HS256"}, {"alg":"RS256","typ":"JWT"}
+#   - Payload: Contains claims, typically starts with {"sub":, {"iss":, etc.
+#   - Signature: Varies by algorithm (HS256=43 chars, RS256=342 chars, ES256=86 chars)
+#
+#   The tightened pattern requires:
+#   - Header starting with 'eyJ' (base64 for '{"') followed by 'hbGci' (base64 for '"alg"')
+#     or reasonable header content (15+ chars after eyJ to cover minimal {"alg":"HS256"})
+#   - Payload starting with 'eyJ' with 15+ additional chars (minimal claims)
+#   - Signature with 40+ chars (covers HS256=43, ES256=86, RS256=342)
+#
+#   False positive reduction:
+#   - Increased minimum lengths for all segments
+#   - Header pattern more specific (requires eyJ followed by substantial content)
+#   - Signature minimum increased to 40 chars (real signatures are rarely shorter)
+#   - Word boundary check ensures we match complete tokens, not substrings
+SENSITIVE_PATTERNS: tuple[tuple[str, str], ...] = (
+    # Private keys and certificates (multiline patterns)
+    (
+        r"-----BEGIN\s+[A-Z\s]+KEY-----[\s\S]*?-----END\s+[A-Z\s]+KEY-----",
+        "[REDACTED_PRIVATE_KEY]",
+    ),
+    (
+        r"-----BEGIN\s+CERTIFICATE-----[\s\S]*?-----END\s+CERTIFICATE-----",
+        "[REDACTED_CERTIFICATE]",
+    ),
+    # SSH keys
+    (r"ssh-rsa\s+[A-Za-z0-9+/=]+", "[REDACTED_SSH_KEY]"),
+    (r"ssh-ed25519\s+[A-Za-z0-9+/=]+", "[REDACTED_SSH_KEY]"),
+    # JWT tokens (header.payload.signature) - tightened to reduce false positives
+    # Header: eyJ + 15+ chars (covers minimal {"alg":"HS256"} = 18 chars base64)
+    # Payload: eyJ + 15+ chars (covers minimal claims like {"sub":"x"} = 12+ chars)
+    # Signature: 40+ chars (HS256=43, ES256=86, RS256=342 - none are < 40)
+    # Word boundary \b ensures we match complete tokens
+    (
+        r"\beyJ[A-Za-z0-9_-]{15,}\.eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{40,}\b",
+        "[REDACTED_JWT]",
+    ),
+    # Password variants with various delimiters
+    (r"password[=:\"'\s]+\S+", "password=[REDACTED]"),
+    (r"passwd[=:\"'\s]+\S+", "passwd=[REDACTED]"),
+    (r"pwd[=:\"'\s]+\S+", "pwd=[REDACTED]"),
+    # Token variants
+    (r"access_token[=:\"'\s]+\S+", "access_token=[REDACTED]"),
+    (r"refresh_token[=:\"'\s]+\S+", "refresh_token=[REDACTED]"),
+    (r"token[=:\"'\s]+\S+", "token=[REDACTED]"),
+    # API key variants
+    (r"x-api-key[=:\"'\s]+\S+", "x-api-key=[REDACTED]"),
+    (r"api[-_]?key[=:\"'\s]+\S+", "api_key=[REDACTED]"),
+    (r"apikey[=:\"'\s]+\S+", "apikey=[REDACTED]"),
+    # Secret variants
+    (r"client[-_]?secret[=:\"'\s]+\S+", "client_secret=[REDACTED]"),
+    (r"secret[-_]?key[=:\"'\s]+\S+", "secret_key=[REDACTED]"),
+    (r"secret[=:\"'\s]+\S+", "secret=[REDACTED]"),
+    # Credentials and auth
+    (r"credential[s]?[=:\"'\s]+\S+", "credentials=[REDACTED]"),
+    (r"auth[-_]?token[=:\"'\s]+\S+", "auth_token=[REDACTED]"),
+    (r"authorization[=:\"'\s]+\S+", "authorization=[REDACTED]"),
+    (r"auth[=:\"'\s]+\S+", "auth=[REDACTED]"),
+    # Bearer tokens
+    (r"bearer\s+[A-Za-z0-9._-]+", "bearer [REDACTED]"),
+    # Connection string credentials (user:pass@host)
+    (r"://[^/:]+:[^/@]+@", "://[REDACTED]:[REDACTED]@"),
+    # AWS access keys (AKIA followed by 16 alphanumeric chars)
+    (r"AKIA[A-Z0-9]{16}", "[REDACTED_AWS_KEY]"),
+    # AWS secret keys
+    (
+        r"aws[-_]?secret[-_]?access[-_]?key[=:\"'\s]+\S+",
+        "aws_secret=[REDACTED]",
+    ),
+    # GCP/Azure style service account JSON keys
+    (r'"private_key"\s*:\s*"[^"]+"', '"private_key": "[REDACTED]"'),
+    (r'"client_secret"\s*:\s*"[^"]+"', '"client_secret": "[REDACTED]"'),
+    # Database connection strings with passwords
+    (r"(postgres|mysql|mongodb|redis)://[^:]+:[^@]+@", r"\1://[REDACTED]@"),
+    # Generic long alphanumeric tokens (40+ chars, likely tokens/keys)
+    # This is intentionally last and broad to catch anything missed
+    (r"[A-Za-z0-9+/]{40,}={0,2}", "[REDACTED_TOKEN]"),
+)
 
 
 class NodeRegistryEffect(MixinAsyncCircuitBreaker):
@@ -193,12 +334,25 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         ```
 
     Key Operations:
-        - **register()**: Dual registration to Consul AND PostgreSQL in parallel.
-          Use when a node starts up and needs to announce itself.
-        - **resolve()** (via discover): Query registered nodes from PostgreSQL.
-          Use for service discovery and dependency resolution.
-        - **deregister()**: Remove from both Consul and PostgreSQL.
+        - **register**: Dual registration to Consul AND PostgreSQL in parallel.
+          Use when a node starts up and needs to announce itself to external
+          service registries. This is EXTERNAL SERVICE REGISTRATION, not DI.
+        - **discover**: Query registered nodes from PostgreSQL.
+          Use for service discovery to find other running nodes.
+        - **deregister**: Remove from both Consul and PostgreSQL.
           Use during graceful shutdown.
+
+    Important - register vs resolve distinction:
+        - **register** (this node's operation): Writes node metadata to external
+          service registries (Consul, PostgreSQL) so other services can discover it.
+          This is runtime service registration for distributed systems.
+        - **resolve** (DI container method): Retrieves service instances from the
+          ModelONEXContainer's service_registry. This is compile-time/startup
+          dependency injection for internal service wiring.
+
+        Do NOT confuse these two concepts:
+        - `await node.execute(ModelRegistryRequest(operation="register", ...))` - external registration
+        - `await container.service_registry.resolve_service(SomeProtocol)` - DI resolution
     """
 
     def __init__(
@@ -216,13 +370,23 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 Uses defaults if not provided.
 
         Note:
-            This is an async-style __init__ pattern. The actual dependency
-            resolution happens in _resolve_dependencies() which must be
-            awaited after construction. Use the async create() factory
-            for cleaner usage:
+            The __init__ method is synchronous (NOT awaitable). However, this
+            node requires async initialization for dependency resolution. The
+            actual dependency resolution happens in _resolve_dependencies()
+            which must be awaited after construction.
+
+            Recommended: Use the async create() factory method which handles
+            both construction and initialization:
 
             ```python
             node = await NodeRegistryEffect.create(container, config)
+            ```
+
+            Alternative: Manual two-phase initialization:
+
+            ```python
+            node = NodeRegistryEffect(container, config)  # Sync construction
+            await node.initialize()  # Async initialization
             ```
         """
         self._container = container
@@ -323,13 +487,15 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         except (KeyError, LookupError, ServiceResolutionError) as e:
             # Service not registered - this is the expected error type when
             # a service simply hasn't been registered in the container
+            # Sanitize error message to prevent credential leakage
+            sanitized_msg = self._sanitize_error(e)
             logger.debug(
                 f"Handler '{handler_name}' not registered in container",
                 extra={
                     "handler_name": handler_name,
                     "handler_description": handler_description,
                     "error_type": type(e).__name__,
-                    "error_message": str(e),
+                    "error_message": sanitized_msg,
                 },
             )
             raise RuntimeError(
@@ -342,34 +508,38 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         except (ValueError, TypeError) as e:
             # Configuration or type mismatch errors - these indicate a problem
             # with the service configuration rather than missing registration
+            # Sanitize error message to prevent credential leakage
+            sanitized_msg = self._sanitize_error(e)
             logger.warning(
                 f"Configuration error resolving {handler_description}",
                 extra={
                     "handler_name": handler_name,
                     "handler_description": handler_description,
                     "error_type": type(e).__name__,
-                    "error_message": str(e),
+                    "error_message": sanitized_msg,
                 },
             )
             raise RuntimeError(
                 f"Configuration error resolving {handler_description} "
-                f"(name='{handler_name}'): {type(e).__name__}: {e}"
+                f"(name='{handler_name}'): {sanitized_msg}"
             ) from e
 
         except Exception as e:
             # Unexpected error - log at warning level for investigation
+            # Sanitize error message to prevent credential leakage
+            sanitized_msg = self._sanitize_error(e)
             logger.warning(
                 f"Unexpected error resolving {handler_description}",
                 extra={
                     "handler_name": handler_name,
                     "handler_description": handler_description,
                     "error_type": type(e).__name__,
-                    "error_message": str(e),
+                    "error_message": sanitized_msg,
                 },
             )
             raise RuntimeError(
                 f"Unexpected error resolving {handler_description} "
-                f"(name='{handler_name}'): {type(e).__name__}: {e}"
+                f"(name='{handler_name}'): {sanitized_msg}"
             ) from e
 
     async def _resolve_optional_service(
@@ -414,19 +584,23 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         except (KeyError, LookupError, ServiceResolutionError) as e:
             # Service not registered - this is expected for optional services
+            # Sanitize error message to prevent credential leakage
+            sanitized_msg = self._sanitize_error(e)
             logger.debug(
                 f"{service_description} not registered in container; {fallback_message}",
                 extra={
                     "service_name": service_name,
                     "service_description": service_description,
                     "error_type": type(e).__name__,
-                    "error_message": str(e),
+                    "error_message": sanitized_msg,
                 },
             )
             return None
 
         except (ValueError, TypeError) as e:
             # Configuration error for optional service - log warning but don't fail
+            # Sanitize error message to prevent credential leakage
+            sanitized_msg = self._sanitize_error(e)
             logger.warning(
                 f"Configuration error resolving optional {service_description}; "
                 f"{fallback_message}",
@@ -434,7 +608,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     "service_name": service_name,
                     "service_description": service_description,
                     "error_type": type(e).__name__,
-                    "error_message": str(e),
+                    "error_message": sanitized_msg,
                 },
             )
             return None
@@ -442,6 +616,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         except Exception as e:
             # Unexpected error for optional service - log warning but don't fail
             # This allows graceful degradation when there are infrastructure issues
+            # Sanitize error message to prevent credential leakage
+            sanitized_msg = self._sanitize_error(e)
             logger.warning(
                 f"Unexpected error resolving optional {service_description}; "
                 f"{fallback_message}",
@@ -449,7 +625,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     "service_name": service_name,
                     "service_description": service_description,
                     "error_type": type(e).__name__,
-                    "error_message": str(e),
+                    "error_message": sanitized_msg,
                 },
             )
             return None
@@ -520,27 +696,10 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         """Sanitize exception message for safe logging and response.
 
         Removes potential sensitive information and includes exception type.
-        Redacts patterns like passwords, tokens, API keys, and connection strings.
+        Uses SENSITIVE_PATTERNS module constant for redaction patterns.
 
-        Security Considerations:
-            This method is critical for preventing credential leakage in error messages.
-            All error messages that may be exposed to clients or logged MUST pass through
-            this sanitization. The patterns are intentionally broad to catch variations.
-
-            Covered credential types:
-            - Password/passwd/pwd variants with various delimiters
-            - Tokens (API tokens, access tokens, refresh tokens)
-            - API keys (api_key, apikey, x-api-key)
-            - Secrets (client_secret, secret_key)
-            - Credentials/auth values
-            - Bearer tokens in Authorization headers
-            - Connection string credentials (user:pass@host)
-            - AWS access keys (AKIA pattern)
-            - GCP/Azure service account keys (long JSON or base64)
-            - Private keys (BEGIN PRIVATE KEY markers)
-            - SSH keys (ssh-rsa, ssh-ed25519 patterns)
-            - JWT tokens (eyJ pattern)
-            - Generic long alphanumeric tokens (40+ chars)
+        See SENSITIVE_PATTERNS constant for full list of covered credential types
+        and pattern design documentation.
 
         Args:
             exception: The exception to sanitize
@@ -548,81 +707,158 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         Returns:
             Sanitized error string in format: "{ExceptionType}: {sanitized_message}"
         """
-        exception_type = type(exception).__name__
         message = str(exception)
+        sanitized = self._redact_sensitive_patterns(message)
+        sanitized = self._truncate_message(sanitized)
+        return f"{type(exception).__name__}: {sanitized}"
 
-        # Redact potential secrets using case-insensitive patterns
-        # Order matters: more specific patterns should come before generic ones
-        sensitive_patterns = [
-            # Private keys and certificates (multiline patterns)
-            (
-                r"-----BEGIN\s+[A-Z\s]+KEY-----[\s\S]*?-----END\s+[A-Z\s]+KEY-----",
-                "[REDACTED_PRIVATE_KEY]",
-            ),
-            (
-                r"-----BEGIN\s+CERTIFICATE-----[\s\S]*?-----END\s+CERTIFICATE-----",
-                "[REDACTED_CERTIFICATE]",
-            ),
-            # SSH keys
-            (r"ssh-rsa\s+[A-Za-z0-9+/=]+", "[REDACTED_SSH_KEY]"),
-            (r"ssh-ed25519\s+[A-Za-z0-9+/=]+", "[REDACTED_SSH_KEY]"),
-            # JWT tokens (header.payload.signature)
-            (
-                r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
-                "[REDACTED_JWT]",
-            ),
-            # Password variants with various delimiters
-            (r"password[=:\"'\s]+\S+", "password=[REDACTED]"),
-            (r"passwd[=:\"'\s]+\S+", "passwd=[REDACTED]"),
-            (r"pwd[=:\"'\s]+\S+", "pwd=[REDACTED]"),
-            # Token variants
-            (r"access_token[=:\"'\s]+\S+", "access_token=[REDACTED]"),
-            (r"refresh_token[=:\"'\s]+\S+", "refresh_token=[REDACTED]"),
-            (r"token[=:\"'\s]+\S+", "token=[REDACTED]"),
-            # API key variants
-            (r"x-api-key[=:\"'\s]+\S+", "x-api-key=[REDACTED]"),
-            (r"api[-_]?key[=:\"'\s]+\S+", "api_key=[REDACTED]"),
-            (r"apikey[=:\"'\s]+\S+", "apikey=[REDACTED]"),
-            # Secret variants
-            (r"client[-_]?secret[=:\"'\s]+\S+", "client_secret=[REDACTED]"),
-            (r"secret[-_]?key[=:\"'\s]+\S+", "secret_key=[REDACTED]"),
-            (r"secret[=:\"'\s]+\S+", "secret=[REDACTED]"),
-            # Credentials and auth
-            (r"credential[s]?[=:\"'\s]+\S+", "credentials=[REDACTED]"),
-            (r"auth[-_]?token[=:\"'\s]+\S+", "auth_token=[REDACTED]"),
-            (r"authorization[=:\"'\s]+\S+", "authorization=[REDACTED]"),
-            (r"auth[=:\"'\s]+\S+", "auth=[REDACTED]"),
-            # Bearer tokens
-            (r"bearer\s+[A-Za-z0-9._-]+", "bearer [REDACTED]"),
-            # Connection string credentials (user:pass@host)
-            (r"://[^/:]+:[^/@]+@", "://[REDACTED]:[REDACTED]@"),
-            # AWS access keys (AKIA followed by 16 alphanumeric chars)
-            (r"AKIA[A-Z0-9]{16}", "[REDACTED_AWS_KEY]"),
-            # AWS secret keys
-            (
-                r"aws[-_]?secret[-_]?access[-_]?key[=:\"'\s]+\S+",
-                "aws_secret=[REDACTED]",
-            ),
-            # GCP/Azure style service account JSON keys
-            (r'"private_key"\s*:\s*"[^"]+"', '"private_key": "[REDACTED]"'),
-            (r'"client_secret"\s*:\s*"[^"]+"', '"client_secret": "[REDACTED]"'),
-            # Database connection strings with passwords
-            (r"(postgres|mysql|mongodb|redis)://[^:]+:[^@]+@", r"\1://[REDACTED]@"),
-            # Generic long alphanumeric tokens (40+ chars, likely tokens/keys)
-            # This is intentionally last and broad to catch anything missed
-            (r"[A-Za-z0-9+/]{40,}={0,2}", "[REDACTED_TOKEN]"),
-        ]
+    def _redact_sensitive_patterns(self, message: str) -> str:
+        """Apply all sensitive pattern redactions to a message.
 
-        for pattern, replacement in sensitive_patterns:
+        Uses SENSITIVE_PATTERNS module constant which contains patterns ordered
+        from most specific to most generic for proper redaction precedence.
+
+        Args:
+            message: The message to redact sensitive information from
+
+        Returns:
+            Message with all sensitive patterns redacted
+        """
+        for pattern, replacement in SENSITIVE_PATTERNS:
             message = re.sub(
                 pattern, replacement, message, flags=re.IGNORECASE | re.DOTALL
             )
+        return message
 
-        # Truncate if too long (prevents DoS via large error messages)
-        if len(message) > 500:
-            message = message[:497] + "..."
+    def _truncate_message(self, message: str, max_length: int = 500) -> str:
+        """Truncate message if too long to prevent DoS via large error messages.
 
-        return f"{exception_type}: {message}"
+        Args:
+            message: The message to truncate
+            max_length: Maximum allowed length (default: 500)
+
+        Returns:
+            Original message if within limit, otherwise truncated with "..."
+        """
+        if len(message) > max_length:
+            return message[: max_length - 3] + "..."
+        return message
+
+    # =========================================================================
+    # Row Parsing Helpers
+    # =========================================================================
+    # These methods are extracted from _row_to_node_registration for:
+    # - Improved testability (can be tested independently)
+    # - Reuse across different row-parsing contexts
+    # - Better separation of concerns
+
+    def _parse_json_field(
+        self,
+        value: JsonValue,
+        field_name: str,
+        correlation_id: UUID | None = None,
+    ) -> dict[str, JsonValue]:
+        """Parse a JSON field from database row to a dictionary.
+
+        Handles both pre-parsed dict values (from JSONB columns) and
+        string values that need JSON deserialization.
+
+        Args:
+            value: The raw value from database (dict or JSON string)
+            field_name: Name of the field for logging context
+            correlation_id: Optional correlation ID for distributed tracing
+
+        Returns:
+            Parsed dictionary, or empty dict if parsing fails
+
+        Note:
+            Logs warnings for parse failures but does not raise exceptions.
+            This supports graceful degradation when database contains
+            malformed data.
+        """
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return cast(dict[str, JsonValue], parsed)
+                logger.warning(
+                    f"JSON parse result not a dict for {field_name}",
+                    extra={
+                        "correlation_id": (
+                            str(correlation_id) if correlation_id else None
+                        ),
+                        "field_name": field_name,
+                    },
+                )
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    f"JSON parse failed for {field_name}: {type(e).__name__}",
+                    extra={
+                        "correlation_id": (
+                            str(correlation_id) if correlation_id else None
+                        ),
+                        "field_name": field_name,
+                        "error_type": type(e).__name__,
+                    },
+                )
+        return {}
+
+    def _parse_datetime_field(
+        self,
+        value: JsonValue,
+        field_name: str,
+        correlation_id: UUID | None = None,
+    ) -> datetime:
+        """Parse a datetime field from database row.
+
+        Handles datetime objects (from TIMESTAMP columns) and ISO-8601
+        string representations.
+
+        Args:
+            value: The raw value from database (datetime or ISO string)
+            field_name: Name of the field for logging context
+            correlation_id: Optional correlation ID for distributed tracing
+
+        Returns:
+            Parsed datetime, or current UTC time as fallback
+
+        Note:
+            Falls back to current time when value cannot be parsed.
+            This supports graceful degradation while ensuring the model
+            always has a valid datetime.
+        """
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            # Handle both 'Z' suffix and explicit timezone offset
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        # Fallback to current time when no valid datetime provided
+        logger.warning(
+            f"Using datetime fallback for {field_name}",
+            extra={
+                "correlation_id": str(correlation_id) if correlation_id else None,
+                "field_name": field_name,
+            },
+        )
+        return datetime.now(UTC)
+
+    def _parse_optional_string_field(
+        self,
+        value: JsonValue,
+    ) -> str | None:
+        """Parse an optional string field from database row.
+
+        Args:
+            value: The raw value from database
+
+        Returns:
+            The string value if valid and non-empty, None otherwise
+        """
+        if isinstance(value, str) and value:
+            return value
+        return None
 
     def _validate_node_id(
         self,
@@ -899,8 +1135,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         if isinstance(obj, BaseModel):
             try:
                 return cast(dict[str, JsonValue], obj.model_dump(mode="json"))
-            except Exception:
-                # If model_dump fails, try dict conversion
+            except (TypeError, ValueError, AttributeError, RecursionError):
+                # If model_dump fails (type error, circular reference, etc.),
+                # fall back to string representation
                 return str(obj)
 
         # Fallback: string representation with warning indicator
@@ -1127,21 +1364,32 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         """Initialize the effect node and verify backend connectivity.
 
         This method ensures all dependencies are resolved before marking the node
-        as initialized. It is idempotent - calling multiple times is safe.
+        as initialized. It is idempotent - calling multiple times is safe and
+        will not re-resolve dependencies or re-log initialization messages.
 
         Behavior:
+            - If already initialized, returns immediately (no-op for idempotency)
             - If dependencies have not been resolved, calls _resolve_dependencies()
             - Sets _initialized flag to True
-            - Safe to call multiple times (idempotent)
+            - Logs initialization status including event bus availability
+
+        Idempotency Guarantees:
+            - Multiple calls to initialize() are safe and efficient
+            - Dependencies are resolved only once (tracked by _dependencies_resolved)
+            - Initialization logging occurs only on first successful initialization
+            - No side effects on subsequent calls
 
         Raises:
-            RuntimeError: If dependency resolution fails (missing handlers).
+            RuntimeError: If dependency resolution fails (missing required handlers).
+                Required handlers: consul (ProtocolEnvelopeExecutor),
+                postgres (ProtocolEnvelopeExecutor).
+                Optional: ProtocolEventBus (for request_introspection operation).
 
         Example:
             ```python
             node = NodeRegistryEffect(container, config)
             await node.initialize()  # Resolves dependencies and initializes
-            await node.initialize()  # Safe to call again (no-op for dependencies)
+            await node.initialize()  # Safe to call again (no-op, returns immediately)
             ```
 
         Note:
@@ -1149,17 +1397,69 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             create() factory method, which handles both construction and
             initialization in a single async call.
         """
+        # Idempotency: skip if already initialized
+        if self._initialized:
+            logger.debug(
+                "NodeRegistryEffect.initialize() called but already initialized, skipping",
+                extra={"event_type": "node_initialize_idempotent_skip"},
+            )
+            return
+
+        logger.debug(
+            "NodeRegistryEffect initialization starting",
+            extra={"event_type": "node_initialize_start"},
+        )
+
         # Ensure dependencies are resolved before initializing
         # This makes the node resilient to incorrect usage patterns where
         # users forget to call _resolve_dependencies() before initialize()
         if not self._dependencies_resolved:
+            logger.debug(
+                "Dependencies not yet resolved, calling _resolve_dependencies()",
+                extra={"event_type": "node_initialize_resolve_deps"},
+            )
             await self._resolve_dependencies()
 
         self._initialized = True
-        logger.info("NodeRegistryEffect initialized")
+
+        # Log initialization status including optional service availability
+        event_bus_status = "available" if self._event_bus is not None else "unavailable"
+        logger.info(
+            "NodeRegistryEffect initialized successfully",
+            extra={
+                "event_type": "node_initialize_complete",
+                "consul_handler": "available",
+                "db_handler": "available",
+                "event_bus": event_bus_status,
+                "circuit_breaker_threshold": self._config.circuit_breaker_threshold,
+                "circuit_breaker_reset_timeout": self._config.circuit_breaker_reset_timeout,
+            },
+        )
+
+        # Log warning if event bus is unavailable (graceful degradation)
+        if self._event_bus is None:
+            logger.warning(
+                "NodeRegistryEffect initialized without event bus - "
+                "request_introspection operation will not be available",
+                extra={
+                    "event_type": "node_initialize_degraded",
+                    "missing_service": "ProtocolEventBus",
+                    "unavailable_operations": ["request_introspection"],
+                },
+            )
 
     async def shutdown(self) -> None:
-        """Shutdown the effect node and cleanup resources."""
+        """Shutdown the effect node and cleanup resources.
+
+        This method performs graceful shutdown:
+        - Resets the circuit breaker state
+        - Marks the node as uninitialized
+
+        After shutdown, the node cannot be used for operations until
+        initialize() is called again.
+
+        This method is idempotent and safe to call multiple times.
+        """
         async with self._circuit_breaker_lock:
             await self._reset_circuit_breaker()
         self._initialized = False
@@ -1249,7 +1549,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             except InfraUnavailableError as e:
                 # Circuit is open - do not retry immediately
                 retry_after = e.model.context.get("retry_after_seconds", 60)
-                logger.error(f"Service unavailable, retry after {retry_after}s")
+                logger.exception(f"Service unavailable, retry after {retry_after}s")
             ```
 
         See Also:
@@ -1299,14 +1599,82 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         except (RuntimeHostError, InfraUnavailableError):
             # Re-raise our own errors without circuit breaker recording
             raise
-        except Exception:
-            # Record failure for circuit breaker
+        except (OSError, ConnectionError, TimeoutError) as e:
+            # Network-level errors - record circuit breaker failure and wrap
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     operation=request.operation,
                     correlation_id=request.correlation_id,
                 )
-            raise
+            logger.warning(
+                f"Network error during {request.operation}: {type(e).__name__}",
+                extra={
+                    "operation": request.operation,
+                    "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            raise RuntimeHostError(
+                f"Network error during {request.operation} operation",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation=request.operation,
+                    target_name="node_registry_effect",
+                    correlation_id=request.correlation_id,
+                ),
+            ) from e
+        except (ValueError, TypeError, KeyError) as e:
+            # Data/validation errors - record circuit breaker failure and wrap
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation=request.operation,
+                    correlation_id=request.correlation_id,
+                )
+            sanitized_msg = self._sanitize_error(e)
+            logger.warning(
+                f"Data error during {request.operation}: {type(e).__name__}",
+                extra={
+                    "operation": request.operation,
+                    "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
+                    "error_message": sanitized_msg,
+                },
+            )
+            raise RuntimeHostError(
+                f"Data error during {request.operation} operation: {sanitized_msg}",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation=request.operation,
+                    target_name="node_registry_effect",
+                    correlation_id=request.correlation_id,
+                ),
+            ) from e
+        except Exception as e:
+            # Catch-all for unexpected errors - log at error level and wrap
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation=request.operation,
+                    correlation_id=request.correlation_id,
+                )
+            sanitized_msg = self._sanitize_error(e)
+            logger.exception(
+                f"Unexpected error during {request.operation}: {type(e).__name__}",
+                extra={
+                    "operation": request.operation,
+                    "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
+                    "error_message": sanitized_msg,
+                },
+            )
+            raise RuntimeHostError(
+                f"Unexpected error during {request.operation} operation: {sanitized_msg}",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation=request.operation,
+                    target_name="node_registry_effect",
+                    correlation_id=request.correlation_id,
+                ),
+            ) from e
 
     async def _register_node(
         self,
@@ -1424,12 +1792,45 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 success=result.get("status") == "success",
                 service_id=introspection.node_id,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError) as e:
+            # Network-level errors (connection refused, timeout, DNS failure)
             logger.warning(
-                f"Consul registration failed: {type(e).__name__}",
+                f"Consul registration failed (network error): {type(e).__name__}",
                 extra={
                     "node_id": introspection.node_id,
                     "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return ModelConsulOperationResult(
+                success=False,
+                error=self._sanitize_error(e),
+            )
+        except (ValueError, TypeError, KeyError) as e:
+            # Data/protocol errors (malformed response, missing keys)
+            logger.warning(
+                f"Consul registration failed (data error): {type(e).__name__}",
+                extra={
+                    "node_id": introspection.node_id,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return ModelConsulOperationResult(
+                success=False,
+                error=self._sanitize_error(e),
+            )
+        except RuntimeHostError:
+            # Re-raise our infrastructure errors (already well-typed)
+            raise
+        except Exception as e:
+            # Catch-all for unexpected errors - log at error level for investigation
+            logger.exception(
+                f"Consul registration failed (unexpected error): {type(e).__name__}",
+                extra={
+                    "node_id": introspection.node_id,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
                 },
             )
             return ModelConsulOperationResult(
@@ -1514,12 +1915,45 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 success=result.get("status") == "success",
                 rows_affected=rows_affected,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError) as e:
+            # Network-level errors (connection refused, timeout, DNS failure)
             logger.warning(
-                f"PostgreSQL registration failed: {type(e).__name__}",
+                f"PostgreSQL registration failed (network error): {type(e).__name__}",
                 extra={
                     "node_id": introspection.node_id,
                     "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return ModelPostgresOperationResult(
+                success=False,
+                error=self._sanitize_error(e),
+            )
+        except (ValueError, TypeError, KeyError) as e:
+            # Data/protocol errors (malformed response, missing keys)
+            logger.warning(
+                f"PostgreSQL registration failed (data error): {type(e).__name__}",
+                extra={
+                    "node_id": introspection.node_id,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return ModelPostgresOperationResult(
+                success=False,
+                error=self._sanitize_error(e),
+            )
+        except RuntimeHostError:
+            # Re-raise our infrastructure errors (already well-typed)
+            raise
+        except Exception as e:
+            # Catch-all for unexpected errors - log at error level for investigation
+            logger.exception(
+                f"PostgreSQL registration failed (unexpected error): {type(e).__name__}",
+                extra={
+                    "node_id": introspection.node_id,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
                 },
             )
             return ModelPostgresOperationResult(
@@ -1622,16 +2056,50 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 success=result.get("status") == "success",
                 service_id=node_id,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError) as e:
+            # Network-level errors (connection refused, timeout, DNS failure)
             logger.warning(
-                f"Consul deregistration failed: {type(e).__name__}",
+                f"Consul deregistration failed (network error): {type(e).__name__}",
                 extra={
                     "node_id": node_id,
                     "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
                 },
             )
             return ModelConsulOperationResult(
-                success=False, error=self._sanitize_error(e)
+                success=False,
+                error=self._sanitize_error(e),
+            )
+        except (ValueError, TypeError, KeyError) as e:
+            # Data/protocol errors (malformed response, missing keys)
+            logger.warning(
+                f"Consul deregistration failed (data error): {type(e).__name__}",
+                extra={
+                    "node_id": node_id,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return ModelConsulOperationResult(
+                success=False,
+                error=self._sanitize_error(e),
+            )
+        except RuntimeHostError:
+            # Re-raise our infrastructure errors (already well-typed)
+            raise
+        except Exception as e:
+            # Catch-all for unexpected errors - log at error level for investigation
+            logger.exception(
+                f"Consul deregistration failed (unexpected error): {type(e).__name__}",
+                extra={
+                    "node_id": node_id,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return ModelConsulOperationResult(
+                success=False,
+                error=self._sanitize_error(e),
             )
 
     async def _deregister_postgres(
@@ -1663,16 +2131,50 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 success=result.get("status") == "success",
                 rows_affected=rows_affected,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError) as e:
+            # Network-level errors (connection refused, timeout, DNS failure)
             logger.warning(
-                f"PostgreSQL deregistration failed: {type(e).__name__}",
+                f"PostgreSQL deregistration failed (network error): {type(e).__name__}",
                 extra={
                     "node_id": node_id,
                     "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
                 },
             )
             return ModelPostgresOperationResult(
-                success=False, error=self._sanitize_error(e)
+                success=False,
+                error=self._sanitize_error(e),
+            )
+        except (ValueError, TypeError, KeyError) as e:
+            # Data/protocol errors (malformed response, missing keys)
+            logger.warning(
+                f"PostgreSQL deregistration failed (data error): {type(e).__name__}",
+                extra={
+                    "node_id": node_id,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return ModelPostgresOperationResult(
+                success=False,
+                error=self._sanitize_error(e),
+            )
+        except RuntimeHostError:
+            # Re-raise our infrastructure errors (already well-typed)
+            raise
+        except Exception as e:
+            # Catch-all for unexpected errors - log at error level for investigation
+            logger.exception(
+                f"PostgreSQL deregistration failed (unexpected error): {type(e).__name__}",
+                extra={
+                    "node_id": node_id,
+                    "correlation_id": str(correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return ModelPostgresOperationResult(
+                success=False,
+                error=self._sanitize_error(e),
             )
 
     def _validate_filter_keys(
@@ -1818,16 +2320,88 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 processing_time_ms=processing_time_ms,
                 correlation_id=request.correlation_id,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError) as e:
+            # Network-level errors (connection refused, timeout, DNS failure)
             # Record circuit breaker failure
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("discover", request.correlation_id)
 
             logger.warning(
-                f"Node discovery failed: {type(e).__name__}",
+                f"Node discovery failed (network error): {type(e).__name__}",
                 extra={
                     "filters": request.filters,
                     "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+            # Log structured performance metrics for network failure
+            self._log_operation_performance(
+                operation="discover",
+                processing_time_ms=processing_time_ms,
+                success=False,
+                correlation_id=request.correlation_id,
+                record_count=0,
+                status="failed",
+            )
+
+            return ModelRegistryResponse(
+                operation="discover",
+                success=False,
+                status="failed",
+                error=self._sanitize_error(e),
+                processing_time_ms=processing_time_ms,
+                correlation_id=request.correlation_id,
+            )
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError) as e:
+            # Data/protocol errors (malformed response, missing keys, invalid JSON)
+            # Record circuit breaker failure
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("discover", request.correlation_id)
+
+            logger.warning(
+                f"Node discovery failed (data error): {type(e).__name__}",
+                extra={
+                    "filters": request.filters,
+                    "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+            # Log structured performance metrics for data error
+            self._log_operation_performance(
+                operation="discover",
+                processing_time_ms=processing_time_ms,
+                success=False,
+                correlation_id=request.correlation_id,
+                record_count=0,
+                status="failed",
+            )
+
+            return ModelRegistryResponse(
+                operation="discover",
+                success=False,
+                status="failed",
+                error=self._sanitize_error(e),
+                processing_time_ms=processing_time_ms,
+                correlation_id=request.correlation_id,
+            )
+        except RuntimeHostError:
+            # Re-raise our infrastructure errors (already well-typed)
+            raise
+        except Exception as e:
+            # Catch-all for unexpected errors - log at error level for investigation
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("discover", request.correlation_id)
+
+            logger.exception(
+                f"Node discovery failed (unexpected error): {type(e).__name__}",
+                extra={
+                    "filters": request.filters,
+                    "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
                 },
             )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
@@ -1927,11 +2501,72 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 processing_time_ms=processing_time_ms,
                 correlation_id=request.correlation_id,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError) as e:
+            # Network-level errors (connection refused, timeout, DNS failure)
             logger.warning(
-                f"Introspection request failed: {type(e).__name__}",
+                f"Introspection request failed (network error): {type(e).__name__}",
                 extra={
                     "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+            # Log structured performance metrics for failed introspection request
+            self._log_operation_performance(
+                operation="request_introspection",
+                processing_time_ms=processing_time_ms,
+                success=False,
+                correlation_id=request.correlation_id,
+                status="failed",
+            )
+
+            return ModelRegistryResponse(
+                operation="request_introspection",
+                success=False,
+                status="failed",
+                error=self._sanitize_error(e),
+                processing_time_ms=processing_time_ms,
+                correlation_id=request.correlation_id,
+            )
+        except (ValueError, TypeError, KeyError) as e:
+            # Data/protocol errors (malformed response, missing keys)
+            logger.warning(
+                f"Introspection request failed (data error): {type(e).__name__}",
+                extra={
+                    "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+
+            # Log structured performance metrics for failed introspection request
+            self._log_operation_performance(
+                operation="request_introspection",
+                processing_time_ms=processing_time_ms,
+                success=False,
+                correlation_id=request.correlation_id,
+                status="failed",
+            )
+
+            return ModelRegistryResponse(
+                operation="request_introspection",
+                success=False,
+                status="failed",
+                error=self._sanitize_error(e),
+                processing_time_ms=processing_time_ms,
+                correlation_id=request.correlation_id,
+            )
+        except RuntimeHostError:
+            # Re-raise our infrastructure errors (already well-typed)
+            raise
+        except Exception as e:
+            # Catch-all for unexpected errors - log at error level for investigation
+            logger.exception(
+                f"Introspection request failed (unexpected error): {type(e).__name__}",
+                extra={
+                    "correlation_id": str(request.correlation_id),
+                    "error_type": type(e).__name__,
                 },
             )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
@@ -2030,6 +2665,11 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
     ) -> ModelNodeRegistration:
         """Convert database row to ModelNodeRegistration.
 
+        Uses extracted helper methods for parsing:
+        - _parse_json_field: Parses JSONB/JSON string columns
+        - _parse_datetime_field: Parses TIMESTAMP/ISO string columns
+        - _parse_optional_string_field: Parses nullable string columns
+
         Args:
             row: Database row dictionary with JSON-serializable values
             correlation_id: Optional correlation ID for logging
@@ -2039,90 +2679,47 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             when unexpected types are encountered. This prevents silent data
             loss while maintaining backward compatibility with graceful degradation.
         """
-
-        def parse_json(
-            val: JsonValue, field_name: str = "unknown"
-        ) -> dict[str, JsonValue]:
-            if isinstance(val, dict):
-                return val
-            if isinstance(val, str):
-                try:
-                    parsed = json.loads(val)
-                    if isinstance(parsed, dict):
-                        return cast(dict[str, JsonValue], parsed)
-                    logger.warning(
-                        f"JSON parse result not a dict for {field_name}",
-                        extra={
-                            "correlation_id": (
-                                str(correlation_id) if correlation_id else None
-                            ),
-                            "field_name": field_name,
-                        },
-                    )
-                except json.JSONDecodeError as e:
-                    logger.warning(
-                        f"JSON parse failed for {field_name}: {type(e).__name__}",
-                        extra={
-                            "correlation_id": (
-                                str(correlation_id) if correlation_id else None
-                            ),
-                            "field_name": field_name,
-                            "error_type": type(e).__name__,
-                        },
-                    )
-            return {}
-
-        def parse_datetime(val: JsonValue, field_name: str = "datetime") -> datetime:
-            if isinstance(val, datetime):
-                return val
-            if isinstance(val, str):
-                return datetime.fromisoformat(val.replace("Z", "+00:00"))
-            # Fallback to current time when no valid datetime provided
-            logger.warning(
-                f"Using datetime fallback for {field_name}",
-                extra={
-                    "correlation_id": (str(correlation_id) if correlation_id else None),
-                    "field_name": field_name,
-                },
-            )
-            return datetime.now(UTC)
-
         # Handle health_endpoint which can be str or None
-        health_endpoint_raw = row.get("health_endpoint")
-        health_endpoint: str | None = None
-        if isinstance(health_endpoint_raw, str) and health_endpoint_raw:
-            health_endpoint = health_endpoint_raw
+        health_endpoint = self._parse_optional_string_field(row.get("health_endpoint"))
 
         # Handle last_heartbeat which can be datetime, str, or None
         last_heartbeat_raw = row.get("last_heartbeat")
         last_heartbeat: datetime | None = None
         if last_heartbeat_raw is not None:
-            last_heartbeat = parse_datetime(last_heartbeat_raw, "last_heartbeat")
+            last_heartbeat = self._parse_datetime_field(
+                last_heartbeat_raw, "last_heartbeat", correlation_id
+            )
 
         # Parse timestamps - use current time if missing (shouldn't happen in valid data)
         registered_at_raw = row.get("registered_at")
         registered_at = (
-            parse_datetime(registered_at_raw, "registered_at")
+            self._parse_datetime_field(
+                registered_at_raw, "registered_at", correlation_id
+            )
             if registered_at_raw is not None
             else datetime.now(UTC)
         )
 
         updated_at_raw = row.get("updated_at")
         updated_at = (
-            parse_datetime(updated_at_raw, "updated_at")
+            self._parse_datetime_field(updated_at_raw, "updated_at", correlation_id)
             if updated_at_raw is not None
             else datetime.now(UTC)
         )
 
         # Convert endpoints dict to proper type (values must be strings)
-        raw_endpoints = parse_json(row.get("endpoints", {}), "endpoints")
+        raw_endpoints = self._parse_json_field(
+            row.get("endpoints", {}), "endpoints", correlation_id
+        )
         endpoints: dict[str, str] = {
             str(k): str(v) for k, v in raw_endpoints.items() if isinstance(v, str)
         }
 
         # Parse capabilities from database and convert to ModelNodeCapabilitiesInfo
         # Validate field types and log warnings for unexpected values
-        raw_capabilities = parse_json(row.get("capabilities", {}), "capabilities")
+        raw_capabilities = self._parse_json_field(
+            row.get("capabilities", {}), "capabilities", correlation_id
+        )
 
         raw_capabilities_list = raw_capabilities.get("capabilities", [])
         capabilities_list: list[str] = (
@@ -2158,7 +2755,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         # Parse runtime_metadata from database and convert to ModelNodeRegistrationMetadata
         # Database column is 'metadata', but model field is 'runtime_metadata'
         # Validate field types and log warnings for unexpected values to prevent silent data loss
-        raw_metadata = parse_json(row.get("metadata", {}), "metadata")
+        raw_metadata = self._parse_json_field(
+            row.get("metadata", {}), "metadata", correlation_id
+        )
 
         # Validate environment field
         env_str = raw_metadata.get("environment", "testing")

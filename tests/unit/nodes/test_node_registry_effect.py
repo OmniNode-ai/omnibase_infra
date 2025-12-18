@@ -307,6 +307,10 @@ async def create_test_node(
     container-based DI, suitable for test methods that need custom
     handler configurations.
 
+    IMPORTANT: The returned node is ALREADY INITIALIZED. Do NOT call
+    node.initialize() after using this factory - it is redundant since
+    NodeRegistryEffect.create() handles initialization internally.
+
     Args:
         consul_handler: Mock consul handler.
         db_handler: Mock PostgreSQL handler.
@@ -317,6 +321,7 @@ async def create_test_node(
     Returns:
         Fully initialized NodeRegistryEffect instance ready for use.
         The node has dependencies resolved and is marked as initialized.
+        No additional initialization is required before calling execute().
     """
     container = create_mock_container(consul_handler, db_handler, event_bus)
     return await NodeRegistryEffect.create(container, config)
@@ -509,7 +514,6 @@ class TestNodeRegistryEffectRegister:
         node = await create_test_node(
             mock_consul_handler_failing, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -548,7 +552,6 @@ class TestNodeRegistryEffectRegister:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -587,7 +590,6 @@ class TestNodeRegistryEffectRegister:
         node = await create_test_node(
             mock_consul_handler_failing, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -674,7 +676,6 @@ class TestNodeRegistryEffectRegister:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -753,7 +754,6 @@ class TestNodeRegistryEffectDeregister:
         node = await create_test_node(
             mock_consul_handler_failing, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="deregister",
@@ -782,7 +782,6 @@ class TestNodeRegistryEffectDeregister:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="deregister",
@@ -811,7 +810,6 @@ class TestNodeRegistryEffectDeregister:
         node = await create_test_node(
             mock_consul_handler_failing, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="deregister",
@@ -867,7 +865,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler_with_rows, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -933,7 +930,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -996,7 +992,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -1044,7 +1039,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -1086,7 +1080,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler_empty_results, mock_event_bus
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -1115,7 +1108,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="discover",
@@ -1148,7 +1140,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Attempt SQL injection via filter key
         malicious_filters = {
@@ -1192,7 +1183,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Use a plausible but non-whitelisted column name
         request = ModelRegistryRequest(
@@ -1230,7 +1220,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Use all whitelisted filter keys
         request = ModelRegistryRequest(
@@ -1273,7 +1262,6 @@ class TestNodeRegistryEffectDiscover:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # SQL injection pattern
         malicious_key = '"; DROP TABLE users--'
@@ -1368,7 +1356,6 @@ class TestNodeRegistryEffectRequestIntrospection:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus_failing
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="request_introspection",
@@ -1442,7 +1429,6 @@ class TestNodeRegistryEffectCircuitBreaker:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Manually trip the circuit breaker by recording failures
         correlation_id = uuid4()
@@ -1484,7 +1470,6 @@ class TestNodeRegistryEffectCircuitBreaker:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         # Record some failures (below threshold)
         async with node._circuit_breaker_lock:
@@ -1524,7 +1509,6 @@ class TestNodeRegistryEffectCircuitBreaker:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Open the circuit
         async with node._circuit_breaker_lock:
@@ -1587,7 +1571,6 @@ class TestNodeRegistryEffectCircuitBreaker:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Open the circuit
         async with node._circuit_breaker_lock:
@@ -1622,7 +1605,6 @@ class TestNodeRegistryEffectCircuitBreaker:
         node = await create_test_node(
             mock_consul_handler_failing, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         # Record some failures (below threshold)
         async with node._circuit_breaker_lock:
@@ -1665,7 +1647,6 @@ class TestNodeRegistryEffectCircuitBreaker:
         node = await create_test_node(
             mock_consul_handler_failing, mock_db_handler_failing, mock_event_bus, config
         )
-        await node.initialize()
 
         initial_failures = node._circuit_breaker_failures
         assert initial_failures == 0
@@ -1708,7 +1689,6 @@ class TestNodeRegistryEffectCorrelationId:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         correlation_id = uuid4()
         request = ModelRegistryRequest(
@@ -1736,7 +1716,6 @@ class TestNodeRegistryEffectCorrelationId:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         correlation_id = uuid4()
         request = ModelRegistryRequest(
@@ -1781,7 +1760,6 @@ class TestNodeRegistryEffectCorrelationId:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, config=config
         )
-        await node.initialize()
 
         # Open the circuit
         async with node._circuit_breaker_lock:
@@ -1892,7 +1870,6 @@ class TestNodeRegistryEffectErrorSanitization:
         )
 
         node = await create_test_node(mock_consul_handler, mock_db_handler)
-        await node.initialize()
 
         introspection = ModelNodeIntrospectionPayload(
             node_id="test-node",
@@ -1929,7 +1906,6 @@ class TestNodeRegistryEffectErrorSanitization:
         mock_db_handler.execute = AsyncMock(return_value={"status": "success"})
 
         node = await create_test_node(mock_consul_handler, mock_db_handler)
-        await node.initialize()
 
         introspection = ModelNodeIntrospectionPayload(
             node_id="test-node",
@@ -2110,7 +2086,6 @@ class TestNodeRegistryEffectJsonSerialization:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Monkey-patch _safe_json_dumps_strict to simulate serialization failure
         original_method = node._safe_json_dumps_strict
@@ -2160,7 +2135,6 @@ class TestNodeRegistryEffectJsonSerialization:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus
         )
-        await node.initialize()
 
         # Create introspection with complex nested data
         # Note: capabilities is now ModelNodeCapabilitiesInfo (typed model)
@@ -2290,7 +2264,6 @@ class TestNodeRegistryEffectSlowOperationThreshold:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -2335,7 +2308,6 @@ class TestNodeRegistryEffectSlowOperationThreshold:
         node = await create_test_node(
             mock_consul_handler, mock_db_handler, mock_event_bus, config
         )
-        await node.initialize()
 
         request = ModelRegistryRequest(
             operation="register",
@@ -2358,37 +2330,297 @@ class TestNodeRegistryEffectSlowOperationThreshold:
 
 
 # =============================================================================
-# Integration Tests Placeholder
+# Test: URL Pattern Validation (Security)
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNodeRegistryEffectUrlValidation:
+    """Tests for URL pattern validation in health_endpoint.
+
+    The URL pattern was enhanced to support:
+    - IPv6 addresses in brackets: http://[::1]:8080/health
+    - Underscores in hostnames: http://my_service.local:8080/health
+    - Standard hostnames and IPv4 addresses
+    """
+
+    async def test_register_with_ipv6_health_endpoint(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration with IPv6 health endpoint."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="ipv6-test-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="http://[::1]:8080/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+        assert response.success is True
+        assert response.status == "success"
+        await node.shutdown()
+
+    async def test_register_with_ipv6_full_address(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration with full IPv6 address."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="ipv6-full-test-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="http://[2001:db8::1]:8080/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+        assert response.success is True
+        assert response.status == "success"
+        await node.shutdown()
+
+    async def test_register_with_underscore_hostname(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration with underscore in hostname."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="underscore-test-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="http://my_service.local:8080/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        response = await node.execute(request)
+        assert response.success is True
+        assert response.status == "success"
+        await node.shutdown()
+
+    async def test_register_rejects_invalid_url_protocol(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration rejects invalid URL protocol (ftp://)."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="invalid-protocol-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="ftp://example.com/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await node.execute(request)
+        assert "valid HTTP/HTTPS URL" in exc_info.value.message
+        await node.shutdown()
+
+    async def test_register_rejects_url_without_host(
+        self,
+        mock_consul_handler: AsyncMock,
+        mock_db_handler: AsyncMock,
+        correlation_id: UUID,
+    ) -> None:
+        """Test registration rejects URL without host."""
+        node = await create_test_node(mock_consul_handler, mock_db_handler)
+
+        introspection = ModelNodeIntrospectionPayload(
+            node_id="no-host-node",
+            node_type="effect",
+            node_version="1.0.0",
+            health_endpoint="http://:8080/health",
+            runtime_metadata=ModelNodeRegistrationMetadata(
+                environment=EnumEnvironment.TESTING
+            ),
+        )
+        request = ModelRegistryRequest(
+            operation="register",
+            introspection_event=introspection,
+            correlation_id=correlation_id,
+        )
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await node.execute(request)
+        assert "valid HTTP/HTTPS URL" in exc_info.value.message
+        await node.shutdown()
+
+
+# =============================================================================
+# Test: JWT Pattern Sanitization (Security)
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNodeRegistryEffectJwtSanitization:
+    """Tests for JWT token sanitization in error messages.
+
+    The JWT pattern was tightened to reduce false positives by requiring:
+    - Header: eyJ + 15+ chars (covers minimal {"alg":"HS256"})
+    - Payload: eyJ + 15+ chars (covers minimal claims)
+    - Signature: 40+ chars (HS256=43, ES256=86, RS256=342)
+    """
+
+    async def test_sanitize_error_redacts_real_jwt(self) -> None:
+        """Test that real JWT tokens are properly redacted."""
+        import base64
+
+        node = await create_test_node(AsyncMock(), AsyncMock())
+
+        # Create a realistic JWT structure
+        header = (
+            base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}')
+            .decode()
+            .rstrip("=")
+        )
+        payload = (
+            base64.urlsafe_b64encode(b'{"sub":"1234567890","name":"Test User"}')
+            .decode()
+            .rstrip("=")
+        )
+        signature = "A" * 43  # HS256 signature length
+
+        real_jwt = f"{header}.{payload}.{signature}"
+        error = Exception(f"Auth failed with token: {real_jwt}")
+        result = node._sanitize_error(error)
+
+        # JWT should be redacted
+        assert header not in result
+        assert signature not in result
+        assert "[REDACTED" in result
+
+    async def test_sanitize_error_does_not_redact_short_strings(self) -> None:
+        """Test that short strings are not falsely identified as JWTs."""
+        node = await create_test_node(AsyncMock(), AsyncMock())
+
+        # Short string that looks like JWT structure but is too short
+        short_jwt_like = "eyJhbGci.eyJzdWI.short"
+        error = Exception(f"Error with value: {short_jwt_like}")
+        result = node._sanitize_error(error)
+
+        # Short string should NOT be redacted as JWT (may be redacted by other patterns)
+        # The key is that the specific JWT pattern should not match
+        assert "[REDACTED_JWT]" not in result
+
+    async def test_sanitize_error_redacts_jwt_with_bearer(self) -> None:
+        """Test that JWT with Bearer prefix is properly redacted."""
+        import base64
+
+        node = await create_test_node(AsyncMock(), AsyncMock())
+
+        header = (
+            base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}')
+            .decode()
+            .rstrip("=")
+        )
+        payload = (
+            base64.urlsafe_b64encode(b'{"sub":"user123","iat":1234567890}')
+            .decode()
+            .rstrip("=")
+        )
+        signature = "B" * 50
+
+        jwt = f"{header}.{payload}.{signature}"
+        error = Exception(f"Authorization: Bearer {jwt}")
+        result = node._sanitize_error(error)
+
+        # Either Bearer pattern or JWT pattern should catch it
+        assert header not in result
+        assert "[REDACTED" in result
+
+
+# =============================================================================
+# Integration Tests Reference
 # =============================================================================
 
 
 @pytest.mark.integration
 class TestNodeRegistryEffectIntegration:
-    """Integration tests placeholder for NodeRegistryEffect with real backends.
+    """Integration tests placeholder - see dedicated integration test file.
 
-    These tests require real Consul and PostgreSQL instances to run.
-    They validate end-to-end behavior that cannot be fully tested with mocks.
+    Full integration tests with real backends are located at:
+        tests/integration/nodes/test_node_registry_effect_integration.py
 
-    TODO: Integration tests to implement:
-        - test_register_with_real_consul: Verify Consul service registration
-          with actual health check callbacks
-        - test_register_with_real_postgres: Verify PostgreSQL UPSERT behavior
-          with actual database constraints
-        - test_discover_with_real_postgres: Verify SQL query generation
-          works with real PostgreSQL query planner
-        - test_circuit_breaker_with_real_failures: Test circuit breaker
-          behavior with actual network failures/timeouts
-        - test_concurrent_registrations: Verify idempotent registration
-          under concurrent load with real backends
-        - test_event_bus_with_real_kafka: Verify introspection events
-          are properly published to Kafka
+    That file contains comprehensive tests for:
+        - Consul: Service registration, health checks, catalog validation
+        - PostgreSQL: UPSERT behavior, constraints, query execution
+        - Kafka: Introspection event publishing
+        - Cross-Backend: Dual registration, partial failures, circuit breaker
 
-    Environment Setup Required:
-        - Consul: localhost:8500
-        - PostgreSQL: localhost:5432 with node_registrations table
-        - Kafka: localhost:9092 with registry topics
+    Environment Variables Required:
+        - CONSUL_HTTP_ADDR: Consul agent address (default: "http://localhost:8500")
+        - POSTGRES_DSN: PostgreSQL DSN (default: "postgresql://localhost:5432/onex_test")
+        - KAFKA_BOOTSTRAP_SERVERS: Kafka broker address (e.g., "localhost:9092")
 
-    Run with: pytest -m integration tests/unit/nodes/test_node_registry_effect.py
+    Running Integration Tests:
+        # Run all integration tests
+        pytest -m integration tests/integration/nodes/
+
+        # Run by backend
+        pytest -m "integration and consul" tests/integration/nodes/
+        pytest -m "integration and postgres" tests/integration/nodes/
+        pytest -m "integration and kafka" tests/integration/nodes/
+
+    Database Setup:
+        # Create schema
+        psql -d $DATABASE_NAME -f docs/schema/node_registrations.sql
+
+    Index Recommendation:
+        For stale node detection queries on `last_heartbeat`, add:
+        ```sql
+        CREATE INDEX IF NOT EXISTS idx_node_registrations_last_heartbeat
+        ON node_registrations(last_heartbeat DESC)
+        WHERE last_heartbeat IS NOT NULL;
+        ```
+
+    The minimal placeholder tests below are kept for backwards compatibility
+    with existing test invocation patterns.
     """
 
     @pytest.mark.skip(reason="Requires real Consul instance")
@@ -2915,3 +3147,171 @@ class TestNodeRegistryEffectDependencyResolution:
         assert original_error_message in str(exc_info.value.__cause__)
         # Original error should be mentioned in the RuntimeError message
         assert original_error_message in str(exc_info.value)
+
+
+# =============================================================================
+# Test: Row Parsing Helpers
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestNodeRegistryEffectRowParsingHelpers:
+    """Tests for extracted row parsing helper methods.
+
+    These tests validate the helper methods extracted from _row_to_node_registration:
+    - _parse_json_field: Parses JSONB/JSON string columns
+    - _parse_datetime_field: Parses TIMESTAMP/ISO string columns
+    - _parse_optional_string_field: Parses nullable string columns
+
+    The helpers support graceful degradation with logging for malformed data.
+    """
+
+    @pytest.fixture
+    def mock_node(self) -> NodeRegistryEffect:
+        """Create a NodeRegistryEffect instance for testing helper methods."""
+        container = Mock()
+        container.service_registry = Mock()
+        container.service_registry.resolve_service = AsyncMock()
+        return NodeRegistryEffect(container)
+
+    # =========================================================================
+    # _parse_json_field tests
+    # =========================================================================
+
+    def test_parse_json_field_returns_dict_unchanged(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_json_field returns dict values unchanged."""
+        input_dict = {"key": "value", "nested": {"a": 1}}
+        result = mock_node._parse_json_field(input_dict, "test_field")
+        assert result == input_dict
+
+    def test_parse_json_field_parses_json_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_json_field parses valid JSON strings."""
+        json_string = '{"key": "value", "number": 42}'
+        result = mock_node._parse_json_field(json_string, "test_field")
+        assert result == {"key": "value", "number": 42}
+
+    def test_parse_json_field_returns_empty_dict_for_invalid_json(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_json_field returns empty dict for invalid JSON."""
+        invalid_json = "{invalid json}"
+        result = mock_node._parse_json_field(invalid_json, "test_field")
+        assert result == {}
+        assert "JSON parse failed for test_field" in caplog.text
+
+    def test_parse_json_field_returns_empty_dict_for_non_dict_json(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_json_field returns empty dict when JSON parses to non-dict."""
+        array_json = '["a", "b", "c"]'
+        result = mock_node._parse_json_field(array_json, "test_field")
+        assert result == {}
+        assert "JSON parse result not a dict for test_field" in caplog.text
+
+    def test_parse_json_field_returns_empty_dict_for_other_types(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_json_field returns empty dict for non-dict, non-string."""
+        result = mock_node._parse_json_field(12345, "test_field")
+        assert result == {}
+
+        result = mock_node._parse_json_field(None, "test_field")
+        assert result == {}
+
+    def test_parse_json_field_logs_with_field_name(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_json_field logs include field_name for debugging."""
+        mock_node._parse_json_field("{invalid}", "my_custom_field")
+        assert "my_custom_field" in caplog.text
+
+    # =========================================================================
+    # _parse_datetime_field tests
+    # =========================================================================
+
+    def test_parse_datetime_field_returns_datetime_unchanged(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_datetime_field returns datetime values unchanged."""
+        input_dt = datetime(2025, 1, 15, 12, 30, 0, tzinfo=UTC)
+        result = mock_node._parse_datetime_field(input_dt, "test_field")
+        assert result == input_dt
+
+    def test_parse_datetime_field_parses_iso_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_datetime_field parses ISO-8601 datetime strings."""
+        iso_string = "2025-01-15T12:30:00+00:00"
+        result = mock_node._parse_datetime_field(iso_string, "test_field")
+        assert result.year == 2025
+        assert result.month == 1
+        assert result.day == 15
+        assert result.hour == 12
+        assert result.minute == 30
+
+    def test_parse_datetime_field_handles_z_suffix(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_datetime_field converts 'Z' suffix to +00:00."""
+        z_string = "2025-01-15T12:30:00Z"
+        result = mock_node._parse_datetime_field(z_string, "test_field")
+        assert result.year == 2025
+        assert result.tzinfo is not None
+
+    def test_parse_datetime_field_falls_back_to_now_for_invalid(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_datetime_field falls back to current time for invalid input."""
+        before = datetime.now(UTC)
+        result = mock_node._parse_datetime_field(12345, "test_field")
+        after = datetime.now(UTC)
+
+        # Result should be between before and after
+        assert before <= result <= after
+        assert "Using datetime fallback for test_field" in caplog.text
+
+    def test_parse_datetime_field_logs_with_field_name(
+        self, mock_node: NodeRegistryEffect, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test _parse_datetime_field logs include field_name for debugging."""
+        mock_node._parse_datetime_field(None, "my_datetime_field")
+        assert "my_datetime_field" in caplog.text
+
+    # =========================================================================
+    # _parse_optional_string_field tests
+    # =========================================================================
+
+    def test_parse_optional_string_field_returns_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_optional_string_field returns non-empty strings."""
+        result = mock_node._parse_optional_string_field("http://example.com/health")
+        assert result == "http://example.com/health"
+
+    def test_parse_optional_string_field_returns_none_for_empty_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_optional_string_field returns None for empty strings."""
+        result = mock_node._parse_optional_string_field("")
+        assert result is None
+
+    def test_parse_optional_string_field_returns_none_for_none(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_optional_string_field returns None for None input."""
+        result = mock_node._parse_optional_string_field(None)
+        assert result is None
+
+    def test_parse_optional_string_field_returns_none_for_non_string(
+        self, mock_node: NodeRegistryEffect
+    ) -> None:
+        """Test _parse_optional_string_field returns None for non-string types."""
+        result = mock_node._parse_optional_string_field(12345)
+        assert result is None
+
+        result = mock_node._parse_optional_string_field({"key": "value"})
+        assert result is None
