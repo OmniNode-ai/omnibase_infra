@@ -50,6 +50,14 @@ import pytest
 from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
 
 from omnibase_infra.errors import InfraUnavailableError, RuntimeHostError
+from omnibase_infra.handlers.models.model_consul_handler_payload import (
+    ModelConsulHandlerPayload,
+)
+from omnibase_infra.handlers.models.model_consul_handler_response import (
+    ModelConsulHandlerResponse,
+)
+from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPayload
+from omnibase_infra.handlers.models.model_db_query_response import ModelDbQueryResponse
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.models.model_node_registration_metadata import (
     EnumEnvironment,
     ModelNodeRegistrationMetadata,
@@ -76,7 +84,13 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.node import NodeRegistryEf
 def mock_consul_handler() -> AsyncMock:
     """Create mock Consul handler with successful execute response."""
     handler = AsyncMock()
-    handler.execute = AsyncMock(return_value={"status": "success"})
+    handler.execute = AsyncMock(
+        return_value=ModelConsulHandlerResponse(
+            status="success",
+            payload=ModelConsulHandlerPayload(data={"registered": True}),
+            correlation_id=uuid4(),
+        )
+    )
     return handler
 
 
@@ -93,10 +107,11 @@ def mock_db_handler() -> AsyncMock:
     """Create mock DB handler with successful execute response."""
     handler = AsyncMock()
     handler.execute = AsyncMock(
-        return_value={
-            "status": "success",
-            "payload": {"rows_affected": 1},
-        }
+        return_value=ModelDbQueryResponse(
+            status="success",
+            payload=ModelDbQueryPayload(rows=[], row_count=1),
+            correlation_id=uuid4(),
+        )
     )
     return handler
 
@@ -114,42 +129,44 @@ def mock_db_handler_with_rows() -> AsyncMock:
     """Create mock DB handler that returns query results."""
     handler = AsyncMock()
 
-    def create_query_response(envelope: dict[str, object]) -> dict[str, object]:
+    def create_query_response(envelope: dict[str, object]) -> ModelDbQueryResponse:
         """Generate response based on operation type."""
         operation = envelope.get("operation", "")
         if operation == "db.query":
-            return {
-                "status": "success",
-                "payload": {
-                    "rows": [
-                        {
-                            "node_id": "test-node-1",
-                            "node_type": "effect",
-                            "node_version": "1.0.0",
-                            "capabilities": json.dumps({"operations": ["read"]}),
-                            "endpoints": json.dumps(
-                                {"health": "http://localhost:8080/health"}
-                            ),
-                            "metadata": json.dumps({}),
-                            "health_endpoint": "http://localhost:8080/health",
-                            "registered_at": FIXED_TEST_TIMESTAMP_ISO,
-                            "updated_at": FIXED_TEST_TIMESTAMP_ISO,
-                        },
-                        {
-                            "node_id": "test-node-2",
-                            "node_type": "compute",
-                            "node_version": "2.0.0",
-                            "capabilities": json.dumps({"operations": ["compute"]}),
-                            "endpoints": json.dumps({}),
-                            "metadata": json.dumps({}),
-                            "health_endpoint": None,
-                            "registered_at": FIXED_TEST_TIMESTAMP_ISO,
-                            "updated_at": FIXED_TEST_TIMESTAMP_ISO,
-                        },
-                    ]
+            rows = [
+                {
+                    "node_id": "test-node-1",
+                    "node_type": "effect",
+                    "node_version": "1.0.0",
+                    "capabilities": json.dumps({"operations": ["read"]}),
+                    "endpoints": json.dumps({"health": "http://localhost:8080/health"}),
+                    "metadata": json.dumps({}),
+                    "health_endpoint": "http://localhost:8080/health",
+                    "registered_at": FIXED_TEST_TIMESTAMP_ISO,
+                    "updated_at": FIXED_TEST_TIMESTAMP_ISO,
                 },
-            }
-        return {"status": "success", "payload": {"rows_affected": 1}}
+                {
+                    "node_id": "test-node-2",
+                    "node_type": "compute",
+                    "node_version": "2.0.0",
+                    "capabilities": json.dumps({"operations": ["compute"]}),
+                    "endpoints": json.dumps({}),
+                    "metadata": json.dumps({}),
+                    "health_endpoint": None,
+                    "registered_at": FIXED_TEST_TIMESTAMP_ISO,
+                    "updated_at": FIXED_TEST_TIMESTAMP_ISO,
+                },
+            ]
+            return ModelDbQueryResponse(
+                status="success",
+                payload=ModelDbQueryPayload(rows=rows, row_count=len(rows)),
+                correlation_id=uuid4(),
+            )
+        return ModelDbQueryResponse(
+            status="success",
+            payload=ModelDbQueryPayload(rows=[], row_count=1),
+            correlation_id=uuid4(),
+        )
 
     handler.execute = AsyncMock(side_effect=create_query_response)
     return handler
@@ -160,10 +177,11 @@ def mock_db_handler_empty_results() -> AsyncMock:
     """Create mock DB handler that returns empty query results."""
     handler = AsyncMock()
     handler.execute = AsyncMock(
-        return_value={
-            "status": "success",
-            "payload": {"rows": []},
-        }
+        return_value=ModelDbQueryResponse(
+            status="success",
+            payload=ModelDbQueryPayload(rows=[], row_count=0),
+            correlation_id=uuid4(),
+        )
     )
     return handler
 
@@ -576,17 +594,27 @@ class TestNodeRegistryEffectRegister:
         """Test that Consul and PostgreSQL operations run in parallel."""
         call_order: list[str] = []
 
-        async def consul_execute(envelope: dict[str, object]) -> dict[str, object]:
+        async def consul_execute(
+            envelope: dict[str, object],
+        ) -> ModelConsulHandlerResponse:
             call_order.append("consul_start")
             await asyncio.sleep(0.05)
             call_order.append("consul_end")
-            return {"status": "success"}
+            return ModelConsulHandlerResponse(
+                status="success",
+                payload=ModelConsulHandlerPayload(data={"registered": True}),
+                correlation_id=uuid4(),
+            )
 
-        async def db_execute(envelope: dict[str, object]) -> dict[str, object]:
+        async def db_execute(envelope: dict[str, object]) -> ModelDbQueryResponse:
             call_order.append("db_start")
             await asyncio.sleep(0.05)
             call_order.append("db_end")
-            return {"status": "success", "payload": {"rows_affected": 1}}
+            return ModelDbQueryResponse(
+                status="success",
+                payload=ModelDbQueryPayload(rows=[], row_count=1),
+                correlation_id=uuid4(),
+            )
 
         mock_consul_handler.execute = AsyncMock(side_effect=consul_execute)
         mock_db_handler.execute = AsyncMock(side_effect=db_execute)
@@ -842,25 +870,25 @@ class TestNodeRegistryEffectDiscover:
     ) -> None:
         """Test discover with node_type filter."""
         # Mock to return filtered results
-        mock_db_handler.execute = AsyncMock(
-            return_value={
-                "status": "success",
-                "payload": {
-                    "rows": [
-                        {
-                            "node_id": "effect-node-1",
-                            "node_type": "effect",
-                            "node_version": "1.0.0",
-                            "capabilities": {},
-                            "endpoints": {},
-                            "metadata": {},
-                            "health_endpoint": None,
-                            "registered_at": FIXED_TEST_TIMESTAMP_ISO,
-                            "updated_at": FIXED_TEST_TIMESTAMP_ISO,
-                        }
-                    ]
-                },
+        rows = [
+            {
+                "node_id": "effect-node-1",
+                "node_type": "effect",
+                "node_version": "1.0.0",
+                "capabilities": {},
+                "endpoints": {},
+                "metadata": {},
+                "health_endpoint": None,
+                "registered_at": FIXED_TEST_TIMESTAMP_ISO,
+                "updated_at": FIXED_TEST_TIMESTAMP_ISO,
             }
+        ]
+        mock_db_handler.execute = AsyncMock(
+            return_value=ModelDbQueryResponse(
+                status="success",
+                payload=ModelDbQueryPayload(rows=rows, row_count=len(rows)),
+                correlation_id=uuid4(),
+            )
         )
 
         node = NodeRegistryEffect(
@@ -907,25 +935,25 @@ class TestNodeRegistryEffectDiscover:
         correlation_id: UUID,
     ) -> None:
         """Test discover with node_id filter."""
-        mock_db_handler.execute = AsyncMock(
-            return_value={
-                "status": "success",
-                "payload": {
-                    "rows": [
-                        {
-                            "node_id": "specific-node",
-                            "node_type": "compute",
-                            "node_version": "1.0.0",
-                            "capabilities": {},
-                            "endpoints": {},
-                            "metadata": {},
-                            "health_endpoint": None,
-                            "registered_at": FIXED_TEST_TIMESTAMP_ISO,
-                            "updated_at": FIXED_TEST_TIMESTAMP_ISO,
-                        }
-                    ]
-                },
+        rows = [
+            {
+                "node_id": "specific-node",
+                "node_type": "compute",
+                "node_version": "1.0.0",
+                "capabilities": {},
+                "endpoints": {},
+                "metadata": {},
+                "health_endpoint": None,
+                "registered_at": FIXED_TEST_TIMESTAMP_ISO,
+                "updated_at": FIXED_TEST_TIMESTAMP_ISO,
             }
+        ]
+        mock_db_handler.execute = AsyncMock(
+            return_value=ModelDbQueryResponse(
+                status="success",
+                payload=ModelDbQueryPayload(rows=rows, row_count=len(rows)),
+                correlation_id=uuid4(),
+            )
         )
 
         node = NodeRegistryEffect(
@@ -972,10 +1000,11 @@ class TestNodeRegistryEffectDiscover:
     ) -> None:
         """Test discover with multiple filters (node_type AND node_id)."""
         mock_db_handler.execute = AsyncMock(
-            return_value={
-                "status": "success",
-                "payload": {"rows": []},
-            }
+            return_value=ModelDbQueryResponse(
+                status="success",
+                payload=ModelDbQueryPayload(rows=[], row_count=0),
+                correlation_id=uuid4(),
+            )
         )
 
         node = NodeRegistryEffect(
@@ -1169,10 +1198,11 @@ class TestNodeRegistryEffectDiscover:
     ) -> None:
         """Test discover accepts all keys in ALLOWED_FILTER_KEYS whitelist."""
         mock_db_handler.execute = AsyncMock(
-            return_value={
-                "status": "success",
-                "payload": {"rows": []},
-            }
+            return_value=ModelDbQueryResponse(
+                status="success",
+                payload=ModelDbQueryPayload(rows=[], row_count=0),
+                correlation_id=uuid4(),
+            )
         )
 
         node = NodeRegistryEffect(
@@ -1891,7 +1921,11 @@ class TestNodeRegistryEffectErrorSanitization:
         )
         mock_db_handler = Mock()
         mock_db_handler.execute = AsyncMock(
-            return_value={"status": "success", "payload": {"rows_affected": 1}}
+            return_value=ModelDbQueryResponse(
+                status="success",
+                payload=ModelDbQueryPayload(rows=[], row_count=1),
+                correlation_id=uuid4(),
+            )
         )
 
         node = NodeRegistryEffect(
@@ -1932,7 +1966,13 @@ class TestNodeRegistryEffectErrorSanitization:
             side_effect=Exception("Consul error: token=secret123")
         )
         mock_db_handler = Mock()
-        mock_db_handler.execute = AsyncMock(return_value={"status": "success"})
+        mock_db_handler.execute = AsyncMock(
+            return_value=ModelDbQueryResponse(
+                status="success",
+                payload=ModelDbQueryPayload(rows=[], row_count=1),
+                correlation_id=uuid4(),
+            )
+        )
 
         node = NodeRegistryEffect(
             consul_handler=mock_consul_handler,

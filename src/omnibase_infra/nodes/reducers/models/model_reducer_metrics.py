@@ -18,6 +18,11 @@ class ModelReducerMetrics:
     Tracks registration outcomes across all processed events for monitoring
     and observability purposes.
 
+    Note:
+        These metrics are stored **in-memory only** and will reset when the
+        service restarts. For persistent metrics collection, integrate with
+        an external metrics backend (Prometheus, StatsD, etc.).
+
     Attributes:
         total_registrations: Total number of registration attempts processed.
         success_count: Number of fully successful registrations (both backends).

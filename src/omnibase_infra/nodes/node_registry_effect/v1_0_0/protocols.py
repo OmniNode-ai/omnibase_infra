@@ -10,12 +10,18 @@ Type Aliases:
     JsonValue: Recursive JSON value type supporting nested structures
     EnvelopeDict: Dictionary type for operation envelopes
     ResultDict: Dictionary type for operation results
+    HandlerResponse: Union type for handler response types (Pydantic models or dict)
 """
 
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 from uuid import UUID
+
+from omnibase_infra.handlers.models.model_consul_handler_response import (
+    ModelConsulHandlerResponse,
+)
+from omnibase_infra.handlers.models.model_db_query_response import ModelDbQueryResponse
 
 # JSON-serializable value type for strong typing (per ONEX guidelines: never use Any/object).
 #
@@ -42,26 +48,53 @@ ResultDict = dict[
 
 
 @runtime_checkable
-class ProtocolEnvelopeExecutor(Protocol):
-    """Protocol for envelope executor objects (Consul, PostgreSQL).
+class ProtocolConsulExecutor(Protocol):
+    """Protocol for Consul handler executor objects.
 
-    Executors must implement an async execute method that accepts an envelope
-    dictionary and returns a result dictionary.
+    Consul handlers must implement an async execute method that accepts an envelope
+    dictionary and returns a ModelConsulHandlerResponse.
     """
 
-    async def execute(self, envelope: EnvelopeDict) -> ResultDict:
-        """Execute an operation based on the envelope contents.
+    async def execute(self, envelope: EnvelopeDict) -> ModelConsulHandlerResponse:
+        """Execute a Consul operation based on the envelope contents.
 
         Args:
             envelope: Dictionary containing operation details with keys:
-                - operation: The operation to perform (e.g., "consul.register", "db.execute")
+                - operation: The Consul operation (e.g., "consul.register", "consul.deregister")
                 - payload: Operation-specific data
                 - correlation_id: UUID for distributed tracing
 
         Returns:
-            Dictionary with operation results, typically containing:
-                - status: "success" or "failed"
-                - payload: Operation-specific result data
+            ModelConsulHandlerResponse with:
+                - status: "success" or "error"
+                - payload: ModelConsulHandlerPayload with operation-specific data
+                - correlation_id: UUID for request/response correlation
+        """
+        ...
+
+
+@runtime_checkable
+class ProtocolDbExecutor(Protocol):
+    """Protocol for Database handler executor objects.
+
+    Database handlers must implement an async execute method that accepts an envelope
+    dictionary and returns a ModelDbQueryResponse.
+    """
+
+    async def execute(self, envelope: EnvelopeDict) -> ModelDbQueryResponse:
+        """Execute a database operation based on the envelope contents.
+
+        Args:
+            envelope: Dictionary containing operation details with keys:
+                - operation: The database operation (e.g., "db.query", "db.execute")
+                - payload: Operation-specific data with "sql" and optional "params"
+                - correlation_id: UUID for distributed tracing
+
+        Returns:
+            ModelDbQueryResponse with:
+                - status: "success" or "error"
+                - payload: ModelDbQueryPayload with rows and row_count
+                - correlation_id: UUID for request/response correlation
         """
         ...
 
@@ -89,7 +122,8 @@ __all__ = [
     "EnvelopeDict",
     "JsonPrimitive",
     "JsonValue",
-    "ProtocolEnvelopeExecutor",
+    "ProtocolConsulExecutor",
+    "ProtocolDbExecutor",
     "ProtocolEventBus",
     "ResultDict",
 ]

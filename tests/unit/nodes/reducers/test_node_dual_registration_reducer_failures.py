@@ -148,25 +148,30 @@ class TestValidationFailures:
         assert validation_passed is False
         assert "node_id" in error_message
 
-    @pytest.mark.asyncio
-    async def test_validation_failure_with_invalid_node_type(
-        self,
-        dual_registration_reducer: NodeDualRegistrationReducer,
-    ) -> None:
-        """Test validation fails for invalid node_type."""
-        await dual_registration_reducer.initialize()
+    def test_pydantic_rejects_invalid_node_type(self) -> None:
+        """Verify Pydantic Literal type rejects invalid node_type values.
 
-        # Create mock event with invalid node_type
-        mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
-        mock_event.node_id = uuid4()
-        mock_event.node_type = "invalid_type"
+        node_type validation is enforced at model construction via the
+        Literal["effect", "compute", "reducer", "orchestrator"] type annotation.
+        The reducer's _validate_payload method no longer performs this validation
+        since Pydantic handles it automatically.
 
-        validation_passed, error_message = dual_registration_reducer._validate_payload(
-            mock_event, uuid4()
-        )
+        This test documents that invalid node_type values are rejected before
+        they can reach the reducer.
+        """
+        from pydantic import ValidationError
 
-        assert validation_passed is False
-        assert "node_type" in error_message
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=uuid4(),
+                node_type="invalid_type",  # Not in Literal
+                node_version="1.0.0",
+                capabilities=ModelNodeCapabilities(),
+                endpoints={"health": "http://localhost:8080/health"},
+            )
+
+        # Verify the error mentions node_type
+        assert "node_type" in str(exc_info.value)
 
 
 # =============================================================================

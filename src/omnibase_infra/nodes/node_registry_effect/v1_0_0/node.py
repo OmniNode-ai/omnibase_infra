@@ -19,8 +19,10 @@ Operations:
     - request_introspection: Publish introspection request to event bus
 
 Handler Interface (duck typing):
-    consul_handler and db_handler must implement:
-        async def execute(self, envelope: EnvelopeDict) -> ResultDict
+    consul_handler must implement ProtocolConsulExecutor:
+        async def execute(self, envelope: EnvelopeDict) -> ModelConsulHandlerResponse
+    db_handler must implement ProtocolDbExecutor:
+        async def execute(self, envelope: EnvelopeDict) -> ModelDbQueryResponse
 
 Event Bus Interface (duck typing):
     event_bus must implement:
@@ -65,9 +67,9 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
     EnvelopeDict,
     JsonValue,
-    ProtocolEnvelopeExecutor,
+    ProtocolConsulExecutor,
+    ProtocolDbExecutor,
     ProtocolEventBus,
-    ResultDict,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,7 +137,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         1. The container infrastructure (wire_infrastructure_services) does not
            yet support registration/resolution of:
-           - ProtocolEnvelopeExecutor handlers (consul, db)
+           - ProtocolConsulExecutor handlers
+           - ProtocolDbExecutor handlers
            - ProtocolEventBus implementations
 
         2. These handlers require runtime configuration (connection strings,
@@ -149,10 +152,10 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             cls, container: ModelONEXContainer
         ) -> NodeRegistryEffect:
             consul_handler = await container.service_registry.resolve_service(
-                ProtocolEnvelopeExecutor, name="consul"
+                ProtocolConsulExecutor, name="consul"
             )
             db_handler = await container.service_registry.resolve_service(
-                ProtocolEnvelopeExecutor, name="postgres"
+                ProtocolDbExecutor, name="postgres"
             )
             event_bus = await container.service_registry.resolve_service(
                 ProtocolEventBus
@@ -169,8 +172,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
     def __init__(
         self,
-        consul_handler: ProtocolEnvelopeExecutor,
-        db_handler: ProtocolEnvelopeExecutor,
+        consul_handler: ProtocolConsulExecutor,
+        db_handler: ProtocolDbExecutor,
         event_bus: ProtocolEventBus | None = None,
         config: ModelNodeRegistryEffectConfig | None = None,
     ) -> None:
@@ -197,8 +200,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             infrastructure supports handler registration, add a factory method
             `create_from_container()` to resolve dependencies from container.
         """
-        self._consul_handler: ProtocolEnvelopeExecutor = consul_handler
-        self._db_handler: ProtocolEnvelopeExecutor = db_handler
+        self._consul_handler: ProtocolConsulExecutor = consul_handler
+        self._db_handler: ProtocolDbExecutor = db_handler
         self._event_bus: ProtocolEventBus | None = event_bus
         self._initialized = False
 
@@ -813,7 +816,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
 
             return ModelConsulOperationResult(
-                success=result.get("status") == "success",
+                success=result.status == "success",
                 service_id=introspection.node_id,
             )
         except Exception as e:
@@ -895,15 +898,13 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 }
             )
 
-            payload = result.get("payload", {})
-            rows_affected = 1
-            if isinstance(payload, dict):
-                raw_rows = payload.get("rows_affected", 1)
-                if isinstance(raw_rows, int):
-                    rows_affected = raw_rows
+            # ModelDbQueryResponse has .payload.row_count for affected rows
+            rows_affected = (
+                result.payload.row_count if result.payload.row_count > 0 else 1
+            )
 
             return ModelPostgresOperationResult(
-                success=result.get("status") == "success",
+                success=result.status == "success",
                 rows_affected=rows_affected,
             )
         except Exception as e:
@@ -1008,7 +1009,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 }
             )
             return ModelConsulOperationResult(
-                success=result.get("status") == "success",
+                success=result.status == "success",
                 service_id=node_id,
             )
         except Exception as e:
@@ -1041,15 +1042,11 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     "correlation_id": correlation_id,
                 }
             )
-            payload = result.get("payload", {})
-            rows_affected = 0
-            if isinstance(payload, dict):
-                raw_rows = payload.get("rows_affected", 0)
-                if isinstance(raw_rows, int):
-                    rows_affected = raw_rows
+            # ModelDbQueryResponse has .payload.row_count for affected rows
+            rows_affected = result.payload.row_count
 
             return ModelPostgresOperationResult(
-                success=result.get("status") == "success",
+                success=result.status == "success",
                 rows_affected=rows_affected,
             )
         except Exception as e:
@@ -1170,12 +1167,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             )
 
             # Parse results into ModelNodeRegistration
-            payload = result.get("payload", {})
-            rows: list[dict[str, JsonValue]] = []
-            if isinstance(payload, dict):
-                raw_rows = payload.get("rows", [])
-                if isinstance(raw_rows, list):
-                    rows = cast(list[dict[str, JsonValue]], raw_rows)
+            # ModelDbQueryResponse has .payload.rows as list[dict[str, object]]
+            rows = cast(list[dict[str, JsonValue]], result.payload.rows)
             nodes = [
                 self._row_to_node_registration(row, request.correlation_id)
                 for row in rows

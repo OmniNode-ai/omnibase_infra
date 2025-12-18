@@ -22,7 +22,6 @@ Thread Safety:
 Related:
     - OMN-889: Infrastructure MVP - ModelNodeIntrospectionEvent
     - OMN-912: ModelIntent typed payloads
-    - docs/handoffs/HANDOFF_PURE_REDUCER_ARCHITECTURE.md: Architecture decision
 """
 
 from __future__ import annotations

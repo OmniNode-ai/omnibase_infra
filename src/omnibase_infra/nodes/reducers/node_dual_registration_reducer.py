@@ -44,7 +44,6 @@ Related:
     - OMN-889: Infrastructure MVP - ModelNodeIntrospectionEvent
     - OMN-912: ModelIntent typed payloads
     - contracts/fsm/dual_registration_reducer_fsm.yaml: FSM contract
-    - docs/handoffs/HANDOFF_PURE_REDUCER_ARCHITECTURE.md: Architecture decision
 """
 
 from __future__ import annotations
@@ -80,14 +79,14 @@ from omnibase_infra.nodes.reducers.models import (
     ModelReducerMetrics,
 )
 
-# Valid ONEX node types for introspection event validation.
-# This constant serves as defense-in-depth validation for mock objects in tests,
-# since ModelNodeIntrospectionEvent.node_type already enforces this via Literal type.
-_VALID_NODE_TYPES: frozenset[str] = frozenset(
-    {"effect", "compute", "reducer", "orchestrator"}
-)
-
 logger = logging.getLogger(__name__)
+
+
+# Maximum directory traversal depth to prevent infinite loops
+_MAX_CONTRACTS_DIR_SEARCH_DEPTH: int = 15
+
+# Expected marker file within contracts directory for validation
+_EXPECTED_FSM_CONTRACT_SUBPATH: str = "fsm/dual_registration_reducer_fsm.yaml"
 
 
 def _find_contracts_dir() -> Path:
@@ -96,34 +95,64 @@ def _find_contracts_dir() -> Path:
     This is more robust than multiple .parent calls and handles
     different installation/development environments.
 
-    The function validates that the found contracts directory contains the
-    expected FSM contract file (fsm/dual_registration_reducer_fsm.yaml).
-    If a contracts/ directory is found but lacks the expected file, the
-    search continues up the directory tree.
+    Validation Strategy:
+        To avoid finding the wrong contracts/ directory (e.g., from another
+        package or a mypy cache), this function performs two validations:
+
+        1. **Marker file validation**: The contracts/ directory must contain
+           the expected FSM contract file (fsm/dual_registration_reducer_fsm.yaml).
+
+        2. **Parent path validation**: The contracts/ directory must be within
+           the omnibase_infra package (i.e., "omnibase_infra" must appear in
+           the resolved path).
+
+        Both validations must pass before returning the contracts directory.
+        If a contracts/ directory fails either validation, the search continues
+        up the directory tree.
 
     Returns:
         Path to the contracts directory containing the expected FSM contract.
 
     Raises:
-        RuntimeError: If contracts directory with expected FSM file cannot be found.
+        RuntimeError: If contracts directory with expected FSM file cannot be found
+            within the traversal depth limit, or if no valid omnibase_infra
+            contracts directory exists.
     """
     # Start from current file's directory and walk up the tree until we find
     # a directory containing 'contracts/' with the expected FSM contract.
     # This handles both development (source checkout) and installed package
     # scenarios where the relative path depth may vary.
     current = Path(__file__).resolve().parent
-    while current != current.parent:
+    search_depth = 0
+
+    while current != current.parent and search_depth < _MAX_CONTRACTS_DIR_SEARCH_DEPTH:
         contracts_dir = current / "contracts"
-        # Validate that the expected FSM contract exists before returning
+
+        # Validation 1: Check if contracts directory exists
         if contracts_dir.is_dir():
-            expected_fsm = contracts_dir / "fsm" / "dual_registration_reducer_fsm.yaml"
+            # Validation 2: Verify expected FSM contract file exists
+            expected_fsm = contracts_dir / _EXPECTED_FSM_CONTRACT_SUBPATH
             if expected_fsm.exists():
-                return contracts_dir
+                # Validation 3: Ensure this is the omnibase_infra contracts directory
+                # This prevents accidentally finding contracts/ from another package
+                # or from cache directories (e.g., .mypy_cache)
+                resolved_path = str(contracts_dir.resolve())
+                if "omnibase_infra" in resolved_path:
+                    return contracts_dir
+                # Found contracts/ with FSM file but wrong package - log and continue
+                logger.debug(
+                    "Found contracts directory with FSM file but outside omnibase_infra: %s",
+                    contracts_dir,
+                )
+
         current = current.parent
+        search_depth += 1
+
     raise RuntimeError(
-        "Could not find contracts directory. "
-        "Ensure the FSM contract exists at "
-        "contracts/fsm/dual_registration_reducer_fsm.yaml"
+        "Could not find omnibase_infra contracts directory. "
+        f"Searched {search_depth} levels up from {Path(__file__).resolve().parent}. "
+        f"Ensure the FSM contract exists at contracts/{_EXPECTED_FSM_CONTRACT_SUBPATH} "
+        "within the omnibase_infra package."
     )
 
 
@@ -567,14 +596,13 @@ class NodeDualRegistrationReducer:
     ) -> tuple[bool, str]:
         """Validate introspection event payload.
 
-        Validates required fields (node_id, node_type) and logs validation
-        errors with distinct error messages for each failure type.
+        Validates required fields and logs validation errors with distinct
+        error messages for each failure type.
 
-        This method provides defense-in-depth validation. While Pydantic already
-        validates ModelNodeIntrospectionEvent at construction time, this explicit
-        validation serves two purposes:
-        1. Catches issues with mock objects in tests that bypass Pydantic validation
-        2. Documents business rules explicitly in code for maintainability
+        Note:
+            node_type validation is handled by Pydantic at model construction
+            via Literal["effect", "compute", "reducer", "orchestrator"]. This
+            method only validates fields that may be None despite being required.
 
         Error Context:
             Creates a ModelInfraErrorContext for consistent distributed tracing.
@@ -599,8 +627,7 @@ class NodeDualRegistrationReducer:
             correlation_id=correlation_id,
         )
 
-        # Defense-in-depth: Pydantic validates at model construction, but mocks
-        # and edge cases may bypass this. Explicit checks provide safety net.
+        # Validate node_id is present (Pydantic marks it required but mocks may bypass)
         if event.node_id is None:
             error_msg = "node_id is required but was None"
             logger.warning(
@@ -614,24 +641,8 @@ class NodeDualRegistrationReducer:
             )
             return False, error_msg
 
-        if event.node_type not in _VALID_NODE_TYPES:
-            valid_types = ", ".join(sorted(_VALID_NODE_TYPES))
-            error_msg = (
-                f"node_type '{event.node_type}' is not valid. "
-                f"Expected one of: {valid_types}"
-            )
-            logger.warning(
-                "Payload validation failed: %s",
-                error_msg,
-                extra={
-                    "node_type": event.node_type,
-                    "valid_types": list(_VALID_NODE_TYPES),
-                    "correlation_id": str(correlation_id),
-                    "operation": ctx.operation,
-                    "target_name": ctx.target_name,
-                },
-            )
-            return False, error_msg
+        # node_type validation is enforced by Pydantic Literal type at model
+        # construction - no duplicate validation needed here
 
         return True, ""
 
