@@ -43,6 +43,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.mixins.mixin_node_introspection import (
+    INTROSPECTION_TOPIC,
     PERF_THRESHOLD_CACHE_HIT_MS,
     PERF_THRESHOLD_GET_CAPABILITIES_MS,
     PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS,
@@ -664,7 +665,7 @@ class TestMixinNodeIntrospectionPublishing:
         assert len(event_bus.published_envelopes) == 1
 
         envelope, topic = event_bus.published_envelopes[0]
-        assert topic == "node.introspection"
+        assert topic == INTROSPECTION_TOPIC
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
 
     async def test_publish_introspection_with_correlation_id(

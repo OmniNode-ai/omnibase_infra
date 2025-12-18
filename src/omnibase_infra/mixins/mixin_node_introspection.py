@@ -61,7 +61,7 @@ Security Considerations:
 
     **Network Security Considerations**:
 
-    - Introspection data is published to Kafka topics (``node.introspection``).
+    - Introspection data is published to Kafka topics (``onex.node.introspection.published.v1``).
     - In multi-tenant environments, ensure proper topic ACLs are configured.
     - Consider whether introspection topics should be accessible outside the cluster.
     - Monitor introspection topic consumers for unauthorized access.
@@ -137,9 +137,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Event topic constants
-INTROSPECTION_TOPIC = "node.introspection"
-HEARTBEAT_TOPIC = "node.heartbeat"
-REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
+# Migrated from legacy topic names to ONEX standardized naming convention:
+#   - node.introspection -> onex.node.introspection.published.v1
+#   - node.heartbeat -> onex.node.heartbeat.published.v1
+#   - node.request_introspection -> onex.registry.introspection.requested.v1
+# See EVENT_STREAMING_TOPICS.md for the full topic naming specification.
+INTROSPECTION_TOPIC = "onex.node.introspection.published.v1"
+HEARTBEAT_TOPIC = "onex.node.heartbeat.published.v1"
+REQUEST_INTROSPECTION_TOPIC = "onex.registry.introspection.requested.v1"
 
 # Type alias for capabilities dictionary structure
 # operations: list of method names, protocols: list of protocol names
@@ -292,8 +297,9 @@ class MixinNodeIntrospection:
         - Use generic operation names that don't reveal implementation details
         - Review ``get_capabilities()`` output before production deployment
         - In multi-tenant environments, configure Kafka topic ACLs for
-          introspection events (``node.introspection``, ``node.heartbeat``,
-          ``node.request_introspection``)
+          introspection events (``onex.node.introspection.published.v1``,
+          ``onex.node.heartbeat.published.v1``,
+          ``onex.registry.introspection.requested.v1``)
         - Monitor introspection topic consumers for unauthorized access
         - Consider network segmentation for introspection event topics
 
@@ -354,6 +360,12 @@ class MixinNodeIntrospection:
     # Capability discovery configuration
     _introspection_operation_keywords: set[str]
     _introspection_exclude_prefixes: set[str]
+
+    # Contract-driven topic configuration (instance-level)
+    # These allow per-node topic customization while defaulting to module constants
+    _introspection_topic: str
+    _heartbeat_topic: str
+    _request_introspection_topic: str
 
     # Registry listener callback error tracking (instance-level)
     # Used for rate-limiting error logging to prevent log spam during
@@ -443,6 +455,9 @@ class MixinNodeIntrospection:
         cache_ttl: float = 300.0,
         operation_keywords: set[str] | None = None,
         exclude_prefixes: set[str] | None = None,
+        introspection_topic: str | None = None,
+        heartbeat_topic: str | None = None,
+        request_introspection_topic: str | None = None,
     ) -> None:
         """Initialize introspection configuration.
 
@@ -462,6 +477,15 @@ class MixinNodeIntrospection:
             exclude_prefixes: Optional set of prefixes to exclude from capability
                 discovery. Methods starting with these prefixes are filtered out.
                 If None, uses DEFAULT_EXCLUDE_PREFIXES.
+            introspection_topic: Optional topic for publishing introspection events.
+                If None, uses module-level INTROSPECTION_TOPIC constant.
+                Allows contract-driven topic configuration per node.
+            heartbeat_topic: Optional topic for publishing heartbeat events.
+                If None, uses module-level HEARTBEAT_TOPIC constant.
+                Allows contract-driven topic configuration per node.
+            request_introspection_topic: Optional topic for listening to introspection
+                requests. If None, uses module-level REQUEST_INTROSPECTION_TOPIC constant.
+                Allows contract-driven topic configuration per node.
 
         Raises:
             ValueError: If node_id or node_type is empty
@@ -485,6 +509,20 @@ class MixinNodeIntrospection:
                         node_type="EFFECT",
                         event_bus=config.event_bus,
                         operation_keywords={"fetch", "upload", "download"},
+                    )
+
+            # With contract-driven topic configuration
+            class MyContractNode(MixinNodeIntrospection):
+                def __init__(self, config, contract):
+                    # Load topics from node contract
+                    topics = contract.get("topics", {})
+                    self.initialize_introspection(
+                        node_id=config.node_id,
+                        node_type="EFFECT",
+                        event_bus=config.event_bus,
+                        introspection_topic=topics.get("introspection_published"),
+                        heartbeat_topic=topics.get("heartbeat_published"),
+                        request_introspection_topic=topics.get("introspection_requested"),
                     )
             ```
         """
@@ -510,6 +548,13 @@ class MixinNodeIntrospection:
             exclude_prefixes
             if exclude_prefixes is not None
             else self.DEFAULT_EXCLUDE_PREFIXES.copy()
+        )
+
+        # Contract-driven topic configuration - use provided values or module defaults
+        self._introspection_topic = introspection_topic or INTROSPECTION_TOPIC
+        self._heartbeat_topic = heartbeat_topic or HEARTBEAT_TOPIC
+        self._request_introspection_topic = (
+            request_introspection_topic or REQUEST_INTROSPECTION_TOPIC
         )
 
         # State
@@ -552,6 +597,9 @@ class MixinNodeIntrospection:
                 "has_event_bus": event_bus is not None,
                 "operation_keywords_count": len(self._introspection_operation_keywords),
                 "exclude_prefixes_count": len(self._introspection_exclude_prefixes),
+                "introspection_topic": self._introspection_topic,
+                "heartbeat_topic": self._heartbeat_topic,
+                "request_introspection_topic": self._request_introspection_topic,
             },
         )
 
@@ -1188,18 +1236,18 @@ class MixinNodeIntrospection:
                 }
             )
 
-            # Publish to event bus
+            # Publish to event bus using instance-configured topic
             if hasattr(self._introspection_event_bus, "publish_envelope"):
                 await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
                     envelope=publish_event,
-                    topic=INTROSPECTION_TOPIC,
+                    topic=self._introspection_topic,
                 )
             else:
                 # Fallback to publish method with raw bytes
                 event_data = publish_event.model_dump(mode="json")
                 value = json.dumps(event_data).encode("utf-8")
                 await self._introspection_event_bus.publish(
-                    topic=INTROSPECTION_TOPIC,
+                    topic=self._introspection_topic,
                     key=self._introspection_node_id.encode("utf-8")
                     if self._introspection_node_id
                     else None,
@@ -1293,16 +1341,16 @@ class MixinNodeIntrospection:
                 correlation_id=uuid4(),
             )
 
-            # Publish to event bus
+            # Publish to event bus using instance-configured topic
             if hasattr(self._introspection_event_bus, "publish_envelope"):
                 await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
                     envelope=heartbeat,
-                    topic=HEARTBEAT_TOPIC,
+                    topic=self._heartbeat_topic,
                 )
             else:
                 value = json.dumps(heartbeat.model_dump(mode="json")).encode("utf-8")
                 await self._introspection_event_bus.publish(
-                    topic=HEARTBEAT_TOPIC,
+                    topic=self._heartbeat_topic,
                     key=self._introspection_node_id.encode("utf-8")
                     if self._introspection_node_id
                     else None,
@@ -1404,14 +1452,14 @@ class MixinNodeIntrospection:
         retry logic with exponential backoff for subscription failures.
 
         Security Note:
-            This method subscribes to the ``node.request_introspection`` Kafka
-            topic and responds with full introspection data to any request.
+            This method subscribes to the ``onex.registry.introspection.requested.v1``
+            Kafka topic and responds with full introspection data to any request.
             This creates a network-accessible endpoint for capability discovery.
 
             **Network Exposure**:
 
             - Any consumer on the Kafka cluster can request introspection data
-            - Responses are published to ``node.introspection`` topic
+            - Responses are published to ``onex.node.introspection.published.v1`` topic
             - No authentication is performed on incoming requests
 
             **Multi-tenant Considerations**:
@@ -1604,10 +1652,10 @@ class MixinNodeIntrospection:
         retry_count = 0
         while not self._introspection_stop_event.is_set():
             try:
-                # Subscribe to request topic
+                # Subscribe to request topic using instance-configured topic
                 if hasattr(self._introspection_event_bus, "subscribe"):
                     unsubscribe = await self._introspection_event_bus.subscribe(
-                        topic=REQUEST_INTROSPECTION_TOPIC,
+                        topic=self._request_introspection_topic,
                         group_id=f"introspection-{self._introspection_node_id}",
                         on_message=on_request,
                     )
@@ -1620,7 +1668,7 @@ class MixinNodeIntrospection:
                         f"Registry listener subscribed for {self._introspection_node_id}",
                         extra={
                             "node_id": self._introspection_node_id,
-                            "topic": REQUEST_INTROSPECTION_TOPIC,
+                            "topic": self._request_introspection_topic,
                         },
                     )
 

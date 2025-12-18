@@ -35,6 +35,24 @@ io_operations:
     operations:
       - "publish"
     target: "protocol:ProtocolEventBus" # Protocol-based: KafkaEventBus (prod), InMemoryEventBus (test)
+event_channels:
+  subscribes_to:
+    - topic: "onex.node.introspection.published.v1"
+      description: "Node capability announcements for registration processing"
+      key_field: "node_id"
+    - topic: "onex.node.heartbeat.published.v1"
+      description: "Periodic liveness signals from registered nodes"
+      key_field: "node_id"
+  publishes_to:
+    - topic: "onex.registry.node.registered.v1"
+      description: "Emitted when node registration completes successfully"
+      key_field: "node_id"
+    - topic: "onex.registry.node.registration_failed.v1"
+      description: "Emitted when node registration fails"
+      key_field: "node_id"
+    - topic: "onex.registry.node.deregistered.v1"
+      description: "Emitted when node is deregistered"
+      key_field: "node_id"
 dependencies:
   - name: "consul_handler"
     type: "handler"
