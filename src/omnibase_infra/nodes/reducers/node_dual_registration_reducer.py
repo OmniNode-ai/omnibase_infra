@@ -348,15 +348,15 @@ class NodeDualRegistrationReducer:
             # FSM: receiving_introspection -> validating_payload
             await self._transition(EnumFSMTrigger.EVENT_PARSED)
 
-            # Validate payload
-            validation_passed = self._validate_payload(event, cid)
+            # Validate payload - returns (is_valid, error_message) tuple
+            validation_passed, validation_error = self._validate_payload(event, cid)
 
             if not validation_passed:
                 # FSM: validating_payload -> registration_failed
                 await self._transition(EnumFSMTrigger.VALIDATION_FAILED)
                 # FSM: registration_failed -> idle
                 await self._transition(EnumFSMTrigger.FAILURE_RESULT_EMITTED)
-                return self._build_failed_result(cid, "Validation failed")
+                return self._build_failed_result(cid, validation_error)
 
             # FSM: validating_payload -> registering_parallel
             await self._transition(EnumFSMTrigger.VALIDATION_PASSED)
@@ -399,6 +399,20 @@ class NodeDualRegistrationReducer:
             )
             # Force transition to failed state
             self._current_state = EnumFSMState.REGISTRATION_FAILED
+            # FSM: registration_failed -> idle (complete the FSM cycle)
+            # This ensures the reducer can process subsequent events after exception.
+            # We use try/except to prevent transition errors from masking the original error.
+            try:
+                await self._transition(EnumFSMTrigger.FAILURE_RESULT_EMITTED)
+            except Exception as transition_error:
+                logger.exception(
+                    "Failed to transition to idle after exception",
+                    extra={
+                        "original_error": type(e).__name__,
+                        "transition_error": type(transition_error).__name__,
+                        "correlation_id": str(cid),
+                    },
+                )
             raise RuntimeHostError(
                 f"Dual registration failed: {type(e).__name__}",
                 context=ctx,
@@ -463,44 +477,49 @@ class NodeDualRegistrationReducer:
         self,
         event: ModelNodeIntrospectionEvent,
         correlation_id: UUID,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """Validate introspection event payload.
 
         Validates required fields (node_id, node_type) and logs validation
-        errors.
+        errors with distinct error messages for each failure type.
 
         Args:
             event: Introspection event to validate.
-            correlation_id: Correlation ID for logging.
+            correlation_id: Correlation ID for logging and error context.
 
         Returns:
-            True if validation passes, False otherwise.
+            Tuple of (validation_passed, error_message).
+            If validation passes, error_message is empty string.
         """
         # ModelNodeIntrospectionEvent already validates via Pydantic
         # Additional business validation can be added here
         if event.node_id is None:
+            error_msg = "node_id is required but was None"
             logger.warning(
-                "Payload validation failed: node_id is required but was None",
+                "Payload validation failed: %s",
+                error_msg,
                 extra={"correlation_id": str(correlation_id)},
             )
-            return False
+            return False, error_msg
 
         if event.node_type not in _VALID_NODE_TYPES:
             valid_types = ", ".join(sorted(_VALID_NODE_TYPES))
+            error_msg = (
+                f"node_type '{event.node_type}' is not valid. "
+                f"Expected one of: {valid_types}"
+            )
             logger.warning(
-                "Payload validation failed: node_type '%s' is not valid. "
-                "Expected one of: %s",
-                event.node_type,
-                valid_types,
+                "Payload validation failed: %s",
+                error_msg,
                 extra={
                     "node_type": event.node_type,
                     "valid_types": list(_VALID_NODE_TYPES),
                     "correlation_id": str(correlation_id),
                 },
             )
-            return False
+            return False, error_msg
 
-        return True
+        return True, ""
 
     async def _register_parallel(
         self,
@@ -846,11 +865,11 @@ class NodeDualRegistrationReducer:
         correlation_id: UUID,
         error_message: str,
     ) -> ModelDualRegistrationResult:
-        """Build a failed result for validation errors.
+        """Build a failed result for validation or pre-registration errors.
 
         Args:
             correlation_id: Correlation ID for tracing.
-            error_message: Error message to include.
+            error_message: Error message describing the failure.
 
         Returns:
             ModelDualRegistrationResult with failed status.
@@ -872,13 +891,17 @@ class NodeDualRegistrationReducer:
             except ValueError:
                 node_id = UUID(int=0)  # Nil UUID as fallback
 
+        # Use generic error message for both backends since registration
+        # was not attempted (pre-registration failure)
+        generic_error = f"Registration not attempted: {error_message}"
+
         return ModelDualRegistrationResult(
             node_id=node_id,
             consul_registered=False,
             postgres_registered=False,
             status="failed",
-            consul_error=error_message,
-            postgres_error=error_message,
+            consul_error=generic_error,
+            postgres_error=generic_error,
             registration_time_ms=0.0,
             correlation_id=correlation_id,
         )

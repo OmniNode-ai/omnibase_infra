@@ -8,6 +8,7 @@ execution in the dual registration reducer.
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -41,7 +42,7 @@ class ModelFSMContext(BaseModel):
     node_id: UUID | None = Field(
         default=None, description="Unique identifier of the node being registered"
     )
-    node_type: str | None = Field(
+    node_type: Literal["effect", "compute", "reducer", "orchestrator"] | None = Field(
         default=None,
         description="ONEX node type (effect, compute, reducer, orchestrator)",
     )
@@ -65,6 +66,9 @@ class ModelFSMContext(BaseModel):
     )
     registration_start_time: float = Field(
         default=0.0, description="Start time for performance tracking"
+    )
+    validation_error: str | None = Field(
+        default=None, description="Validation error message if validation failed"
     )
 
 

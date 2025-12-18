@@ -421,7 +421,7 @@ class TestFSMValidation:
         with patch.object(
             dual_registration_reducer,
             "_validate_payload",
-            return_value=False,
+            return_value=(False, "node_type is invalid"),
         ):
             result = await dual_registration_reducer.execute(event)
 
@@ -437,12 +437,13 @@ class TestFSMValidation:
 
         # Verify internal validation method directly
         correlation_id = uuid4()
-        result = dual_registration_reducer._validate_payload(
+        validation_passed, error_message = dual_registration_reducer._validate_payload(
             sample_introspection_event,
             correlation_id,
         )
 
-        assert result is True
+        assert validation_passed is True
+        assert error_message == ""
 
     async def test_fsm_validation_fails_with_null_node_id(
         self,
@@ -460,8 +461,11 @@ class TestFSMValidation:
         mock_event.node_id = None
         mock_event.node_type = "effect"
 
-        result = dual_registration_reducer._validate_payload(mock_event, uuid4())
-        assert result is False
+        validation_passed, error_message = dual_registration_reducer._validate_payload(
+            mock_event, uuid4()
+        )
+        assert validation_passed is False
+        assert "node_id" in error_message
 
     async def test_fsm_validation_fails_with_invalid_node_type_value(
         self,
@@ -475,8 +479,11 @@ class TestFSMValidation:
         mock_event.node_id = uuid4()
         mock_event.node_type = "invalid_type"
 
-        result = dual_registration_reducer._validate_payload(mock_event, uuid4())
-        assert result is False
+        validation_passed, error_message = dual_registration_reducer._validate_payload(
+            mock_event, uuid4()
+        )
+        assert validation_passed is False
+        assert "node_type" in error_message
 
     async def test_fsm_validation_accepts_all_valid_node_types(
         self,
@@ -494,8 +501,13 @@ class TestFSMValidation:
 
         for node_type in valid_types:
             event = create_introspection_event(node_type=node_type)
-            result = dual_registration_reducer._validate_payload(event, uuid4())
-            assert result is True, f"Validation should pass for node_type: {node_type}"
+            validation_passed, error_message = (
+                dual_registration_reducer._validate_payload(event, uuid4())
+            )
+            assert validation_passed is True, (
+                f"Validation should pass for node_type: {node_type}"
+            )
+            assert error_message == ""
 
 
 # -----------------------------------------------------------------------------
@@ -890,7 +902,7 @@ class TestFSMMetrics:
         with patch.object(
             dual_registration_reducer,
             "_validate_payload",
-            return_value=False,
+            return_value=(False, "Validation failed"),
         ):
             result = await dual_registration_reducer.execute(event)
 
