@@ -1265,7 +1265,7 @@ class TestMixinNodeIntrospectionEdgeCases:
 
     async def test_empty_node_introspection(self) -> None:
         """Test introspection on a minimal node."""
-        from uuid import NAMESPACE_DNS, UUID, uuid5
+        from uuid import UUID
 
         class MinimalNode(MixinNodeIntrospection):
             pass
@@ -1342,7 +1342,7 @@ class TestMixinNodeIntrospectionEdgeCases:
 
     async def test_concurrent_introspection_calls(self) -> None:
         """Test concurrent introspection data requests."""
-        from uuid import NAMESPACE_DNS, UUID, uuid5
+        from uuid import UUID
 
         node = MockNode()
         config = ModelIntrospectionConfig(
