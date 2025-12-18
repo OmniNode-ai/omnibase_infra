@@ -251,7 +251,7 @@ class RuntimeHostProcess:
         # Values outside bounds are clamped with a warning
         _drain_timeout_raw = config.get("drain_timeout_seconds")
         drain_timeout_value: float = DEFAULT_DRAIN_TIMEOUT_SECONDS
-        if isinstance(_drain_timeout_raw, (int, float)):
+        if isinstance(_drain_timeout_raw, int | float):
             drain_timeout_value = float(_drain_timeout_raw)
         elif isinstance(_drain_timeout_raw, str):
             try:
