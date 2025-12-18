@@ -29,8 +29,9 @@ class ModelNodeIntrospectionEvent(BaseModel):
 
     Example:
         ```python
+        from uuid import UUID
         event = ModelNodeIntrospectionEvent(
-            node_id="node-postgres-adapter-001",
+            node_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
             node_type="EFFECT",
             capabilities={
                 "operations": ["execute", "query", "batch_execute"],
@@ -48,7 +49,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         ```
     """
 
-    node_id: str = Field(..., description="Unique node identifier")
+    node_id: UUID = Field(..., description="Unique node identifier")
     node_type: str = Field(..., description="Node type classification")
 
     # Capabilities discovered via reflection
@@ -116,7 +117,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         json_schema_extra={
             "examples": [
                 {
-                    "node_id": "node-postgres-adapter-001",
+                    "node_id": "550e8400-e29b-41d4-a716-446655440001",
                     "node_type": "EFFECT",
                     "capabilities": {
                         "operations": ["execute", "query", "batch_execute"],

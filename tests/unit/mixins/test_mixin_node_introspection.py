@@ -38,9 +38,14 @@ import asyncio
 import json
 import os
 import time
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+
+# Test UUIDs - use deterministic values for reproducible tests
+TEST_NODE_UUID_1 = UUID("00000000-0000-0000-0000-000000000001")
+TEST_NODE_UUID_2 = UUID("00000000-0000-0000-0000-000000000002")
+TEST_NODE_UUID_3 = UUID("00000000-0000-0000-0000-000000000003")
 
 from omnibase_infra.mixins.mixin_node_introspection import (
     PERF_THRESHOLD_CACHE_HIT_MS,
@@ -49,7 +54,10 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     IntrospectionPerformanceMetrics,
     MixinNodeIntrospection,
 )
-from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+from omnibase_infra.models.discovery import (
+    ModelIntrospectionConfig,
+    ModelNodeIntrospectionEvent,
+)
 
 # CI environments may be slower - apply multiplier for performance thresholds
 _CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
@@ -227,13 +235,14 @@ class TestMixinNodeIntrospectionInit:
     async def test_initialize_introspection_sets_attributes(self) -> None:
         """Test that initialize_introspection properly sets all attributes."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-001",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
-        assert node._introspection_node_id == "test-node-001"
+        assert node._introspection_node_id == TEST_NODE_UUID_1
         assert node._introspection_node_type == "EFFECT"
         assert node._introspection_event_bus is None
         assert node._introspection_version == "1.0.0"
@@ -244,46 +253,50 @@ class TestMixinNodeIntrospectionInit:
         node = MockNode()
         event_bus = MockEventBus()
 
-        node.initialize_introspection(
-            node_id="test-node-002",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_2,
             node_type="COMPUTE",
             event_bus=event_bus,
         )
+        node.initialize_introspection(config)
 
         assert node._introspection_event_bus is event_bus
 
     async def test_initialize_introspection_custom_cache_ttl(self) -> None:
         """Test initialization with custom cache TTL."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-003",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_3,
             node_type="REDUCER",
             event_bus=None,
             cache_ttl=120.0,
         )
+        node.initialize_introspection(config)
 
         assert node._introspection_cache_ttl == 120.0
 
     async def test_initialize_introspection_custom_version(self) -> None:
         """Test initialization with custom version."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-004",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="ORCHESTRATOR",
             event_bus=None,
             version="2.1.0",
         )
+        node.initialize_introspection(config)
 
         assert node._introspection_version == "2.1.0"
 
     async def test_initialize_introspection_defaults(self) -> None:
         """Test initialization uses correct defaults."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-005",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Default cache TTL is 300 seconds
         assert node._introspection_cache_ttl == 300.0
@@ -294,24 +307,30 @@ class TestMixinNodeIntrospectionInit:
         assert node._introspection_cached_at is None
 
     async def test_initialize_introspection_empty_node_id_raises(self) -> None:
-        """Test that empty node_id raises ValueError."""
+        """Test that empty node_id raises validation error."""
+        from pydantic import ValidationError
+
         node = MockNode()
 
-        with pytest.raises(ValueError, match="node_id cannot be empty"):
-            node.initialize_introspection(
+        with pytest.raises(ValidationError):
+            config = ModelIntrospectionConfig(
                 node_id="",
                 node_type="EFFECT",
             )
+            node.initialize_introspection(config)
 
     async def test_initialize_introspection_empty_node_type_raises(self) -> None:
-        """Test that empty node_type raises ValueError."""
+        """Test that empty node_type raises validation error."""
+        from pydantic import ValidationError
+
         node = MockNode()
 
-        with pytest.raises(ValueError, match="node_type cannot be empty"):
-            node.initialize_introspection(
-                node_id="test-node",
+        with pytest.raises(ValidationError):
+            config = ModelIntrospectionConfig(
+                node_id=TEST_NODE_UUID_1,
                 node_type="",
             )
+            node.initialize_introspection(config)
 
 
 @pytest.mark.unit
@@ -327,11 +346,12 @@ class TestMixinNodeIntrospectionCapabilities:
             Initialized MockNode instance.
         """
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-001",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
         return node
 
     async def test_get_capabilities_extracts_operations(
@@ -411,11 +431,12 @@ class TestMixinNodeIntrospectionEndpoints:
             Initialized MockNode instance.
         """
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-001",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
         return node
 
     async def test_get_endpoints_discovers_health(self, mock_node: MockNode) -> None:
@@ -435,11 +456,12 @@ class TestMixinNodeIntrospectionEndpoints:
     async def test_get_endpoints_no_endpoints(self) -> None:
         """Test endpoint discovery when no endpoints defined."""
         node = MockNodeNoHealth()
-        node.initialize_introspection(
-            node_id="test-node-no-health",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         endpoints = await node.get_endpoints()
 
@@ -470,11 +492,12 @@ class TestMixinNodeIntrospectionState:
             Initialized MockNode instance.
         """
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-001",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
         return node
 
     async def test_get_current_state_returns_state(self, mock_node: MockNode) -> None:
@@ -495,11 +518,12 @@ class TestMixinNodeIntrospectionState:
     async def test_get_current_state_no_state_attribute(self) -> None:
         """Test get_current_state when _state is missing."""
         node = MockNodeNoState()
-        node.initialize_introspection(
-            node_id="test-node-no-state",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         state = await node.get_current_state()
 
@@ -508,11 +532,12 @@ class TestMixinNodeIntrospectionState:
     async def test_get_current_state_with_enum_state(self) -> None:
         """Test get_current_state with enum-style state (has .value)."""
         node = MockNodeWithEnumState()
-        node.initialize_introspection(
-            node_id="test-node-enum",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         state = await node.get_current_state()
         assert state == "running"
@@ -531,12 +556,13 @@ class TestMixinNodeIntrospectionCaching:
             Initialized MockNode instance with 0.1s cache TTL.
         """
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-001",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.1,  # Short TTL for testing
         )
+        node.initialize_introspection(config)
         return node
 
     async def test_get_introspection_data_caches_result(
@@ -575,7 +601,9 @@ class TestMixinNodeIntrospectionCaching:
         data = await mock_node.get_introspection_data()
 
         assert isinstance(data, ModelNodeIntrospectionEvent)
-        assert data.node_id == "test-node-001"
+        # node_id is a UUID passed via config
+        assert isinstance(data.node_id, UUID)
+        assert data.node_id == TEST_NODE_UUID_1
         assert data.node_type == "EFFECT"
         assert isinstance(data.capabilities, dict)
         assert isinstance(data.endpoints, dict)
@@ -584,11 +612,12 @@ class TestMixinNodeIntrospectionCaching:
     async def test_cache_not_used_before_initialization(self) -> None:
         """Test that cache starts empty."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-cache",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         assert node._introspection_cache is None
         assert node._introspection_cached_at is None
@@ -620,11 +649,12 @@ class TestMixinNodeIntrospectionPublishing:
         """
         node = MockNode()
         event_bus = MockEventBus()
-        node.initialize_introspection(
-            node_id="test-node-001",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=event_bus,
         )
+        node.initialize_introspection(config)
         return node
 
     @pytest.fixture
@@ -635,11 +665,12 @@ class TestMixinNodeIntrospectionPublishing:
             MockNode without event bus.
         """
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-001",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
         return node
 
     async def test_publish_introspection_returns_false_without_event_bus(
@@ -703,11 +734,12 @@ class TestMixinNodeIntrospectionTasks:
         """Test that start_introspection_tasks creates heartbeat task."""
         node = MockNode()
         event_bus = MockEventBus()
-        node.initialize_introspection(
-            node_id="test-node-tasks",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=event_bus,
         )
+        node.initialize_introspection(config)
 
         # Start tasks with fast heartbeat
         await node.start_introspection_tasks(
@@ -733,11 +765,12 @@ class TestMixinNodeIntrospectionTasks:
         """Test that stop_introspection_tasks cancels all tasks."""
         node = MockNode()
         event_bus = MockEventBus()
-        node.initialize_introspection(
-            node_id="test-node-stop",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=event_bus,
         )
+        node.initialize_introspection(config)
 
         # Start and then stop tasks
         await node.start_introspection_tasks(
@@ -755,11 +788,12 @@ class TestMixinNodeIntrospectionTasks:
     async def test_stop_introspection_tasks_idempotent(self) -> None:
         """Test that stop_introspection_tasks can be called multiple times."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-idempotent",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Stop without starting should be safe
         await node.stop_introspection_tasks()
@@ -771,11 +805,12 @@ class TestMixinNodeIntrospectionTasks:
         """Test that heartbeat publishes at regular intervals."""
         node = MockNode()
         event_bus = MockEventBus()
-        node.initialize_introspection(
-            node_id="test-node-heartbeat",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=event_bus,
         )
+        node.initialize_introspection(config)
 
         await node.start_introspection_tasks(
             enable_heartbeat=True,
@@ -802,11 +837,12 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         """Test that publish_introspection handles errors gracefully."""
         node = MockNode()
         failing_event_bus = MockEventBus(should_fail=True)
-        node.initialize_introspection(
-            node_id="test-node-graceful",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=failing_event_bus,
         )
+        node.initialize_introspection(config)
 
         # Should not raise, just return False
         result = await node.publish_introspection()
@@ -824,11 +860,12 @@ class TestMixinNodeIntrospectionGracefulDegradation:
             ) -> None:
                 raise ValueError("Unexpected error")
 
-        node.initialize_introspection(
-            node_id="test-node-broken",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=BrokenEventBus(),
         )
+        node.initialize_introspection(config)
 
         # Should not raise
         result = await node.publish_introspection()
@@ -838,11 +875,12 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         """Test that heartbeat continues even if publish fails."""
         node = MockNode()
         event_bus = MockEventBus(should_fail=True)
-        node.initialize_introspection(
-            node_id="test-node-continue",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=event_bus,
         )
+        node.initialize_introspection(config)
 
         await node.start_introspection_tasks(
             enable_heartbeat=True,
@@ -878,11 +916,12 @@ class TestMixinNodeIntrospectionPerformance:
             Initialized MockNode instance.
         """
         node = MockNode()
-        node.initialize_introspection(
-            node_id="test-node-perf",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
         return node
 
     async def test_introspection_extraction_under_50ms(
@@ -994,11 +1033,12 @@ class TestMixinNodeIntrospectionBenchmark:
     async def test_introspection_benchmark_with_instrumentation(self) -> None:
         """Benchmark introspection with detailed timing breakdown."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="benchmark-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Clear cache for full computation
         node._introspection_cache = None
@@ -1061,12 +1101,13 @@ class TestMixinNodeIntrospectionBenchmark:
     async def test_introspection_concurrent_load_benchmark(self) -> None:
         """Benchmark introspection under concurrent load."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="concurrent-benchmark-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Force cache misses
         )
+        node.initialize_introspection(config)
 
         async def single_introspection() -> float:
             start = time.perf_counter()
@@ -1098,11 +1139,12 @@ class TestMixinNodeIntrospectionBenchmark:
     async def test_cache_hit_performance(self) -> None:
         """Verify cache hits are sub-millisecond."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="cache-hit-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Warm cache
         await node.get_introspection_data()
@@ -1134,11 +1176,12 @@ class TestMixinNodeIntrospectionBenchmark:
     async def test_introspection_p95_latency(self) -> None:
         """Test that p95 latency meets requirements."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="p95-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         times: list[float] = []
         iterations = 50
@@ -1171,11 +1214,12 @@ class TestMixinNodeIntrospectionBenchmark:
     async def test_component_timing_breakdown(self) -> None:
         """Test timing breakdown of individual introspection components."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="breakdown-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Time each component individually
         components = {
@@ -1221,20 +1265,24 @@ class TestMixinNodeIntrospectionEdgeCases:
 
     async def test_empty_node_introspection(self) -> None:
         """Test introspection on a minimal node."""
+        from uuid import NAMESPACE_DNS, UUID, uuid5
 
         class MinimalNode(MixinNodeIntrospection):
             pass
 
         node = MinimalNode()
-        node.initialize_introspection(
-            node_id="minimal-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         data = await node.get_introspection_data()
 
-        assert data.node_id == "minimal-node"
+        # node_id is the UUID passed in config
+        assert isinstance(data.node_id, UUID)
+        assert data.node_id == TEST_NODE_UUID_1
         assert data.current_state is None  # No state attribute
 
     async def test_large_capability_list(self) -> None:
@@ -1272,11 +1320,12 @@ class TestMixinNodeIntrospectionEdgeCases:
                 pass
 
         node = LargeNode()
-        node.initialize_introspection(
-            node_id="large-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_2,
             node_type="COMPUTE",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         threshold_ms = 50 * PERF_MULTIPLIER
         start = time.time()
@@ -1293,13 +1342,16 @@ class TestMixinNodeIntrospectionEdgeCases:
 
     async def test_concurrent_introspection_calls(self) -> None:
         """Test concurrent introspection data requests."""
+        from uuid import NAMESPACE_DNS, UUID, uuid5
+
         node = MockNode()
-        node.initialize_introspection(
-            node_id="concurrent-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL
         )
+        node.initialize_introspection(config)
 
         # Make 100 concurrent calls
         tasks = [node.get_introspection_data() for _ in range(100)]
@@ -1308,17 +1360,19 @@ class TestMixinNodeIntrospectionEdgeCases:
         # All should succeed
         assert len(results) == 100
         for result in results:
-            assert result.node_id == "concurrent-node"
+            assert isinstance(result.node_id, UUID)
+            assert result.node_id == TEST_NODE_UUID_1
 
     async def test_introspection_with_special_characters_in_state(self) -> None:
         """Test introspection with special characters in state."""
         node = MockNode()
         node._state = "state<with>special&chars\"quote'"
-        node.initialize_introspection(
-            node_id="special-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         state = await node.get_current_state()
         assert state == "state<with>special&chars\"quote'"
@@ -1326,11 +1380,12 @@ class TestMixinNodeIntrospectionEdgeCases:
     async def test_introspection_preserves_node_functionality(self) -> None:
         """Test that introspection mixin doesn't affect node functionality."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="functional-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Node methods should still work normally
         result = await node.execute("test_op", {"data": "value"})
@@ -1356,11 +1411,12 @@ class TestMixinNodeIntrospectionClassLevelCache:
     async def test_class_method_cache_populated_on_first_access(self) -> None:
         """Test that class-level cache is populated on first access."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="cache-test-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Cache should be empty before first access
         assert MockNode not in MixinNodeIntrospection._class_method_cache
@@ -1377,18 +1433,20 @@ class TestMixinNodeIntrospectionClassLevelCache:
     async def test_class_method_cache_shared_across_instances(self) -> None:
         """Test that class-level cache is shared across instances."""
         node1 = MockNode()
-        node1.initialize_introspection(
-            node_id="cache-node-1",
+        config1 = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node1.initialize_introspection(config1)
 
         node2 = MockNode()
-        node2.initialize_introspection(
-            node_id="cache-node-2",
+        config2 = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node2.initialize_introspection(config2)
 
         # First node populates cache
         await node1.get_capabilities()
@@ -1405,11 +1463,12 @@ class TestMixinNodeIntrospectionClassLevelCache:
     async def test_invalidate_class_method_cache_specific_class(self) -> None:
         """Test invalidating cache for a specific class."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="invalidate-test",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Populate cache
         await node.get_capabilities()
@@ -1424,11 +1483,12 @@ class TestMixinNodeIntrospectionClassLevelCache:
     async def test_invalidate_class_method_cache_all_classes(self) -> None:
         """Test invalidating cache for all classes."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="invalidate-all-test",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Populate cache
         await node.get_capabilities()
@@ -1443,11 +1503,12 @@ class TestMixinNodeIntrospectionClassLevelCache:
     async def test_cached_signatures_match_direct_extraction(self) -> None:
         """Test that cached signatures match direct signature extraction."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="signature-match-test",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Get capabilities (uses cache)
         capabilities = await node.get_capabilities()
@@ -1465,11 +1526,12 @@ class TestMixinNodeIntrospectionClassLevelCache:
     async def test_class_level_cache_performance_benefit(self) -> None:
         """Test that class-level caching provides performance benefit."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="perf-cache-test",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # First call (cold cache) - populates cache
         start1 = time.time()
@@ -1503,18 +1565,20 @@ class TestMixinNodeIntrospectionClassLevelCache:
                 return {"custom2": value}
 
         node1 = CustomNode1()
-        node1.initialize_introspection(
-            node_id="custom-1",
+        config1 = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="COMPUTE",
             event_bus=None,
         )
+        node1.initialize_introspection(config1)
 
         node2 = CustomNode2()
-        node2.initialize_introspection(
-            node_id="custom-2",
+        config2 = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_2,
             node_type="COMPUTE",
             event_bus=None,
         )
+        node2.initialize_introspection(config2)
 
         # Both populate their respective caches
         await node1.get_capabilities()
@@ -1545,11 +1609,12 @@ class TestMixinNodeIntrospectionClassLevelCache:
             pass
 
         node = NodeWithBuiltins()
-        node.initialize_introspection(
-            node_id="builtins-test",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Should not raise exception
         capabilities = await node.get_capabilities()
@@ -1565,11 +1630,12 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
     async def test_default_operation_keywords_used_when_not_specified(self) -> None:
         """Test that DEFAULT_OPERATION_KEYWORDS is used when not specified."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="default-keywords-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
         assert (
             node._introspection_operation_keywords
             == MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
@@ -1578,11 +1644,12 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
     async def test_default_exclude_prefixes_used_when_not_specified(self) -> None:
         """Test that DEFAULT_EXCLUDE_PREFIXES is used when not specified."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="default-prefixes-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
         assert (
             node._introspection_exclude_prefixes
             == MixinNodeIntrospection.DEFAULT_EXCLUDE_PREFIXES
@@ -1592,24 +1659,26 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         """Test that custom operation_keywords are stored correctly."""
         custom_keywords = {"fetch", "upload", "download", "sync"}
         node = MockNode()
-        node.initialize_introspection(
-            node_id="custom-keywords-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             operation_keywords=custom_keywords,
         )
+        node.initialize_introspection(config)
         assert node._introspection_operation_keywords == custom_keywords
 
     async def test_custom_exclude_prefixes_are_stored(self) -> None:
         """Test that custom exclude_prefixes are stored correctly."""
         custom_prefixes = {"_", "helper_", "internal_"}
         node = MockNode()
-        node.initialize_introspection(
-            node_id="custom-prefixes-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             exclude_prefixes=custom_prefixes,
         )
+        node.initialize_introspection(config)
         assert node._introspection_exclude_prefixes == custom_prefixes
 
     async def test_custom_operation_keywords_affect_capability_discovery(self) -> None:
@@ -1626,12 +1695,13 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
                 pass
 
         node = CustomMethodsNode()
-        node.initialize_introspection(
-            node_id="custom-ops-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"fetch", "upload"},
         )
+        node.initialize_introspection(config)
         capabilities = await node.get_capabilities()
         operations = capabilities["operations"]
         assert isinstance(operations, list)
@@ -1653,12 +1723,13 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
     async def test_empty_operation_keywords_discovers_no_operations(self) -> None:
         """Test that empty operation_keywords results in no operations discovered."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="empty-keywords-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             operation_keywords=set(),
         )
+        node.initialize_introspection(config)
         capabilities = await node.get_capabilities()
         operations = capabilities["operations"]
         assert isinstance(operations, list)
@@ -1675,19 +1746,21 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
                 pass
 
         node1 = MultiInstanceNode()
-        node1.initialize_introspection(
-            node_id="node-1",
+        config1 = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"execute"},
         )
+        node1.initialize_introspection(config1)
         node2 = MultiInstanceNode()
-        node2.initialize_introspection(
-            node_id="node-2",
+        config2 = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_2,
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"fetch"},
         )
+        node2.initialize_introspection(config2)
         caps1 = await node1.get_capabilities()
         caps2 = await node2.get_capabilities()
         ops1 = caps1["operations"]
@@ -1703,11 +1776,12 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         """Test that DEFAULT_OPERATION_KEYWORDS is not mutated by instances."""
         original_defaults = MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.copy()
         node = MockNode()
-        node.initialize_introspection(
-            node_id="no-mutation-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
         node._introspection_operation_keywords.add("custom_keyword")
         assert original_defaults == MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
         assert "custom_keyword" not in MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS
@@ -1723,11 +1797,12 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
     ) -> None:
         """Test that get_performance_metrics returns None before introspection."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="metrics-test-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         metrics = node.get_performance_metrics()
         assert metrics is None
@@ -1737,11 +1812,12 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
     ) -> None:
         """Test that get_performance_metrics returns metrics after introspection."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="metrics-test-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         await node.get_introspection_data()
         metrics = node.get_performance_metrics()
@@ -1752,11 +1828,12 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
     async def test_performance_metrics_contains_expected_fields(self) -> None:
         """Test that performance metrics contain all expected fields."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="metrics-fields-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         await node.get_introspection_data()
         metrics = node.get_performance_metrics()
@@ -1784,11 +1861,12 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
     async def test_performance_metrics_cache_hit_detection(self) -> None:
         """Test that cache hits are correctly detected in metrics."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="cache-hit-metrics-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # First call - cache miss
         await node.get_introspection_data()
@@ -1805,11 +1883,12 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
     async def test_performance_metrics_method_count(self) -> None:
         """Test that method count is correctly reported in metrics."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="method-count-metrics-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         await node.get_introspection_data()
         metrics = node.get_performance_metrics()
@@ -1822,11 +1901,12 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
     async def test_performance_metrics_to_dict(self) -> None:
         """Test that to_dict() returns all fields."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="to-dict-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         await node.get_introspection_data()
         metrics = node.get_performance_metrics()
@@ -1848,12 +1928,13 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
     async def test_performance_metrics_fresh_on_each_call(self) -> None:
         """Test that performance metrics are fresh for each introspection call."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="fresh-metrics-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL to force cache refresh
         )
+        node.initialize_introspection(config)
 
         # First call
         await node.get_introspection_data()
@@ -1896,11 +1977,12 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
                 return data
 
         node = MinimalMethodsNode()
-        node.initialize_introspection(
-            node_id="minimal-methods-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="COMPUTE",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Clear cache for accurate measurement
         MixinNodeIntrospection._invalidate_class_method_cache(MinimalMethodsNode)
@@ -1998,11 +2080,12 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
                 return d
 
         node = MediumMethodsNode()
-        node.initialize_introspection(
-            node_id="medium-methods-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="COMPUTE",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Clear cache for accurate measurement
         MixinNodeIntrospection._invalidate_class_method_cache(MediumMethodsNode)
@@ -2052,11 +2135,12 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
             setattr(LargeMethodsNode, method.__name__, method)
 
         node = LargeMethodsNode()
-        node.initialize_introspection(
-            node_id="large-methods-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="COMPUTE",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Clear cache for accurate measurement
         MixinNodeIntrospection._invalidate_class_method_cache(LargeMethodsNode)
@@ -2103,11 +2187,12 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
             setattr(LargeCacheNode, method.__name__, method)
 
         node = LargeCacheNode()
-        node.initialize_introspection(
-            node_id="large-cache-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="COMPUTE",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # Warm cache
         await node.get_introspection_data()
@@ -2151,11 +2236,12 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
                 setattr(ScalingTestNode, method.__name__, method)
 
             node = ScalingTestNode()
-            node.initialize_introspection(
-                node_id=f"scaling-test-{method_count}",
+            config = ModelIntrospectionConfig(
+                node_id=TEST_NODE_UUID_1,
                 node_type="COMPUTE",
                 event_bus=None,
             )
+            node.initialize_introspection(config)
 
             # Clear cache and measure
             MixinNodeIntrospection._invalidate_class_method_cache(ScalingTestNode)
@@ -2198,11 +2284,12 @@ class TestMixinNodeIntrospectionThresholdDetection:
     async def test_threshold_not_exceeded_normal_operation(self) -> None:
         """Test that thresholds are not marked exceeded in normal operation."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="threshold-normal-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         await node.get_introspection_data()
         metrics = node.get_performance_metrics()
@@ -2219,11 +2306,12 @@ class TestMixinNodeIntrospectionThresholdDetection:
         # This test verifies the structure is correct
         # We can't reliably force slow operations in a unit test
         node = MockNode()
-        node.initialize_introspection(
-            node_id="slow-ops-structure-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         await node.get_introspection_data()
         metrics = node.get_performance_metrics()
@@ -2235,11 +2323,12 @@ class TestMixinNodeIntrospectionThresholdDetection:
     async def test_cache_hit_threshold_separate_from_total(self) -> None:
         """Test that cache hit has its own performance threshold."""
         node = MockNode()
-        node.initialize_introspection(
-            node_id="cache-threshold-node",
+        config = ModelIntrospectionConfig(
+            node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
             event_bus=None,
         )
+        node.initialize_introspection(config)
 
         # First call - cache miss
         await node.get_introspection_data()

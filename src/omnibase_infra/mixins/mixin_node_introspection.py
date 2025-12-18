@@ -72,14 +72,16 @@ Security Considerations:
 Usage:
     ```python
     from omnibase_infra.mixins import MixinNodeIntrospection
+    from omnibase_infra.models.discovery import ModelIntrospectionConfig
 
     class MyNode(MixinNodeIntrospection):
-        def __init__(self, config, event_bus=None):
-            self.initialize_introspection(
-                node_id=config.node_id,
+        def __init__(self, node_config, event_bus=None):
+            config = ModelIntrospectionConfig(
+                node_id=node_config.node_id,
                 node_type="EFFECT",
                 event_bus=event_bus,
             )
+            self.initialize_introspection(config)
 
         async def startup(self):
             # Publish initial introspection on startup
@@ -102,12 +104,14 @@ Usage:
 
 Integration Requirements:
     Classes using this mixin must:
-    1. Call `initialize_introspection()` during initialization
+    1. Call `initialize_introspection(config)` during initialization with a
+       ModelIntrospectionConfig instance
     2. Optionally call `start_introspection_tasks()` for background operations
     3. Call `stop_introspection_tasks()` during shutdown
     4. Ensure event_bus has `publish_envelope()` method if provided
 
 See Also:
+    - ModelIntrospectionConfig for configuration options
     - MixinAsyncCircuitBreaker for circuit breaker pattern
     - ModelNodeIntrospectionEvent for event model
     - ModelNodeHeartbeatEvent for heartbeat model
@@ -126,7 +130,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
-from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+from omnibase_infra.models.discovery import (
+    ModelIntrospectionConfig,
+    ModelNodeIntrospectionEvent,
+)
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 if TYPE_CHECKING:
@@ -304,13 +311,17 @@ class MixinNodeIntrospection:
 
     Example:
         ```python
+        from uuid import UUID
+        from omnibase_infra.models.discovery import ModelIntrospectionConfig
+
         class PostgresAdapter(MixinNodeIntrospection):
-            def __init__(self, config):
-                self.initialize_introspection(
-                    node_id="postgres-adapter-001",
+            def __init__(self, node_id: UUID, adapter_config):
+                config = ModelIntrospectionConfig(
+                    node_id=node_id,
                     node_type="EFFECT",
-                    event_bus=config.event_bus,
+                    event_bus=adapter_config.event_bus,
                 )
+                self.initialize_introspection(config)
 
             async def execute(self, query: str) -> list[dict]:
                 # Node operation - WILL be exposed via introspection
@@ -345,7 +356,7 @@ class MixinNodeIntrospection:
     _registry_unsubscribe: Callable[[], None] | Callable[[], Awaitable[None]] | None
 
     # Configuration attributes
-    _introspection_node_id: str | None
+    _introspection_node_id: UUID | None
     _introspection_node_type: str | None
     _introspection_event_bus: ProtocolEventBus | None
     _introspection_version: str
@@ -436,13 +447,7 @@ class MixinNodeIntrospection:
 
     def initialize_introspection(
         self,
-        node_id: str,
-        node_type: str,
-        event_bus: ProtocolEventBus | None = None,
-        version: str = "1.0.0",
-        cache_ttl: float = 300.0,
-        operation_keywords: set[str] | None = None,
-        exclude_prefixes: set[str] | None = None,
+        config: ModelIntrospectionConfig,
     ) -> None:
         """Initialize introspection configuration.
 
@@ -450,65 +455,63 @@ class MixinNodeIntrospection:
         operations are performed.
 
         Args:
-            node_id: Unique identifier for this node instance
-            node_type: Node type classification (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
-            event_bus: Optional event bus for publishing introspection events.
-                Must have `publish_envelope()` method if provided.
-            version: Node version string (default: "1.0.0")
-            cache_ttl: Cache time-to-live in seconds (default: 300.0)
-            operation_keywords: Optional set of keywords to identify operation methods.
-                Methods containing these keywords are reported as operations.
-                If None, uses DEFAULT_OPERATION_KEYWORDS.
-            exclude_prefixes: Optional set of prefixes to exclude from capability
-                discovery. Methods starting with these prefixes are filtered out.
-                If None, uses DEFAULT_EXCLUDE_PREFIXES.
+            config: Configuration model containing all introspection settings.
+                See ModelIntrospectionConfig for available options.
 
         Raises:
-            ValueError: If node_id or node_type is empty
+            ValueError: If config.node_id or config.node_type is empty
+                (validated by Pydantic min_length=1)
 
         Example:
             ```python
+            from omnibase_infra.models.discovery import ModelIntrospectionConfig
+
             class MyNode(MixinNodeIntrospection):
-                def __init__(self, config):
-                    self.initialize_introspection(
-                        node_id=config.node_id,
+                def __init__(self, node_config):
+                    config = ModelIntrospectionConfig(
+                        node_id=node_config.node_id,
                         node_type="EFFECT",
-                        event_bus=config.event_bus,
+                        event_bus=node_config.event_bus,
                         version="1.2.0",
                     )
+                    self.initialize_introspection(config)
 
             # With custom operation keywords
             class MyEffectNode(MixinNodeIntrospection):
-                def __init__(self, config):
-                    self.initialize_introspection(
-                        node_id=config.node_id,
+                def __init__(self, node_config):
+                    config = ModelIntrospectionConfig(
+                        node_id=node_config.node_id,
                         node_type="EFFECT",
-                        event_bus=config.event_bus,
+                        event_bus=node_config.event_bus,
                         operation_keywords={"fetch", "upload", "download"},
                     )
+                    self.initialize_introspection(config)
             ```
+
+        See Also:
+            ModelIntrospectionConfig: Configuration model with all available options.
         """
-        if not node_id:
-            raise ValueError("node_id cannot be empty")
-        if not node_type:
+        # Note: Pydantic validates node_id is a valid UUID and node_type has min_length=1
+        # This check is kept for explicit error message
+        if not config.node_type:
             raise ValueError("node_type cannot be empty")
 
-        # Configuration
-        self._introspection_node_id = node_id
-        self._introspection_node_type = node_type
-        self._introspection_event_bus = event_bus
-        self._introspection_version = version
-        self._introspection_cache_ttl = cache_ttl
+        # Configuration - extract from config model
+        self._introspection_node_id = config.node_id
+        self._introspection_node_type = config.node_type
+        self._introspection_event_bus = config.event_bus
+        self._introspection_version = config.version
+        self._introspection_cache_ttl = config.cache_ttl
 
         # Capability discovery configuration - use copies to avoid mutation
         self._introspection_operation_keywords = (
-            operation_keywords
-            if operation_keywords is not None
+            config.operation_keywords
+            if config.operation_keywords is not None
             else self.DEFAULT_OPERATION_KEYWORDS.copy()
         )
         self._introspection_exclude_prefixes = (
-            exclude_prefixes
-            if exclude_prefixes is not None
+            config.exclude_prefixes
+            if config.exclude_prefixes is not None
             else self.DEFAULT_EXCLUDE_PREFIXES.copy()
         )
 
@@ -533,23 +536,23 @@ class MixinNodeIntrospection:
         # Performance metrics tracking
         self._introspection_last_metrics = None
 
-        if event_bus is None:
+        if config.event_bus is None:
             logger.warning(
-                f"Introspection initialized without event bus for {node_id}",
+                f"Introspection initialized without event bus for {config.node_id}",
                 extra={
-                    "node_id": node_id,
-                    "node_type": node_type,
+                    "node_id": config.node_id,
+                    "node_type": config.node_type,
                 },
             )
 
         logger.debug(
-            f"Introspection initialized for {node_id}",
+            f"Introspection initialized for {config.node_id}",
             extra={
-                "node_id": node_id,
-                "node_type": node_type,
-                "version": version,
-                "cache_ttl": cache_ttl,
-                "has_event_bus": event_bus is not None,
+                "node_id": config.node_id,
+                "node_type": config.node_type,
+                "version": config.version,
+                "cache_ttl": config.cache_ttl,
+                "has_event_bus": config.event_bus is not None,
                 "operation_keywords_count": len(self._introspection_operation_keywords),
                 "exclude_prefixes_count": len(self._introspection_exclude_prefixes),
             },
@@ -1046,26 +1049,30 @@ class MixinNodeIntrospection:
 
         # Get node_id and node_type with fallback logging
         # The "unknown" fallback indicates a potential initialization issue
-        node_id = self._introspection_node_id
-        if node_id is None:
+        node_id_uuid = self._introspection_node_id
+        if node_id_uuid is None:
             logger.warning(
-                "Node ID not initialized, using 'unknown' - "
+                "Node ID not initialized, using generated UUID - "
                 "ensure initialize_introspection() was called correctly",
                 extra={"operation": "get_introspection_data"},
             )
-            node_id = "unknown"
+            # Generate a deterministic UUID for "unknown" using uuid5
+            node_id_uuid = uuid5(NAMESPACE_DNS, "unknown")
 
         node_type = self._introspection_node_type
         if node_type is None:
             logger.warning(
                 "Node type not initialized, using 'unknown' - "
                 "ensure initialize_introspection() was called correctly",
-                extra={"node_id": node_id, "operation": "get_introspection_data"},
+                extra={
+                    "node_id": str(node_id_uuid),
+                    "operation": "get_introspection_data",
+                },
             )
             node_type = "unknown"
 
         event = ModelNodeIntrospectionEvent(
-            node_id=node_id,
+            node_id=node_id_uuid,
             node_type=node_type,
             capabilities=capabilities,
             endpoints=endpoints,
@@ -1251,31 +1258,27 @@ class MixinNodeIntrospection:
 
             # Get node_id and node_type with fallback logging
             # The "unknown" fallback indicates a potential initialization issue
-            node_id_str = self._introspection_node_id
-            if node_id_str is None:
+            node_id_uuid = self._introspection_node_id
+            if node_id_uuid is None:
                 logger.warning(
-                    "Node ID not initialized, using 'unknown' in heartbeat - "
+                    "Node ID not initialized, using generated UUID in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
                     extra={"operation": "_publish_heartbeat"},
                 )
-                node_id_str = "unknown"
+                # Generate a deterministic UUID for "unknown" using uuid5
+                node_id_uuid = uuid5(NAMESPACE_DNS, "unknown")
 
             node_type = self._introspection_node_type
             if node_type is None:
                 logger.warning(
                     "Node type not initialized, using 'unknown' in heartbeat - "
                     "ensure initialize_introspection() was called correctly",
-                    extra={"node_id": node_id_str, "operation": "_publish_heartbeat"},
+                    extra={
+                        "node_id": str(node_id_uuid),
+                        "operation": "_publish_heartbeat",
+                    },
                 )
                 node_type = "unknown"
-
-            # Convert node_id to UUID for heartbeat model compatibility
-            # Try to parse as UUID first, otherwise generate deterministic UUID from string
-            try:
-                node_id_uuid = UUID(node_id_str)
-            except ValueError:
-                # Generate deterministic UUID from string using uuid5 with DNS namespace
-                node_id_uuid = uuid5(NAMESPACE_DNS, node_id_str)
 
             # Create heartbeat event
             heartbeat = ModelNodeHeartbeatEvent(
