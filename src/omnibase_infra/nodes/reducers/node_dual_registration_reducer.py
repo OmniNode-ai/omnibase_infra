@@ -8,8 +8,16 @@ pattern.
 
 Architecture:
     NodeDualRegistrationReducer belongs to the REDUCER layer of ONEX 4-node
-    architecture, aggregating registration state from multiple backends and
-    implementing graceful degradation when one backend fails.
+    architecture. As a PURE reducer, it performs NO I/O operations. Instead,
+    it emits typed intents (ModelConsulRegisterIntent, ModelPostgresUpsertRegistrationIntent)
+    that describe the desired side effects. An Effect node is responsible for
+    executing these intents.
+
+    This design ensures:
+    - Reducer purity: same inputs always produce same outputs
+    - Testability: no mocking required for I/O
+    - Replay capability: given same inputs, replay produces identical outputs
+    - Separation of concerns: business logic (reducer) vs infrastructure (effect)
 
 FSM Integration:
     The reducer loads its state machine from:
@@ -19,27 +27,29 @@ FSM Integration:
     - idle: Waiting for introspection events
     - receiving_introspection: Parsing NODE_INTROSPECTION event
     - validating_payload: Validating event structure
-    - registering_parallel: Parallel registration to both backends
+    - building_intents: Building typed registration intents (was: registering_parallel)
     - aggregating_results: Combining registration outcomes
-    - registration_complete: Both backends succeeded
-    - partial_failure: One backend failed (graceful degradation)
-    - registration_failed: Both backends failed
+    - registration_complete: Both intents emitted successfully
+    - partial_failure: One intent could not be built (validation failure)
+    - registration_failed: No intents could be emitted
 
-Performance Targets:
-    - Dual registration time: <300ms
-    - Aggregation overhead: <10ms
+Intent Emission:
+    The reducer emits typed intents from omnibase_core.models.intents:
+    - ModelConsulRegisterIntent: Declares Consul service registration
+    - ModelPostgresUpsertRegistrationIntent: Declares PostgreSQL record upsert
+
+    Effect nodes receive these intents and execute the actual I/O operations.
 
 Related:
     - OMN-889: Infrastructure MVP - ModelNodeIntrospectionEvent
+    - OMN-912: ModelIntent typed payloads
     - contracts/fsm/dual_registration_reducer_fsm.yaml: FSM contract
+    - docs/handoffs/HANDOFF_PURE_REDUCER_ARCHITECTURE.md: Architecture decision
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,22 +57,24 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 import yaml
+from omnibase_core.models.intents import (
+    ModelConsulRegisterIntent,
+    ModelCoreRegistrationIntent,
+    ModelPostgresUpsertRegistrationIntent,
+)
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
-    InfraConnectionError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
-from omnibase_infra.handlers import ConsulHandler, DbAdapter
 from omnibase_infra.models.registration import (
-    ModelDualRegistrationResult,
     ModelNodeIntrospectionEvent,
-    ModelNodeRegistration,
+    ModelNodeRegistrationRecord,
 )
 from omnibase_infra.nodes.reducers.enums import EnumFSMState, EnumFSMTrigger
 from omnibase_infra.nodes.reducers.models import (
-    ModelAggregationParams,
+    ModelDualRegistrationReducerOutput,
     ModelFSMContext,
     ModelFSMContract,
     ModelReducerMetrics,
@@ -75,51 +87,7 @@ _VALID_NODE_TYPES: frozenset[str] = frozenset(
     {"effect", "compute", "reducer", "orchestrator"}
 )
 
-# Patterns that indicate sensitive data that should be redacted.
-# Per CLAUDE.md error sanitization guidelines, exception messages should
-# never include passwords, API keys, tokens, secrets, or credentials.
-_SENSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"password\s*[=:]\s*\S+", re.IGNORECASE),
-    re.compile(r"api[_-]?key\s*[=:]\s*\S+", re.IGNORECASE),
-    re.compile(r"token\s*[=:]\s*\S+", re.IGNORECASE),
-    re.compile(r"secret\s*[=:]\s*\S+", re.IGNORECASE),
-    re.compile(r"credential\s*[=:]\s*\S+", re.IGNORECASE),
-    re.compile(r"://[^:]+:[^@]+@", re.IGNORECASE),  # user:pass@host in URLs
-    # Email pattern (basic PII protection)
-    re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
-    # Phone number patterns (basic PII protection)
-    re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"),
-)
-
 logger = logging.getLogger(__name__)
-
-
-def _sanitize_error_message(exc: BaseException) -> str:
-    """Sanitize exception message to remove sensitive information.
-
-    Per CLAUDE.md error sanitization guidelines, exception messages should
-    never include passwords, API keys, tokens, secrets, or credentials.
-
-    This function extracts the exception type name and message, then filters
-    out sensitive patterns like:
-    - Passwords, API keys, tokens, secrets
-    - Connection strings with credentials (user:pass@host in URLs)
-    - Basic PII patterns (email addresses, phone numbers)
-
-    Args:
-        exc: The exception to sanitize.
-
-    Returns:
-        Sanitized error string with format "ExceptionType: sanitized message".
-    """
-    exc_type = type(exc).__name__
-    message = str(exc)
-
-    # Redact sensitive patterns
-    for pattern in _SENSITIVE_PATTERNS:
-        message = pattern.sub("[REDACTED]", message)
-
-    return f"{exc_type}: {message}"
 
 
 def _find_contracts_dir() -> Path:
@@ -160,103 +128,96 @@ def _find_contracts_dir() -> Path:
 
 
 class NodeDualRegistrationReducer:
-    """Dual registration reducer that aggregates registration state.
+    """Pure dual registration reducer that emits typed intents.
 
-    Listens for NODE_INTROSPECTION events and coordinates dual registration
-    with graceful degradation when one backend fails.
+    Listens for NODE_INTROSPECTION events and emits typed registration intents
+    for Consul and PostgreSQL backends. As a PURE reducer, this class performs
+    NO I/O operations - it only computes and emits intents.
 
-    This reducer implements the REDUCER pattern in ONEX 4-node architecture:
-    - Aggregates state from multiple sources (Consul, PostgreSQL)
-    - Implements graceful degradation for partial failures
-    - Tracks registration metrics across all processed events
-    - Uses FSM-driven workflow from YAML contract
+    Pure Reducer Architecture:
+        This reducer follows the ONEX Pure Reducer Architecture pattern:
+        - NO I/O operations (no database, network, file system access)
+        - NO side effects (logging is acceptable for debugging)
+        - Deterministic: same inputs always produce same outputs
+        - Emits typed ModelIntent objects for Effect layer execution
 
-    Status Semantics:
-        - "success": Both Consul and PostgreSQL registrations succeeded
-        - "partial": One registration succeeded, the other failed
-        - "failed": Both registrations failed
+        The separation of concerns ensures:
+        1. **Replay capability**: Given same inputs, replay produces identical outputs
+        2. **Testability**: No mocking required for I/O
+        3. **Predictability**: FSM transitions are deterministic
+
+    Status Semantics (Intent Emission, not Registration):
+        - "success": Both Consul and PostgreSQL intents were emitted
+        - "partial": Only one intent could be emitted (validation failure)
+        - "failed": No intents could be emitted (event validation failed)
 
     Attributes:
-        consul_handler: Handler for Consul service discovery operations.
-        db_adapter: Adapter for PostgreSQL database operations.
-        metrics: Aggregation metrics tracking registration outcomes.
+        metrics: Aggregation metrics tracking intent emission outcomes.
         fsm_contract: Loaded FSM contract from YAML.
         current_state: Current FSM state.
         fsm_context: Context variables maintained during FSM execution.
 
     Example:
-        >>> from omnibase_infra.handlers import ConsulHandler, DbAdapter
         >>> from omnibase_infra.nodes.reducers import NodeDualRegistrationReducer
         >>>
-        >>> consul = ConsulHandler()
-        >>> db = DbAdapter()
-        >>> reducer = NodeDualRegistrationReducer(consul, db)
+        >>> reducer = NodeDualRegistrationReducer()
         >>> await reducer.initialize()
         >>>
-        >>> # Process introspection event
-        >>> result = await reducer.execute(introspection_event, correlation_id)
-        >>> print(result.status)  # "success", "partial", or "failed"
+        >>> # Process introspection event - returns intents, not registration result
+        >>> output = await reducer.execute(introspection_event, correlation_id)
+        >>> print(output.status)  # "success", "partial", or "failed"
+        >>> print(len(output.intents))  # Number of intents emitted
+        >>>
+        >>> # Effect layer executes the intents
+        >>> for intent in output.intents:
+        ...     await effect_node.execute(intent)
     """
 
     # Default performance target constants
-    _DEFAULT_TARGET_DUAL_REGISTRATION_MS: float = 300.0
+    _DEFAULT_TARGET_INTENT_BUILD_MS: float = 50.0
     _DEFAULT_TARGET_AGGREGATION_OVERHEAD_MS: float = 10.0
 
     def __init__(
         self,
-        consul_handler: ConsulHandler,
-        db_adapter: DbAdapter,
         fsm_contract_path: Path | None = None,
-        target_dual_registration_ms: float | None = None,
+        target_intent_build_ms: float | None = None,
         target_aggregation_overhead_ms: float | None = None,
     ) -> None:
-        """Initialize dual registration reducer.
+        """Initialize pure dual registration reducer.
 
-        Dependency Injection Pattern:
-            This reducer uses constructor-based dependency injection for handlers.
-            Handlers are injected rather than instantiated internally, enabling:
+        Pure Reducer Design:
+            This reducer is PURE - it performs no I/O operations. Unlike the
+            previous design that injected ConsulHandler and DbAdapter, this
+            reducer only builds typed intents that describe the desired
+            side effects.
 
-            1. **Testability**: Handlers can be replaced with mocks or stubs in tests
-               without modifying the reducer code. Simply pass mock objects that
-               implement the same interface (execute method returning status).
+            The Effect layer (not this reducer) is responsible for:
+            1. Receiving the emitted intents
+            2. Executing actual I/O operations (Consul registration, DB upsert)
+            3. Reporting success/failure back to the orchestrator
 
-            2. **Loose Coupling**: The reducer depends on handler behavior (execute
-               method signature), not concrete implementations. This allows handler
-               implementations to evolve independently.
-
-            3. **Lifecycle Management**: Handlers are managed externally, allowing
-               shared connection pools, centralized initialization, and coordinated
-               shutdown across multiple consumers.
-
-            Note: While ONEX architecture prefers protocol-based resolution through
-            ModelONEXContainer, the current DI pattern is acceptable for infrastructure
-            nodes where handlers require external initialization (connections, auth).
+            This separation ensures:
+            - Reducer is testable without I/O mocking
+            - Replay produces identical outputs
+            - FSM transitions are deterministic
 
         Args:
-            consul_handler: Initialized ConsulHandler for service discovery.
-                Must have an async execute() method that accepts an envelope dict
-                and returns a response with a status attribute.
-            db_adapter: Initialized DbAdapter for PostgreSQL operations.
-                Must have an async execute() method that accepts an envelope dict
-                and returns a response with a status attribute.
             fsm_contract_path: Optional path to FSM contract YAML. If not provided,
                 defaults to contracts/fsm/dual_registration_reducer_fsm.yaml.
-            target_dual_registration_ms: Optional performance target for dual
-                registration in milliseconds. Defaults to 300.0ms. Exceeded
-                thresholds trigger warning logs.
+            target_intent_build_ms: Optional performance target for intent building
+                in milliseconds. Defaults to 50.0ms. Exceeded thresholds trigger
+                warning logs.
             target_aggregation_overhead_ms: Optional performance target for
                 aggregation overhead in milliseconds. Defaults to 10.0ms.
         """
-        self._consul_handler = consul_handler
-        self._db_adapter = db_adapter
         self._metrics = ModelReducerMetrics()
         self._initialized = False
 
         # Performance thresholds (configurable for different environments)
-        self._target_dual_registration_ms = (
-            target_dual_registration_ms
-            if target_dual_registration_ms is not None
-            else self._DEFAULT_TARGET_DUAL_REGISTRATION_MS
+        self._target_intent_build_ms = (
+            target_intent_build_ms
+            if target_intent_build_ms is not None
+            else self._DEFAULT_TARGET_INTENT_BUILD_MS
         )
         self._target_aggregation_overhead_ms = (
             target_aggregation_overhead_ms
@@ -304,8 +265,7 @@ class NodeDualRegistrationReducer:
         """Initialize reducer and load FSM contract.
 
         Loads the FSM contract from YAML and validates its structure.
-        The consul_handler and db_adapter must be initialized separately
-        before calling this method.
+        As a pure reducer, no I/O handlers need to be initialized.
 
         Raises:
             RuntimeHostError: If FSM contract loading fails.
@@ -387,8 +347,7 @@ class NodeDualRegistrationReducer:
         """Shutdown reducer and reset state.
 
         Resets FSM to idle state and clears context.
-        Does NOT shutdown consul_handler or db_adapter - those are managed
-        externally.
+        As a pure reducer, there are no I/O resources to release.
         """
         self._current_state = EnumFSMState.IDLE
         self._fsm_context = ModelFSMContext()
@@ -399,12 +358,19 @@ class NodeDualRegistrationReducer:
         self,
         event: ModelNodeIntrospectionEvent,
         correlation_id: UUID | None = None,
-    ) -> ModelDualRegistrationResult:
-        """Execute dual registration workflow for introspection event.
+    ) -> ModelDualRegistrationReducerOutput:
+        """Execute pure dual registration workflow for introspection event.
 
         Processes a NODE_INTROSPECTION event through the FSM workflow,
-        coordinating parallel registration to Consul and PostgreSQL
-        with graceful degradation.
+        building typed registration intents for Consul and PostgreSQL.
+        This method performs NO I/O - it only builds and emits intents.
+
+        Pure Reducer Semantics:
+            This method returns intents describing the desired registrations,
+            NOT the registration results. The Effect layer is responsible for:
+            1. Receiving the emitted intents
+            2. Executing actual I/O operations
+            3. Reporting success/failure
 
         Args:
             event: Node introspection event to process.
@@ -412,7 +378,7 @@ class NodeDualRegistrationReducer:
                 uses event.correlation_id or generates a new one.
 
         Returns:
-            ModelDualRegistrationResult with registration outcomes.
+            ModelDualRegistrationReducerOutput containing typed intents.
 
         Raises:
             RuntimeHostError: If reducer not initialized or workflow fails.
@@ -457,24 +423,25 @@ class NodeDualRegistrationReducer:
                 await self._transition(EnumFSMTrigger.VALIDATION_FAILED)
                 # FSM: registration_failed -> idle
                 await self._transition(EnumFSMTrigger.FAILURE_RESULT_EMITTED)
-                return self._build_failed_result(cid, validation_error)
+                return self._build_failed_output(cid, validation_error)
 
             # FSM: validating_payload -> registering_parallel
+            # (Note: state name unchanged for FSM compatibility, but we're building intents)
             await self._transition(EnumFSMTrigger.VALIDATION_PASSED)
 
-            # Execute parallel registration
-            result = await self._register_parallel(event, cid)
+            # Build registration intents (pure computation, no I/O)
+            output = self._build_registration_intents(event, cid)
 
             # FSM: registering_parallel -> aggregating_results
             await self._transition(EnumFSMTrigger.REGISTRATION_ATTEMPTS_COMPLETE)
 
             # Determine outcome and transition to terminal state
-            if result.status == "success":
+            if output.status == "success":
                 # FSM: aggregating_results -> registration_complete
                 await self._transition(EnumFSMTrigger.ALL_BACKENDS_SUCCEEDED)
                 # FSM: registration_complete -> idle
                 await self._transition(EnumFSMTrigger.RESULT_EMITTED)
-            elif result.status == "partial":
+            elif output.status == "partial":
                 # FSM: aggregating_results -> partial_failure
                 await self._transition(EnumFSMTrigger.PARTIAL_SUCCESS)
                 # FSM: partial_failure -> idle
@@ -485,7 +452,7 @@ class NodeDualRegistrationReducer:
                 # FSM: registration_failed -> idle
                 await self._transition(EnumFSMTrigger.FAILURE_RESULT_EMITTED)
 
-            return result
+            return output
 
         except RuntimeHostError:
             raise
@@ -493,7 +460,7 @@ class NodeDualRegistrationReducer:
             # =================================================================
             # ERROR RECOVERY PATTERN: FSM State Reset
             # =================================================================
-            # When an unexpected exception occurs during the registration workflow,
+            # When an unexpected exception occurs during the intent building workflow,
             # we must ensure the FSM returns to the IDLE state to allow subsequent
             # events to be processed. Without this recovery, the reducer would be
             # stuck in an intermediate state and unable to handle new events.
@@ -502,14 +469,10 @@ class NodeDualRegistrationReducer:
             # 1. Log the exception with full context for debugging
             # 2. Force FSM to REGISTRATION_FAILED state (error terminal)
             # 3. Transition from REGISTRATION_FAILED -> IDLE via FAILURE_RESULT_EMITTED
-            #    (defined in FSM contract at lines 286-292)
             # 4. Re-raise as RuntimeHostError to signal failure to caller
-            #
-            # The try/except around the transition prevents transition errors from
-            # masking the original exception that caused the failure.
             # =================================================================
             logger.exception(
-                "Dual registration workflow failed",
+                "Dual registration intent building failed",
                 extra={
                     "node_id": self._fsm_context.node_id,
                     "current_state": self._current_state.value,
@@ -521,13 +484,10 @@ class NodeDualRegistrationReducer:
             self._current_state = EnumFSMState.REGISTRATION_FAILED
 
             # FSM: registration_failed -> idle (complete the FSM cycle)
-            # This ensures the reducer can process subsequent events after exception.
-            # The transition is defined in the FSM contract at lines 286-292.
             try:
                 await self._transition(EnumFSMTrigger.FAILURE_RESULT_EMITTED)
             except Exception as transition_error:
-                # Log but don't mask the original error - FSM will be in
-                # REGISTRATION_FAILED state, which is recoverable on next init
+                # Log but don't mask the original error
                 logger.exception(
                     "Failed to transition to idle after exception - "
                     "FSM may need reinitialization",
@@ -540,7 +500,7 @@ class NodeDualRegistrationReducer:
                 )
 
             raise RuntimeHostError(
-                f"Dual registration failed: {type(e).__name__}",
+                f"Intent building failed: {type(e).__name__}",
                 context=ctx,
             ) from e
 
@@ -675,308 +635,48 @@ class NodeDualRegistrationReducer:
 
         return True, ""
 
-    async def _register_parallel(
+    def _build_registration_intents(
         self,
         event: ModelNodeIntrospectionEvent,
         correlation_id: UUID,
-    ) -> ModelDualRegistrationResult:
-        """Execute parallel registration to both backends.
+    ) -> ModelDualRegistrationReducerOutput:
+        """Build typed registration intents for both backends.
 
-        Uses asyncio.gather to execute Consul and PostgreSQL registrations
-        concurrently, with return_exceptions=True for graceful error handling.
+        This is a PURE method - it performs no I/O operations.
+        It builds typed intent objects that describe the desired
+        registration operations for the Effect layer to execute.
 
         Args:
             event: Introspection event containing node data.
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelDualRegistrationResult with aggregated outcomes.
+            ModelDualRegistrationReducerOutput with typed intents.
         """
         start_time = time.perf_counter()
+        intents: list[ModelCoreRegistrationIntent] = []
 
-        # Run both registrations in parallel
-        consul_task = self._register_consul(event, correlation_id)
-        postgres_task = self._register_postgres(event, correlation_id)
+        # Build Consul registration intent
+        consul_intent = self._build_consul_intent(event, correlation_id)
+        consul_emitted = consul_intent is not None
+        if consul_intent is not None:
+            intents.append(consul_intent)
 
-        results = await asyncio.gather(
-            consul_task,
-            postgres_task,
-            return_exceptions=True,
-        )
-
-        consul_result = results[0]
-        postgres_result = results[1]
+        # Build PostgreSQL registration intent
+        postgres_intent = self._build_postgres_intent(event, correlation_id)
+        postgres_emitted = postgres_intent is not None
+        if postgres_intent is not None:
+            intents.append(postgres_intent)
 
         # Calculate elapsed time
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        # Aggregate results using parameter model
-        params = ModelAggregationParams(
-            consul_result=consul_result,
-            postgres_result=postgres_result,
-            node_id=event.node_id,
-            correlation_id=correlation_id,
-            registration_time_ms=elapsed_ms,
-        )
-        return self._aggregate_results(params)
-
-    async def _register_consul(
-        self,
-        event: ModelNodeIntrospectionEvent,
-        correlation_id: UUID,
-    ) -> bool:
-        """Register node with Consul service discovery.
-
-        Args:
-            event: Introspection event containing node data.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            True if registration succeeded, False otherwise.
-
-        Raises:
-            Exception: If registration fails (caught by asyncio.gather).
-        """
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.CONSUL,
-            operation="register",
-            target_name="consul_handler",
-            correlation_id=correlation_id,
-        )
-
-        try:
-            # Build service registration payload
-            service_id = f"node-{event.node_type}-{event.node_id}"
-            health_endpoint = event.endpoints.get("health")
-
-            # Build health check configuration
-            check_config: dict[str, object] | None = None
-            if health_endpoint:
-                check_config = {
-                    "http": health_endpoint,
-                    "interval": "10s",
-                    "timeout": "5s",
-                }
-
-            payload: dict[str, object] = {
-                "name": f"onex-{event.node_type}",
-                "service_id": service_id,
-                "tags": [
-                    f"node_type:{event.node_type}",
-                    f"node_version:{event.node_version}",
-                ],
-            }
-
-            if check_config is not None:
-                payload["check"] = check_config
-
-            # Execute registration
-            envelope: dict[str, object] = {
-                "operation": "consul.register",
-                "payload": payload,
-                "correlation_id": correlation_id,
-            }
-
-            response = await self._consul_handler.execute(envelope)
-
-            # NOTE: Both ConsulHandler and DbAdapter now return typed Pydantic models
-            # (ModelConsulHandlerResponse and ModelDbQueryResponse respectively).
-            # This provides consistent attribute access patterns across both handlers.
-            if response.status == "success":
-                logger.info(
-                    "Consul registration succeeded",
-                    extra={
-                        "service_id": service_id,
-                        "node_id": str(event.node_id),
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                return True
-
-            logger.warning(
-                "Consul registration returned non-success status",
-                extra={
-                    "status": response.status,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return False
-
-        except Exception as e:
-            logger.exception(
-                "Consul registration failed",
-                extra={
-                    "node_id": str(event.node_id),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            raise InfraConnectionError(
-                "Consul registration failed",
-                context=ctx,
-            ) from e
-
-    async def _register_postgres(
-        self,
-        event: ModelNodeIntrospectionEvent,
-        correlation_id: UUID,
-    ) -> bool:
-        """Register node in PostgreSQL node registry.
-
-        Args:
-            event: Introspection event containing node data.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            True if registration succeeded, False otherwise.
-
-        Raises:
-            Exception: If registration fails (caught by asyncio.gather).
-        """
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="register",
-            target_name="db_adapter",
-            correlation_id=correlation_id,
-        )
-
-        try:
-            # Build node registration model
-            now = datetime.now(UTC)
-            registration = ModelNodeRegistration(
-                node_id=event.node_id,
-                node_type=event.node_type,
-                node_version=event.node_version,
-                capabilities=event.capabilities,
-                endpoints=event.endpoints,
-                metadata=event.metadata,
-                health_endpoint=event.endpoints.get("health"),
-                registered_at=now,
-                updated_at=now,
-            )
-
-            # Convert to JSON for insertion
-            registration_data = registration.model_dump(mode="json")
-
-            # Upsert into node_registrations table
-            sql = """
-                INSERT INTO node_registrations (
-                    node_id, node_type, node_version, capabilities,
-                    endpoints, metadata, health_endpoint,
-                    registered_at, updated_at
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9
-                )
-                ON CONFLICT (node_id) DO UPDATE SET
-                    node_type = EXCLUDED.node_type,
-                    node_version = EXCLUDED.node_version,
-                    capabilities = EXCLUDED.capabilities,
-                    endpoints = EXCLUDED.endpoints,
-                    metadata = EXCLUDED.metadata,
-                    health_endpoint = EXCLUDED.health_endpoint,
-                    updated_at = EXCLUDED.updated_at
-            """
-
-            envelope: dict[str, object] = {
-                "operation": "db.execute",
-                "payload": {
-                    "sql": sql,
-                    "parameters": [
-                        str(registration_data["node_id"]),
-                        registration_data["node_type"],
-                        registration_data["node_version"],
-                        json.dumps(registration_data["capabilities"]),
-                        json.dumps(registration_data["endpoints"]),
-                        json.dumps(registration_data["metadata"]),
-                        registration_data.get("health_endpoint"),
-                        registration_data["registered_at"],
-                        registration_data["updated_at"],
-                    ],
-                },
-                "correlation_id": correlation_id,
-            }
-
-            response = await self._db_adapter.execute(envelope)
-
-            # NOTE: Both DbAdapter and ConsulHandler now return typed Pydantic models
-            # (ModelDbQueryResponse and ModelConsulHandlerResponse respectively).
-            # This provides consistent attribute access patterns across both handlers.
-            if response.status == "success":
-                logger.info(
-                    "PostgreSQL registration succeeded",
-                    extra={
-                        "node_id": str(event.node_id),
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                return True
-
-            logger.warning(
-                "PostgreSQL registration returned non-success status",
-                extra={
-                    "status": response.status,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return False
-
-        except Exception as e:
-            logger.exception(
-                "PostgreSQL registration failed",
-                extra={
-                    "node_id": str(event.node_id),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            raise InfraConnectionError(
-                "PostgreSQL registration failed",
-                context=ctx,
-            ) from e
-
-    def _aggregate_results(
-        self,
-        params: ModelAggregationParams,
-    ) -> ModelDualRegistrationResult:
-        """Aggregate registration results with graceful degradation.
-
-        Determines overall status based on individual backend results:
-        - Both succeed -> status="success"
-        - One succeeds -> status="partial"
-        - Both fail -> status="failed"
-
-        Args:
-            params: Aggregation parameters containing registration results,
-                node_id, correlation_id, and timing information.
-
-        Returns:
-            ModelDualRegistrationResult with aggregated outcomes.
-        """
-        # Determine Consul success
-        consul_registered = params.consul_result is True
-        consul_error: str | None = None
-        if isinstance(params.consul_result, BaseException):
-            consul_error = _sanitize_error_message(params.consul_result)
-
-        # Determine PostgreSQL success
-        postgres_registered = params.postgres_result is True
-        postgres_error: str | None = None
-        if isinstance(params.postgres_result, BaseException):
-            postgres_error = _sanitize_error_message(params.postgres_result)
-
-        # Update FSM context
-        self._fsm_context.consul_registered = consul_registered
-        self._fsm_context.postgres_registered = postgres_registered
-        self._fsm_context.consul_error = consul_error
-        self._fsm_context.postgres_error = postgres_error
-        self._fsm_context.success_count = (1 if consul_registered else 0) + (
-            1 if postgres_registered else 0
-        )
-
-        # Determine status
+        # Determine status based on intent emission
         status: Literal["success", "partial", "failed"]
-        if consul_registered and postgres_registered:
+        if consul_emitted and postgres_emitted:
             status = "success"
             self._metrics.success_count += 1
-        elif consul_registered or postgres_registered:
+        elif consul_emitted or postgres_emitted:
             status = "partial"
             self._metrics.partial_count += 1
         else:
@@ -986,49 +686,169 @@ class NodeDualRegistrationReducer:
         # Always increment total
         self._metrics.total_registrations += 1
 
+        # Update FSM context for intent emission (not registration result)
+        self._fsm_context.consul_registered = consul_emitted
+        self._fsm_context.postgres_registered = postgres_emitted
+        self._fsm_context.success_count = (1 if consul_emitted else 0) + (
+            1 if postgres_emitted else 0
+        )
+
         # Log performance metrics
-        if params.registration_time_ms > self._target_dual_registration_ms:
+        if elapsed_ms > self._target_intent_build_ms:
             logger.warning(
-                "Dual registration exceeded performance target",
+                "Intent building exceeded performance target",
                 extra={
-                    "registration_time_ms": params.registration_time_ms,
-                    "target_ms": self._target_dual_registration_ms,
-                    "node_id": str(params.node_id),
-                    "correlation_id": str(params.correlation_id),
+                    "intent_build_time_ms": elapsed_ms,
+                    "target_ms": self._target_intent_build_ms,
+                    "node_id": str(event.node_id),
+                    "correlation_id": str(correlation_id),
                 },
             )
 
-        # Build result - node_id is already UUID from params
-        return ModelDualRegistrationResult(
-            node_id=params.node_id,
-            consul_registered=consul_registered,
-            postgres_registered=postgres_registered,
+        return ModelDualRegistrationReducerOutput(
+            node_id=event.node_id,
+            intents=tuple(intents),
             status=status,
-            consul_error=consul_error,
-            postgres_error=postgres_error,
-            registration_time_ms=params.registration_time_ms,
-            correlation_id=params.correlation_id,
+            consul_intent_emitted=consul_emitted,
+            postgres_intent_emitted=postgres_emitted,
+            validation_error=None,
+            processing_time_ms=elapsed_ms,
+            correlation_id=correlation_id,
         )
 
-    def _build_failed_result(
+    def _build_consul_intent(
+        self,
+        event: ModelNodeIntrospectionEvent,
+        correlation_id: UUID,
+    ) -> ModelConsulRegisterIntent | None:
+        """Build Consul registration intent.
+
+        This is a PURE method - it performs no I/O operations.
+        It builds a typed ModelConsulRegisterIntent that declares
+        the desired Consul service registration.
+
+        Args:
+            event: Introspection event containing node data.
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            ModelConsulRegisterIntent if intent can be built, None otherwise.
+        """
+        # Build service ID
+        service_id = f"node-{event.node_type}-{event.node_id}"
+        service_name = f"onex-{event.node_type}"
+
+        # Build tags
+        tags = [
+            f"node_type:{event.node_type}",
+            f"node_version:{event.node_version}",
+        ]
+
+        # Build health check configuration
+        health_endpoint = event.endpoints.get("health")
+        health_check: dict[str, str] | None = None
+        if health_endpoint:
+            health_check = {
+                "HTTP": health_endpoint,
+                "Interval": "10s",
+                "Timeout": "5s",
+            }
+
+        logger.debug(
+            "Building Consul registration intent",
+            extra={
+                "service_id": service_id,
+                "service_name": service_name,
+                "node_id": str(event.node_id),
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        return ModelConsulRegisterIntent(
+            correlation_id=correlation_id,
+            service_id=service_id,
+            service_name=service_name,
+            tags=tags,
+            health_check=health_check,
+        )
+
+    def _build_postgres_intent(
+        self,
+        event: ModelNodeIntrospectionEvent,
+        correlation_id: UUID,
+    ) -> ModelPostgresUpsertRegistrationIntent | None:
+        """Build PostgreSQL upsert registration intent.
+
+        This is a PURE method - it performs no I/O operations.
+        It builds a typed ModelPostgresUpsertRegistrationIntent that
+        declares the desired PostgreSQL record upsert.
+
+        Args:
+            event: Introspection event containing node data.
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            ModelPostgresUpsertRegistrationIntent if intent can be built, None otherwise.
+        """
+        # Build registration record
+        now = datetime.now(UTC)
+
+        # Convert capabilities to dict if it's a model
+        if hasattr(event.capabilities, "model_dump"):
+            capabilities_dict = event.capabilities.model_dump(mode="json")
+        else:
+            capabilities_dict = dict(event.capabilities) if event.capabilities else {}
+
+        # Convert metadata to dict if it's a model
+        if hasattr(event.metadata, "model_dump"):
+            metadata_dict = event.metadata.model_dump(mode="json")
+        else:
+            metadata_dict = dict(event.metadata) if event.metadata else {}
+
+        record = ModelNodeRegistrationRecord(
+            node_id=event.node_id,
+            node_type=event.node_type,
+            node_version=event.node_version,
+            capabilities=capabilities_dict,
+            endpoints=dict(event.endpoints) if event.endpoints else {},
+            metadata=metadata_dict,
+            health_endpoint=event.endpoints.get("health") if event.endpoints else None,
+            registered_at=now,
+            updated_at=now,
+        )
+
+        logger.debug(
+            "Building PostgreSQL upsert registration intent",
+            extra={
+                "node_id": str(event.node_id),
+                "node_type": event.node_type,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        return ModelPostgresUpsertRegistrationIntent(
+            correlation_id=correlation_id,
+            record=record,
+        )
+
+    def _build_failed_output(
         self,
         correlation_id: UUID,
         error_message: str,
-    ) -> ModelDualRegistrationResult:
-        """Build a failed result for validation or pre-registration errors.
+    ) -> ModelDualRegistrationReducerOutput:
+        """Build a failed output for validation or pre-intent-building errors.
 
         Args:
             correlation_id: Correlation ID for tracing.
             error_message: Error message describing the failure.
 
         Returns:
-            ModelDualRegistrationResult with failed status.
+            ModelDualRegistrationReducerOutput with failed status and no intents.
         """
         self._metrics.failure_count += 1
         self._metrics.total_registrations += 1
 
         # Get node_id from FSM context, use a nil UUID as fallback
-        # node_id is stored as UUID in ModelFSMContext
         node_id_value = self._fsm_context.node_id
         if node_id_value is None:
             node_id = UUID(int=0)  # Nil UUID as fallback
@@ -1041,18 +861,14 @@ class NodeDualRegistrationReducer:
             except ValueError:
                 node_id = UUID(int=0)  # Nil UUID as fallback
 
-        # Use generic error message for both backends since registration
-        # was not attempted (pre-registration failure)
-        generic_error = f"Registration not attempted: {error_message}"
-
-        return ModelDualRegistrationResult(
+        return ModelDualRegistrationReducerOutput(
             node_id=node_id,
-            consul_registered=False,
-            postgres_registered=False,
+            intents=(),
             status="failed",
-            consul_error=generic_error,
-            postgres_error=generic_error,
-            registration_time_ms=0.0,
+            consul_intent_emitted=False,
+            postgres_intent_emitted=False,
+            validation_error=error_message,
+            processing_time_ms=0.0,
             correlation_id=correlation_id,
         )
 

@@ -2,12 +2,15 @@
 # Copyright (c) 2025 OmniNode Team
 """FSM Models for Dual Registration Reducer.
 
-This module exports the FSM context, metrics, contract, and aggregation
+This module exports the FSM context, metrics, contract, output, and aggregation
 parameter models used by the dual registration reducer node.
 """
 
 from omnibase_infra.nodes.reducers.models.model_aggregation_params import (
     ModelAggregationParams,
+)
+from omnibase_infra.nodes.reducers.models.model_dual_registration_reducer_output import (
+    ModelDualRegistrationReducerOutput,
 )
 from omnibase_infra.nodes.reducers.models.model_fsm_action import ModelFSMAction
 from omnibase_infra.nodes.reducers.models.model_fsm_condition import ModelFSMCondition
@@ -31,6 +34,7 @@ from omnibase_infra.nodes.reducers.models.model_reducer_metrics import (
 
 __all__ = [
     "ModelAggregationParams",
+    "ModelDualRegistrationReducerOutput",
     "ModelFSMAction",
     "ModelFSMCondition",
     "ModelFSMContext",

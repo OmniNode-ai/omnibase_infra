@@ -1,47 +1,51 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for NodeDualRegistrationReducer partial failure scenarios.
+"""Unit tests for NodeDualRegistrationReducer validation and edge cases.
 
-Tests graceful degradation behavior when one or both registration backends
-fail (Consul and PostgreSQL), verifying status semantics, error capture,
-and metrics tracking per OMN-889 requirements.
+Tests pure reducer behavior for intent emission, verifying validation logic,
+error handling, and metrics tracking per OMN-889 requirements.
+
+Pure Reducer Architecture:
+    The reducer is now a PURE component that emits typed intents instead of
+    performing I/O. Since there's no I/O, there are no "failures" in the
+    traditional sense - the reducer either:
+    - Emits intents successfully (status="success")
+    - Fails validation (status="failed", no intents)
+
+    Handler/adapter failure scenarios are no longer applicable since the
+    reducer doesn't interact with handlers. Instead, these tests focus on:
+    - Validation failure scenarios
+    - Edge cases in intent building
+    - Metrics tracking
+    - FSM state behavior
+    - Correlation ID propagation
 
 Test Categories:
-    1. Partial Failures - Consul Fails, PostgreSQL Succeeds
-    2. Partial Failures - PostgreSQL Fails, Consul Succeeds
-    3. Total Failures - Both Backends Fail
-    4. Result Model Validation - Status field correctness
-    5. Error Message Capture - Error propagation to result
-    6. Metrics Tracking - Counter increments
-    7. Performance Under Failure - Response time behavior
+    1. Validation Failures - Invalid input handling
+    2. Validation Success - All node types work
+    3. Metrics Tracking - Counter increments
+    4. Intent Emission - Correct intent structure
+    5. FSM State Behavior - State transitions
+    6. Correlation ID Propagation - Tracing support
+    7. Node ID Preservation - Identity tracking
+    8. Edge Cases - Boundary conditions
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from omnibase_core.models.intents import (
+    ModelConsulRegisterIntent,
+    ModelPostgresUpsertRegistrationIntent,
+)
 
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import (
-    InfraAuthenticationError,
-    InfraConnectionError,
-    InfraTimeoutError,
-    InfraUnavailableError,
-    ModelInfraErrorContext,
-    RuntimeHostError,
-)
-from omnibase_infra.handlers import ConsulHandler, DbAdapter
-from omnibase_infra.handlers.models import (
-    ModelConsulHandlerPayload,
-    ModelConsulHandlerResponse,
-)
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.registration import (
-    ModelDualRegistrationResult,
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -49,7 +53,6 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 )
 from omnibase_infra.nodes.reducers.node_dual_registration_reducer import (
     EnumFSMState,
-    ModelReducerMetrics,
     NodeDualRegistrationReducer,
 )
 
@@ -72,159 +75,6 @@ def sample_introspection_event() -> ModelNodeIntrospectionEvent:
 
 
 @pytest.fixture
-def mock_consul_handler() -> MagicMock:
-    """Create a mock ConsulHandler that succeeds by default."""
-    handler = MagicMock(spec=ConsulHandler)
-    # Return ModelConsulHandlerResponse for type consistency
-    mock_response = ModelConsulHandlerResponse(
-        status="success",
-        payload=ModelConsulHandlerPayload(data={"registered": True}),
-        correlation_id=uuid4(),
-    )
-    handler.execute = AsyncMock(return_value=mock_response)
-    return handler
-
-
-@pytest.fixture
-def mock_db_adapter() -> MagicMock:
-    """Create a mock DbAdapter that succeeds by default."""
-    adapter = MagicMock(spec=DbAdapter)
-    # Create a mock response with a status attribute
-    mock_response = MagicMock()
-    mock_response.status = "success"
-    adapter.execute = AsyncMock(return_value=mock_response)
-    return adapter
-
-
-@pytest.fixture
-def failing_consul_handler() -> MagicMock:
-    """ConsulHandler that raises InfraConnectionError."""
-    handler = MagicMock(spec=ConsulHandler)
-    handler.execute = AsyncMock(
-        side_effect=InfraConnectionError(
-            "Consul connection failed",
-            context=ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="register",
-                target_name="consul_handler",
-                correlation_id=uuid4(),
-            ),
-        )
-    )
-    return handler
-
-
-@pytest.fixture
-def failing_db_adapter() -> MagicMock:
-    """DbAdapter that raises InfraConnectionError."""
-    adapter = MagicMock(spec=DbAdapter)
-    adapter.execute = AsyncMock(
-        side_effect=InfraConnectionError(
-            "PostgreSQL connection failed",
-            context=ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="execute",
-                target_name="db_adapter",
-                correlation_id=uuid4(),
-            ),
-        )
-    )
-    return adapter
-
-
-@pytest.fixture
-def timeout_consul_handler() -> MagicMock:
-    """ConsulHandler that raises InfraTimeoutError."""
-    handler = MagicMock(spec=ConsulHandler)
-    handler.execute = AsyncMock(
-        side_effect=InfraTimeoutError(
-            "Consul operation timed out",
-            context=ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="register",
-                target_name="consul_handler",
-                correlation_id=uuid4(),
-            ),
-            timeout_seconds=30.0,
-        )
-    )
-    return handler
-
-
-@pytest.fixture
-def timeout_db_adapter() -> MagicMock:
-    """DbAdapter that raises InfraTimeoutError."""
-    adapter = MagicMock(spec=DbAdapter)
-    adapter.execute = AsyncMock(
-        side_effect=InfraTimeoutError(
-            "PostgreSQL query timed out",
-            context=ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="execute",
-                target_name="db_adapter",
-                correlation_id=uuid4(),
-            ),
-            timeout_seconds=30.0,
-        )
-    )
-    return adapter
-
-
-@pytest.fixture
-def auth_failing_consul_handler() -> MagicMock:
-    """ConsulHandler that raises InfraAuthenticationError."""
-    handler = MagicMock(spec=ConsulHandler)
-    handler.execute = AsyncMock(
-        side_effect=InfraAuthenticationError(
-            "Consul ACL permission denied",
-            context=ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="register",
-                target_name="consul_handler",
-                correlation_id=uuid4(),
-            ),
-        )
-    )
-    return handler
-
-
-@pytest.fixture
-def auth_failing_db_adapter() -> MagicMock:
-    """DbAdapter that raises InfraAuthenticationError."""
-    adapter = MagicMock(spec=DbAdapter)
-    adapter.execute = AsyncMock(
-        side_effect=InfraAuthenticationError(
-            "PostgreSQL authentication failed",
-            context=ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.DATABASE,
-                operation="execute",
-                target_name="db_adapter",
-                correlation_id=uuid4(),
-            ),
-        )
-    )
-    return adapter
-
-
-@pytest.fixture
-def unavailable_consul_handler() -> MagicMock:
-    """ConsulHandler that raises InfraUnavailableError."""
-    handler = MagicMock(spec=ConsulHandler)
-    handler.execute = AsyncMock(
-        side_effect=InfraUnavailableError(
-            "Consul service unavailable - circuit breaker open",
-            context=ModelInfraErrorContext(
-                transport_type=EnumInfraTransportType.CONSUL,
-                operation="register",
-                target_name="consul_handler",
-                correlation_id=uuid4(),
-            ),
-        )
-    )
-    return handler
-
-
-@pytest.fixture
 def fsm_contract_path() -> Path:
     """Path to FSM contract for testing."""
     return (
@@ -235,524 +85,140 @@ def fsm_contract_path() -> Path:
     )
 
 
-# =============================================================================
-# TEST CLASS: PARTIAL FAILURE - CONSUL FAILS, POSTGRESQL SUCCEEDS
-# =============================================================================
+@pytest.fixture
+def dual_registration_reducer(fsm_contract_path: Path) -> NodeDualRegistrationReducer:
+    """Create a pure dual registration reducer for testing.
 
-
-class TestPartialFailureConsulFails:
-    """Test partial failure scenarios where Consul fails but PostgreSQL succeeds."""
-
-    @pytest.mark.asyncio
-    async def test_partial_failure_consul_connection_error(
-        self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Test graceful degradation when Consul connection fails."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is False
-        assert result.postgres_registered is True
-        assert result.consul_error is not None
-        assert "InfraConnectionError" in result.consul_error
-        assert result.postgres_error is None
-
-    @pytest.mark.asyncio
-    async def test_partial_failure_consul_timeout(
-        self,
-        timeout_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Test graceful degradation when Consul times out.
-
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling. The test verifies the timeout causes a
-        partial failure, not that the exact error type is preserved.
-        """
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=timeout_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is False
-        assert result.postgres_registered is True
-        assert result.consul_error is not None
-        # Reducer wraps errors in InfraConnectionError for consistency
-        assert "InfraConnectionError" in result.consul_error
-        assert result.postgres_error is None
-
-    @pytest.mark.asyncio
-    async def test_partial_failure_consul_auth_error(
-        self,
-        auth_failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Test graceful degradation when Consul authentication fails.
-
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling.
-        """
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=auth_failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is False
-        assert result.postgres_registered is True
-        assert result.consul_error is not None
-        # Reducer wraps errors in InfraConnectionError for consistency
-        assert "InfraConnectionError" in result.consul_error
-        assert result.postgres_error is None
-
-    @pytest.mark.asyncio
-    async def test_partial_failure_consul_unavailable(
-        self,
-        unavailable_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Test graceful degradation when Consul is unavailable (circuit breaker).
-
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling.
-        """
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=unavailable_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is False
-        assert result.postgres_registered is True
-        assert result.consul_error is not None
-        # Reducer wraps errors in InfraConnectionError for consistency
-        assert "InfraConnectionError" in result.consul_error
+    Pure Reducer Design:
+        The reducer no longer accepts ConsulHandler or DbAdapter because
+        it emits typed intents instead of performing I/O operations.
+    """
+    return NodeDualRegistrationReducer(fsm_contract_path=fsm_contract_path)
 
 
 # =============================================================================
-# TEST CLASS: PARTIAL FAILURE - POSTGRESQL FAILS, CONSUL SUCCEEDS
+# TEST CLASS: VALIDATION FAILURES
 # =============================================================================
 
 
-class TestPartialFailurePostgresFails:
-    """Test partial failure scenarios where PostgreSQL fails but Consul succeeds."""
+class TestValidationFailures:
+    """Test validation failure scenarios."""
 
     @pytest.mark.asyncio
-    async def test_partial_failure_postgres_connection_error(
+    async def test_validation_failure_returns_failed_status(
         self,
-        mock_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
+        dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
     ) -> None:
-        """Test graceful degradation when PostgreSQL connection fails."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        """Test that validation failure returns failed status with no intents."""
+        await dual_registration_reducer.initialize()
 
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is True
-        assert result.postgres_registered is False
-        assert result.consul_error is None
-        assert result.postgres_error is not None
-        assert "InfraConnectionError" in result.postgres_error
-
-    @pytest.mark.asyncio
-    async def test_partial_failure_postgres_timeout(
-        self,
-        mock_consul_handler: MagicMock,
-        timeout_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Test graceful degradation when PostgreSQL times out.
-
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling.
-        """
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=timeout_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is True
-        assert result.postgres_registered is False
-        assert result.consul_error is None
-        assert result.postgres_error is not None
-        # Reducer wraps errors in InfraConnectionError for consistency
-        assert "InfraConnectionError" in result.postgres_error
-
-    @pytest.mark.asyncio
-    async def test_partial_failure_postgres_auth_error(
-        self,
-        mock_consul_handler: MagicMock,
-        auth_failing_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Test graceful degradation when PostgreSQL authentication fails.
-
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling.
-        """
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=auth_failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is True
-        assert result.postgres_registered is False
-        assert result.consul_error is None
-        assert result.postgres_error is not None
-        # Reducer wraps errors in InfraConnectionError for consistency
-        assert "InfraConnectionError" in result.postgres_error
-
-
-# =============================================================================
-# TEST CLASS: TOTAL FAILURE - BOTH BACKENDS FAIL
-# =============================================================================
-
-
-class TestTotalFailureBothFail:
-    """Test total failure scenarios where both Consul and PostgreSQL fail."""
-
-    @pytest.mark.asyncio
-    async def test_total_failure_both_connection_errors(
-        self,
-        failing_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Test status=failed when both connections fail."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
+        # Mock validation to fail
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Custom validation error"),
+        ):
+            result = await dual_registration_reducer.execute(sample_introspection_event)
 
         assert result.status == "failed"
-        assert result.consul_registered is False
-        assert result.postgres_registered is False
-        assert result.consul_error is not None
-        assert result.postgres_error is not None
+        assert result.consul_intent_emitted is False
+        assert result.postgres_intent_emitted is False
+        assert len(result.intents) == 0
+        assert result.validation_error == "Custom validation error"
 
     @pytest.mark.asyncio
-    async def test_total_failure_both_timeouts(
+    async def test_validation_failure_with_null_node_id(
         self,
-        timeout_consul_handler: MagicMock,
-        timeout_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Test status=failed when both operations timeout.
+        """Test validation fails when node_id is None."""
+        await dual_registration_reducer.initialize()
 
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling.
-        """
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=timeout_consul_handler,
-            db_adapter=timeout_db_adapter,
-            fsm_contract_path=fsm_contract_path,
+        # Create mock event with None node_id
+        mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
+        mock_event.node_id = None
+        mock_event.node_type = "effect"
+        mock_event.correlation_id = uuid4()
+
+        validation_passed, error_message = dual_registration_reducer._validate_payload(
+            mock_event, uuid4()
         )
-        await reducer.initialize()
 
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "failed"
-        assert result.consul_registered is False
-        assert result.postgres_registered is False
-        # Reducer wraps errors in InfraConnectionError for consistency
-        assert "InfraConnectionError" in result.consul_error
-        assert "InfraConnectionError" in result.postgres_error
+        assert validation_passed is False
+        assert "node_id" in error_message
 
     @pytest.mark.asyncio
-    async def test_total_failure_mixed_errors(
+    async def test_validation_failure_with_invalid_node_type(
         self,
-        timeout_consul_handler: MagicMock,
-        auth_failing_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Test status=failed with different error types.
+        """Test validation fails for invalid node_type."""
+        await dual_registration_reducer.initialize()
 
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling.
-        """
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=timeout_consul_handler,
-            db_adapter=auth_failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
+        # Create mock event with invalid node_type
+        mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
+        mock_event.node_id = uuid4()
+        mock_event.node_type = "invalid_type"
+
+        validation_passed, error_message = dual_registration_reducer._validate_payload(
+            mock_event, uuid4()
         )
-        await reducer.initialize()
 
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "failed"
-        assert result.consul_registered is False
-        assert result.postgres_registered is False
-        # Reducer wraps errors in InfraConnectionError for consistency
-        assert "InfraConnectionError" in result.consul_error
-        assert "InfraConnectionError" in result.postgres_error
+        assert validation_passed is False
+        assert "node_type" in error_message
 
 
 # =============================================================================
-# TEST CLASS: RESULT MODEL VALIDATION
+# TEST CLASS: VALIDATION SUCCESS
 # =============================================================================
 
 
-class TestResultStatusValidation:
-    """Test that result status field correctly reflects registration outcomes."""
+class TestValidationSuccess:
+    """Test that validation passes for valid inputs."""
 
     @pytest.mark.asyncio
-    async def test_result_status_partial_consul_failed(
+    async def test_validation_passes_for_all_node_types(
         self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Verify status='partial' when Consul fails but PostgreSQL succeeds."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        """Test validation passes for all valid node types."""
+        await dual_registration_reducer.initialize()
 
-        result = await reducer.execute(sample_introspection_event)
+        for node_type in ["effect", "compute", "reducer", "orchestrator"]:
+            event = ModelNodeIntrospectionEvent(
+                node_id=uuid4(),
+                node_type=node_type,  # type: ignore[arg-type]
+                node_version="1.0.0",
+                capabilities=ModelNodeCapabilities(),
+                endpoints={"health": "http://localhost:8080/health"},
+            )
 
-        assert result.status == "partial"
-        # Validate Pydantic model consistency
-        assert result.consul_registered != result.postgres_registered
+            result = await dual_registration_reducer.execute(event)
+
+            assert result.status == "success", f"Failed for node_type: {node_type}"
+            assert len(result.intents) == 2
 
     @pytest.mark.asyncio
-    async def test_result_status_partial_postgres_failed(
+    async def test_success_emits_both_intents(
         self,
-        mock_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
+        dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
     ) -> None:
-        """Verify status='partial' when PostgreSQL fails but Consul succeeds."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        """Test successful execution emits both Consul and PostgreSQL intents."""
+        await dual_registration_reducer.initialize()
 
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        # Validate Pydantic model consistency
-        assert result.consul_registered != result.postgres_registered
-
-    @pytest.mark.asyncio
-    async def test_result_status_failed_both_failed(
-        self,
-        failing_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify status='failed' when both backends fail."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "failed"
-        assert result.consul_registered is False
-        assert result.postgres_registered is False
-
-    @pytest.mark.asyncio
-    async def test_result_status_success_both_succeeded(
-        self,
-        mock_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify status='success' when both backends succeed."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
+        result = await dual_registration_reducer.execute(sample_introspection_event)
 
         assert result.status == "success"
-        assert result.consul_registered is True
-        assert result.postgres_registered is True
-        assert result.consul_error is None
-        assert result.postgres_error is None
+        assert result.consul_intent_emitted is True
+        assert result.postgres_intent_emitted is True
+        assert len(result.intents) == 2
 
-
-# =============================================================================
-# TEST CLASS: ERROR MESSAGE CAPTURE
-# =============================================================================
-
-
-class TestErrorMessageCapture:
-    """Test that error messages are correctly captured in result model."""
-
-    @pytest.mark.asyncio
-    async def test_consul_error_captured_in_result(
-        self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify Consul error message is stored in consul_error field."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.consul_error is not None
-        assert (
-            "Consul connection failed" in result.consul_error
-            or "InfraConnectionError" in result.consul_error
-        )
-        # Should contain error type
-        assert "InfraConnectionError" in result.consul_error
-
-    @pytest.mark.asyncio
-    async def test_postgres_error_captured_in_result(
-        self,
-        mock_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify PostgreSQL error message is stored in postgres_error field."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.postgres_error is not None
-        assert (
-            "PostgreSQL connection failed" in result.postgres_error
-            or "InfraConnectionError" in result.postgres_error
-        )
-        # Should contain error type
-        assert "InfraConnectionError" in result.postgres_error
-
-    @pytest.mark.asyncio
-    async def test_both_errors_captured_in_result(
-        self,
-        failing_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify both error messages are captured when both fail."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.consul_error is not None
-        assert result.postgres_error is not None
-        # Both should be independent error messages
-        assert result.consul_error != result.postgres_error
-
-    @pytest.mark.asyncio
-    async def test_error_type_preserved_in_message(
-        self,
-        timeout_consul_handler: MagicMock,
-        auth_failing_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify error type names are preserved in error messages.
-
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling. The wrapper error type is what appears
-        in the message.
-        """
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=timeout_consul_handler,
-            db_adapter=auth_failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        # Reducer wraps errors in InfraConnectionError for consistency
-        # Error format is "InfraConnectionError: [ERROR_CODE] message"
-        assert "InfraConnectionError" in result.consul_error
-        assert "InfraConnectionError" in result.postgres_error
+        # Verify intent types
+        intent_types = {type(intent) for intent in result.intents}
+        assert ModelConsulRegisterIntent in intent_types
+        assert ModelPostgresUpsertRegistrationIntent in intent_types
 
 
 # =============================================================================
@@ -766,102 +232,73 @@ class TestMetricsTracking:
     @pytest.mark.asyncio
     async def test_metrics_increment_success_count(
         self,
-        mock_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
+        dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
     ) -> None:
-        """Verify success_count is incremented on full success."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        """Verify success_count is incremented on successful intent emission."""
+        await dual_registration_reducer.initialize()
 
-        initial_success = reducer.metrics.success_count
-        await reducer.execute(sample_introspection_event)
+        initial_success = dual_registration_reducer.metrics.success_count
+        await dual_registration_reducer.execute(sample_introspection_event)
 
-        assert reducer.metrics.success_count == initial_success + 1
+        assert dual_registration_reducer.metrics.success_count == initial_success + 1
 
     @pytest.mark.asyncio
-    async def test_metrics_increment_failure_count(
+    async def test_metrics_increment_failure_count_on_validation_failure(
         self,
-        failing_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
+        dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
     ) -> None:
-        """Verify failure_count is incremented on total failure."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        """Verify failure_count is incremented on validation failure."""
+        await dual_registration_reducer.initialize()
 
-        initial_failure = reducer.metrics.failure_count
-        await reducer.execute(sample_introspection_event)
+        initial_failure = dual_registration_reducer.metrics.failure_count
 
-        assert reducer.metrics.failure_count == initial_failure + 1
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Validation error"),
+        ):
+            await dual_registration_reducer.execute(sample_introspection_event)
 
-    @pytest.mark.asyncio
-    async def test_metrics_increment_partial_count(
-        self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify partial_count is incremented on partial failure."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        initial_partial = reducer.metrics.partial_count
-        await reducer.execute(sample_introspection_event)
-
-        assert reducer.metrics.partial_count == initial_partial + 1
+        assert dual_registration_reducer.metrics.failure_count == initial_failure + 1
 
     @pytest.mark.asyncio
     async def test_metrics_total_registrations_always_incremented(
         self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
+        dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
     ) -> None:
         """Verify total_registrations is always incremented regardless of outcome."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
+        await dual_registration_reducer.initialize()
+
+        initial_total = dual_registration_reducer.metrics.total_registrations
+
+        # First execution - success
+        await dual_registration_reducer.execute(sample_introspection_event)
+        assert (
+            dual_registration_reducer.metrics.total_registrations == initial_total + 1
         )
-        await reducer.initialize()
 
-        initial_total = reducer.metrics.total_registrations
-        await reducer.execute(sample_introspection_event)
+        # Second execution - validation failure
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Validation error"),
+        ):
+            await dual_registration_reducer.execute(sample_introspection_event)
 
-        assert reducer.metrics.total_registrations == initial_total + 1
+        assert (
+            dual_registration_reducer.metrics.total_registrations == initial_total + 2
+        )
 
     @pytest.mark.asyncio
     async def test_metrics_accumulate_across_multiple_executions(
         self,
-        mock_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
         """Verify metrics accumulate correctly across multiple executions."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        await dual_registration_reducer.initialize()
 
         # Execute multiple times
         for i in range(3):
@@ -872,150 +309,242 @@ class TestMetricsTracking:
                 capabilities=ModelNodeCapabilities(),
                 endpoints={"health": "http://localhost:8080/health"},
             )
-            await reducer.execute(event)
+            await dual_registration_reducer.execute(event)
 
-        assert reducer.metrics.total_registrations == 3
-        assert reducer.metrics.success_count == 3
-        assert reducer.metrics.partial_count == 0
-        assert reducer.metrics.failure_count == 0
+        assert dual_registration_reducer.metrics.total_registrations == 3
+        assert dual_registration_reducer.metrics.success_count == 3
+        assert dual_registration_reducer.metrics.partial_count == 0
+        assert dual_registration_reducer.metrics.failure_count == 0
 
 
 # =============================================================================
-# TEST CLASS: PERFORMANCE UNDER FAILURE
+# TEST CLASS: INTENT EMISSION
 # =============================================================================
 
 
-class TestPerformanceUnderFailure:
-    """Test performance characteristics when backends fail."""
+class TestIntentEmission:
+    """Test correct intent structure and values."""
 
     @pytest.mark.asyncio
-    async def test_partial_failure_returns_quickly(
+    async def test_consul_intent_service_id_format(
         self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Verify partial failures don't wait excessively for failed backend."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
+        """Test Consul intent has correct service ID format."""
+        await dual_registration_reducer.initialize()
+
+        node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=node_id,
+            node_type="compute",
+            node_version="1.0.0",
+            capabilities=ModelNodeCapabilities(),
+            endpoints={"health": "http://localhost:8080/health"},
         )
-        await reducer.initialize()
+
+        result = await dual_registration_reducer.execute(event)
+
+        consul_intent = next(
+            (i for i in result.intents if isinstance(i, ModelConsulRegisterIntent)),
+            None,
+        )
+        assert consul_intent is not None
+        assert consul_intent.service_id == f"node-compute-{node_id}"
+        assert consul_intent.service_name == "onex-compute"
+
+    @pytest.mark.asyncio
+    async def test_consul_intent_tags(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test Consul intent has correct tags."""
+        await dual_registration_reducer.initialize()
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="reducer",
+            node_version="2.0.0",
+            capabilities=ModelNodeCapabilities(),
+            endpoints={"health": "http://localhost:8080/health"},
+        )
+
+        result = await dual_registration_reducer.execute(event)
+
+        consul_intent = next(
+            (i for i in result.intents if isinstance(i, ModelConsulRegisterIntent)),
+            None,
+        )
+        assert consul_intent is not None
+        assert "node_type:reducer" in consul_intent.tags
+        assert "node_version:2.0.0" in consul_intent.tags
+
+    @pytest.mark.asyncio
+    async def test_postgres_intent_record_data(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test PostgreSQL intent has correct record data."""
+        await dual_registration_reducer.initialize()
+
+        node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=node_id,
+            node_type="orchestrator",
+            node_version="3.0.0",
+            capabilities=ModelNodeCapabilities(postgres=True, kafka=True),
+            endpoints={
+                "health": "http://localhost:8080/health",
+                "api": "http://localhost:8080/api/v1",
+            },
+        )
+
+        result = await dual_registration_reducer.execute(event)
+
+        postgres_intent = next(
+            (
+                i
+                for i in result.intents
+                if isinstance(i, ModelPostgresUpsertRegistrationIntent)
+            ),
+            None,
+        )
+        assert postgres_intent is not None
+        assert postgres_intent.record.node_id == node_id
+        assert postgres_intent.record.node_type == "orchestrator"
+        assert postgres_intent.record.node_version == "3.0.0"
+
+    @pytest.mark.asyncio
+    async def test_consul_intent_health_check_config(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test Consul intent has correct health check configuration."""
+        await dual_registration_reducer.initialize()
+
+        health_endpoint = "http://localhost:9090/healthz"
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities=ModelNodeCapabilities(),
+            endpoints={"health": health_endpoint},
+        )
+
+        result = await dual_registration_reducer.execute(event)
+
+        consul_intent = next(
+            (i for i in result.intents if isinstance(i, ModelConsulRegisterIntent)),
+            None,
+        )
+        assert consul_intent is not None
+        assert consul_intent.health_check is not None
+        assert consul_intent.health_check["HTTP"] == health_endpoint
+        assert consul_intent.health_check["Interval"] == "10s"
+        assert consul_intent.health_check["Timeout"] == "5s"
+
+
+# =============================================================================
+# TEST CLASS: PERFORMANCE
+# =============================================================================
+
+
+class TestPerformance:
+    """Test performance characteristics of intent building."""
+
+    @pytest.mark.asyncio
+    async def test_intent_building_is_fast(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Verify intent building completes quickly (no I/O)."""
+        await dual_registration_reducer.initialize()
 
         start = time.perf_counter()
-        result = await reducer.execute(sample_introspection_event)
+        result = await dual_registration_reducer.execute(sample_introspection_event)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-        # Should complete quickly (not waiting for timeout)
-        # Using 1000ms as reasonable threshold for mocked operations
-        assert elapsed_ms < 1000, f"Partial failure took too long: {elapsed_ms}ms"
-        assert result.status == "partial"
+        # Intent building should be very fast (sub-100ms)
+        # since there's no I/O
+        assert elapsed_ms < 100, f"Intent building took too long: {elapsed_ms}ms"
+        assert result.status == "success"
 
     @pytest.mark.asyncio
-    async def test_registration_time_ms_accurate(
+    async def test_processing_time_ms_is_recorded(
         self,
-        mock_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
+        dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
     ) -> None:
-        """Verify registration_time_ms field is reasonably accurate."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        """Verify processing_time_ms field is populated."""
+        await dual_registration_reducer.initialize()
 
-        start = time.perf_counter()
-        result = await reducer.execute(sample_introspection_event)
-        elapsed_ms = (time.perf_counter() - start) * 1000
+        result = await dual_registration_reducer.execute(sample_introspection_event)
 
-        # registration_time_ms should be close to actual elapsed time
-        # Allow 100ms tolerance for test overhead
-        assert result.registration_time_ms >= 0
-        assert abs(result.registration_time_ms - elapsed_ms) < 100
-
-    @pytest.mark.asyncio
-    async def test_parallel_execution_completes_when_both_fail(
-        self,
-        failing_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify parallel execution completes even when both backends fail."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        # Should complete without hanging
-        start = time.perf_counter()
-        result = await reducer.execute(sample_introspection_event)
-        elapsed_ms = (time.perf_counter() - start) * 1000
-
-        assert result.status == "failed"
-        assert elapsed_ms < 1000, f"Total failure took too long: {elapsed_ms}ms"
+        assert result.processing_time_ms >= 0.0
+        # Should be reasonable (under 100ms for pure computation)
+        assert result.processing_time_ms < 100.0
 
 
 # =============================================================================
-# TEST CLASS: FSM STATE VERIFICATION
+# TEST CLASS: FSM STATE BEHAVIOR
 # =============================================================================
 
 
-class TestFSMStateTransitions:
-    """Test FSM state transitions during failure scenarios."""
+class TestFSMStateBehavior:
+    """Test FSM state transitions during various scenarios."""
 
     @pytest.mark.asyncio
-    async def test_fsm_ends_in_idle_after_partial_failure(
+    async def test_fsm_returns_to_idle_after_success(
         self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
+        dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
     ) -> None:
-        """Verify FSM returns to idle state after partial failure."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        """Verify FSM returns to idle state after successful execution."""
+        await dual_registration_reducer.initialize()
 
-        await reducer.execute(sample_introspection_event)
+        await dual_registration_reducer.execute(sample_introspection_event)
 
-        # FSM should return to idle after emitting partial result
-        assert reducer.current_state == EnumFSMState.IDLE
+        assert dual_registration_reducer.current_state == EnumFSMState.IDLE
 
     @pytest.mark.asyncio
-    async def test_fsm_ends_in_failed_state_on_total_failure(
+    async def test_fsm_returns_to_idle_after_validation_failure(
         self,
-        failing_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
+        dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
     ) -> None:
-        """Verify FSM ends in registration_failed state on total failure."""
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        """Verify FSM returns to idle state after validation failure."""
+        await dual_registration_reducer.initialize()
 
-        await reducer.execute(sample_introspection_event)
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Validation error"),
+        ):
+            await dual_registration_reducer.execute(sample_introspection_event)
 
-        # FSM may end in registration_failed (terminal) without transition back to idle
-        # Based on the FSM contract, registration_failed doesn't have a transition to idle
-        assert reducer.current_state in (
-            EnumFSMState.REGISTRATION_FAILED,
-            EnumFSMState.IDLE,
-        )
+        assert dual_registration_reducer.current_state == EnumFSMState.IDLE
+
+    @pytest.mark.asyncio
+    async def test_fsm_can_process_multiple_events(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Verify FSM can process multiple events in sequence."""
+        await dual_registration_reducer.initialize()
+
+        for i in range(5):
+            event = ModelNodeIntrospectionEvent(
+                node_id=uuid4(),
+                node_type="effect",
+                node_version="1.0.0",
+                capabilities=ModelNodeCapabilities(),
+                endpoints={"health": "http://localhost:8080/health"},
+            )
+            result = await dual_registration_reducer.execute(event)
+            assert result.status == "success"
+            assert dual_registration_reducer.current_state == EnumFSMState.IDLE
+
+        assert dual_registration_reducer.metrics.total_registrations == 5
 
 
 # =============================================================================
@@ -1024,16 +553,16 @@ class TestFSMStateTransitions:
 
 
 class TestCorrelationIdPropagation:
-    """Test correlation ID is correctly propagated through failure scenarios."""
+    """Test correlation ID is correctly propagated."""
 
     @pytest.mark.asyncio
-    async def test_correlation_id_in_partial_failure_result(
+    async def test_correlation_id_in_result(
         self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Verify correlation_id is preserved in partial failure result."""
+        """Verify correlation_id is preserved in result."""
+        await dual_registration_reducer.initialize()
+
         test_correlation_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
@@ -1044,25 +573,18 @@ class TestCorrelationIdPropagation:
             correlation_id=test_correlation_id,
         )
 
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(event)
+        result = await dual_registration_reducer.execute(event)
 
         assert result.correlation_id == test_correlation_id
 
     @pytest.mark.asyncio
-    async def test_correlation_id_in_total_failure_result(
+    async def test_correlation_id_in_intents(
         self,
-        failing_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Verify correlation_id is preserved in total failure result."""
+        """Verify correlation_id is propagated to all emitted intents."""
+        await dual_registration_reducer.initialize()
+
         test_correlation_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
@@ -1073,14 +595,35 @@ class TestCorrelationIdPropagation:
             correlation_id=test_correlation_id,
         )
 
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
+        result = await dual_registration_reducer.execute(event, test_correlation_id)
 
-        result = await reducer.execute(event)
+        for intent in result.intents:
+            assert intent.correlation_id == test_correlation_id
+
+    @pytest.mark.asyncio
+    async def test_correlation_id_in_validation_failure_result(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Verify correlation_id is preserved in validation failure result."""
+        await dual_registration_reducer.initialize()
+
+        test_correlation_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities=ModelNodeCapabilities(),
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=test_correlation_id,
+        )
+
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Validation error"),
+        ):
+            result = await dual_registration_reducer.execute(event, test_correlation_id)
 
         assert result.correlation_id == test_correlation_id
 
@@ -1091,16 +634,16 @@ class TestCorrelationIdPropagation:
 
 
 class TestNodeIdPreservation:
-    """Test node_id is correctly preserved in failure results."""
+    """Test node_id is correctly preserved in results."""
 
     @pytest.mark.asyncio
-    async def test_node_id_preserved_in_partial_failure(
+    async def test_node_id_preserved_in_success_result(
         self,
-        failing_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Verify node_id is preserved in partial failure result."""
+        """Verify node_id is preserved in success result."""
+        await dual_registration_reducer.initialize()
+
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
@@ -1110,25 +653,18 @@ class TestNodeIdPreservation:
             endpoints={"health": "http://localhost:8080/health"},
         )
 
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(event)
+        result = await dual_registration_reducer.execute(event)
 
         assert result.node_id == test_node_id
 
     @pytest.mark.asyncio
-    async def test_node_id_preserved_in_total_failure(
+    async def test_node_id_preserved_in_failure_result(
         self,
-        failing_consul_handler: MagicMock,
-        failing_db_adapter: MagicMock,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Verify node_id is preserved in total failure result."""
+        """Verify node_id is preserved in validation failure result."""
+        await dual_registration_reducer.initialize()
+
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
@@ -1138,14 +674,12 @@ class TestNodeIdPreservation:
             endpoints={"health": "http://localhost:8080/health"},
         )
 
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_consul_handler,
-            db_adapter=failing_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(event)
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Validation error"),
+        ):
+            result = await dual_registration_reducer.execute(event)
 
         assert result.node_id == test_node_id
 
@@ -1159,90 +693,28 @@ class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
     @pytest.mark.asyncio
-    async def test_generic_exception_treated_as_failure(
+    async def test_execute_without_initialization_raises_error(
         self,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
         fsm_contract_path: Path,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Verify generic exceptions are treated as failures.
+        """Verify execute raises error if reducer not initialized."""
+        reducer = NodeDualRegistrationReducer(fsm_contract_path=fsm_contract_path)
 
-        Note: The reducer wraps all exceptions into InfraConnectionError for
-        consistent error handling.
-        """
-        # Create handler that raises generic Exception
-        handler = MagicMock(spec=ConsulHandler)
-        handler.execute = AsyncMock(side_effect=Exception("Unexpected error"))
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await reducer.execute(sample_introspection_event)
 
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is False
-        # Reducer wraps errors in InfraConnectionError for consistency
-        assert "InfraConnectionError" in result.consul_error
+        assert "not initialized" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_false_return_treated_as_failure(
+    async def test_reducer_can_process_after_validation_failure(
         self,
-        mock_db_adapter: MagicMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-        fsm_contract_path: Path,
+        dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
-        """Verify False return (not True) is treated as registration failure."""
-        # Create handler that returns non-success status
-        handler = MagicMock(spec=ConsulHandler)
-        handler.execute = AsyncMock(
-            return_value={"status": "error", "payload": {"registered": False}}
-        )
+        """Verify reducer can process new events after experiencing validation failure."""
+        await dual_registration_reducer.initialize()
 
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        result = await reducer.execute(sample_introspection_event)
-
-        # Non-success status should result in consul_registered=False
-        assert result.consul_registered is False
-
-    @pytest.mark.asyncio
-    async def test_reducer_can_process_multiple_events_after_failure(
-        self,
-        mock_consul_handler: MagicMock,
-        mock_db_adapter: MagicMock,
-        fsm_contract_path: Path,
-    ) -> None:
-        """Verify reducer can process new events after experiencing a failure."""
-        # First create a reducer that will fail
-        failing_handler = MagicMock(spec=ConsulHandler)
-        failing_handler.execute = AsyncMock(
-            side_effect=InfraConnectionError(
-                "Connection failed",
-                context=ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.CONSUL,
-                    operation="register",
-                    target_name="consul_handler",
-                ),
-            )
-        )
-
-        reducer = NodeDualRegistrationReducer(
-            consul_handler=failing_handler,
-            db_adapter=mock_db_adapter,
-            fsm_contract_path=fsm_contract_path,
-        )
-        await reducer.initialize()
-
-        # First event - partial failure
+        # First event - validation failure
         event1 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
             node_type="effect",
@@ -1250,13 +722,15 @@ class TestEdgeCases:
             capabilities=ModelNodeCapabilities(),
             endpoints={"health": "http://localhost:8080/health"},
         )
-        result1 = await reducer.execute(event1)
-        assert result1.status == "partial"
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Validation error"),
+        ):
+            result1 = await dual_registration_reducer.execute(event1)
+        assert result1.status == "failed"
 
-        # Replace with working handler
-        reducer._consul_handler = mock_consul_handler
-
-        # Second event - should succeed
+        # Second event - should succeed (validation not mocked)
         event2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
             node_type="compute",
@@ -1264,22 +738,158 @@ class TestEdgeCases:
             capabilities=ModelNodeCapabilities(),
             endpoints={"health": "http://localhost:8080/health"},
         )
-        result2 = await reducer.execute(event2)
+        result2 = await dual_registration_reducer.execute(event2)
 
         assert result2.status == "success"
-        assert reducer.metrics.total_registrations == 2
+        assert len(result2.intents) == 2
+        assert dual_registration_reducer.metrics.total_registrations == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_endpoints_handled(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test that empty endpoints dict is handled correctly."""
+        await dual_registration_reducer.initialize()
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities=ModelNodeCapabilities(),
+            endpoints={},  # Empty endpoints
+        )
+
+        result = await dual_registration_reducer.execute(event)
+
+        # Should still succeed - health check will be None
+        assert result.status == "success"
+        assert len(result.intents) == 2
+
+        consul_intent = next(
+            (i for i in result.intents if isinstance(i, ModelConsulRegisterIntent)),
+            None,
+        )
+        assert consul_intent is not None
+        assert consul_intent.health_check is None
+
+    @pytest.mark.asyncio
+    async def test_empty_capabilities_handled(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test that empty capabilities is handled correctly."""
+        await dual_registration_reducer.initialize()
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities=ModelNodeCapabilities(),  # Default empty capabilities
+            endpoints={"health": "http://localhost:8080/health"},
+        )
+
+        result = await dual_registration_reducer.execute(event)
+
+        assert result.status == "success"
+        assert len(result.intents) == 2
+
+    @pytest.mark.asyncio
+    async def test_shutdown_resets_state(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test that shutdown properly resets reducer state."""
+        await dual_registration_reducer.initialize()
+
+        # Execute once
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities=ModelNodeCapabilities(),
+            endpoints={"health": "http://localhost:8080/health"},
+        )
+        await dual_registration_reducer.execute(event)
+
+        # Shutdown
+        await dual_registration_reducer.shutdown()
+
+        # Verify state reset
+        assert dual_registration_reducer.current_state == EnumFSMState.IDLE
+
+        # Execute again should fail (not initialized)
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await dual_registration_reducer.execute(event)
+        assert "not initialized" in str(exc_info.value)
+
+
+# =============================================================================
+# TEST CLASS: OUTPUT MODEL VALIDATION
+# =============================================================================
+
+
+class TestOutputModelValidation:
+    """Test output model structure and validation."""
+
+    @pytest.mark.asyncio
+    async def test_output_model_is_frozen(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that output model is frozen (immutable)."""
+        await dual_registration_reducer.initialize()
+
+        result = await dual_registration_reducer.execute(sample_introspection_event)
+
+        # Try to modify should raise error
+        with pytest.raises(Exception):  # ValidationError or AttributeError
+            result.status = "failed"  # type: ignore[misc]
+
+    @pytest.mark.asyncio
+    async def test_output_intents_is_tuple(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that output intents is a tuple (immutable)."""
+        await dual_registration_reducer.initialize()
+
+        result = await dual_registration_reducer.execute(sample_introspection_event)
+
+        assert isinstance(result.intents, tuple)
+
+    @pytest.mark.asyncio
+    async def test_failed_output_has_empty_intents(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that failed output has empty intents tuple."""
+        await dual_registration_reducer.initialize()
+
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Validation error"),
+        ):
+            result = await dual_registration_reducer.execute(sample_introspection_event)
+
+        assert result.status == "failed"
+        assert result.intents == ()
+        assert len(result.intents) == 0
 
 
 __all__ = [
-    "TestPartialFailureConsulFails",
-    "TestPartialFailurePostgresFails",
-    "TestTotalFailureBothFail",
-    "TestResultStatusValidation",
-    "TestErrorMessageCapture",
+    "TestValidationFailures",
+    "TestValidationSuccess",
     "TestMetricsTracking",
-    "TestPerformanceUnderFailure",
-    "TestFSMStateTransitions",
+    "TestIntentEmission",
+    "TestPerformance",
+    "TestFSMStateBehavior",
     "TestCorrelationIdPropagation",
     "TestNodeIdPreservation",
     "TestEdgeCases",
+    "TestOutputModelValidation",
 ]

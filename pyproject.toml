@@ -19,7 +19,7 @@ onex-runtime = "omnibase_infra.runtime.kernel:main"
 python = "^3.12"
 
 # ONEX dependencies - from PyPI
-omnibase-core = "^0.4.0"
+omnibase-core = "^0.5.1"
 omnibase-spi = "^0.4.0"
 
 # Core dependencies
@@ -123,6 +123,7 @@ ignore = [
     "BLE001",    # Blind exception catching (technical debt)
     "E402",      # Module level import not at top (technical debt)
     "TC001",     # Type checking imports (technical debt)
+    "TC002",     # Type checking imports - Pydantic needs runtime types (technical debt)
     "TC003",     # Type checking imports (technical debt)
     "PLR0911",   # Too many returns (technical debt)
     "PLR0912",   # Too many branches (technical debt)

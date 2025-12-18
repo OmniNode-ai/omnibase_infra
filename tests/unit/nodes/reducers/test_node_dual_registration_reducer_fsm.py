@@ -5,15 +5,23 @@
 This test suite validates FSM state transitions in the dual registration
 reducer workflow per OMN-889 requirements.
 
+Pure Reducer Architecture:
+    The reducer is now a PURE component that emits typed intents instead of
+    performing I/O. Tests verify:
+    - Correct intent types are emitted (ModelConsulRegisterIntent, ModelPostgresUpsertRegistrationIntent)
+    - Intent fields contain correct values
+    - FSM state transitions work correctly
+    - Validation logic is correct
+
 FSM States Tested:
     - idle (initial): Waiting for introspection events
     - receiving_introspection: Received NODE_INTROSPECTION event
     - validating_payload: Validating introspection data structure
-    - registering_parallel: Parallel registration to Consul + PostgreSQL
-    - aggregating_results: Combining registration results
-    - registration_complete: Both backends succeeded (terminal)
-    - partial_failure: One backend failed (terminal)
-    - registration_failed: Both backends failed (terminal)
+    - registering_parallel: Building typed registration intents
+    - aggregating_results: Combining intent emission results
+    - registration_complete: Both intents emitted (terminal)
+    - partial_failure: One intent could not be built (terminal)
+    - registration_failed: No intents emitted (terminal)
 
 Test Organization:
     - TestFSMHappyPath: Successful state transitions
@@ -22,12 +30,14 @@ Test Organization:
     - TestFSMResetCycles: State reset and full workflow cycles
     - TestFSMErrorHandling: Error handling during transitions
     - TestFSMMetrics: Metrics tracking during transitions
+    - TestIntentEmission: Intent emission verification
 
 Coverage Goals:
     - All FSM state transitions covered
     - All terminal states verified
     - Reset behavior validated
     - Full workflow cycles tested
+    - Intent emission verified
 """
 
 from __future__ import annotations
@@ -35,18 +45,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-
-from omnibase_infra.handlers import ConsulHandler, DbAdapter
-from omnibase_infra.handlers.models import (
-    ModelConsulHandlerPayload,
-    ModelConsulHandlerResponse,
-    ModelDbQueryPayload,
-    ModelDbQueryResponse,
+from omnibase_core.models.intents import (
+    ModelConsulRegisterIntent,
+    ModelPostgresUpsertRegistrationIntent,
 )
+
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -91,15 +98,15 @@ state_transitions:
     - state_name: "validating_payload"
       description: "Validating event structure"
     - state_name: "registering_parallel"
-      description: "Parallel registration to both backends"
+      description: "Building typed registration intents"
     - state_name: "aggregating_results"
-      description: "Combining registration outcomes"
+      description: "Combining intent emission outcomes"
     - state_name: "registration_complete"
-      description: "Both backends succeeded"
+      description: "Both intents emitted"
     - state_name: "partial_failure"
-      description: "One backend failed"
+      description: "One intent could not be built"
     - state_name: "registration_failed"
-      description: "Both backends failed"
+      description: "No intents emitted"
   transitions:
     - from: "idle"
       to: "receiving_introspection"
@@ -152,42 +159,6 @@ def fsm_contract_path(sample_fsm_contract_yaml: str, tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def mock_consul_handler() -> AsyncMock:
-    """Create mock ConsulHandler for testing.
-
-    Returns:
-        AsyncMock configured with default successful responses.
-    """
-    mock = AsyncMock(spec=ConsulHandler)
-    # Configure default successful response with ModelConsulHandlerResponse
-    mock.execute.return_value = ModelConsulHandlerResponse(
-        status="success",
-        payload=ModelConsulHandlerPayload(data={"registered": True}),
-        correlation_id=uuid4(),
-    )
-    mock.health_check.return_value = {"healthy": True}
-    return mock
-
-
-@pytest.fixture
-def mock_db_adapter() -> AsyncMock:
-    """Create mock DbAdapter for testing.
-
-    Returns:
-        AsyncMock configured with default successful responses.
-    """
-    mock = AsyncMock(spec=DbAdapter)
-    # Configure default successful response
-    mock.execute.return_value = ModelDbQueryResponse(
-        status="success",
-        payload=ModelDbQueryPayload(rows=[], row_count=1),
-        correlation_id=uuid4(),
-    )
-    mock.health_check.return_value = {"healthy": True}
-    return mock
-
-
-@pytest.fixture
 def sample_introspection_event() -> ModelNodeIntrospectionEvent:
     """Create sample ModelNodeIntrospectionEvent for testing.
 
@@ -212,23 +183,21 @@ def sample_introspection_event() -> ModelNodeIntrospectionEvent:
 
 @pytest.fixture
 def dual_registration_reducer(
-    mock_consul_handler: AsyncMock,
-    mock_db_adapter: AsyncMock,
     fsm_contract_path: Path,
 ) -> NodeDualRegistrationReducer:
-    """Create NodeDualRegistrationReducer with mocked handlers.
+    """Create NodeDualRegistrationReducer for testing.
+
+    Pure Reducer Design:
+        The reducer no longer accepts ConsulHandler or DbAdapter because
+        it emits typed intents instead of performing I/O operations.
 
     Args:
-        mock_consul_handler: Mocked Consul handler.
-        mock_db_adapter: Mocked database adapter.
         fsm_contract_path: Path to FSM contract YAML.
 
     Returns:
         Configured reducer instance (not yet initialized).
     """
     return NodeDualRegistrationReducer(
-        consul_handler=mock_consul_handler,
-        db_adapter=mock_db_adapter,
         fsm_contract_path=fsm_contract_path,
     )
 
@@ -379,21 +348,191 @@ class TestFSMHappyPath:
         dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Test complete workflow with both backends succeeding."""
+        """Test complete workflow with both intents emitted successfully."""
         await dual_registration_reducer.initialize()
 
         # Execute full workflow
         result = await dual_registration_reducer.execute(sample_introspection_event)
 
-        # Verify success result
+        # Verify success result - both intents emitted
         assert result.status == "success"
-        assert result.consul_registered is True
-        assert result.postgres_registered is True
-        assert result.consul_error is None
-        assert result.postgres_error is None
+        assert result.consul_intent_emitted is True
+        assert result.postgres_intent_emitted is True
+        assert result.validation_error is None
+        assert len(result.intents) == 2
 
         # FSM should have returned to idle after RESULT_EMITTED
         assert dual_registration_reducer.current_state == EnumFSMState.IDLE
+
+
+# -----------------------------------------------------------------------------
+# Intent Emission Tests
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestIntentEmission:
+    """Tests for verifying typed intent emission."""
+
+    async def test_emits_both_intent_types(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that reducer emits both Consul and PostgreSQL intents."""
+        await dual_registration_reducer.initialize()
+
+        result = await dual_registration_reducer.execute(sample_introspection_event)
+
+        assert len(result.intents) == 2
+        intent_types = {type(intent) for intent in result.intents}
+        assert ModelConsulRegisterIntent in intent_types
+        assert ModelPostgresUpsertRegistrationIntent in intent_types
+
+    async def test_consul_intent_has_correct_fields(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that Consul intent has correct field values."""
+        await dual_registration_reducer.initialize()
+
+        result = await dual_registration_reducer.execute(sample_introspection_event)
+
+        # Find the Consul intent
+        consul_intent = next(
+            (i for i in result.intents if isinstance(i, ModelConsulRegisterIntent)),
+            None,
+        )
+        assert consul_intent is not None
+
+        # Verify service ID format
+        expected_service_id = (
+            f"node-{sample_introspection_event.node_type}-"
+            f"{sample_introspection_event.node_id}"
+        )
+        assert consul_intent.service_id == expected_service_id
+
+        # Verify service name format
+        expected_service_name = f"onex-{sample_introspection_event.node_type}"
+        assert consul_intent.service_name == expected_service_name
+
+        # Verify tags contain node type and version
+        assert f"node_type:{sample_introspection_event.node_type}" in consul_intent.tags
+        assert (
+            f"node_version:{sample_introspection_event.node_version}"
+            in consul_intent.tags
+        )
+
+        # Verify correlation ID is propagated
+        assert consul_intent.correlation_id is not None
+
+    async def test_postgres_intent_has_correct_fields(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that PostgreSQL intent has correct field values."""
+        await dual_registration_reducer.initialize()
+
+        result = await dual_registration_reducer.execute(sample_introspection_event)
+
+        # Find the PostgreSQL intent
+        postgres_intent = next(
+            (
+                i
+                for i in result.intents
+                if isinstance(i, ModelPostgresUpsertRegistrationIntent)
+            ),
+            None,
+        )
+        assert postgres_intent is not None
+
+        # Verify record contains correct node data
+        record = postgres_intent.record
+        assert record.node_id == sample_introspection_event.node_id
+        assert record.node_type == sample_introspection_event.node_type
+        assert record.node_version == sample_introspection_event.node_version
+
+        # Verify correlation ID is propagated
+        assert postgres_intent.correlation_id is not None
+
+    async def test_intent_correlation_id_matches_request(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test that intent correlation IDs match the request correlation ID."""
+        await dual_registration_reducer.initialize()
+
+        correlation_id = uuid4()
+        event = create_introspection_event(correlation_id=correlation_id)
+
+        result = await dual_registration_reducer.execute(event, correlation_id)
+
+        # All intents should have the same correlation ID
+        for intent in result.intents:
+            assert intent.correlation_id == correlation_id
+
+        # Result should also have the same correlation ID
+        assert result.correlation_id == correlation_id
+
+    async def test_consul_intent_has_health_check_when_endpoint_provided(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test that Consul intent includes health check when endpoint is provided."""
+        await dual_registration_reducer.initialize()
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities=ModelNodeCapabilities(),
+            endpoints={"health": "http://localhost:8080/health"},
+        )
+
+        result = await dual_registration_reducer.execute(event)
+
+        consul_intent = next(
+            (i for i in result.intents if isinstance(i, ModelConsulRegisterIntent)),
+            None,
+        )
+        assert consul_intent is not None
+        assert consul_intent.health_check is not None
+        assert consul_intent.health_check["HTTP"] == "http://localhost:8080/health"
+
+    async def test_output_has_correct_node_id(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+    ) -> None:
+        """Test that output node_id matches event node_id."""
+        await dual_registration_reducer.initialize()
+
+        test_node_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id,
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities=ModelNodeCapabilities(),
+            endpoints={"health": "http://localhost:8080/health"},
+        )
+
+        result = await dual_registration_reducer.execute(event)
+
+        assert result.node_id == test_node_id
+
+    async def test_processing_time_is_recorded(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that processing time is recorded in output."""
+        await dual_registration_reducer.initialize()
+
+        result = await dual_registration_reducer.execute(sample_introspection_event)
+
+        assert result.processing_time_ms >= 0.0
 
 
 # -----------------------------------------------------------------------------
@@ -426,6 +565,7 @@ class TestFSMValidation:
             result = await dual_registration_reducer.execute(event)
 
         assert result.status == "failed"
+        assert len(result.intents) == 0
 
     async def test_fsm_validation_passes_with_required_fields(
         self,
@@ -584,8 +724,8 @@ class TestFSMTerminalStates:
     ) -> None:
         """Test that registration_failed is a terminal state.
 
-        Unlike success/partial, registration_failed does not have a
-        transition back to idle in the transition map.
+        Unlike success/partial, registration_failed transitions back to idle
+        via the FAILURE_RESULT_EMITTED trigger.
         """
         await dual_registration_reducer.initialize()
 
@@ -648,27 +788,6 @@ class TestFSMResetCycles:
         assert result.status == "success"
         assert dual_registration_reducer.current_state == EnumFSMState.IDLE
 
-    async def test_fsm_returns_to_idle_after_partial(
-        self,
-        dual_registration_reducer: NodeDualRegistrationReducer,
-        mock_consul_handler: AsyncMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Test that FSM returns to idle after partial failure."""
-        await dual_registration_reducer.initialize()
-
-        # Configure Consul to fail
-        mock_consul_handler.execute.side_effect = Exception("Consul unavailable")
-
-        # Execute workflow
-        result = await dual_registration_reducer.execute(sample_introspection_event)
-
-        # Verify partial result and idle state
-        assert result.status == "partial"
-        assert result.consul_registered is False
-        assert result.postgres_registered is True
-        assert dual_registration_reducer.current_state == EnumFSMState.IDLE
-
     async def test_fsm_full_workflow_cycle(
         self,
         dual_registration_reducer: NodeDualRegistrationReducer,
@@ -680,23 +799,23 @@ class TestFSMResetCycles:
         # First cycle
         result1 = await dual_registration_reducer.execute(sample_introspection_event)
         assert result1.status == "success"
+        assert len(result1.intents) == 2
         assert dual_registration_reducer.current_state == EnumFSMState.IDLE
 
         # Second cycle (FSM should be reusable)
         new_event = create_introspection_event(node_type="compute")
         result2 = await dual_registration_reducer.execute(new_event)
         assert result2.status == "success"
+        assert len(result2.intents) == 2
         assert dual_registration_reducer.current_state == EnumFSMState.IDLE
 
-        # Metrics should reflect both registrations
+        # Metrics should reflect both intent emissions
         assert dual_registration_reducer.metrics.total_registrations == 2
         assert dual_registration_reducer.metrics.success_count == 2
 
     async def test_fsm_multiple_cycles_with_mixed_results(
         self,
         dual_registration_reducer: NodeDualRegistrationReducer,
-        mock_consul_handler: AsyncMock,
-        mock_db_adapter: AsyncMock,
     ) -> None:
         """Test multiple cycles with varying success/failure outcomes."""
         await dual_registration_reducer.initialize()
@@ -705,27 +824,31 @@ class TestFSMResetCycles:
         event1 = create_introspection_event(node_type="effect")
         result1 = await dual_registration_reducer.execute(event1)
         assert result1.status == "success"
+        assert len(result1.intents) == 2
         assert dual_registration_reducer.current_state == EnumFSMState.IDLE
 
-        # Cycle 2: Partial (Consul fails)
-        mock_consul_handler.execute.side_effect = Exception("Consul unavailable")
+        # Cycle 2: Success (pure reducer always succeeds for valid input)
         event2 = create_introspection_event(node_type="compute")
         result2 = await dual_registration_reducer.execute(event2)
-        assert result2.status == "partial"
+        assert result2.status == "success"
+        assert len(result2.intents) == 2
         assert dual_registration_reducer.current_state == EnumFSMState.IDLE
 
-        # Cycle 3: Failed (both fail)
-        mock_db_adapter.execute.side_effect = Exception("DB unavailable")
+        # Cycle 3: Failed (validation failure with mocked validation)
         event3 = create_introspection_event(node_type="reducer")
-        result3 = await dual_registration_reducer.execute(event3)
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, "Validation failed"),
+        ):
+            result3 = await dual_registration_reducer.execute(event3)
         assert result3.status == "failed"
-        # Note: registration_failed now transitions back to idle via FAILURE_RESULT_EMITTED
+        assert len(result3.intents) == 0
         assert dual_registration_reducer.current_state == EnumFSMState.IDLE
 
         # Verify metrics
         assert dual_registration_reducer.metrics.total_registrations == 3
-        assert dual_registration_reducer.metrics.success_count == 1
-        assert dual_registration_reducer.metrics.partial_count == 1
+        assert dual_registration_reducer.metrics.success_count == 2
         assert dual_registration_reducer.metrics.failure_count == 1
 
 
@@ -770,30 +893,6 @@ class TestFSMErrorHandling:
 
         assert "not initialized" in str(exc_info.value)
 
-    async def test_exception_during_registration_transitions_to_failed(
-        self,
-        dual_registration_reducer: NodeDualRegistrationReducer,
-        mock_consul_handler: AsyncMock,
-        mock_db_adapter: AsyncMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Test that unexpected exceptions during registration force failed state."""
-        from omnibase_infra.errors import RuntimeHostError
-
-        await dual_registration_reducer.initialize()
-
-        # Make both handlers fail with unexpected error
-        mock_consul_handler.execute.side_effect = RuntimeError("Unexpected error")
-        mock_db_adapter.execute.side_effect = RuntimeError("Unexpected error")
-
-        # Execute should handle errors gracefully
-        result = await dual_registration_reducer.execute(sample_introspection_event)
-
-        # Both should fail
-        assert result.status == "failed"
-        assert result.consul_registered is False
-        assert result.postgres_registered is False
-
     async def test_shutdown_resets_fsm_state(
         self,
         dual_registration_reducer: NodeDualRegistrationReducer,
@@ -832,7 +931,7 @@ class TestFSMMetrics:
         dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Test that success count increments on successful registration."""
+        """Test that success count increments on successful intent emission."""
         await dual_registration_reducer.initialize()
 
         # Initial metrics
@@ -843,61 +942,19 @@ class TestFSMMetrics:
         result = await dual_registration_reducer.execute(sample_introspection_event)
 
         assert result.status == "success"
+        assert len(result.intents) == 2
         assert dual_registration_reducer.metrics.total_registrations == 1
         assert dual_registration_reducer.metrics.success_count == 1
         assert dual_registration_reducer.metrics.failure_count == 0
         assert dual_registration_reducer.metrics.partial_count == 0
 
-    async def test_metrics_increment_on_partial(
-        self,
-        dual_registration_reducer: NodeDualRegistrationReducer,
-        mock_consul_handler: AsyncMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Test that partial count increments on partial failure."""
-        await dual_registration_reducer.initialize()
-
-        # Configure Consul to fail
-        mock_consul_handler.execute.side_effect = Exception("Consul error")
-
-        result = await dual_registration_reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert dual_registration_reducer.metrics.total_registrations == 1
-        assert dual_registration_reducer.metrics.partial_count == 1
-        assert dual_registration_reducer.metrics.success_count == 0
-        assert dual_registration_reducer.metrics.failure_count == 0
-
     async def test_metrics_increment_on_failure(
-        self,
-        dual_registration_reducer: NodeDualRegistrationReducer,
-        mock_consul_handler: AsyncMock,
-        mock_db_adapter: AsyncMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Test that failure count increments when both backends fail."""
-        await dual_registration_reducer.initialize()
-
-        # Configure both to fail
-        mock_consul_handler.execute.side_effect = Exception("Consul error")
-        mock_db_adapter.execute.side_effect = Exception("DB error")
-
-        result = await dual_registration_reducer.execute(sample_introspection_event)
-
-        assert result.status == "failed"
-        assert dual_registration_reducer.metrics.total_registrations == 1
-        assert dual_registration_reducer.metrics.failure_count == 1
-        assert dual_registration_reducer.metrics.success_count == 0
-        assert dual_registration_reducer.metrics.partial_count == 0
-
-    async def test_metrics_increment_on_validation_failure(
         self,
         dual_registration_reducer: NodeDualRegistrationReducer,
     ) -> None:
         """Test that failure count increments on validation failure."""
         await dual_registration_reducer.initialize()
 
-        # Create event with mocked invalid validation
         event = create_introspection_event()
         with patch.object(
             dual_registration_reducer,
@@ -907,8 +964,11 @@ class TestFSMMetrics:
             result = await dual_registration_reducer.execute(event)
 
         assert result.status == "failed"
+        assert len(result.intents) == 0
         assert dual_registration_reducer.metrics.total_registrations == 1
         assert dual_registration_reducer.metrics.failure_count == 1
+        assert dual_registration_reducer.metrics.success_count == 0
+        assert dual_registration_reducer.metrics.partial_count == 0
 
 
 # -----------------------------------------------------------------------------
@@ -990,15 +1050,11 @@ class TestFSMContractLoading:
 
     async def test_initialization_fails_with_missing_contract(
         self,
-        mock_consul_handler: AsyncMock,
-        mock_db_adapter: AsyncMock,
     ) -> None:
         """Test that initialization fails if contract file is missing."""
         from omnibase_infra.errors import RuntimeHostError
 
         reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=mock_db_adapter,
             fsm_contract_path=Path("/nonexistent/path/contract.yaml"),
         )
 
@@ -1009,8 +1065,6 @@ class TestFSMContractLoading:
 
     async def test_initialization_fails_with_invalid_initial_state(
         self,
-        mock_consul_handler: AsyncMock,
-        mock_db_adapter: AsyncMock,
         tmp_path: Path,
     ) -> None:
         """Test that initialization fails if initial state is invalid.
@@ -1033,8 +1087,6 @@ state_transitions:
         contract_path.write_text(invalid_contract)
 
         reducer = NodeDualRegistrationReducer(
-            consul_handler=mock_consul_handler,
-            db_adapter=mock_db_adapter,
             fsm_contract_path=contract_path,
         )
 
@@ -1045,93 +1097,65 @@ state_transitions:
 
 
 # -----------------------------------------------------------------------------
-# Registration Result Tests
+# Output Model Tests
 # -----------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestFSMRegistrationResults:
-    """Tests for registration result building during FSM execution."""
+class TestOutputModel:
+    """Tests for output model structure and values."""
 
-    async def test_success_result_structure(
+    async def test_success_output_structure(
         self,
         dual_registration_reducer: NodeDualRegistrationReducer,
         sample_introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Test structure of successful registration result."""
+        """Test structure of successful intent emission output."""
         await dual_registration_reducer.initialize()
 
         result = await dual_registration_reducer.execute(sample_introspection_event)
 
         assert result.status == "success"
-        assert result.consul_registered is True
-        assert result.postgres_registered is True
-        assert result.consul_error is None
-        assert result.postgres_error is None
-        assert result.registration_time_ms >= 0.0
+        assert result.consul_intent_emitted is True
+        assert result.postgres_intent_emitted is True
+        assert result.validation_error is None
+        assert result.processing_time_ms >= 0.0
         assert result.correlation_id is not None
         assert result.node_id == sample_introspection_event.node_id
+        assert len(result.intents) == 2
 
-    async def test_partial_result_consul_failed(
+    async def test_failed_output_has_validation_error(
         self,
         dual_registration_reducer: NodeDualRegistrationReducer,
-        mock_consul_handler: AsyncMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Test partial result when Consul registration fails."""
+        """Test that failed output includes validation error message."""
         await dual_registration_reducer.initialize()
 
-        mock_consul_handler.execute.side_effect = Exception("Consul unavailable")
-
-        result = await dual_registration_reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is False
-        assert result.postgres_registered is True
-        # Error message contains the wrapped error info
-        assert result.consul_error is not None
-        assert "registration failed" in result.consul_error.lower()
-        assert result.postgres_error is None
-
-    async def test_partial_result_postgres_failed(
-        self,
-        dual_registration_reducer: NodeDualRegistrationReducer,
-        mock_db_adapter: AsyncMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Test partial result when PostgreSQL registration fails."""
-        await dual_registration_reducer.initialize()
-
-        mock_db_adapter.execute.side_effect = Exception("DB unavailable")
-
-        result = await dual_registration_reducer.execute(sample_introspection_event)
-
-        assert result.status == "partial"
-        assert result.consul_registered is True
-        assert result.postgres_registered is False
-        assert result.consul_error is None
-        # Error message contains the wrapped error info
-        assert result.postgres_error is not None
-        assert "registration failed" in result.postgres_error.lower()
-
-    async def test_failed_result_both_failed(
-        self,
-        dual_registration_reducer: NodeDualRegistrationReducer,
-        mock_consul_handler: AsyncMock,
-        mock_db_adapter: AsyncMock,
-        sample_introspection_event: ModelNodeIntrospectionEvent,
-    ) -> None:
-        """Test failed result when both registrations fail."""
-        await dual_registration_reducer.initialize()
-
-        mock_consul_handler.execute.side_effect = Exception("Consul error")
-        mock_db_adapter.execute.side_effect = Exception("DB error")
-
-        result = await dual_registration_reducer.execute(sample_introspection_event)
+        event = create_introspection_event()
+        error_message = "Custom validation error"
+        with patch.object(
+            dual_registration_reducer,
+            "_validate_payload",
+            return_value=(False, error_message),
+        ):
+            result = await dual_registration_reducer.execute(event)
 
         assert result.status == "failed"
-        assert result.consul_registered is False
-        assert result.postgres_registered is False
-        assert result.consul_error is not None
-        assert result.postgres_error is not None
+        assert result.validation_error == error_message
+        assert len(result.intents) == 0
+        assert result.consul_intent_emitted is False
+        assert result.postgres_intent_emitted is False
+
+    async def test_output_intents_are_immutable(
+        self,
+        dual_registration_reducer: NodeDualRegistrationReducer,
+        sample_introspection_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that output intents tuple is immutable."""
+        await dual_registration_reducer.initialize()
+
+        result = await dual_registration_reducer.execute(sample_introspection_event)
+
+        # Intents should be a tuple (immutable)
+        assert isinstance(result.intents, tuple)
