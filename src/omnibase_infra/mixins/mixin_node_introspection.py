@@ -245,8 +245,10 @@ class ModelIntrospectionConfig(BaseModel):
         description="Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)",
         min_length=1,
     )
-    # Using Any for event_bus since ProtocolEventBus is only available at TYPE_CHECKING
-    # The actual type is ProtocolEventBus | None, validated at runtime
+    # Using object for event_bus to allow duck-typed event bus implementations.
+    # MixinNodeIntrospection only uses publish_envelope(), publish(), and subscribe(),
+    # but ProtocolEventBus requires 5 methods. Using object allows any compatible
+    # implementation without requiring the full protocol interface.
     event_bus: object | None = Field(
         default=None,
         description="Event bus for publishing introspection and heartbeat events",
@@ -507,6 +509,11 @@ class MixinNodeIntrospection:
     # Stores the most recent performance metrics from introspection operations
     _introspection_last_metrics: IntrospectionPerformanceMetrics | None
 
+    # Thread-safe cache lock (instance-level)
+    # Protects _introspection_cache and _introspection_cached_at from race conditions
+    # in concurrent environments. Must be held when reading or writing cache state.
+    _introspection_cache_lock: asyncio.Lock
+
     # Default operation keywords for capability discovery
     DEFAULT_OPERATION_KEYWORDS: ClassVar[set[str]] = {
         "execute",
@@ -689,8 +696,7 @@ class MixinNodeIntrospection:
             # Use config model - extract all values
             node_id = config.node_id
             node_type = config.node_type
-            # Cast event_bus since ModelIntrospectionConfig uses object | None
-            # for compatibility, but we know it's ProtocolEventBus | None
+            # Type is object | None in model for duck typing flexibility (see field comment)
             event_bus = config.event_bus  # type: ignore[assignment]
             version = config.version
             cache_ttl = config.cache_ttl
@@ -756,6 +762,9 @@ class MixinNodeIntrospection:
 
         # Performance metrics tracking
         self._introspection_last_metrics = None
+
+        # Thread-safe cache lock for concurrent access protection
+        self._introspection_cache_lock = asyncio.Lock()
 
         if event_bus is None:
             logger.warning(
@@ -1231,28 +1240,29 @@ class MixinNodeIntrospection:
         # Initialize metrics for this call
         metrics = IntrospectionPerformanceMetrics()
 
-        # Check cache validity
-        if (
-            self._introspection_cache is not None
-            and self._introspection_cached_at is not None
-            and current_time - self._introspection_cached_at
-            < self._introspection_cache_ttl
-        ):
-            # Return cached data with updated timestamp
-            cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
+        # Check cache validity under lock to prevent race conditions
+        async with self._introspection_cache_lock:
+            if (
+                self._introspection_cache is not None
+                and self._introspection_cached_at is not None
+                and current_time - self._introspection_cached_at
+                < self._introspection_cache_ttl
+            ):
+                # Return cached data with updated timestamp
+                cached_event = ModelNodeIntrospectionEvent(**self._introspection_cache)
 
-            # Record cache hit metrics
-            elapsed_ms = (time.perf_counter() - total_start) * 1000
-            metrics.total_introspection_ms = elapsed_ms
-            metrics.cache_hit = True
+                # Record cache hit metrics
+                elapsed_ms = (time.perf_counter() - total_start) * 1000
+                metrics.total_introspection_ms = elapsed_ms
+                metrics.cache_hit = True
 
-            # Check cache hit threshold
-            if elapsed_ms > PERF_THRESHOLD_CACHE_HIT_MS:
-                metrics.threshold_exceeded = True
-                metrics.slow_operations.append("cache_hit")
+                # Check cache hit threshold
+                if elapsed_ms > PERF_THRESHOLD_CACHE_HIT_MS:
+                    metrics.threshold_exceeded = True
+                    metrics.slow_operations.append("cache_hit")
 
-            self._introspection_last_metrics = metrics
-            return cached_event
+                self._introspection_last_metrics = metrics
+                return cached_event
 
         # Build fresh introspection data with timing for each component
         cap_start = time.perf_counter()
@@ -1302,12 +1312,13 @@ class MixinNodeIntrospection:
             correlation_id=uuid4(),
         )
 
-        # Update cache - cast the model_dump output to our typed dict since we know
+        # Update cache under lock - cast the model_dump output to our typed dict since we know
         # the structure matches (model_dump returns dict[str, Any] by default)
-        self._introspection_cache = cast(
-            IntrospectionCacheDict, event.model_dump(mode="json")
-        )
-        self._introspection_cached_at = current_time
+        async with self._introspection_cache_lock:
+            self._introspection_cache = cast(
+                IntrospectionCacheDict, event.model_dump(mode="json")
+            )
+            self._introspection_cached_at = current_time
 
         # Extract operations list with proper type narrowing
         operations_value = capabilities.get("operations", [])
@@ -2039,20 +2050,24 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
-    def invalidate_introspection_cache(self) -> None:
+    async def invalidate_introspection_cache(self) -> None:
         """Invalidate the introspection cache.
 
         Call this when node capabilities change to ensure fresh
         data is reported on next introspection request.
 
+        This method is async to ensure thread-safe cache invalidation
+        using the internal async lock.
+
         Example:
             ```python
             node.register_new_handler(handler)
-            node.invalidate_introspection_cache()
+            await node.invalidate_introspection_cache()
             ```
         """
-        self._introspection_cache = None
-        self._introspection_cached_at = None
+        async with self._introspection_cache_lock:
+            self._introspection_cache = None
+            self._introspection_cached_at = None
         logger.debug(
             f"Introspection cache invalidated for {self._introspection_node_id}",
             extra={"node_id": self._introspection_node_id},

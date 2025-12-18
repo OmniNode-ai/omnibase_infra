@@ -600,8 +600,8 @@ class TestMixinNodeIntrospectionCaching:
         await mock_node.get_introspection_data()
         assert mock_node._introspection_cache is not None
 
-        # Invalidate
-        mock_node.invalidate_introspection_cache()
+        # Invalidate (async method for thread-safe cache access)
+        await mock_node.invalidate_introspection_cache()
 
         assert mock_node._introspection_cache is None
         assert mock_node._introspection_cached_at is None
@@ -1310,6 +1310,48 @@ class TestMixinNodeIntrospectionEdgeCases:
         assert len(results) == 100
         for result in results:
             assert result.node_id == "concurrent-node"
+
+    async def test_cache_lock_thread_safety(self) -> None:
+        """Test that cache operations are thread-safe with async lock.
+
+        This test verifies that concurrent cache reads, writes, and invalidations
+        do not cause race conditions when using the async lock.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="lock-test-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,  # Very short TTL to force frequent cache misses
+        )
+
+        # Verify the lock is initialized
+        assert hasattr(node, "_introspection_cache_lock")
+        assert isinstance(node._introspection_cache_lock, asyncio.Lock)
+
+        # Create mixed operations: reads, writes (via get_introspection_data),
+        # and invalidations
+        async def mixed_operations(idx: int) -> str:
+            """Perform a mix of cache operations."""
+            if idx % 3 == 0:
+                await node.invalidate_introspection_cache()
+                return "invalidate"
+            else:
+                await node.get_introspection_data()
+                return "read"
+
+        # Run 50 concurrent mixed operations
+        tasks = [mixed_operations(i) for i in range(50)]
+        results = await asyncio.gather(*tasks)
+
+        # All operations should complete without deadlock or error
+        assert len(results) == 50
+        assert "invalidate" in results
+        assert "read" in results
+
+        # Final state should be consistent
+        data = await node.get_introspection_data()
+        assert data.node_id == "lock-test-node"
 
     async def test_introspection_with_special_characters_in_state(self) -> None:
         """Test introspection with special characters in state."""
