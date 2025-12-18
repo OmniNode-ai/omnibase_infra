@@ -132,13 +132,14 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Protocol, TypedDict, cast, runtime_checkable
 from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
@@ -229,16 +230,6 @@ class ProtocolIntrospectionEventBus(Protocol):
         ...
 
 
-# Event topic constants
-# Migrated from legacy topic names to ONEX standardized naming convention:
-#   - node.introspection -> onex.node.introspection.published.v1
-#   - node.heartbeat -> onex.node.heartbeat.published.v1
-#   - node.request_introspection -> onex.registry.introspection.requested.v1
-# See EVENT_STREAMING_TOPICS.md for the full topic naming specification.
-INTROSPECTION_TOPIC = "onex.node.introspection.published.v1"
-HEARTBEAT_TOPIC = "onex.node.heartbeat.published.v1"
-REQUEST_INTROSPECTION_TOPIC = "onex.registry.introspection.requested.v1"
-
 # Type alias for capabilities dictionary structure
 # operations: list of method names, protocols: list of protocol names
 # has_fsm: boolean, method_signatures: dict of method name to signature string
@@ -272,11 +263,17 @@ class ModelIntrospectionConfig(BaseModel):
             Methods starting with these prefixes are filtered out.
             If None, uses DEFAULT_EXCLUDE_PREFIXES from the mixin.
         introspection_topic: Optional topic for publishing introspection events.
-            If None, uses module-level INTROSPECTION_TOPIC constant.
+            If None, uses ``MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC`` class
+            variable, which defaults to ``"onex.node.introspection.published.v1"``.
+            Subclasses can override the class variable for different defaults.
         heartbeat_topic: Optional topic for publishing heartbeat events.
-            If None, uses module-level HEARTBEAT_TOPIC constant.
+            If None, uses ``MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC`` class
+            variable, which defaults to ``"onex.node.heartbeat.published.v1"``.
+            Subclasses can override the class variable for different defaults.
         request_introspection_topic: Optional topic for listening to introspection requests.
-            If None, uses module-level REQUEST_INTROSPECTION_TOPIC constant.
+            If None, uses ``MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC``
+            class variable, which defaults to ``"onex.registry.introspection.requested.v1"``.
+            Subclasses can override the class variable for different defaults.
 
     Example:
         ```python
@@ -304,14 +301,22 @@ class ModelIntrospectionConfig(BaseModel):
         config = ModelIntrospectionConfig(
             node_id="contract-node",
             node_type="COMPUTE",
-            introspection_topic="custom.introspection.topic",
-            heartbeat_topic="custom.heartbeat.topic",
+            introspection_topic="onex.custom.introspection.published.v1",
+            heartbeat_topic="onex.custom.heartbeat.published.v1",
         )
+
+        # Subclass with different default topics
+        class MyTenantNode(MixinNodeIntrospection):
+            # Override class-level defaults for this tenant
+            DEFAULT_INTROSPECTION_TOPIC = "onex.tenant1.introspection.published.v1"
+            DEFAULT_HEARTBEAT_TOPIC = "onex.tenant1.heartbeat.published.v1"
         ```
 
     See Also:
         - ``MixinNodeIntrospection.initialize_introspection()`` for usage patterns
-        - Module constants for default topic values
+        - ``MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC`` for default topic values
+        - ``MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC`` for default topic values
+        - ``MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC`` for default topic values
     """
 
     node_id: str = Field(
@@ -362,6 +367,61 @@ class ModelIntrospectionConfig(BaseModel):
         description="Topic for introspection requests",
     )
 
+    # Regex pattern for valid topic name characters (alphanumeric, dots, hyphens, underscores)
+    _TOPIC_NAME_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9._-]+$")
+    _TOPIC_PREFIX: ClassVar[str] = "onex."
+
+    @field_validator(
+        "introspection_topic",
+        "heartbeat_topic",
+        "request_introspection_topic",
+        mode="after",
+    )
+    @classmethod
+    def validate_topic_name(cls, v: str | None) -> str | None:
+        """Validate topic name format for ONEX naming convention.
+
+        Topic names must:
+        - Start with "onex." prefix (ONEX naming convention)
+        - Contain only alphanumeric characters, dots, hyphens, and underscores
+        - Be non-empty after the prefix
+
+        Args:
+            v: Topic name string or None
+
+        Returns:
+            The validated topic name, or None if input was None
+
+        Raises:
+            ValueError: If topic name format is invalid
+        """
+        if v is None:
+            return v
+
+        # Check for ONEX prefix
+        if not v.startswith(cls._TOPIC_PREFIX):
+            raise ValueError(
+                f"Topic name must start with '{cls._TOPIC_PREFIX}' prefix. Got: '{v}'"
+            )
+
+        # Check for valid characters
+        if not cls._TOPIC_NAME_PATTERN.match(v):
+            raise ValueError(
+                f"Topic name contains invalid characters. "
+                f"Only alphanumeric, dots, hyphens, and underscores are allowed. "
+                f"Got: '{v}'"
+            )
+
+        # Check non-empty after prefix
+        suffix = v[len(cls._TOPIC_PREFIX) :]
+        if not suffix:
+            raise ValueError(
+                f"Topic name must have content after '{cls._TOPIC_PREFIX}' prefix. "
+                f"Got: '{v}'"
+            )
+
+        return v
+
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         frozen=False,
@@ -375,6 +435,13 @@ class IntrospectionPerformanceMetrics:
     This dataclass captures timing information for introspection operations,
     enabling performance monitoring and alerting when operations exceed
     the <50ms target threshold.
+
+    Note:
+        These metrics are currently **local-only** and are NOT included in
+        published ``ModelNodeIntrospectionEvent`` events. This is because the
+        event model uses ``extra="forbid"`` and has no extension point for
+        performance metrics. See OMN-926 for tracking the addition of
+        distributed performance observability.
 
     Attributes:
         get_capabilities_ms: Time taken by get_capabilities() in milliseconds.
@@ -399,6 +466,10 @@ class IntrospectionPerformanceMetrics:
                 }
             )
         ```
+
+    See Also:
+        - OMN-926: Add performance metrics to introspection events
+        - ``get_performance_metrics()``: Method to retrieve these metrics
     """
 
     get_capabilities_ms: float = 0.0
@@ -717,6 +788,22 @@ class MixinNodeIntrospection:
         },
     }
 
+    # Default topic names for introspection events (can be overridden in subclasses)
+    # These class-level defaults enable:
+    #   1. Subclass overrides for multi-tenant or domain-specific deployments
+    #   2. Better testability (tests can mock class variables)
+    #   3. Consistent defaults without relying on module-level constants
+    #
+    # Usage:
+    #   - Override in subclass: class MyNode(MixinNodeIntrospection):
+    #                               DEFAULT_INTROSPECTION_TOPIC = "custom.topic.v1"
+    #   - Override via config: ModelIntrospectionConfig(introspection_topic="...")
+    DEFAULT_INTROSPECTION_TOPIC: ClassVar[str] = "onex.node.introspection.published.v1"
+    DEFAULT_HEARTBEAT_TOPIC: ClassVar[str] = "onex.node.heartbeat.published.v1"
+    DEFAULT_REQUEST_INTROSPECTION_TOPIC: ClassVar[str] = (
+        "onex.registry.introspection.requested.v1"
+    )
+
     def initialize_introspection(
         self,
         config: ModelIntrospectionConfig | None = None,
@@ -768,14 +855,17 @@ class MixinNodeIntrospection:
                 discovery. Methods starting with these prefixes are filtered out.
                 If None, uses DEFAULT_EXCLUDE_PREFIXES.
             introspection_topic: Optional topic for publishing introspection events.
-                If None, uses module-level INTROSPECTION_TOPIC constant.
+                If None, uses ``DEFAULT_INTROSPECTION_TOPIC`` class variable.
                 Allows contract-driven topic configuration per node.
+                Subclasses can override the class variable for different defaults.
             heartbeat_topic: Optional topic for publishing heartbeat events.
-                If None, uses module-level HEARTBEAT_TOPIC constant.
+                If None, uses ``DEFAULT_HEARTBEAT_TOPIC`` class variable.
                 Allows contract-driven topic configuration per node.
+                Subclasses can override the class variable for different defaults.
             request_introspection_topic: Optional topic for listening to introspection
-                requests. If None, uses module-level REQUEST_INTROSPECTION_TOPIC constant.
-                Allows contract-driven topic configuration per node.
+                requests. If None, uses ``DEFAULT_REQUEST_INTROSPECTION_TOPIC`` class
+                variable. Allows contract-driven topic configuration per node.
+                Subclasses can override the class variable for different defaults.
 
         Raises:
             ValueError: If neither ``config`` nor (``node_id`` and ``node_type``)
@@ -871,11 +961,14 @@ class MixinNodeIntrospection:
             else self.DEFAULT_EXCLUDE_PREFIXES.copy()
         )
 
-        # Contract-driven topic configuration - use provided values or module defaults
-        self._introspection_topic = introspection_topic or INTROSPECTION_TOPIC
-        self._heartbeat_topic = heartbeat_topic or HEARTBEAT_TOPIC
+        # Contract-driven topic configuration - use provided values or class defaults
+        # Class defaults allow subclasses to override default topics without config changes
+        self._introspection_topic = (
+            introspection_topic or self.DEFAULT_INTROSPECTION_TOPIC
+        )
+        self._heartbeat_topic = heartbeat_topic or self.DEFAULT_HEARTBEAT_TOPIC
         self._request_introspection_topic = (
-            request_introspection_topic or REQUEST_INTROSPECTION_TOPIC
+            request_introspection_topic or self.DEFAULT_REQUEST_INTROSPECTION_TOPIC
         )
 
         # State
@@ -1667,7 +1760,7 @@ class MixinNodeIntrospection:
                 node_id=node_id_uuid,
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
-                # TODO(OMN-XXX): Implement active operation tracking
+                # TODO(OMN-925): Implement active operation tracking
                 # Currently hardcoded to 0. Full implementation requires:
                 # - Operation counter increment/decrement around async operations
                 # - Thread-safe counter for concurrent operations
@@ -1894,11 +1987,21 @@ class MixinNodeIntrospection:
             try:
                 # Early exit if message has no parseable value
                 if not hasattr(message, "value") or not message.value:
+                    # DO NOT reset failure counter here - empty messages may indicate
+                    # a systematic issue (e.g., producer sending malformed messages).
+                    # Counter resets only after successful message parsing below.
+                    logger.debug(
+                        "Received introspection request with no message value for "
+                        f"{self._introspection_node_id}",
+                        extra={
+                            "node_id": self._introspection_node_id,
+                            "has_value_attr": hasattr(message, "value"),
+                        },
+                    )
                     await self.publish_introspection(
                         reason="request",
                         correlation_id=None,
                     )
-                    self._registry_callback_consecutive_failures = 0
                     return
 
                 # Parse request data
@@ -2240,6 +2343,17 @@ class MixinNodeIntrospection:
         ``get_introspection_data()``. Use this to monitor introspection
         performance and detect when operations exceed the <50ms threshold.
 
+        Note:
+            These metrics are currently local-only and are NOT included in
+            published introspection events. The ``ModelNodeIntrospectionEvent``
+            model (from ``omnibase_infra.models.discovery``) uses ``extra="forbid"``
+            and has no extension point for performance metrics.
+
+            TODO(OMN-926): Add performance metrics to introspection events for
+            distributed observability. Options include adding an optional
+            ``performance_metrics`` field to ``ModelNodeIntrospectionEvent`` or
+            creating a separate ``ModelNodePerformanceEvent`` type.
+
         Returns:
             IntrospectionPerformanceMetrics if introspection has been called,
             None if no introspection has been performed yet.
@@ -2274,9 +2388,6 @@ __all__ = [
     "MixinNodeIntrospection",
     "ModelIntrospectionConfig",
     "ProtocolIntrospectionEventBus",
-    "INTROSPECTION_TOPIC",
-    "HEARTBEAT_TOPIC",
-    "REQUEST_INTROSPECTION_TOPIC",
     "CapabilitiesDict",
     "IntrospectionCacheDict",
     "IntrospectionPerformanceMetrics",

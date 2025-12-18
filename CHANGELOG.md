@@ -34,9 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `cache_ttl`: Cache time-to-live in seconds (default: `300.0`)
   - `operation_keywords`: Optional set of keywords to identify operation methods (if None, uses DEFAULT_OPERATION_KEYWORDS)
   - `exclude_prefixes`: Optional set of prefixes to exclude from capability discovery (if None, uses DEFAULT_EXCLUDE_PREFIXES)
-  - `introspection_topic`: Optional topic for publishing introspection events (if None, uses module-level INTROSPECTION_TOPIC constant)
-  - `heartbeat_topic`: Optional topic for publishing heartbeat events (if None, uses module-level HEARTBEAT_TOPIC constant)
-  - `request_introspection_topic`: Optional topic for listening to introspection requests (if None, uses module-level REQUEST_INTROSPECTION_TOPIC constant)
+  - `introspection_topic`: Optional topic for publishing introspection events (if None, uses `MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC` class default)
+  - `heartbeat_topic`: Optional topic for publishing heartbeat events (if None, uses `MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC` class default)
+  - `request_introspection_topic`: Optional topic for listening to introspection requests (if None, uses `MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC` class default)
 - **Contract-Driven Topic Configuration**: Topics can now be customized via configuration rather than hardcoded, enabling multi-tenant and environment-specific deployments
 - **Performance Metrics Tracking**: Added tracking for cache hits/misses, publish latency, and last publish timestamp via `get_introspection_metrics()` method
 - **Async Cache Lock**: Thread-safe cache operations using `asyncio.Lock` for concurrent access protection

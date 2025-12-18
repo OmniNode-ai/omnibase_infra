@@ -600,6 +600,66 @@ Contract event channels are validated against this specification:
 3. **Publish/subscribe direction** must be consistent with topic semantics
 4. **Node types** must match expected publishers (e.g., EFFECT nodes publish lifecycle events)
 
+### Validation Tooling
+
+Topic names are validated at configuration time using Pydantic field validators. The `ModelIntrospectionConfig` class enforces ONEX naming conventions:
+
+```python
+from omnibase_infra.mixins import ModelIntrospectionConfig
+from pydantic import ValidationError
+
+# Valid topic configuration
+config = ModelIntrospectionConfig(
+    node_id="my-node",
+    node_type="EFFECT",
+    introspection_topic="onex.custom.introspection.published.v1",  # Valid: starts with "onex."
+)
+
+# Invalid topic - raises ValidationError
+try:
+    config = ModelIntrospectionConfig(
+        node_id="my-node",
+        node_type="EFFECT",
+        introspection_topic="custom.topic.v1",  # Invalid: missing "onex." prefix
+    )
+except ValidationError as e:
+    print(e)  # Topic name must start with 'onex.' prefix. Got: 'custom.topic.v1'
+```
+
+**Validation Rules Enforced**:
+
+| Rule | Description | Example Error |
+|------|-------------|---------------|
+| ONEX prefix | Topic names must start with `onex.` | `"custom.topic"` fails |
+| Valid characters | Only alphanumeric, dots (`.`), hyphens (`-`), and underscores (`_`) | `"onex.topic@invalid"` fails |
+| Non-empty suffix | Topic must have content after `onex.` prefix | `"onex."` fails |
+
+**Additional Invalid Examples**:
+
+```python
+# Invalid: contains special characters
+try:
+    config = ModelIntrospectionConfig(
+        node_id="my-node",
+        node_type="EFFECT",
+        introspection_topic="onex.topic@invalid!",  # Invalid characters
+    )
+except ValidationError:
+    pass  # "Topic name contains invalid characters..."
+
+# Invalid: empty after prefix
+try:
+    config = ModelIntrospectionConfig(
+        node_id="my-node",
+        node_type="EFFECT",
+        introspection_topic="onex.",  # Nothing after prefix
+    )
+except ValidationError:
+    pass  # "Topic name must have content after 'onex.' prefix..."
+```
+
+See `src/omnibase_infra/mixins/mixin_node_introspection.py` for the complete validator implementation.
+
 ### Code Integration Example
 
 The following shows how a node's `contract.yaml` event_channels integrate with `MixinNodeIntrospection` at runtime.

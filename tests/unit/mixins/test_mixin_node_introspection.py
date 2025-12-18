@@ -47,7 +47,6 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.mixins.mixin_node_introspection import (
-    INTROSPECTION_TOPIC,
     PERF_THRESHOLD_CACHE_HIT_MS,
     PERF_THRESHOLD_GET_CAPABILITIES_MS,
     PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS,
@@ -691,7 +690,7 @@ class TestMixinNodeIntrospectionPublishing:
         assert len(event_bus.published_envelopes) == 1
 
         envelope, topic = event_bus.published_envelopes[0]
-        assert topic == INTROSPECTION_TOPIC
+        assert topic == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
         assert isinstance(envelope, ModelNodeIntrospectionEvent)
 
     async def test_publish_introspection_with_correlation_id(
@@ -2936,17 +2935,17 @@ class TestMixinNodeIntrospectionConfigModel:
         config = ModelIntrospectionConfig(
             node_id="config-topics-node",
             node_type="EFFECT",
-            introspection_topic="custom.introspection.topic",
-            heartbeat_topic="custom.heartbeat.topic",
-            request_introspection_topic="custom.request.topic",
+            introspection_topic="onex.custom.introspection.topic",
+            heartbeat_topic="onex.custom.heartbeat.topic",
+            request_introspection_topic="onex.custom.request.topic",
         )
 
         node = MockNode()
         node.initialize_introspection(config=config)
 
-        assert node._introspection_topic == "custom.introspection.topic"
-        assert node._heartbeat_topic == "custom.heartbeat.topic"
-        assert node._request_introspection_topic == "custom.request.topic"
+        assert node._introspection_topic == "onex.custom.introspection.topic"
+        assert node._heartbeat_topic == "onex.custom.heartbeat.topic"
+        assert node._request_introspection_topic == "onex.custom.request.topic"
 
     async def test_legacy_params_still_work(self) -> None:
         """Test that legacy individual parameters still work."""
@@ -3043,6 +3042,219 @@ class TestMixinNodeIntrospectionConfigModel:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+class TestModelIntrospectionConfigTopicValidation:
+    """Tests for topic name validation in ModelIntrospectionConfig.
+
+    These tests verify that the Pydantic field_validator for topic names
+    correctly validates and rejects invalid topic name formats.
+
+    Topic names must:
+    - Start with "onex." prefix (ONEX naming convention)
+    - Contain only alphanumeric characters, dots, hyphens, and underscores
+    - Be non-empty after the prefix
+    """
+
+    async def test_valid_topic_names_accepted(self) -> None:
+        """Test that valid topic names following ONEX convention are accepted."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Valid topic names with various patterns
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic="onex.node.introspection.published.v1",
+            heartbeat_topic="onex.node.heartbeat.published.v1",
+            request_introspection_topic="onex.registry.introspection.requested.v1",
+        )
+
+        assert config.introspection_topic == "onex.node.introspection.published.v1"
+        assert config.heartbeat_topic == "onex.node.heartbeat.published.v1"
+        assert (
+            config.request_introspection_topic
+            == "onex.registry.introspection.requested.v1"
+        )
+
+    async def test_none_values_allowed(self) -> None:
+        """Test that None values pass validation (use defaults)."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic=None,
+            heartbeat_topic=None,
+            request_introspection_topic=None,
+        )
+
+        assert config.introspection_topic is None
+        assert config.heartbeat_topic is None
+        assert config.request_introspection_topic is None
+
+    async def test_missing_onex_prefix_rejected(self) -> None:
+        """Test that topic names without 'onex.' prefix are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Test introspection_topic without prefix
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="node.introspection.published.v1",
+            )
+
+        error_message = str(exc_info.value)
+        assert "onex." in error_message
+        assert "prefix" in error_message.lower()
+
+    async def test_invalid_characters_rejected(self) -> None:
+        """Test that topic names with invalid characters are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Test with spaces
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.node introspection.published.v1",
+            )
+
+        error_message = str(exc_info.value)
+        assert "invalid characters" in error_message.lower()
+
+        # Test with special characters
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                heartbeat_topic="onex.node@heartbeat#published!v1",
+            )
+
+        # Test with slashes
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                request_introspection_topic="onex/registry/introspection",
+            )
+
+    async def test_empty_after_prefix_rejected(self) -> None:
+        """Test that topic names with only 'onex.' prefix are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.",
+            )
+
+        error_message = str(exc_info.value)
+        assert "content after" in error_message.lower()
+
+    async def test_valid_characters_in_topic_names(self) -> None:
+        """Test that valid characters (alphanumeric, dots, hyphens, underscores) are allowed."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Test with hyphens and underscores
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic="onex.my-node_introspection.published.v1",
+            heartbeat_topic="onex.node-1_heartbeat.published.v2",
+            request_introspection_topic="onex.registry_v2.introspection-request.v1",
+        )
+
+        assert config.introspection_topic == "onex.my-node_introspection.published.v1"
+        assert config.heartbeat_topic == "onex.node-1_heartbeat.published.v2"
+        assert (
+            config.request_introspection_topic
+            == "onex.registry_v2.introspection-request.v1"
+        )
+
+    async def test_multiple_topic_validation_errors(self) -> None:
+        """Test that multiple invalid topics produce multiple validation errors."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="bad.introspection.topic",
+                heartbeat_topic="bad.heartbeat.topic",
+                request_introspection_topic="bad.request.topic",
+            )
+
+        # Should have 3 validation errors
+        errors = exc_info.value.errors()
+        assert len(errors) == 3
+
+        # All should be about missing prefix
+        for error in errors:
+            assert "onex." in str(error["msg"])
+
+    async def test_case_sensitive_prefix(self) -> None:
+        """Test that the 'onex.' prefix is case-sensitive."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # ONEX. (uppercase) should fail
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="ONEX.node.introspection.published.v1",
+            )
+
+        # Onex. (mixed case) should fail
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="Onex.node.introspection.published.v1",
+            )
+
+    async def test_validation_error_messages_are_descriptive(self) -> None:
+        """Test that validation error messages provide clear guidance."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Test missing prefix error message
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="custom.topic.name",
+            )
+
+        error_msg = str(exc_info.value)
+        assert "onex." in error_msg
+        assert "custom.topic.name" in error_msg  # Shows the actual invalid value
+
+        # Test invalid characters error message
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                heartbeat_topic="onex.topic with spaces",
+            )
+
+        error_msg = str(exc_info.value)
+        assert "invalid characters" in error_msg.lower()
+        assert "onex.topic with spaces" in error_msg
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestMixinNodeIntrospectionCustomTopics:
     """Tests for custom topic configuration via ModelIntrospectionConfig.
 
@@ -3055,7 +3267,7 @@ class TestMixinNodeIntrospectionCustomTopics:
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
         event_bus = MockEventBus()
-        custom_topic = "my.custom.introspection.topic.v1"
+        custom_topic = "onex.my.custom.introspection.topic.v1"
 
         config = ModelIntrospectionConfig(
             node_id="custom-topic-node",
@@ -3076,14 +3288,8 @@ class TestMixinNodeIntrospectionCustomTopics:
         _, topic = event_bus.published_envelopes[0]
         assert topic == custom_topic
 
-    async def test_custom_topics_default_to_module_constants(self) -> None:
-        """Test that topics default to module constants when not specified."""
-        from omnibase_infra.mixins.mixin_node_introspection import (
-            HEARTBEAT_TOPIC,
-            INTROSPECTION_TOPIC,
-            REQUEST_INTROSPECTION_TOPIC,
-        )
-
+    async def test_custom_topics_default_to_class_defaults(self) -> None:
+        """Test that topics default to class-level defaults when not specified."""
         node = MockNode()
         node.initialize_introspection(
             node_id="default-topics-node",
@@ -3091,17 +3297,23 @@ class TestMixinNodeIntrospectionCustomTopics:
             event_bus=None,
         )
 
-        # Verify defaults are used
-        assert node._introspection_topic == INTROSPECTION_TOPIC
-        assert node._heartbeat_topic == HEARTBEAT_TOPIC
-        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+        # Verify class-level defaults are used
+        assert (
+            node._introspection_topic
+            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+        )
+        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+        assert (
+            node._request_introspection_topic
+            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+        )
 
     async def test_custom_heartbeat_topic_used_in_heartbeat_publishing(self) -> None:
         """Test that custom heartbeat topic is used in heartbeat publishing."""
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
         event_bus = MockEventBus()
-        custom_heartbeat_topic = "my.custom.heartbeat.topic.v1"
+        custom_heartbeat_topic = "onex.my.custom.heartbeat.topic.v1"
 
         config = ModelIntrospectionConfig(
             node_id="custom-heartbeat-node",
@@ -3142,7 +3354,7 @@ class TestMixinNodeIntrospectionCustomTopics:
         """
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
-        custom_request_topic = "my.custom.request.introspection.topic.v1"
+        custom_request_topic = "onex.my.custom.request.introspection.topic.v1"
 
         config = ModelIntrospectionConfig(
             node_id="custom-request-topic-node",
@@ -3161,9 +3373,9 @@ class TestMixinNodeIntrospectionCustomTopics:
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
         event_bus = MockEventBus()
-        custom_introspection = "custom.intro.topic"
-        custom_heartbeat = "custom.heartbeat.topic"
-        custom_request = "custom.request.topic"
+        custom_introspection = "onex.custom.intro.topic"
+        custom_heartbeat = "onex.custom.heartbeat.topic"
+        custom_request = "onex.custom.request.topic"
 
         config = ModelIntrospectionConfig(
             node_id="all-custom-topics-node",
@@ -3207,12 +3419,8 @@ class TestMixinNodeIntrospectionCustomTopics:
     async def test_partial_custom_topics_with_defaults(self) -> None:
         """Test that unspecified topics fall back to defaults."""
         from omnibase_infra.mixins import ModelIntrospectionConfig
-        from omnibase_infra.mixins.mixin_node_introspection import (
-            HEARTBEAT_TOPIC,
-            REQUEST_INTROSPECTION_TOPIC,
-        )
 
-        custom_introspection = "only.introspection.custom"
+        custom_introspection = "onex.only.introspection.custom"
 
         config = ModelIntrospectionConfig(
             node_id="partial-topics-node",
@@ -3226,9 +3434,12 @@ class TestMixinNodeIntrospectionCustomTopics:
 
         # Custom topic should be set
         assert node._introspection_topic == custom_introspection
-        # Others should use defaults
-        assert node._heartbeat_topic == HEARTBEAT_TOPIC
-        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+        # Others should use class-level defaults
+        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+        assert (
+            node._request_introspection_topic
+            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+        )
 
     async def test_introspection_topic_with_fallback_publish_method(self) -> None:
         """Test custom topic used with fallback publish method (no publish_envelope).
@@ -3261,7 +3472,7 @@ class TestMixinNodeIntrospectionCustomTopics:
         # Use legacy parameter path to bypass Pydantic protocol validation
         # This allows testing the fallback path with a minimal event bus
         event_bus = NoEnvelopeEventBus()
-        custom_topic = "fallback.publish.topic.v1"
+        custom_topic = "onex.fallback.publish.topic.v1"
 
         node = MockNode()
         # Cast to Any to bypass type checking for testing fallback behavior
@@ -3311,7 +3522,7 @@ class TestMixinNodeIntrospectionCustomTopics:
         # Use legacy parameter path to bypass Pydantic protocol validation
         # This allows testing the fallback path with a minimal event bus
         event_bus = NoEnvelopeEventBus()
-        custom_heartbeat_topic = "fallback.heartbeat.topic.v1"
+        custom_heartbeat_topic = "onex.fallback.heartbeat.topic.v1"
 
         node = MockNode()
         # Cast to Any to bypass type checking for testing fallback behavior
@@ -3342,11 +3553,6 @@ class TestMixinNodeIntrospectionCustomTopics:
     async def test_empty_topic_strings_use_defaults(self) -> None:
         """Test that None topic values correctly fall back to defaults."""
         from omnibase_infra.mixins import ModelIntrospectionConfig
-        from omnibase_infra.mixins.mixin_node_introspection import (
-            HEARTBEAT_TOPIC,
-            INTROSPECTION_TOPIC,
-            REQUEST_INTROSPECTION_TOPIC,
-        )
 
         # Create config with explicit None values
         config = ModelIntrospectionConfig(
@@ -3360,10 +3566,16 @@ class TestMixinNodeIntrospectionCustomTopics:
         node = MockNode()
         node.initialize_introspection(config=config)
 
-        # All should fall back to module constants
-        assert node._introspection_topic == INTROSPECTION_TOPIC
-        assert node._heartbeat_topic == HEARTBEAT_TOPIC
-        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+        # All should fall back to class-level defaults
+        assert (
+            node._introspection_topic
+            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+        )
+        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+        assert (
+            node._request_introspection_topic
+            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+        )
 
     async def test_get_introspection_data_includes_topic_info(self) -> None:
         """Test that introspection data includes configured topic information.
@@ -3373,9 +3585,9 @@ class TestMixinNodeIntrospectionCustomTopics:
         """
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
-        custom_introspection = "debug.introspection.topic"
-        custom_heartbeat = "debug.heartbeat.topic"
-        custom_request = "debug.request.topic"
+        custom_introspection = "onex.debug.introspection.topic"
+        custom_heartbeat = "onex.debug.heartbeat.topic"
+        custom_request = "onex.debug.request.topic"
 
         config = ModelIntrospectionConfig(
             node_id="topic-info-node",
@@ -3400,7 +3612,7 @@ class TestMixinNodeIntrospectionCustomTopics:
     async def test_legacy_params_custom_introspection_topic(self) -> None:
         """Test custom introspection topic via legacy parameter path."""
         event_bus = MockEventBus()
-        custom_topic = "legacy.introspection.topic.v1"
+        custom_topic = "onex.legacy.introspection.topic.v1"
 
         node = MockNode()
         node.initialize_introspection(
@@ -3424,7 +3636,7 @@ class TestMixinNodeIntrospectionCustomTopics:
     async def test_legacy_params_custom_heartbeat_topic(self) -> None:
         """Test custom heartbeat topic via legacy parameter path."""
         event_bus = MockEventBus()
-        custom_heartbeat_topic = "legacy.heartbeat.topic.v1"
+        custom_heartbeat_topic = "onex.legacy.heartbeat.topic.v1"
 
         node = MockNode()
         node.initialize_introspection(
@@ -3459,7 +3671,7 @@ class TestMixinNodeIntrospectionCustomTopics:
 
     async def test_legacy_params_custom_request_topic(self) -> None:
         """Test custom request introspection topic via legacy parameter path."""
-        custom_request_topic = "legacy.request.introspection.topic.v1"
+        custom_request_topic = "onex.legacy.request.introspection.topic.v1"
 
         node = MockNode()
         node.initialize_introspection(
@@ -3474,9 +3686,9 @@ class TestMixinNodeIntrospectionCustomTopics:
     async def test_legacy_params_all_custom_topics(self) -> None:
         """Test all three custom topics via legacy parameter path."""
         event_bus = MockEventBus()
-        custom_introspection = "legacy.intro.topic"
-        custom_heartbeat = "legacy.heartbeat.topic"
-        custom_request = "legacy.request.topic"
+        custom_introspection = "onex.legacy.intro.topic"
+        custom_heartbeat = "onex.legacy.heartbeat.topic"
+        custom_request = "onex.legacy.request.topic"
 
         node = MockNode()
         node.initialize_introspection(
@@ -3562,7 +3774,7 @@ class TestMixinNodeIntrospectionCustomTopics:
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
         event_bus = CapturingEventBus()
-        custom_request_topic = "custom.registry.request.topic.v1"
+        custom_request_topic = "onex.custom.registry.request.topic.v1"
 
         config = ModelIntrospectionConfig(
             node_id="registry-custom-topic-node",
@@ -3635,7 +3847,7 @@ class TestMixinNodeIntrospectionCustomTopics:
                 return unsubscribe
 
         event_bus = CapturingEventBus()
-        custom_request_topic = "legacy.registry.request.topic.v1"
+        custom_request_topic = "onex.legacy.registry.request.topic.v1"
 
         node = MockNode()
         node.initialize_introspection(
@@ -3665,13 +3877,7 @@ class TestMixinNodeIntrospectionCustomTopics:
             await node.stop_introspection_tasks()
 
     async def test_default_topics_used_without_custom_config(self) -> None:
-        """Test that default module topics are used when no custom topics provided."""
-        from omnibase_infra.mixins.mixin_node_introspection import (
-            HEARTBEAT_TOPIC,
-            INTROSPECTION_TOPIC,
-            REQUEST_INTROSPECTION_TOPIC,
-        )
-
+        """Test that class-level default topics are used when no custom topics provided."""
         event_bus = MockEventBus()
 
         node = MockNode()
@@ -3681,25 +3887,26 @@ class TestMixinNodeIntrospectionCustomTopics:
             event_bus=event_bus,
         )
 
-        # Verify default topics are used
-        assert node._introspection_topic == INTROSPECTION_TOPIC
-        assert node._heartbeat_topic == HEARTBEAT_TOPIC
-        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+        # Verify class-level defaults are used
+        assert (
+            node._introspection_topic
+            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+        )
+        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+        assert (
+            node._request_introspection_topic
+            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+        )
 
         # Verify introspection uses default topic
         await node.publish_introspection(reason="default-test")
         assert len(event_bus.published_envelopes) == 1
         _, topic = event_bus.published_envelopes[0]
-        assert topic == INTROSPECTION_TOPIC
+        assert topic == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
 
     async def test_config_model_default_topics_used(self) -> None:
         """Test that default topics are used when config model has None topics."""
         from omnibase_infra.mixins import ModelIntrospectionConfig
-        from omnibase_infra.mixins.mixin_node_introspection import (
-            HEARTBEAT_TOPIC,
-            INTROSPECTION_TOPIC,
-            REQUEST_INTROSPECTION_TOPIC,
-        )
 
         event_bus = MockEventBus()
 
@@ -3713,13 +3920,184 @@ class TestMixinNodeIntrospectionCustomTopics:
         node = MockNode()
         node.initialize_introspection(config=config)
 
-        # Verify default topics are used
-        assert node._introspection_topic == INTROSPECTION_TOPIC
-        assert node._heartbeat_topic == HEARTBEAT_TOPIC
-        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+        # Verify class-level defaults are used
+        assert (
+            node._introspection_topic
+            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+        )
+        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+        assert (
+            node._request_introspection_topic
+            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+        )
 
         # Verify introspection uses default topic
         await node.publish_introspection(reason="config-default-test")
         assert len(event_bus.published_envelopes) == 1
         _, topic = event_bus.published_envelopes[0]
-        assert topic == INTROSPECTION_TOPIC
+        assert topic == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+
+
+@pytest.mark.asyncio(loop_scope="function")
+class TestMixinNodeIntrospectionClassLevelDefaults:
+    """Test class-level default topic constants for subclass overrides."""
+
+    async def test_class_level_default_topics_exist(self) -> None:
+        """Test that class-level default topic constants are defined."""
+        assert hasattr(MixinNodeIntrospection, "DEFAULT_INTROSPECTION_TOPIC")
+        assert hasattr(MixinNodeIntrospection, "DEFAULT_HEARTBEAT_TOPIC")
+        assert hasattr(MixinNodeIntrospection, "DEFAULT_REQUEST_INTROSPECTION_TOPIC")
+
+        # Verify they have the expected values
+        assert (
+            MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+            == "onex.node.introspection.published.v1"
+        )
+        assert (
+            MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+            == "onex.node.heartbeat.published.v1"
+        )
+        assert (
+            MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+            == "onex.registry.introspection.requested.v1"
+        )
+
+    async def test_subclass_can_override_default_topics(self) -> None:
+        """Test that subclasses can override default topic class variables."""
+
+        class TenantNode(MixinNodeIntrospection):
+            """A tenant-specific node with custom topic defaults."""
+
+            DEFAULT_INTROSPECTION_TOPIC = "onex.tenant1.introspection.published.v1"
+            DEFAULT_HEARTBEAT_TOPIC = "onex.tenant1.heartbeat.published.v1"
+            DEFAULT_REQUEST_INTROSPECTION_TOPIC = (
+                "onex.tenant1.introspection.requested.v1"
+            )
+
+        node = TenantNode()
+        node.initialize_introspection(
+            node_id="tenant-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Verify that the subclass defaults are used
+        assert node._introspection_topic == "onex.tenant1.introspection.published.v1"
+        assert node._heartbeat_topic == "onex.tenant1.heartbeat.published.v1"
+        assert (
+            node._request_introspection_topic
+            == "onex.tenant1.introspection.requested.v1"
+        )
+
+    async def test_subclass_defaults_used_in_publishing(self) -> None:
+        """Test that subclass default topics are used in publish operations."""
+
+        class CustomTopicNode(MixinNodeIntrospection):
+            """A node with custom topic defaults."""
+
+            DEFAULT_INTROSPECTION_TOPIC = "onex.custom.introspection.published.v1"
+
+        event_bus = MockEventBus()
+        node = CustomTopicNode()
+        node.initialize_introspection(
+            node_id="custom-topic-node",
+            node_type="EFFECT",
+            event_bus=event_bus,
+        )
+
+        await node.publish_introspection(reason="test")
+
+        # Verify the custom topic was used
+        assert len(event_bus.published_envelopes) == 1
+        _, topic = event_bus.published_envelopes[0]
+        assert topic == "onex.custom.introspection.published.v1"
+
+    async def test_config_model_overrides_subclass_defaults(self) -> None:
+        """Test that config model topics override subclass defaults."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        class SubclassNode(MixinNodeIntrospection):
+            """A subclass with custom defaults."""
+
+            DEFAULT_INTROSPECTION_TOPIC = "onex.subclass.introspection.published.v1"
+
+        event_bus = MockEventBus()
+
+        # Config specifies a different topic that should override subclass default
+        config = ModelIntrospectionConfig(
+            node_id="override-node",
+            node_type="EFFECT",
+            event_bus=event_bus,
+            introspection_topic="onex.config.introspection.published.v1",
+        )
+
+        node = SubclassNode()
+        node.initialize_introspection(config=config)
+
+        # Verify config topic overrides subclass default
+        assert node._introspection_topic == "onex.config.introspection.published.v1"
+
+        await node.publish_introspection(reason="override-test")
+
+        _, topic = event_bus.published_envelopes[0]
+        assert topic == "onex.config.introspection.published.v1"
+
+    async def test_multiple_subclasses_have_independent_defaults(self) -> None:
+        """Test that different subclasses can have independent default topics."""
+
+        class TenantANode(MixinNodeIntrospection):
+            """Node for Tenant A."""
+
+            DEFAULT_INTROSPECTION_TOPIC = "onex.tenantA.introspection.published.v1"
+
+        class TenantBNode(MixinNodeIntrospection):
+            """Node for Tenant B."""
+
+            DEFAULT_INTROSPECTION_TOPIC = "onex.tenantB.introspection.published.v1"
+
+        event_bus_a = MockEventBus()
+        event_bus_b = MockEventBus()
+
+        node_a = TenantANode()
+        node_a.initialize_introspection(
+            node_id="tenant-a-node",
+            node_type="EFFECT",
+            event_bus=event_bus_a,
+        )
+
+        node_b = TenantBNode()
+        node_b.initialize_introspection(
+            node_id="tenant-b-node",
+            node_type="EFFECT",
+            event_bus=event_bus_b,
+        )
+
+        # Verify independent defaults
+        assert node_a._introspection_topic == "onex.tenantA.introspection.published.v1"
+        assert node_b._introspection_topic == "onex.tenantB.introspection.published.v1"
+
+        # Verify publishing uses correct topics
+        await node_a.publish_introspection(reason="tenant-a")
+        await node_b.publish_introspection(reason="tenant-b")
+
+        _, topic_a = event_bus_a.published_envelopes[0]
+        _, topic_b = event_bus_b.published_envelopes[0]
+
+        assert topic_a == "onex.tenantA.introspection.published.v1"
+        assert topic_b == "onex.tenantB.introspection.published.v1"
+
+    async def test_class_defaults_have_expected_values(self) -> None:
+        """Test that class defaults have the expected ONEX topic values."""
+        # Verify class defaults have the expected values following ONEX naming convention
+        assert (
+            MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+            == "onex.node.introspection.published.v1"
+        )
+        assert (
+            MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+            == "onex.node.heartbeat.published.v1"
+        )
+        assert (
+            MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+            == "onex.registry.introspection.requested.v1"
+        )
