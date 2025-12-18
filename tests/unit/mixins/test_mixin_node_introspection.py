@@ -49,7 +49,6 @@ TEST_NODE_UUID_3 = UUID("00000000-0000-0000-0000-000000000003")
 
 from omnibase_infra.mixins.mixin_node_introspection import (
     PERF_THRESHOLD_CACHE_HIT_MS,
-    PERF_THRESHOLD_GET_CAPABILITIES_MS,
     PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS,
     IntrospectionPerformanceMetrics,
     MixinNodeIntrospection,
