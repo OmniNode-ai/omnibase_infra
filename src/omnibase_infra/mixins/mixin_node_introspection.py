@@ -370,6 +370,8 @@ class ModelIntrospectionConfig(BaseModel):
     # Regex pattern for valid topic name characters (alphanumeric, dots, hyphens, underscores)
     _TOPIC_NAME_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9._-]+$")
     _TOPIC_PREFIX: ClassVar[str] = "onex."
+    # Regex pattern for version suffix (e.g., .v1, .v2, .v10)
+    _VERSION_SUFFIX_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"\.v\d+$")
 
     @field_validator(
         "introspection_topic",
@@ -385,6 +387,7 @@ class ModelIntrospectionConfig(BaseModel):
         - Start with "onex." prefix (ONEX naming convention)
         - Contain only alphanumeric characters, dots, hyphens, and underscores
         - Be non-empty after the prefix
+        - End with a version suffix (e.g., .v1, .v2, .v10)
 
         Args:
             v: Topic name string or None
@@ -394,6 +397,11 @@ class ModelIntrospectionConfig(BaseModel):
 
         Raises:
             ValueError: If topic name format is invalid
+
+        Example:
+            Valid: "onex.node.introspection.published.v1"
+            Invalid: "onex.node.introspection.published" (missing version suffix)
+            Invalid: "onex.node.introspection.published.v" (incomplete version)
         """
         if v is None:
             return v
@@ -418,6 +426,12 @@ class ModelIntrospectionConfig(BaseModel):
             raise ValueError(
                 f"Topic name must have content after '{cls._TOPIC_PREFIX}' prefix. "
                 f"Got: '{v}'"
+            )
+
+        # Check for version suffix (e.g., .v1, .v2, .v10)
+        if not cls._VERSION_SUFFIX_PATTERN.search(v):
+            raise ValueError(
+                f"Topic name must end with version suffix (e.g., .v1, .v2). Got: '{v}'"
             )
 
         return v

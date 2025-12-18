@@ -630,9 +630,10 @@ except ValidationError as e:
 
 | Rule | Description | Example Error |
 |------|-------------|---------------|
-| ONEX prefix | Topic names must start with `onex.` | `"custom.topic"` fails |
-| Valid characters | Only alphanumeric, dots (`.`), hyphens (`-`), and underscores (`_`) | `"onex.topic@invalid"` fails |
+| ONEX prefix | Topic names must start with `onex.` | `"custom.topic.v1"` fails |
+| Valid characters | Only alphanumeric, dots (`.`), hyphens (`-`), and underscores (`_`) | `"onex.topic@invalid.v1"` fails |
 | Non-empty suffix | Topic must have content after `onex.` prefix | `"onex."` fails |
+| Version suffix | Topic names must end with `.v` followed by a number | `"onex.node.topic"` fails (missing `.v1`) |
 
 **Additional Invalid Examples**:
 
@@ -656,6 +657,16 @@ try:
     )
 except ValidationError:
     pass  # "Topic name must have content after 'onex.' prefix..."
+
+# Invalid: missing version suffix
+try:
+    config = ModelIntrospectionConfig(
+        node_id="my-node",
+        node_type="EFFECT",
+        introspection_topic="onex.node.introspection.published",  # Missing .v1
+    )
+except ValidationError:
+    pass  # "Topic name must end with version suffix (e.g., .v1, .v2)..."
 ```
 
 See `src/omnibase_infra/mixins/mixin_node_introspection.py` for the complete validator implementation.

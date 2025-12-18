@@ -2935,17 +2935,17 @@ class TestMixinNodeIntrospectionConfigModel:
         config = ModelIntrospectionConfig(
             node_id="config-topics-node",
             node_type="EFFECT",
-            introspection_topic="onex.custom.introspection.topic",
-            heartbeat_topic="onex.custom.heartbeat.topic",
-            request_introspection_topic="onex.custom.request.topic",
+            introspection_topic="onex.custom.introspection.topic.v1",
+            heartbeat_topic="onex.custom.heartbeat.topic.v1",
+            request_introspection_topic="onex.custom.request.topic.v1",
         )
 
         node = MockNode()
         node.initialize_introspection(config=config)
 
-        assert node._introspection_topic == "onex.custom.introspection.topic"
-        assert node._heartbeat_topic == "onex.custom.heartbeat.topic"
-        assert node._request_introspection_topic == "onex.custom.request.topic"
+        assert node._introspection_topic == "onex.custom.introspection.topic.v1"
+        assert node._heartbeat_topic == "onex.custom.heartbeat.topic.v1"
+        assert node._request_introspection_topic == "onex.custom.request.topic.v1"
 
     async def test_legacy_params_still_work(self) -> None:
         """Test that legacy individual parameters still work."""
@@ -3252,6 +3252,95 @@ class TestModelIntrospectionConfigTopicValidation:
         assert "invalid characters" in error_msg.lower()
         assert "onex.topic with spaces" in error_msg
 
+    async def test_missing_version_suffix_rejected(self) -> None:
+        """Test that topic names without version suffix are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Missing version suffix entirely
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.node.introspection.published",
+            )
+
+        error_msg = str(exc_info.value)
+        assert "version suffix" in error_msg.lower()
+        assert ".v1" in error_msg or ".v2" in error_msg
+
+    async def test_incomplete_version_suffix_rejected(self) -> None:
+        """Test that incomplete version suffixes are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # .v without number
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.node.introspection.published.v",
+            )
+
+        # v1 without dot
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                heartbeat_topic="onex.node.heartbeatv1",
+            )
+
+    async def test_valid_version_suffixes_accepted(self) -> None:
+        """Test that valid version suffixes are accepted."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Single digit version
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic="onex.node.introspection.v1",
+        )
+        assert config.introspection_topic == "onex.node.introspection.v1"
+
+        # Double digit version
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            heartbeat_topic="onex.node.heartbeat.v10",
+        )
+        assert config.heartbeat_topic == "onex.node.heartbeat.v10"
+
+        # Triple digit version
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            request_introspection_topic="onex.registry.request.v100",
+        )
+        assert config.request_introspection_topic == "onex.registry.request.v100"
+
+    async def test_version_suffix_error_message_descriptive(self) -> None:
+        """Test that version suffix error message provides clear guidance."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.node.introspection.published",
+            )
+
+        error_msg = str(exc_info.value)
+        # Error should mention version suffix requirement
+        assert "version suffix" in error_msg.lower()
+        # Error should provide examples
+        assert ".v1" in error_msg or ".v2" in error_msg
+        # Error should show the invalid value
+        assert "onex.node.introspection.published" in error_msg
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
@@ -3373,9 +3462,9 @@ class TestMixinNodeIntrospectionCustomTopics:
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
         event_bus = MockEventBus()
-        custom_introspection = "onex.custom.intro.topic"
-        custom_heartbeat = "onex.custom.heartbeat.topic"
-        custom_request = "onex.custom.request.topic"
+        custom_introspection = "onex.custom.intro.topic.v1"
+        custom_heartbeat = "onex.custom.heartbeat.topic.v1"
+        custom_request = "onex.custom.request.topic.v1"
 
         config = ModelIntrospectionConfig(
             node_id="all-custom-topics-node",
@@ -3420,7 +3509,7 @@ class TestMixinNodeIntrospectionCustomTopics:
         """Test that unspecified topics fall back to defaults."""
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
-        custom_introspection = "onex.only.introspection.custom"
+        custom_introspection = "onex.only.introspection.custom.v1"
 
         config = ModelIntrospectionConfig(
             node_id="partial-topics-node",
@@ -3585,9 +3674,9 @@ class TestMixinNodeIntrospectionCustomTopics:
         """
         from omnibase_infra.mixins import ModelIntrospectionConfig
 
-        custom_introspection = "onex.debug.introspection.topic"
-        custom_heartbeat = "onex.debug.heartbeat.topic"
-        custom_request = "onex.debug.request.topic"
+        custom_introspection = "onex.debug.introspection.topic.v1"
+        custom_heartbeat = "onex.debug.heartbeat.topic.v1"
+        custom_request = "onex.debug.request.topic.v1"
 
         config = ModelIntrospectionConfig(
             node_id="topic-info-node",
