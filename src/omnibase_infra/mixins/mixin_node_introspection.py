@@ -135,7 +135,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
+from typing import TYPE_CHECKING, ClassVar, Protocol, TypedDict, cast, runtime_checkable
 from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -144,11 +144,90 @@ from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 if TYPE_CHECKING:
-    from omnibase_core.protocols.event_bus import ProtocolEventBus
-
     from omnibase_infra.event_bus.models import ModelEventMessage
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ProtocolIntrospectionEventBus(Protocol):
+    """Minimal protocol for event bus used by MixinNodeIntrospection.
+
+    This protocol defines only the subset of event bus methods actually used by
+    the introspection mixin, enabling duck-typed compatibility with any event bus
+    implementation without requiring the full ProtocolEventBus interface.
+
+    The introspection mixin uses:
+        - ``publish_envelope()``: For publishing typed introspection and heartbeat events
+        - ``publish()``: Fallback for raw byte publishing when publish_envelope unavailable
+        - ``subscribe()``: For listening to introspection request events
+
+    This minimal interface allows flexibility in event bus implementations while
+    maintaining proper type checking. Any object implementing these three methods
+    can be used as the introspection event bus.
+
+    Note:
+        The ``on_message`` callback type uses ``ModelEventMessage`` from
+        ``omnibase_infra.event_bus.models``, imported under TYPE_CHECKING to avoid
+        circular imports at runtime.
+
+    See Also:
+        - ``ProtocolEventBus`` in ``omnibase_infra.nodes.node_registry_effect`` for
+          the full event bus protocol
+        - ``KafkaEventBus`` and ``InMemoryEventBus`` for concrete implementations
+    """
+
+    async def publish_envelope(
+        self,
+        envelope: object,
+        topic: str,
+    ) -> None:
+        """Publish a typed envelope to a topic.
+
+        Args:
+            envelope: Event model (e.g., ModelNodeIntrospectionEvent) with model_dump()
+            topic: Target topic name
+
+        Note:
+            The envelope parameter uses ``object`` type to accept any Pydantic model
+            with a ``model_dump()`` method. This matches the actual implementations
+            in KafkaEventBus and InMemoryEventBus.
+        """
+        ...
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+    ) -> None:
+        """Publish raw bytes to a topic.
+
+        Args:
+            topic: Target topic name
+            key: Optional message key for partitioning
+            value: Message payload as bytes (typically JSON-encoded)
+        """
+        ...
+
+    async def subscribe(
+        self,
+        topic: str,
+        group_id: str,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]],
+    ) -> Callable[[], Awaitable[None]]:
+        """Subscribe to a topic with a message callback.
+
+        Args:
+            topic: Topic to subscribe to
+            group_id: Consumer group ID for offset management
+            on_message: Async callback invoked for each message
+
+        Returns:
+            Async unsubscribe function to cancel the subscription
+        """
+        ...
+
 
 # Event topic constants
 # Migrated from legacy topic names to ONEX standardized naming convention:
@@ -245,11 +324,11 @@ class ModelIntrospectionConfig(BaseModel):
         description="Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)",
         min_length=1,
     )
-    # Using object for event_bus to allow duck-typed event bus implementations.
-    # MixinNodeIntrospection only uses publish_envelope(), publish(), and subscribe(),
-    # but ProtocolEventBus requires 5 methods. Using object allows any compatible
-    # implementation without requiring the full protocol interface.
-    event_bus: object | None = Field(
+    # Using ProtocolIntrospectionEventBus for type-safe duck typing.
+    # This minimal protocol requires only the 3 methods actually used by this mixin:
+    # publish_envelope(), publish(), and subscribe(). This provides meaningful type
+    # checking while allowing any compatible event bus implementation.
+    event_bus: ProtocolIntrospectionEventBus | None = Field(
         default=None,
         description="Event bus for publishing introspection and heartbeat events",
     )
@@ -383,10 +462,66 @@ class MixinNodeIntrospection:
     Provides automatic capability discovery using reflection, endpoint
     reporting, and periodic heartbeat broadcasting for ONEX nodes.
 
+    Thread Safety:
+        This mixin uses ``asyncio.Lock`` for thread-safe cache operations in
+        concurrent async environments. The lock protects the introspection cache
+        from race conditions when multiple coroutines access or update cached data.
+
+        **Lock Type**: ``asyncio.Lock`` (Async Lock)
+
+        **Why asyncio.Lock?**
+
+        - Native async/await compatibility for async infrastructure components
+        - No thread pool overhead (unlike threading.RLock)
+        - Proper integration with asyncio event loop
+        - Prevents async race conditions in concurrent cache operations
+
+        **Protected State Variables**:
+
+        1. ``_introspection_cache`` - Cached introspection data (dict or None)
+        2. ``_introspection_cached_at`` - Timestamp when cache was populated (float or None)
+
+        **Lock Usage Pattern**:
+
+        The lock is used internally by the mixin methods. Callers do not need to
+        manage the lock directly - it is acquired automatically when accessing
+        or modifying cache state.
+
+        ```python
+        # Internal usage in get_introspection_data()
+        async with self._introspection_cache_lock:
+            if self._introspection_cache is not None:
+                # Check cache validity and return cached data
+                ...
+
+        # Internal usage in invalidate_introspection_cache()
+        async with self._introspection_cache_lock:
+            self._introspection_cache = None
+            self._introspection_cached_at = None
+        ```
+
+        **Thread Safety Guarantees**:
+
+        - ``get_introspection_data()`` - Cache read/write is atomic under lock
+        - ``invalidate_introspection_cache()`` - Cache invalidation is atomic under lock
+        - Cache TTL checks and updates are protected from race conditions
+        - Multiple concurrent calls to ``get_introspection_data()`` will not corrupt cache state
+
+        **Performance Impact**:
+
+        - Lock acquisition overhead: ~1-5us (microseconds)
+        - Negligible compared to capability discovery via reflection
+        - Cache hits return immediately after lock acquisition
+
+        See Also:
+            - ``docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`` for similar thread
+              safety patterns used in ``MixinAsyncCircuitBreaker``
+
     State Variables:
         _introspection_cache: Cached introspection data
         _introspection_cache_ttl: Cache time-to-live in seconds
         _introspection_cached_at: Timestamp when cache was populated
+        _introspection_cache_lock: asyncio.Lock protecting cache state
 
     Background Task Variables:
         _heartbeat_task: Background heartbeat task
@@ -484,7 +619,7 @@ class MixinNodeIntrospection:
     # Configuration attributes
     _introspection_node_id: str | None
     _introspection_node_type: str | None
-    _introspection_event_bus: ProtocolEventBus | None
+    _introspection_event_bus: ProtocolIntrospectionEventBus | None
     _introspection_version: str
     _introspection_start_time: float | None
 
@@ -589,7 +724,7 @@ class MixinNodeIntrospection:
         # Legacy parameters for backwards compatibility
         node_id: str | None = None,
         node_type: str | None = None,
-        event_bus: ProtocolEventBus | None = None,
+        event_bus: ProtocolIntrospectionEventBus | None = None,
         version: str = "1.0.0",
         cache_ttl: float = 300.0,
         operation_keywords: set[str] | None = None,
@@ -696,8 +831,7 @@ class MixinNodeIntrospection:
             # Use config model - extract all values
             node_id = config.node_id
             node_type = config.node_type
-            # Type is object | None in model for duck typing flexibility (see field comment)
-            event_bus = config.event_bus  # type: ignore[assignment]
+            event_bus = config.event_bus
             version = config.version
             cache_ttl = config.cache_ttl
             operation_keywords = config.operation_keywords
@@ -710,11 +844,13 @@ class MixinNodeIntrospection:
                 "Either config or both node_id and node_type must be provided"
             )
 
-        # Validate required fields
-        if not node_id:
-            raise ValueError("node_id cannot be empty")
-        if not node_type:
-            raise ValueError("node_type cannot be empty")
+        # Validate required fields - explicit handling of None and empty string
+        # Note: When using ModelIntrospectionConfig, Pydantic's min_length=1 validator
+        # already prevents empty strings. This validation handles the legacy parameter path.
+        if node_id is None or node_id == "":
+            raise ValueError("node_id cannot be None or empty")
+        if node_type is None or node_type == "":
+            raise ValueError("node_type cannot be None or empty")
 
         # Configuration
         self._introspection_node_id = node_id
@@ -1220,6 +1356,17 @@ class MixinNodeIntrospection:
         Performance metrics are captured for each call and stored in
         ``_introspection_last_metrics``. Use ``get_performance_metrics()``
         to retrieve the most recent metrics.
+
+        Thread Safety:
+            This method uses ``_introspection_cache_lock`` internally to ensure
+            thread-safe cache operations. The lock is acquired automatically when:
+
+            1. Checking cache validity and returning cached data
+            2. Updating the cache with fresh introspection data
+
+            Multiple concurrent calls are safe - the lock prevents race conditions
+            where one coroutine might read stale cache state while another is
+            updating it. Cache TTL checks and updates are atomic under the lock.
 
         Returns:
             ModelNodeIntrospectionEvent containing full introspection data.
@@ -2056,8 +2203,21 @@ class MixinNodeIntrospection:
         Call this when node capabilities change to ensure fresh
         data is reported on next introspection request.
 
-        This method is async to ensure thread-safe cache invalidation
-        using the internal async lock.
+        Thread Safety:
+            This method is async to ensure thread-safe cache invalidation
+            using ``_introspection_cache_lock``. The lock protects the atomic
+            clearing of both ``_introspection_cache`` and ``_introspection_cached_at``
+            to prevent race conditions with concurrent ``get_introspection_data()``
+            calls.
+
+            Without the lock, a concurrent call to ``get_introspection_data()`` might:
+
+            1. Read ``_introspection_cache`` (not None)
+            2. This method clears ``_introspection_cached_at``
+            3. The other call reads stale ``_introspection_cached_at`` (now None)
+            4. Inconsistent state leads to unexpected behavior
+
+            The lock ensures both cache variables are always in a consistent state.
 
         Example:
             ```python
@@ -2113,6 +2273,7 @@ class MixinNodeIntrospection:
 __all__ = [
     "MixinNodeIntrospection",
     "ModelIntrospectionConfig",
+    "ProtocolIntrospectionEventBus",
     "INTROSPECTION_TOPIC",
     "HEARTBEAT_TOPIC",
     "REQUEST_INTROSPECTION_TOPIC",

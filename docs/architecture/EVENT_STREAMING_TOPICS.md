@@ -462,6 +462,8 @@ Arbitrary partition counts are forbidden.
 
 ## 10. Topic Summary
 
+**Total Topics: 12** (organized by domain: node lifecycle, registry control, registry state, workflow observability, infrastructure signals)
+
 | Topic | Direction | Key | Retention |
 |-------|-----------|-----|-----------|
 | `onex.node.introspection.published.v1` | Node → Registry | `node_id` | 1 day |
@@ -597,6 +599,51 @@ Contract event channels are validated against this specification:
 2. **Keys** must match the keying rules for that topic class (Section 5)
 3. **Publish/subscribe direction** must be consistent with topic semantics
 4. **Node types** must match expected publishers (e.g., EFFECT nodes publish lifecycle events)
+
+### Code Integration Example
+
+The following shows how a node's `contract.yaml` event_channels integrate with `MixinNodeIntrospection` at runtime:
+
+```python
+# node.py - Wiring contract-defined topics to MixinNodeIntrospection
+from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
+from omnibase_infra.event_bus import KafkaEventBus
+
+class RegistryEffectNode(MixinNodeIntrospection):
+    """Effect node that uses contract-defined topics for introspection."""
+
+    def __init__(
+        self,
+        contract: NodeContract,
+        event_bus: KafkaEventBus,
+    ) -> None:
+        # Extract topic names from contract event_channels
+        publishes = {ch.event_type: ch.topic for ch in contract.event_channels.publishes}
+        subscribes = {ch.event_type: ch.topic for ch in contract.event_channels.subscribes}
+
+        # Configure introspection with contract-defined topics
+        config = ModelIntrospectionConfig(
+            node_id=contract.metadata.name,
+            node_type=contract.metadata.node_type,
+            node_version=contract.metadata.version,
+            event_bus=event_bus,
+            # Map contract event_channels to introspection topics
+            introspection_topic=publishes.get("introspection"),  # onex.node.introspection.published.v1
+            heartbeat_topic=publishes.get("heartbeat"),          # onex.node.heartbeat.published.v1
+            shutdown_topic=publishes.get("shutdown"),            # onex.node.shutdown.announced.v1
+            request_introspection_topic=subscribes.get("request"),  # onex.registry.introspection.requested.v1
+        )
+        self.initialize_introspection(config=config)
+```
+
+**Key Points:**
+- Topics are declared in `contract.yaml`, not hardcoded in Python
+- `MixinNodeIntrospection` accepts topic names via `ModelIntrospectionConfig`
+- Contract validation (see Validation Rules above) ensures topics exist in the canonical list
+- This pattern enables static analysis of event topology across all nodes
+
+**Default Behavior:**
+If topic names are not provided in the config, `MixinNodeIntrospection` falls back to default topic names defined in `ModelIntrospectionConfig`. Contract-driven configuration is recommended for production deployments to enable topology analysis and validation.
 
 ---
 

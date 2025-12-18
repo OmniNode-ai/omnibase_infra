@@ -832,8 +832,20 @@ capabilities = node.get_capabilities()
 - Consider whether introspection topics should be accessible outside the cluster
 - Monitor introspection topic consumers for unauthorized access
 
+**Thread Safety**:
+The mixin uses `asyncio.Lock` for thread-safe cache operations:
+
+- **Lock**: `_introspection_cache_lock` (asyncio.Lock)
+- **Protected Variables**: `_introspection_cache`, `_introspection_cached_at`
+- **Thread-Safe Methods**:
+  - `get_introspection_data()` - Cache read/write is atomic under lock
+  - `invalidate_introspection_cache()` - Cache invalidation is atomic under lock
+
+Unlike `MixinAsyncCircuitBreaker` which uses a caller-held locking pattern, `MixinNodeIntrospection` manages the lock internally - callers do not need to acquire the lock manually.
+
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
+- Thread Safety Pattern: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md` (similar pattern)
 - Ticket: OMN-893
 - See `MixinNodeIntrospection.get_capabilities()` for filtering logic details
 

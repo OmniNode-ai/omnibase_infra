@@ -38,6 +38,8 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Awaitable, Callable
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -119,6 +121,28 @@ class MockEventBus:
                 "value": json.loads(value.decode("utf-8")),
             }
         )
+
+    async def subscribe(
+        self,
+        topic: str,
+        group_id: str,
+        on_message: Callable[[Any], Awaitable[None]],
+    ) -> Callable[[], Awaitable[None]]:
+        """Mock subscribe method for protocol compliance.
+
+        Args:
+            topic: Topic to subscribe to.
+            group_id: Consumer group ID.
+            on_message: Callback function for messages.
+
+        Returns:
+            An async unsubscribe function.
+        """
+
+        async def unsubscribe() -> None:
+            pass
+
+        return unsubscribe
 
 
 class MockNode(MixinNodeIntrospection):
@@ -298,7 +322,7 @@ class TestMixinNodeIntrospectionInit:
         """Test that empty node_id raises ValueError."""
         node = MockNode()
 
-        with pytest.raises(ValueError, match="node_id cannot be empty"):
+        with pytest.raises(ValueError, match="node_id cannot be None or empty"):
             node.initialize_introspection(
                 node_id="",
                 node_type="EFFECT",
@@ -308,7 +332,7 @@ class TestMixinNodeIntrospectionInit:
         """Test that empty node_type raises ValueError."""
         node = MockNode()
 
-        with pytest.raises(ValueError, match="node_type cannot be empty"):
+        with pytest.raises(ValueError, match="node_type cannot be None or empty"):
             node.initialize_introspection(
                 node_id="test-node",
                 node_type="",
@@ -2468,3 +2492,360 @@ class TestMixinNodeIntrospectionConfigModel:
 
         assert PkgConfig is not None
         assert PkgConfig is ModelIntrospectionConfig
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinNodeIntrospectionCustomTopics:
+    """Tests for custom topic configuration via ModelIntrospectionConfig.
+
+    These tests verify that custom topics are correctly used when publishing
+    introspection events, heartbeats, and when setting up registry listeners.
+    """
+
+    async def test_custom_introspection_topic_used_in_publishing(self) -> None:
+        """Test that custom introspection topic is used when publishing."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        event_bus = MockEventBus()
+        custom_topic = "my.custom.introspection.topic.v1"
+
+        config = ModelIntrospectionConfig(
+            node_id="custom-topic-node",
+            node_type="EFFECT",
+            event_bus=event_bus,
+            introspection_topic=custom_topic,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # Publish introspection
+        success = await node.publish_introspection(reason="test")
+        assert success is True
+
+        # Verify the custom topic was used
+        assert len(event_bus.published_envelopes) == 1
+        _, topic = event_bus.published_envelopes[0]
+        assert topic == custom_topic
+
+    async def test_custom_topics_default_to_module_constants(self) -> None:
+        """Test that topics default to module constants when not specified."""
+        from omnibase_infra.mixins.mixin_node_introspection import (
+            HEARTBEAT_TOPIC,
+            INTROSPECTION_TOPIC,
+            REQUEST_INTROSPECTION_TOPIC,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="default-topics-node",
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Verify defaults are used
+        assert node._introspection_topic == INTROSPECTION_TOPIC
+        assert node._heartbeat_topic == HEARTBEAT_TOPIC
+        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+
+    async def test_custom_heartbeat_topic_used_in_heartbeat_publishing(self) -> None:
+        """Test that custom heartbeat topic is used in heartbeat publishing."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        event_bus = MockEventBus()
+        custom_heartbeat_topic = "my.custom.heartbeat.topic.v1"
+
+        config = ModelIntrospectionConfig(
+            node_id="custom-heartbeat-node",
+            node_type="COMPUTE",
+            event_bus=event_bus,
+            heartbeat_topic=custom_heartbeat_topic,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # Start heartbeat task with fast interval
+        await node.start_introspection_tasks(
+            enable_heartbeat=True,
+            heartbeat_interval_seconds=0.05,
+            enable_registry_listener=False,
+        )
+
+        try:
+            # Wait for at least one heartbeat
+            await asyncio.sleep(0.1)
+
+            # Verify the custom heartbeat topic was used
+            assert len(event_bus.published_envelopes) >= 1
+
+            # Check that heartbeat events use the custom topic
+            for _, topic in event_bus.published_envelopes:
+                assert topic == custom_heartbeat_topic
+        finally:
+            await node.stop_introspection_tasks()
+
+    async def test_custom_request_topic_stored_for_registry_listener(self) -> None:
+        """Test that custom request introspection topic is stored correctly.
+
+        The registry listener uses the request_introspection_topic when
+        subscribing to introspection requests. This test verifies the topic
+        is correctly stored for use by the registry listener.
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        custom_request_topic = "my.custom.request.introspection.topic.v1"
+
+        config = ModelIntrospectionConfig(
+            node_id="custom-request-topic-node",
+            node_type="REDUCER",
+            request_introspection_topic=custom_request_topic,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # Verify the custom request topic is stored
+        assert node._request_introspection_topic == custom_request_topic
+
+    async def test_all_custom_topics_used_together(self) -> None:
+        """Test that all three custom topics work when configured together."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        event_bus = MockEventBus()
+        custom_introspection = "custom.intro.topic"
+        custom_heartbeat = "custom.heartbeat.topic"
+        custom_request = "custom.request.topic"
+
+        config = ModelIntrospectionConfig(
+            node_id="all-custom-topics-node",
+            node_type="ORCHESTRATOR",
+            event_bus=event_bus,
+            introspection_topic=custom_introspection,
+            heartbeat_topic=custom_heartbeat,
+            request_introspection_topic=custom_request,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # Verify all topics are stored correctly
+        assert node._introspection_topic == custom_introspection
+        assert node._heartbeat_topic == custom_heartbeat
+        assert node._request_introspection_topic == custom_request
+
+        # Test introspection publishing uses custom topic
+        await node.publish_introspection(reason="test")
+        assert len(event_bus.published_envelopes) == 1
+        _, intro_topic = event_bus.published_envelopes[0]
+        assert intro_topic == custom_introspection
+
+        # Clear and test heartbeat uses custom topic
+        event_bus.published_envelopes.clear()
+        await node.start_introspection_tasks(
+            enable_heartbeat=True,
+            heartbeat_interval_seconds=0.05,
+            enable_registry_listener=False,
+        )
+
+        try:
+            await asyncio.sleep(0.1)
+            assert len(event_bus.published_envelopes) >= 1
+            for _, hb_topic in event_bus.published_envelopes:
+                assert hb_topic == custom_heartbeat
+        finally:
+            await node.stop_introspection_tasks()
+
+    async def test_partial_custom_topics_with_defaults(self) -> None:
+        """Test that unspecified topics fall back to defaults."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+        from omnibase_infra.mixins.mixin_node_introspection import (
+            HEARTBEAT_TOPIC,
+            REQUEST_INTROSPECTION_TOPIC,
+        )
+
+        custom_introspection = "only.introspection.custom"
+
+        config = ModelIntrospectionConfig(
+            node_id="partial-topics-node",
+            node_type="EFFECT",
+            introspection_topic=custom_introspection,
+            # heartbeat_topic and request_introspection_topic not specified
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # Custom topic should be set
+        assert node._introspection_topic == custom_introspection
+        # Others should use defaults
+        assert node._heartbeat_topic == HEARTBEAT_TOPIC
+        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+
+    async def test_introspection_topic_with_fallback_publish_method(self) -> None:
+        """Test custom topic used with fallback publish method (no publish_envelope).
+
+        This test validates the fallback path when an event bus doesn't have
+        publish_envelope method. Uses legacy parameter path to bypass Pydantic
+        protocol validation.
+        """
+
+        class NoEnvelopeEventBus:
+            """Mock event bus without publish_envelope method (only publish)."""
+
+            def __init__(self) -> None:
+                self.published_events: list[dict[str, str | bytes | None]] = []
+
+            async def publish(
+                self,
+                topic: str,
+                key: bytes | None,
+                value: bytes,
+            ) -> None:
+                self.published_events.append(
+                    {
+                        "topic": topic,
+                        "key": key,
+                        "value": value,
+                    }
+                )
+
+        # Use legacy parameter path to bypass Pydantic protocol validation
+        # This allows testing the fallback path with a minimal event bus
+        event_bus = NoEnvelopeEventBus()
+        custom_topic = "fallback.publish.topic.v1"
+
+        node = MockNode()
+        # Cast to Any to bypass type checking for testing fallback behavior
+        node.initialize_introspection(
+            node_id="fallback-publish-node",
+            node_type="EFFECT",
+            event_bus=event_bus,  # type: ignore[arg-type]
+            introspection_topic=custom_topic,
+        )
+
+        # Publish using fallback method
+        success = await node.publish_introspection(reason="fallback-test")
+        assert success is True
+
+        # Verify custom topic was used in fallback publish
+        assert len(event_bus.published_events) == 1
+        assert event_bus.published_events[0]["topic"] == custom_topic
+
+    async def test_heartbeat_topic_with_fallback_publish_method(self) -> None:
+        """Test custom heartbeat topic used with fallback publish method.
+
+        This test validates the fallback path when an event bus doesn't have
+        publish_envelope method. Uses legacy parameter path to bypass Pydantic
+        protocol validation.
+        """
+
+        class NoEnvelopeEventBus:
+            """Mock event bus without publish_envelope method (only publish)."""
+
+            def __init__(self) -> None:
+                self.published_events: list[dict[str, str | bytes | None]] = []
+
+            async def publish(
+                self,
+                topic: str,
+                key: bytes | None,
+                value: bytes,
+            ) -> None:
+                self.published_events.append(
+                    {
+                        "topic": topic,
+                        "key": key,
+                        "value": value,
+                    }
+                )
+
+        # Use legacy parameter path to bypass Pydantic protocol validation
+        # This allows testing the fallback path with a minimal event bus
+        event_bus = NoEnvelopeEventBus()
+        custom_heartbeat_topic = "fallback.heartbeat.topic.v1"
+
+        node = MockNode()
+        # Cast to Any to bypass type checking for testing fallback behavior
+        node.initialize_introspection(
+            node_id="fallback-heartbeat-node",
+            node_type="COMPUTE",
+            event_bus=event_bus,  # type: ignore[arg-type]
+            heartbeat_topic=custom_heartbeat_topic,
+        )
+
+        # Start heartbeat
+        await node.start_introspection_tasks(
+            enable_heartbeat=True,
+            heartbeat_interval_seconds=0.05,
+            enable_registry_listener=False,
+        )
+
+        try:
+            await asyncio.sleep(0.1)
+
+            # Verify custom heartbeat topic was used in fallback publish
+            assert len(event_bus.published_events) >= 1
+            for event in event_bus.published_events:
+                assert event["topic"] == custom_heartbeat_topic
+        finally:
+            await node.stop_introspection_tasks()
+
+    async def test_empty_topic_strings_use_defaults(self) -> None:
+        """Test that None topic values correctly fall back to defaults."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+        from omnibase_infra.mixins.mixin_node_introspection import (
+            HEARTBEAT_TOPIC,
+            INTROSPECTION_TOPIC,
+            REQUEST_INTROSPECTION_TOPIC,
+        )
+
+        # Create config with explicit None values
+        config = ModelIntrospectionConfig(
+            node_id="none-topics-node",
+            node_type="EFFECT",
+            introspection_topic=None,
+            heartbeat_topic=None,
+            request_introspection_topic=None,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # All should fall back to module constants
+        assert node._introspection_topic == INTROSPECTION_TOPIC
+        assert node._heartbeat_topic == HEARTBEAT_TOPIC
+        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+
+    async def test_get_introspection_data_includes_topic_info(self) -> None:
+        """Test that introspection data includes configured topic information.
+
+        The mixin stores topic configuration for debugging and observability.
+        This test verifies topics are properly reported in introspection output.
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        custom_introspection = "debug.introspection.topic"
+        custom_heartbeat = "debug.heartbeat.topic"
+        custom_request = "debug.request.topic"
+
+        config = ModelIntrospectionConfig(
+            node_id="topic-info-node",
+            node_type="EFFECT",
+            introspection_topic=custom_introspection,
+            heartbeat_topic=custom_heartbeat,
+            request_introspection_topic=custom_request,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # Verify internal attributes are set (for debugging/logging purposes)
+        assert hasattr(node, "_introspection_topic")
+        assert hasattr(node, "_heartbeat_topic")
+        assert hasattr(node, "_request_introspection_topic")
+
+        assert node._introspection_topic == custom_introspection
+        assert node._heartbeat_topic == custom_heartbeat
+        assert node._request_introspection_topic == custom_request

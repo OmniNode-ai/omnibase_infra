@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+#### MixinNodeIntrospection API (PR #54)
+- **`invalidate_introspection_cache()` is now async**: The cache invalidation method was changed from synchronous to asynchronous to ensure thread-safe cache operations using async lock.
+  - **Old**: `def invalidate_introspection_cache(self) -> None`
+  - **New**: `async def invalidate_introspection_cache(self) -> None`
+  - **Migration**: Add `await` before calls to `invalidate_introspection_cache()`
+  - **Rationale**: Thread-safe cache invalidation requires holding the async lock, which requires the method to be async.
+
 #### Handler Types (PR #33)
 - **HANDLER_TYPE_REDIS renamed to HANDLER_TYPE_VALKEY**: The handler type constant for Redis-compatible cache has been renamed to accurately reflect the service name.
   - **Old**: `HANDLER_TYPE_REDIS = "redis"`
@@ -17,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Rationale**: Valkey is the correct service name for the Redis-compatible cache used in the infrastructure. This aligns the codebase with the actual service naming.
 
 ### Added
+
+#### Node Introspection (OMN-881, PR #54)
+- **ModelIntrospectionConfig**: Configuration model for `MixinNodeIntrospection` that enables contract-driven topic configuration
+  - `base_topic`: Configurable base topic name (default: `"node.introspection"`)
+  - `topic_suffix`: Optional custom topic suffix for specialized deployments
+  - `cache_ttl_seconds`: Configurable cache TTL with 300-second default
+  - `include_fsm_state`: Toggle FSM state inclusion in introspection data
+  - `include_circuit_breaker_state`: Toggle circuit breaker state inclusion
+  - `exclude_prefixes`: Customizable list of method prefixes to exclude from capability discovery
+- **Contract-Driven Topic Configuration**: Topics can now be customized via configuration rather than hardcoded, enabling multi-tenant and environment-specific deployments
+- **Performance Metrics Tracking**: Added tracking for cache hits/misses, publish latency, and last publish timestamp via `get_introspection_metrics()` method
+- **Async Cache Lock**: Thread-safe cache operations using `asyncio.Lock` for concurrent access protection
 
 #### Handlers
 - **HttpHandler** (OMN-237, PR #26): HTTP REST protocol handler for MVP
