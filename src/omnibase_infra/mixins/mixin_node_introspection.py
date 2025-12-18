@@ -1208,7 +1208,7 @@ class MixinNodeIntrospection:
                 await self._introspection_event_bus.publish(
                     topic=INTROSPECTION_TOPIC,
                     key=str(self._introspection_node_id).encode("utf-8")
-                    if self._introspection_node_id
+                    if self._introspection_node_id is not None
                     else None,
                     value=value,
                 )
@@ -1307,7 +1307,7 @@ class MixinNodeIntrospection:
                 await self._introspection_event_bus.publish(
                     topic=HEARTBEAT_TOPIC,
                     key=str(self._introspection_node_id).encode("utf-8")
-                    if self._introspection_node_id
+                    if self._introspection_node_id is not None
                     else None,
                     value=value,
                 )
