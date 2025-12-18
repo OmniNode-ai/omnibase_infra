@@ -299,11 +299,12 @@ context_variables:
     type: uuid
     description: "Distributed tracing correlation ID from incoming event"
   - name: node_id
-    type: string
-    description: "Node identifier from introspection event"
+    type: uuid
+    description: "Node identifier from introspection event (UUID format)"
   - name: node_type
     type: string
-    description: "Node type (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)"
+    # Valid values: EFFECT, COMPUTE, REDUCER, ORCHESTRATOR (Literal type in Pydantic model)
+    description: "Node archetype type - one of: EFFECT, COMPUTE, REDUCER, ORCHESTRATOR"
   - name: introspection_payload
     type: object
     description: "Full parsed introspection event payload"
@@ -333,6 +334,7 @@ error_handling:
   timeout_seconds: 30
   retry_policy:
     max_retries: 3
+    # Valid backoff_type values: exponential, linear, constant
     backoff_type: exponential
     initial_delay_ms: 1000
     max_delay_ms: 30000

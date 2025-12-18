@@ -89,6 +89,10 @@ def _find_contracts_dir() -> Path:
     Raises:
         RuntimeError: If contracts directory cannot be found.
     """
+    # Start from current file's directory and walk up the tree until we find
+    # a directory containing 'contracts/'. This handles both development
+    # (source checkout) and installed package scenarios where the relative
+    # path depth may vary.
     current = Path(__file__).resolve().parent
     while current != current.parent:
         contracts_dir = current / "contracts"
@@ -97,7 +101,8 @@ def _find_contracts_dir() -> Path:
         current = current.parent
     raise RuntimeError(
         "Could not find contracts directory. "
-        "Ensure the FSM contract exists at contracts/fsm/dual_registration_reducer_fsm.yaml"
+        "Ensure the FSM contract exists at "
+        "contracts/fsm/dual_registration_reducer_fsm.yaml"
     )
 
 
@@ -152,9 +157,33 @@ class NodeDualRegistrationReducer:
     ) -> None:
         """Initialize dual registration reducer.
 
+        Dependency Injection Pattern:
+            This reducer uses constructor-based dependency injection for handlers.
+            Handlers are injected rather than instantiated internally, enabling:
+
+            1. **Testability**: Handlers can be replaced with mocks or stubs in tests
+               without modifying the reducer code. Simply pass mock objects that
+               implement the same interface (execute method returning status).
+
+            2. **Loose Coupling**: The reducer depends on handler behavior (execute
+               method signature), not concrete implementations. This allows handler
+               implementations to evolve independently.
+
+            3. **Lifecycle Management**: Handlers are managed externally, allowing
+               shared connection pools, centralized initialization, and coordinated
+               shutdown across multiple consumers.
+
+            Note: While ONEX architecture prefers protocol-based resolution through
+            ModelONEXContainer, the current DI pattern is acceptable for infrastructure
+            nodes where handlers require external initialization (connections, auth).
+
         Args:
             consul_handler: Initialized ConsulHandler for service discovery.
+                Must have an async execute() method that accepts an envelope dict
+                and returns a response with a status attribute.
             db_adapter: Initialized DbAdapter for PostgreSQL operations.
+                Must have an async execute() method that accepts an envelope dict
+                and returns a response with a status attribute.
             fsm_contract_path: Optional path to FSM contract YAML. If not provided,
                 defaults to contracts/fsm/dual_registration_reducer_fsm.yaml.
         """
@@ -389,30 +418,55 @@ class NodeDualRegistrationReducer:
         except RuntimeHostError:
             raise
         except Exception as e:
-            # Log error and transition to failed state
+            # =================================================================
+            # ERROR RECOVERY PATTERN: FSM State Reset
+            # =================================================================
+            # When an unexpected exception occurs during the registration workflow,
+            # we must ensure the FSM returns to the IDLE state to allow subsequent
+            # events to be processed. Without this recovery, the reducer would be
+            # stuck in an intermediate state and unable to handle new events.
+            #
+            # Recovery steps:
+            # 1. Log the exception with full context for debugging
+            # 2. Force FSM to REGISTRATION_FAILED state (error terminal)
+            # 3. Transition from REGISTRATION_FAILED -> IDLE via FAILURE_RESULT_EMITTED
+            #    (defined in FSM contract at lines 286-292)
+            # 4. Re-raise as RuntimeHostError to signal failure to caller
+            #
+            # The try/except around the transition prevents transition errors from
+            # masking the original exception that caused the failure.
+            # =================================================================
             logger.exception(
                 "Dual registration workflow failed",
                 extra={
                     "node_id": self._fsm_context.node_id,
+                    "current_state": self._current_state.value,
                     "correlation_id": str(cid),
                 },
             )
-            # Force transition to failed state
+
+            # Force transition to failed state (handles any intermediate state)
             self._current_state = EnumFSMState.REGISTRATION_FAILED
+
             # FSM: registration_failed -> idle (complete the FSM cycle)
             # This ensures the reducer can process subsequent events after exception.
-            # We use try/except to prevent transition errors from masking the original error.
+            # The transition is defined in the FSM contract at lines 286-292.
             try:
                 await self._transition(EnumFSMTrigger.FAILURE_RESULT_EMITTED)
             except Exception as transition_error:
+                # Log but don't mask the original error - FSM will be in
+                # REGISTRATION_FAILED state, which is recoverable on next init
                 logger.exception(
-                    "Failed to transition to idle after exception",
+                    "Failed to transition to idle after exception - "
+                    "FSM may need reinitialization",
                     extra={
                         "original_error": type(e).__name__,
                         "transition_error": type(transition_error).__name__,
+                        "current_state": self._current_state.value,
                         "correlation_id": str(cid),
                     },
                 )
+
             raise RuntimeHostError(
                 f"Dual registration failed: {type(e).__name__}",
                 context=ctx,
@@ -453,7 +507,8 @@ class NodeDualRegistrationReducer:
                 correlation_id=self._fsm_context.correlation_id,
             )
             raise RuntimeHostError(
-                f"Invalid FSM transition: {self._current_state.value} + {trigger.value}",
+                f"Invalid FSM transition: "
+                f"{self._current_state.value} + {trigger.value}",
                 context=ctx,
                 current_state=self._current_state.value,
                 trigger=trigger.value,
@@ -483,6 +538,17 @@ class NodeDualRegistrationReducer:
         Validates required fields (node_id, node_type) and logs validation
         errors with distinct error messages for each failure type.
 
+        This method provides defense-in-depth validation. While Pydantic already
+        validates ModelNodeIntrospectionEvent at construction time, this explicit
+        validation serves two purposes:
+        1. Catches issues with mock objects in tests that bypass Pydantic validation
+        2. Documents business rules explicitly in code for maintainability
+
+        Error Context:
+            Creates a ModelInfraErrorContext for consistent distributed tracing.
+            The context is used in logging to ensure correlation_id propagates
+            through the validation operation, enabling end-to-end request tracing.
+
         Args:
             event: Introspection event to validate.
             correlation_id: Correlation ID for logging and error context.
@@ -491,14 +557,28 @@ class NodeDualRegistrationReducer:
             Tuple of (validation_passed, error_message).
             If validation passes, error_message is empty string.
         """
-        # ModelNodeIntrospectionEvent already validates via Pydantic
-        # Additional business validation can be added here
+        # Create error context for consistent distributed tracing
+        # This ensures all validation errors can be correlated with the
+        # original request through the correlation_id
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="validate_payload",
+            target_name="dual_registration_reducer",
+            correlation_id=correlation_id,
+        )
+
+        # Defense-in-depth: Pydantic validates at model construction, but mocks
+        # and edge cases may bypass this. Explicit checks provide safety net.
         if event.node_id is None:
             error_msg = "node_id is required but was None"
             logger.warning(
                 "Payload validation failed: %s",
                 error_msg,
-                extra={"correlation_id": str(correlation_id)},
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "operation": ctx.operation,
+                    "target_name": ctx.target_name,
+                },
             )
             return False, error_msg
 
@@ -515,6 +595,8 @@ class NodeDualRegistrationReducer:
                     "node_type": event.node_type,
                     "valid_types": list(_VALID_NODE_TYPES),
                     "correlation_id": str(correlation_id),
+                    "operation": ctx.operation,
+                    "target_name": ctx.target_name,
                 },
             )
             return False, error_msg

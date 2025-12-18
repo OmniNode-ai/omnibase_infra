@@ -28,14 +28,14 @@ class ModelDualRegistrationResult(BaseModel):
         - "failed": Both registrations failed.
 
     Attributes:
-        node_id: Unique identifier of the registered node.
+        node_id: Unique identifier of the registered node (UUID).
         consul_registered: Whether Consul registration succeeded.
         postgres_registered: Whether PostgreSQL registration succeeded.
         status: Combined registration outcome (success, partial, failed).
-        consul_error: Error message if Consul registration failed.
-        postgres_error: Error message if PostgreSQL registration failed.
-        registration_time_ms: Total time taken for registration in milliseconds.
-        correlation_id: Request correlation ID for distributed tracing.
+        consul_error: Error message if Consul registration failed (None if succeeded).
+        postgres_error: Error message if PostgreSQL registration failed (None if succeeded).
+        registration_time_ms: Total time taken for registration in milliseconds (>= 0.0).
+        correlation_id: Request correlation ID for distributed tracing (UUID).
 
     Example:
         >>> from uuid import uuid4
