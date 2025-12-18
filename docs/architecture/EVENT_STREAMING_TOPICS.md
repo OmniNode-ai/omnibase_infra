@@ -492,11 +492,127 @@ Arbitrary partition counts are forbidden.
 
 ---
 
+## 12. Contract Integration
+
+ONEX node contracts declare their event channel dependencies in `contract.yaml`. This enables:
+- Static analysis of event topology
+- Automatic topic validation during deployment
+- Clear documentation of node communication patterns
+
+### Example: Node Contract Event Channels
+
+```yaml
+# contract.yaml - Event channel configuration for a registry effect node
+metadata:
+  name: registry-effect
+  version: 1.0.0
+  node_type: EFFECT
+
+  event_channels:
+    # Topics this node publishes to
+    publishes:
+      - topic: onex.node.introspection.published.v1
+        key: node_id
+        event_type: introspection
+        description: Announces node capabilities on startup and refresh
+
+      - topic: onex.node.heartbeat.published.v1
+        key: node_id
+        event_type: heartbeat
+        description: Periodic liveness signal
+
+      - topic: onex.node.shutdown.announced.v1
+        key: node_id
+        event_type: shutdown
+        description: Graceful shutdown notification
+
+    # Topics this node subscribes to
+    subscribes:
+      - topic: onex.registry.introspection.requested.v1
+        key: request_id
+        event_type: request
+        description: Registry broadcast requesting introspection refresh
+        handler: handle_introspection_request
+```
+
+### Example: Orchestrator Contract with Workflow Events
+
+```yaml
+# contract.yaml - Event channel configuration for a registration orchestrator
+metadata:
+  name: registration-orchestrator
+  version: 1.0.0
+  node_type: ORCHESTRATOR
+
+  event_channels:
+    publishes:
+      - topic: onex.registry.node.registered.v1
+        key: node_id
+        event_type: state_change
+        description: Emitted when node registration completes successfully
+
+      - topic: onex.registry.node.registration_failed.v1
+        key: node_id
+        event_type: state_change
+        description: Emitted when node registration fails
+
+      - topic: onex.registry.workflow.started.v1
+        key: workflow_id
+        event_type: workflow
+        description: Workflow audit trail - started
+
+      - topic: onex.registry.workflow.completed.v1
+        key: workflow_id
+        event_type: workflow
+        description: Workflow audit trail - completed
+
+      - topic: onex.registry.workflow.failed.v1
+        key: workflow_id
+        event_type: workflow
+        description: Workflow audit trail - failed
+
+    subscribes:
+      - topic: onex.node.introspection.published.v1
+        key: node_id
+        event_type: introspection
+        description: Triggers registration workflow for new/updated nodes
+        handler: handle_introspection_event
+```
+
+### Event Channel Schema Reference
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `topic` | string | Yes | Full topic name (must match Section 10 topics) |
+| `key` | string | Yes | Kafka message key field (see Section 5 keying rules) |
+| `event_type` | string | Yes | Logical event category |
+| `description` | string | No | Human-readable purpose |
+| `handler` | string | No | Method name for subscription handlers |
+
+### Validation Rules
+
+Contract event channels are validated against this specification:
+
+1. **Topic names** must exist in the canonical topic list (Section 10)
+2. **Keys** must match the keying rules for that topic class (Section 5)
+3. **Publish/subscribe direction** must be consistent with topic semantics
+4. **Node types** must match expected publishers (e.g., EFFECT nodes publish lifecycle events)
+
+---
+
 ## Related Documentation
 
 - [Correlation ID Tracking](../patterns/correlation_id_tracking.md)
 - [Circuit Breaker Implementation](../patterns/circuit_breaker_implementation.md)
 - [Error Handling Patterns](../patterns/error_handling_patterns.md)
+
+## Future Enhancements
+
+### EnumONEXTopic for Type Safety (Post-MVP)
+
+Consider introducing an `EnumONEXTopic` enum for topic name type safety. Benefits include IDE autocomplete, compile-time typo prevention, and centralized topic management. Trade-offs: reduced flexibility for dynamic topic generation and additional maintenance when adding new topics. Recommended for post-MVP evaluation when topic inventory stabilizes.
+
+---
 
 ## Related Tickets
 

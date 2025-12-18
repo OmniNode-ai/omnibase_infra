@@ -12,6 +12,7 @@ import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 from aiokafka.errors import KafkaError
@@ -1421,3 +1422,189 @@ enable_auto_commit: false
         assert bus.group == "prod-workers"
         assert bus.config.acks == "1"
         assert bus.config.enable_idempotence is False
+
+
+class TestKafkaEventBusTopicValidation:
+    """Test suite for topic name validation.
+
+    Tests the _validate_topic_name method which enforces Kafka topic naming rules:
+    - Not empty
+    - Max 255 characters
+    - Only alphanumeric, period (.), underscore (_), hyphen (-)
+    - Not reserved names ("." or "..")
+    """
+
+    @pytest.fixture
+    def event_bus(self) -> KafkaEventBus:
+        """Create KafkaEventBus for validation testing."""
+        return KafkaEventBus(
+            bootstrap_servers="localhost:9092",
+            environment="test",
+        )
+
+    @pytest.fixture
+    def correlation_id(self) -> UUID:
+        """Create a correlation ID for tests."""
+        from uuid import uuid4
+
+        return uuid4()
+
+    def test_valid_topic_name_simple(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid simple topic name passes validation."""
+        # Should not raise any exception
+        event_bus._validate_topic_name("my-topic", correlation_id)
+
+    def test_valid_topic_name_with_dots(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with dots passes validation."""
+        event_bus._validate_topic_name("dev.events.user-created", correlation_id)
+
+    def test_valid_topic_name_with_underscores(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with underscores passes validation."""
+        event_bus._validate_topic_name("my_topic_name", correlation_id)
+
+    def test_valid_topic_name_with_hyphens(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with hyphens passes validation."""
+        event_bus._validate_topic_name("my-topic-name", correlation_id)
+
+    def test_valid_topic_name_with_numbers(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with numbers passes validation."""
+        event_bus._validate_topic_name("topic123", correlation_id)
+
+    def test_valid_topic_name_mixed_characters(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with mixed valid characters."""
+        event_bus._validate_topic_name("prod.user-events_v2.created", correlation_id)
+
+    def test_valid_topic_name_uppercase(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name with uppercase letters."""
+        event_bus._validate_topic_name("MyTopicName", correlation_id)
+
+    def test_valid_topic_name_max_length(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test valid topic name at exactly 255 characters."""
+        topic = "a" * 255
+        # Should not raise
+        event_bus._validate_topic_name(topic, correlation_id)
+
+    def test_empty_topic_name_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test empty topic name raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="cannot be empty"):
+            event_bus._validate_topic_name("", correlation_id)
+
+    def test_topic_name_exceeds_max_length(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name exceeding 255 chars raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        topic = "a" * 256
+        with pytest.raises(
+            ProtocolConfigurationError, match="exceeds maximum length of 255"
+        ):
+            event_bus._validate_topic_name(topic, correlation_id)
+
+    def test_reserved_topic_name_dot(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test reserved topic name '.' raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="reserved"):
+            event_bus._validate_topic_name(".", correlation_id)
+
+    def test_reserved_topic_name_double_dot(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test reserved topic name '..' raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="reserved"):
+            event_bus._validate_topic_name("..", correlation_id)
+
+    def test_topic_with_space_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with space raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("my topic", correlation_id)
+
+    def test_topic_with_at_symbol_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with @ symbol raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("topic@name", correlation_id)
+
+    def test_topic_with_special_chars_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with special characters raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        invalid_topics = [
+            "topic#name",
+            "topic$name",
+            "topic%name",
+            "topic&name",
+            "topic*name",
+            "topic!name",
+            "topic/name",
+            "topic\\name",
+            "topic:name",
+            "topic;name",
+            "topic<name",
+            "topic>name",
+            "topic|name",
+        ]
+        for topic in invalid_topics:
+            with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+                event_bus._validate_topic_name(topic, correlation_id)
+
+    def test_topic_with_unicode_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with unicode characters raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("topic\u00e9name", correlation_id)
+
+    def test_topic_with_newline_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with newline raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("topic\nname", correlation_id)
+
+    def test_topic_with_tab_raises_error(
+        self, event_bus: KafkaEventBus, correlation_id: UUID
+    ) -> None:
+        """Test topic name with tab raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
+            event_bus._validate_topic_name("topic\tname", correlation_id)
