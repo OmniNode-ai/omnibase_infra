@@ -602,7 +602,63 @@ Contract event channels are validated against this specification:
 
 ### Code Integration Example
 
-The following shows how a node's `contract.yaml` event_channels integrate with `MixinNodeIntrospection` at runtime:
+The following shows how a node's `contract.yaml` event_channels integrate with `MixinNodeIntrospection` at runtime.
+
+#### Contract Definition
+
+First, define the event channels in `contract.yaml`. The `event_type` field serves as the lookup key that the Python code uses to extract topic names:
+
+```yaml
+# contract.yaml - RegistryEffectNode event channel configuration
+#
+# This contract defines topics for the RegistryEffectNode Python class below.
+# The event_type field is the lookup key used by the Python code.
+metadata:
+  name: registry-effect-node
+  version: 1.0.0
+  node_type: EFFECT
+
+event_channels:
+  # Topics this node publishes to
+  # Python: publishes = {ch.event_type: ch.topic for ch in contract.event_channels.publishes}
+  publishes:
+    - event_type: introspection                      # Key: "introspection"
+      topic: onex.node.introspection.published.v1   # Value: used for introspection_topic
+      key: node_id
+      description: Node capability announcements on startup and refresh
+
+    - event_type: heartbeat                          # Key: "heartbeat"
+      topic: onex.node.heartbeat.published.v1       # Value: used for heartbeat_topic
+      key: node_id
+      description: Periodic liveness signals (every 30 seconds)
+
+    - event_type: shutdown                           # Key: "shutdown"
+      topic: onex.node.shutdown.announced.v1        # Value: NOT used by MixinNodeIntrospection
+      key: node_id                                   # (handled separately by node shutdown logic)
+      description: Graceful shutdown notification
+
+  # Topics this node subscribes to
+  # Python: subscribes = {ch.event_type: ch.topic for ch in contract.event_channels.subscribes}
+  subscribes:
+    - event_type: request                            # Key: "request"
+      topic: onex.registry.introspection.requested.v1  # Value: used for request_introspection_topic
+      key: request_id
+      description: Registry broadcast requesting introspection refresh
+      handler: handle_introspection_request
+```
+
+**Contract-to-Code Mapping:**
+
+| Contract `event_type` | Contract `topic` | Python Config Field |
+|-----------------------|------------------|---------------------|
+| `introspection` | `onex.node.introspection.published.v1` | `introspection_topic` |
+| `heartbeat` | `onex.node.heartbeat.published.v1` | `heartbeat_topic` |
+| `shutdown` | `onex.node.shutdown.announced.v1` | *(not in MixinNodeIntrospection)* |
+| `request` | `onex.registry.introspection.requested.v1` | `request_introspection_topic` |
+
+#### Python Integration
+
+The node code reads the contract and wires topics to `MixinNodeIntrospection`. The `event_type` field from the contract is used as the dictionary key to look up topic names:
 
 ```python
 # node.py - Wiring contract-defined topics to MixinNodeIntrospection
@@ -622,6 +678,12 @@ class RegistryEffectNode(MixinNodeIntrospection):
         subscribes = {ch.event_type: ch.topic for ch in contract.event_channels.subscribes}
 
         # Configure introspection with contract-defined topics
+        # Note: ModelIntrospectionConfig supports 3 configurable topics:
+        # - introspection_topic (publish)
+        # - heartbeat_topic (publish)
+        # - request_introspection_topic (subscribe)
+        # Shutdown events are NOT part of the introspection mixin - they are
+        # a separate lifecycle concern handled by the node's shutdown logic.
         config = ModelIntrospectionConfig(
             node_id=contract.metadata.name,
             node_type=contract.metadata.node_type,
@@ -630,7 +692,6 @@ class RegistryEffectNode(MixinNodeIntrospection):
             # Map contract event_channels to introspection topics
             introspection_topic=publishes.get("introspection"),  # onex.node.introspection.published.v1
             heartbeat_topic=publishes.get("heartbeat"),          # onex.node.heartbeat.published.v1
-            shutdown_topic=publishes.get("shutdown"),            # onex.node.shutdown.announced.v1
             request_introspection_topic=subscribes.get("request"),  # onex.registry.introspection.requested.v1
         )
         self.initialize_introspection(config=config)
@@ -639,6 +700,11 @@ class RegistryEffectNode(MixinNodeIntrospection):
 **Key Points:**
 - Topics are declared in `contract.yaml`, not hardcoded in Python
 - `MixinNodeIntrospection` accepts topic names via `ModelIntrospectionConfig`
+- **Only 3 topics are configurable** via `ModelIntrospectionConfig`:
+  - `introspection_topic` - for publishing node capabilities
+  - `heartbeat_topic` - for publishing liveness signals
+  - `request_introspection_topic` - for subscribing to refresh requests
+- **Shutdown events are a separate concern**: The `onex.node.shutdown.announced.v1` topic is not managed by `MixinNodeIntrospection`. Nodes should publish shutdown events directly via their shutdown/cleanup logic, not through the introspection mixin.
 - Contract validation (see Validation Rules above) ensures topics exist in the canonical list
 - This pattern enables static analysis of event topology across all nodes
 

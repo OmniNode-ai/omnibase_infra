@@ -27,12 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Node Introspection (OMN-881, PR #54)
 - **ModelIntrospectionConfig**: Configuration model for `MixinNodeIntrospection` that enables contract-driven topic configuration
-  - `base_topic`: Configurable base topic name (default: `"node.introspection"`)
-  - `topic_suffix`: Optional custom topic suffix for specialized deployments
-  - `cache_ttl_seconds`: Configurable cache TTL with 300-second default
-  - `include_fsm_state`: Toggle FSM state inclusion in introspection data
-  - `include_circuit_breaker_state`: Toggle circuit breaker state inclusion
-  - `exclude_prefixes`: Customizable list of method prefixes to exclude from capability discovery
+  - `node_id` (required): Unique identifier for this node instance
+  - `node_type` (required): Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
+  - `event_bus`: Optional event bus for publishing introspection and heartbeat events (must have `publish_envelope()` method if provided)
+  - `version`: Node version string (default: `"1.0.0"`)
+  - `cache_ttl`: Cache time-to-live in seconds (default: `300.0`)
+  - `operation_keywords`: Optional set of keywords to identify operation methods (if None, uses DEFAULT_OPERATION_KEYWORDS)
+  - `exclude_prefixes`: Optional set of prefixes to exclude from capability discovery (if None, uses DEFAULT_EXCLUDE_PREFIXES)
+  - `introspection_topic`: Optional topic for publishing introspection events (if None, uses module-level INTROSPECTION_TOPIC constant)
+  - `heartbeat_topic`: Optional topic for publishing heartbeat events (if None, uses module-level HEARTBEAT_TOPIC constant)
+  - `request_introspection_topic`: Optional topic for listening to introspection requests (if None, uses module-level REQUEST_INTROSPECTION_TOPIC constant)
 - **Contract-Driven Topic Configuration**: Topics can now be customized via configuration rather than hardcoded, enabling multi-tenant and environment-specific deployments
 - **Performance Metrics Tracking**: Added tracking for cache hits/misses, publish latency, and last publish timestamp via `get_introspection_metrics()` method
 - **Async Cache Lock**: Thread-safe cache operations using `asyncio.Lock` for concurrent access protection

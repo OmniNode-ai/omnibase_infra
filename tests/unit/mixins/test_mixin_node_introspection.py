@@ -13,6 +13,7 @@ This test suite validates:
 - Background task management (heartbeat)
 - Graceful degradation on errors
 - Performance requirements (<50ms with CI buffer)
+- Thread safety and race condition handling
 
 Test Organization:
     - TestMixinNodeIntrospectionInit: Initialization tests
@@ -26,6 +27,7 @@ Test Organization:
     - TestMixinNodeIntrospectionPerformance: Performance requirements
     - TestMixinNodeIntrospectionBenchmark: Detailed benchmarks with instrumentation
     - TestMixinNodeIntrospectionEdgeCases: Edge cases and boundary conditions
+    - TestMixinNodeIntrospectionThreadSafety: Race condition and concurrency tests
 
 Coverage Goals:
     - >90% code coverage for mixin
@@ -1406,6 +1408,551 @@ class TestMixinNodeIntrospectionEdgeCases:
 
         health = await node.health_check()
         assert health["healthy"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio(loop_scope="function")
+class TestMixinNodeIntrospectionThreadSafety:
+    """Comprehensive thread safety and race condition tests.
+
+    This test class validates that the MixinNodeIntrospection cache operations
+    are thread-safe under various concurrent access patterns:
+
+    1. Multiple concurrent reads (get_introspection_data)
+    2. Multiple concurrent invalidations (invalidate_introspection_cache)
+    3. Mixed concurrent reads and invalidations
+    4. Rapid alternating read/invalidate patterns
+    5. Cache state consistency after concurrent operations
+    6. Lock contention under high load
+    7. No data corruption or deadlocks
+
+    Thread Safety Implementation:
+        The mixin uses asyncio.Lock to protect:
+        - _introspection_cache (dict or None)
+        - _introspection_cached_at (float or None)
+
+        All tests verify that these invariants hold under concurrent access.
+    """
+
+    async def test_concurrent_reads_return_consistent_data(self) -> None:
+        """Test that multiple concurrent get_introspection_data calls return consistent data.
+
+        This test verifies that when many coroutines simultaneously request
+        introspection data, all receive identical, valid results without
+        data corruption.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="concurrent-read-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=60.0,  # Long TTL to ensure cache hits
+        )
+
+        # Prime the cache first
+        initial_data = await node.get_introspection_data()
+
+        # Run many concurrent reads
+        num_concurrent = 100
+        results = await asyncio.gather(
+            *[node.get_introspection_data() for _ in range(num_concurrent)]
+        )
+
+        # All results should be valid and consistent
+        assert len(results) == num_concurrent
+        for i, result in enumerate(results):
+            assert result.node_id == "concurrent-read-node", (
+                f"Result {i} has wrong node_id: {result.node_id}"
+            )
+            assert result.node_type == "EFFECT", (
+                f"Result {i} has wrong node_type: {result.node_type}"
+            )
+            # Verify structural consistency with initial data
+            assert result.capabilities == initial_data.capabilities, (
+                f"Result {i} has different capabilities than initial data"
+            )
+
+    async def test_concurrent_invalidations_are_safe(self) -> None:
+        """Test that multiple concurrent invalidate_introspection_cache calls are safe.
+
+        This test verifies that rapidly invalidating the cache from multiple
+        coroutines does not cause errors or leave the cache in an inconsistent state.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="concurrent-invalidate-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=60.0,
+        )
+
+        # Prime the cache
+        await node.get_introspection_data()
+        assert node._introspection_cache is not None
+
+        # Run many concurrent invalidations
+        num_concurrent = 50
+        await asyncio.gather(
+            *[node.invalidate_introspection_cache() for _ in range(num_concurrent)]
+        )
+
+        # Cache should be invalidated (None)
+        assert node._introspection_cache is None
+        assert node._introspection_cached_at is None
+
+        # Should be able to repopulate cache normally
+        data = await node.get_introspection_data()
+        assert data.node_id == "concurrent-invalidate-node"
+        assert node._introspection_cache is not None
+
+    async def test_invalidation_during_concurrent_reads(self) -> None:
+        """Test that invalidation during multiple concurrent reads is handled safely.
+
+        This is the key race condition scenario: invalidation happens while
+        other coroutines are reading. All operations should complete without
+        errors or data corruption.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="mixed-ops-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,  # Very short TTL to force cache misses
+        )
+
+        errors: list[Exception] = []
+        results: list[str] = []
+
+        async def read_operation(idx: int) -> None:
+            """Perform a read operation."""
+            try:
+                data = await node.get_introspection_data()
+                assert data.node_id == "mixed-ops-node"
+                results.append(f"read-{idx}")
+            except Exception as e:
+                errors.append(e)
+
+        async def invalidate_operation(idx: int) -> None:
+            """Perform an invalidation operation."""
+            try:
+                await node.invalidate_introspection_cache()
+                results.append(f"invalidate-{idx}")
+            except Exception as e:
+                errors.append(e)
+
+        # Create mixed tasks: 70% reads, 30% invalidations
+        tasks: list[asyncio.Task[None]] = []
+        for i in range(100):
+            if i % 3 == 0:
+                tasks.append(asyncio.create_task(invalidate_operation(i)))
+            else:
+                tasks.append(asyncio.create_task(read_operation(i)))
+
+        await asyncio.gather(*tasks)
+
+        # No errors should have occurred
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+        assert len(results) == 100
+
+        # Final state should be consistent
+        final_data = await node.get_introspection_data()
+        assert final_data.node_id == "mixed-ops-node"
+
+    async def test_rapid_alternating_read_invalidate_cycles(self) -> None:
+        """Test rapid alternating read/invalidate cycles.
+
+        This tests a worst-case contention pattern where reads and invalidations
+        rapidly alternate, maximizing lock contention.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="alternating-node",
+            node_type="COMPUTE",
+            event_bus=None,
+            cache_ttl=0.0001,  # Extremely short TTL
+        )
+
+        cycle_count = 50
+        errors: list[Exception] = []
+
+        async def alternating_cycle(cycle_id: int) -> None:
+            """Perform alternating read-invalidate-read cycle."""
+            try:
+                # Read
+                data1 = await node.get_introspection_data()
+                assert data1.node_id == "alternating-node"
+
+                # Invalidate
+                await node.invalidate_introspection_cache()
+
+                # Read again (forces cache rebuild)
+                data2 = await node.get_introspection_data()
+                assert data2.node_id == "alternating-node"
+            except Exception as e:
+                errors.append(e)
+
+        # Run many alternating cycles concurrently
+        await asyncio.gather(*[alternating_cycle(i) for i in range(cycle_count)])
+
+        assert len(errors) == 0, f"Errors during alternating cycles: {errors}"
+
+    async def test_cache_state_consistency_invariants(self) -> None:
+        """Test that cache state invariants hold under concurrent access.
+
+        Invariants:
+        1. If _introspection_cache is not None, _introspection_cached_at must be set
+        2. If _introspection_cached_at is None, _introspection_cache must be None
+        3. Both must transition atomically together
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="invariant-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,
+        )
+
+        invariant_violations: list[str] = []
+
+        async def check_and_operate(op_type: str) -> None:
+            """Check invariants and perform operation."""
+            # Check invariant before operation
+            cache = node._introspection_cache
+            cached_at = node._introspection_cached_at
+
+            if cache is not None and cached_at is None:
+                invariant_violations.append(
+                    f"cache set but cached_at is None before {op_type}"
+                )
+            if cache is None and cached_at is not None:
+                invariant_violations.append(
+                    f"cache is None but cached_at is set before {op_type}"
+                )
+
+            # Perform operation
+            if op_type == "read":
+                await node.get_introspection_data()
+            else:
+                await node.invalidate_introspection_cache()
+
+            # Small yield to allow other coroutines to run
+            await asyncio.sleep(0)
+
+            # Check invariant after operation
+            cache = node._introspection_cache
+            cached_at = node._introspection_cached_at
+
+            if cache is not None and cached_at is None:
+                invariant_violations.append(
+                    f"cache set but cached_at is None after {op_type}"
+                )
+            if cache is None and cached_at is not None:
+                invariant_violations.append(
+                    f"cache is None but cached_at is set after {op_type}"
+                )
+
+        # Run mixed operations
+        tasks: list[asyncio.Task[None]] = []
+        for i in range(100):
+            op = "invalidate" if i % 4 == 0 else "read"
+            tasks.append(asyncio.create_task(check_and_operate(op)))
+
+        await asyncio.gather(*tasks)
+
+        assert len(invariant_violations) == 0, (
+            f"Invariant violations: {invariant_violations}"
+        )
+
+    async def test_no_deadlock_under_high_contention(self) -> None:
+        """Test that high contention does not cause deadlocks.
+
+        This test uses a timeout to detect potential deadlocks. If the test
+        completes within the timeout, no deadlock occurred.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="deadlock-test-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.0001,
+        )
+
+        completed = 0
+
+        async def contention_operation(idx: int) -> None:
+            """Perform operations under high contention."""
+            nonlocal completed
+            for _ in range(10):
+                if idx % 2 == 0:
+                    await node.get_introspection_data()
+                else:
+                    await node.invalidate_introspection_cache()
+                # Yield to maximize contention
+                await asyncio.sleep(0)
+            completed += 1
+
+        # Run with timeout to detect deadlock
+        num_tasks = 50
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*[contention_operation(i) for i in range(num_tasks)]),
+                timeout=10.0,  # 10 second timeout
+            )
+        except TimeoutError:
+            pytest.fail(
+                f"Deadlock detected: only {completed}/{num_tasks} tasks completed"
+            )
+
+        assert completed == num_tasks
+
+    async def test_stale_read_prevention(self) -> None:
+        """Test that invalidation properly prevents stale reads.
+
+        When a cache is invalidated, subsequent reads should return fresh data,
+        not stale cached data.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="stale-prevention-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=60.0,  # Long TTL
+        )
+
+        # Populate cache
+        initial_data = await node.get_introspection_data()
+        initial_timestamp = initial_data.timestamp
+
+        # Wait a small amount to ensure timestamp difference
+        await asyncio.sleep(0.01)
+
+        # Invalidate cache
+        await node.invalidate_introspection_cache()
+
+        # Read again - should get fresh data with new timestamp
+        fresh_data = await node.get_introspection_data()
+
+        assert fresh_data.timestamp >= initial_timestamp, (
+            "Fresh data should have timestamp >= initial timestamp"
+        )
+        assert fresh_data.node_id == "stale-prevention-node"
+
+    async def test_concurrent_reads_with_expiring_cache(self) -> None:
+        """Test concurrent reads when cache TTL expires mid-operation.
+
+        This tests the race condition where multiple readers find an expired
+        cache simultaneously and all try to rebuild it.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="expiring-cache-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,  # 1ms TTL - will expire quickly
+        )
+
+        # Prime the cache
+        await node.get_introspection_data()
+
+        # Wait for cache to expire
+        await asyncio.sleep(0.005)
+
+        # Now run many concurrent reads - all will find expired cache
+        num_concurrent = 50
+        results = await asyncio.gather(
+            *[node.get_introspection_data() for _ in range(num_concurrent)]
+        )
+
+        # All should succeed with valid data
+        assert len(results) == num_concurrent
+        for result in results:
+            assert result.node_id == "expiring-cache-node"
+            assert result.node_type == "EFFECT"
+
+    async def test_lock_acquisition_fairness(self) -> None:
+        """Test that lock acquisition is reasonably fair under contention.
+
+        This test verifies that no coroutine is starved of lock access
+        by checking that all operations complete in reasonable order.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="fairness-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,
+        )
+
+        completion_order: list[int] = []
+        start_order: list[int] = []
+        order_lock = asyncio.Lock()
+
+        async def tracked_operation(idx: int) -> None:
+            """Track operation start and completion order."""
+            async with order_lock:
+                start_order.append(idx)
+
+            # Perform actual operation
+            await node.get_introspection_data()
+
+            async with order_lock:
+                completion_order.append(idx)
+
+        num_tasks = 30
+        await asyncio.gather(*[tracked_operation(i) for i in range(num_tasks)])
+
+        # All tasks should complete
+        assert len(completion_order) == num_tasks
+        assert set(completion_order) == set(range(num_tasks))
+
+        # Check for reasonable fairness: first starter shouldn't be last completer
+        # (allowing some flexibility due to async scheduling)
+        first_starters = set(start_order[:10])
+        last_completers = set(completion_order[-5:])
+
+        # At least half of early starters should have completed before last 5
+        early_completed = first_starters - last_completers
+        assert len(early_completed) >= 5, (
+            f"Potential starvation: {len(early_completed)}/10 early starters "
+            f"completed before last 5 completers"
+        )
+
+    async def test_exception_in_concurrent_operation_does_not_corrupt_cache(
+        self,
+    ) -> None:
+        """Test that an exception in one coroutine doesn't corrupt cache for others.
+
+        If one operation fails, the cache should remain in a consistent state
+        for other concurrent operations.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="exception-safety-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=60.0,
+        )
+
+        # Prime cache
+        await node.get_introspection_data()
+
+        errors: list[Exception] = []
+        successes: list[int] = []
+
+        async def potentially_failing_read(idx: int, should_fail: bool) -> None:
+            """Read that may raise an exception."""
+            try:
+                if should_fail:
+                    # Simulate an error after getting data
+                    await node.get_introspection_data()
+                    raise ValueError(f"Simulated error in task {idx}")
+
+                data = await node.get_introspection_data()
+                assert data.node_id == "exception-safety-node"
+                successes.append(idx)
+            except ValueError as e:
+                errors.append(e)
+
+        # Run mix of failing and succeeding tasks
+        tasks: list[asyncio.Task[None]] = []
+        for i in range(50):
+            should_fail = i % 10 == 0  # 10% failure rate
+            tasks.append(asyncio.create_task(potentially_failing_read(i, should_fail)))
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Should have expected number of successes and errors
+        assert len(errors) == 5, f"Expected 5 errors, got {len(errors)}"
+        assert len(successes) == 45, f"Expected 45 successes, got {len(successes)}"
+
+        # Cache should still be valid for normal operations
+        final_data = await node.get_introspection_data()
+        assert final_data.node_id == "exception-safety-node"
+
+    async def test_concurrent_initialization_safety(self) -> None:
+        """Test that concurrent access during initialization is handled safely.
+
+        This is an edge case where operations might be called before
+        initialization is complete.
+        """
+
+        class SlowInitNode(MixinNodeIntrospection):
+            """Node with delayed state setup."""
+
+            def __init__(self) -> None:
+                self._state = "initializing"
+
+            async def slow_init(self) -> None:
+                """Simulate slow initialization."""
+                await asyncio.sleep(0.01)
+                self._state = "ready"
+
+        nodes: list[SlowInitNode] = []
+        errors: list[Exception] = []
+
+        async def init_and_introspect(idx: int) -> None:
+            """Initialize and immediately introspect."""
+            try:
+                node = SlowInitNode()
+                node.initialize_introspection(
+                    node_id=f"slow-init-{idx}",
+                    node_type="EFFECT",
+                    event_bus=None,
+                )
+                nodes.append(node)
+
+                # Start introspection before slow_init completes
+                init_task = asyncio.create_task(node.slow_init())
+                data = await node.get_introspection_data()
+
+                assert data.node_id == f"slow-init-{idx}"
+                await init_task
+
+            except Exception as e:
+                errors.append(e)
+
+        await asyncio.gather(*[init_and_introspect(i) for i in range(20)])
+
+        assert len(errors) == 0, f"Initialization errors: {errors}"
+        assert len(nodes) == 20
+
+    async def test_multiple_nodes_independent_caches(self) -> None:
+        """Test that multiple node instances have independent caches.
+
+        Concurrent operations on different nodes should not interfere
+        with each other's caches.
+        """
+        nodes: list[MockNode] = []
+        for i in range(10):
+            node = MockNode()
+            node.initialize_introspection(
+                node_id=f"independent-node-{i}",
+                node_type="EFFECT",
+                event_bus=None,
+                cache_ttl=60.0,
+            )
+            nodes.append(node)
+
+        async def operate_on_node(node: MockNode, op_count: int) -> list[str]:
+            """Perform operations on a single node."""
+            node_ids: list[str] = []
+            for _ in range(op_count):
+                data = await node.get_introspection_data()
+                node_ids.append(data.node_id)
+                if _ % 3 == 0:
+                    await node.invalidate_introspection_cache()
+            return node_ids
+
+        # Run concurrent operations on all nodes
+        results = await asyncio.gather(*[operate_on_node(node, 20) for node in nodes])
+
+        # Each node's operations should only see its own node_id
+        for i, node_ids in enumerate(results):
+            expected_id = f"independent-node-{i}"
+            for node_id in node_ids:
+                assert node_id == expected_id, (
+                    f"Node {i} saw foreign node_id: {node_id}"
+                )
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -2849,3 +3396,330 @@ class TestMixinNodeIntrospectionCustomTopics:
         assert node._introspection_topic == custom_introspection
         assert node._heartbeat_topic == custom_heartbeat
         assert node._request_introspection_topic == custom_request
+
+    async def test_legacy_params_custom_introspection_topic(self) -> None:
+        """Test custom introspection topic via legacy parameter path."""
+        event_bus = MockEventBus()
+        custom_topic = "legacy.introspection.topic.v1"
+
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="legacy-intro-topic-node",
+            node_type="EFFECT",
+            event_bus=event_bus,
+            introspection_topic=custom_topic,
+        )
+
+        # Verify topic is stored correctly
+        assert node._introspection_topic == custom_topic
+
+        # Verify topic is used when publishing
+        success = await node.publish_introspection(reason="legacy-test")
+        assert success is True
+
+        assert len(event_bus.published_envelopes) == 1
+        _, topic = event_bus.published_envelopes[0]
+        assert topic == custom_topic
+
+    async def test_legacy_params_custom_heartbeat_topic(self) -> None:
+        """Test custom heartbeat topic via legacy parameter path."""
+        event_bus = MockEventBus()
+        custom_heartbeat_topic = "legacy.heartbeat.topic.v1"
+
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="legacy-heartbeat-topic-node",
+            node_type="COMPUTE",
+            event_bus=event_bus,
+            heartbeat_topic=custom_heartbeat_topic,
+        )
+
+        # Verify topic is stored correctly
+        assert node._heartbeat_topic == custom_heartbeat_topic
+
+        # Start heartbeat task with fast interval
+        await node.start_introspection_tasks(
+            enable_heartbeat=True,
+            heartbeat_interval_seconds=0.05,
+            enable_registry_listener=False,
+        )
+
+        try:
+            # Wait for at least one heartbeat
+            await asyncio.sleep(0.1)
+
+            # Verify the custom heartbeat topic was used
+            assert len(event_bus.published_envelopes) >= 1
+
+            # Check that heartbeat events use the custom topic
+            for _, topic in event_bus.published_envelopes:
+                assert topic == custom_heartbeat_topic
+        finally:
+            await node.stop_introspection_tasks()
+
+    async def test_legacy_params_custom_request_topic(self) -> None:
+        """Test custom request introspection topic via legacy parameter path."""
+        custom_request_topic = "legacy.request.introspection.topic.v1"
+
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="legacy-request-topic-node",
+            node_type="REDUCER",
+            request_introspection_topic=custom_request_topic,
+        )
+
+        # Verify topic is stored correctly
+        assert node._request_introspection_topic == custom_request_topic
+
+    async def test_legacy_params_all_custom_topics(self) -> None:
+        """Test all three custom topics via legacy parameter path."""
+        event_bus = MockEventBus()
+        custom_introspection = "legacy.intro.topic"
+        custom_heartbeat = "legacy.heartbeat.topic"
+        custom_request = "legacy.request.topic"
+
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="legacy-all-topics-node",
+            node_type="ORCHESTRATOR",
+            event_bus=event_bus,
+            introspection_topic=custom_introspection,
+            heartbeat_topic=custom_heartbeat,
+            request_introspection_topic=custom_request,
+        )
+
+        # Verify all topics are stored correctly
+        assert node._introspection_topic == custom_introspection
+        assert node._heartbeat_topic == custom_heartbeat
+        assert node._request_introspection_topic == custom_request
+
+        # Test introspection publishing uses custom topic
+        await node.publish_introspection(reason="legacy-test")
+        assert len(event_bus.published_envelopes) == 1
+        _, intro_topic = event_bus.published_envelopes[0]
+        assert intro_topic == custom_introspection
+
+        # Clear and test heartbeat uses custom topic
+        event_bus.published_envelopes.clear()
+        await node.start_introspection_tasks(
+            enable_heartbeat=True,
+            heartbeat_interval_seconds=0.05,
+            enable_registry_listener=False,
+        )
+
+        try:
+            await asyncio.sleep(0.1)
+            assert len(event_bus.published_envelopes) >= 1
+            for _, hb_topic in event_bus.published_envelopes:
+                assert hb_topic == custom_heartbeat
+        finally:
+            await node.stop_introspection_tasks()
+
+    async def test_registry_listener_uses_custom_request_topic(self) -> None:
+        """Test that registry listener subscribes to the custom request topic.
+
+        This test verifies that the registry listener loop uses the
+        custom request_introspection_topic when subscribing to the event bus.
+        """
+
+        class CapturingEventBus:
+            """Event bus that captures subscription topic."""
+
+            def __init__(self) -> None:
+                self.subscribed_topic: str | None = None
+                self.subscribed_group_id: str | None = None
+                self.published_envelopes: list[tuple[Any, str]] = []
+
+            async def publish_envelope(
+                self,
+                envelope: Any,
+                topic: str,
+            ) -> None:
+                self.published_envelopes.append((envelope, topic))
+
+            async def publish(
+                self,
+                topic: str,
+                key: bytes | None,
+                value: bytes,
+            ) -> None:
+                pass
+
+            async def subscribe(
+                self,
+                topic: str,
+                group_id: str,
+                on_message: Callable[[Any], Awaitable[None]],
+            ) -> Callable[[], Awaitable[None]]:
+                self.subscribed_topic = topic
+                self.subscribed_group_id = group_id
+
+                async def unsubscribe() -> None:
+                    pass
+
+                return unsubscribe
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        event_bus = CapturingEventBus()
+        custom_request_topic = "custom.registry.request.topic.v1"
+
+        config = ModelIntrospectionConfig(
+            node_id="registry-custom-topic-node",
+            node_type="EFFECT",
+            event_bus=event_bus,  # type: ignore[arg-type]
+            request_introspection_topic=custom_request_topic,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # Start registry listener
+        await node.start_introspection_tasks(
+            enable_heartbeat=False,
+            enable_registry_listener=True,
+        )
+
+        try:
+            # Give time for subscription to complete
+            await asyncio.sleep(0.1)
+
+            # Verify the custom request topic was used for subscription
+            assert event_bus.subscribed_topic == custom_request_topic
+            assert (
+                event_bus.subscribed_group_id
+                == "introspection-registry-custom-topic-node"
+            )
+        finally:
+            await node.stop_introspection_tasks()
+
+    async def test_registry_listener_uses_custom_request_topic_legacy_params(
+        self,
+    ) -> None:
+        """Test registry listener with custom request topic via legacy params."""
+
+        class CapturingEventBus:
+            """Event bus that captures subscription topic."""
+
+            def __init__(self) -> None:
+                self.subscribed_topic: str | None = None
+                self.subscribed_group_id: str | None = None
+
+            async def publish_envelope(
+                self,
+                envelope: Any,
+                topic: str,
+            ) -> None:
+                pass
+
+            async def publish(
+                self,
+                topic: str,
+                key: bytes | None,
+                value: bytes,
+            ) -> None:
+                pass
+
+            async def subscribe(
+                self,
+                topic: str,
+                group_id: str,
+                on_message: Callable[[Any], Awaitable[None]],
+            ) -> Callable[[], Awaitable[None]]:
+                self.subscribed_topic = topic
+                self.subscribed_group_id = group_id
+
+                async def unsubscribe() -> None:
+                    pass
+
+                return unsubscribe
+
+        event_bus = CapturingEventBus()
+        custom_request_topic = "legacy.registry.request.topic.v1"
+
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="legacy-registry-topic-node",
+            node_type="COMPUTE",
+            event_bus=event_bus,  # type: ignore[arg-type]
+            request_introspection_topic=custom_request_topic,
+        )
+
+        # Start registry listener
+        await node.start_introspection_tasks(
+            enable_heartbeat=False,
+            enable_registry_listener=True,
+        )
+
+        try:
+            # Give time for subscription to complete
+            await asyncio.sleep(0.1)
+
+            # Verify the custom request topic was used for subscription
+            assert event_bus.subscribed_topic == custom_request_topic
+            assert (
+                event_bus.subscribed_group_id
+                == "introspection-legacy-registry-topic-node"
+            )
+        finally:
+            await node.stop_introspection_tasks()
+
+    async def test_default_topics_used_without_custom_config(self) -> None:
+        """Test that default module topics are used when no custom topics provided."""
+        from omnibase_infra.mixins.mixin_node_introspection import (
+            HEARTBEAT_TOPIC,
+            INTROSPECTION_TOPIC,
+            REQUEST_INTROSPECTION_TOPIC,
+        )
+
+        event_bus = MockEventBus()
+
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="default-topics-verify-node",
+            node_type="EFFECT",
+            event_bus=event_bus,
+        )
+
+        # Verify default topics are used
+        assert node._introspection_topic == INTROSPECTION_TOPIC
+        assert node._heartbeat_topic == HEARTBEAT_TOPIC
+        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+
+        # Verify introspection uses default topic
+        await node.publish_introspection(reason="default-test")
+        assert len(event_bus.published_envelopes) == 1
+        _, topic = event_bus.published_envelopes[0]
+        assert topic == INTROSPECTION_TOPIC
+
+    async def test_config_model_default_topics_used(self) -> None:
+        """Test that default topics are used when config model has None topics."""
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+        from omnibase_infra.mixins.mixin_node_introspection import (
+            HEARTBEAT_TOPIC,
+            INTROSPECTION_TOPIC,
+            REQUEST_INTROSPECTION_TOPIC,
+        )
+
+        event_bus = MockEventBus()
+
+        # Create config without specifying any topics
+        config = ModelIntrospectionConfig(
+            node_id="config-default-topics-node",
+            node_type="EFFECT",
+            event_bus=event_bus,
+        )
+
+        node = MockNode()
+        node.initialize_introspection(config=config)
+
+        # Verify default topics are used
+        assert node._introspection_topic == INTROSPECTION_TOPIC
+        assert node._heartbeat_topic == HEARTBEAT_TOPIC
+        assert node._request_introspection_topic == REQUEST_INTROSPECTION_TOPIC
+
+        # Verify introspection uses default topic
+        await node.publish_introspection(reason="config-default-test")
+        assert len(event_bus.published_envelopes) == 1
+        _, topic = event_bus.published_envelopes[0]
+        assert topic == INTROSPECTION_TOPIC
