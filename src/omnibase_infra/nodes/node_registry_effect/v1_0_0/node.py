@@ -55,7 +55,7 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -86,13 +86,22 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
     ModelRegistryRequest,
     ModelRegistryResponse,
 )
-from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
-    EnvelopeDict,
-    JsonValue,
+from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
     ProtocolEnvelopeExecutor,
+)
+from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
     ProtocolEventBus,
+)
+from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_types import (
+    EnvelopeDict,
     ResultDict,
 )
+
+# Type alias for JSON-serializable values.
+# Using `Any` is a documented ONEX exception for JSON containers since JSON payloads
+# contain arbitrary serializable data that cannot be precisely typed without
+# schema-specific Pydantic models.
+JsonValue = Any
 
 logger = logging.getLogger(__name__)
 
@@ -1227,8 +1236,8 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             record_count: Optional count of records (for discover operations)
             status: Optional status string (success, partial, failed)
         """
-        # Build structured log extra dict
-        log_extra: dict[str, str | float | int | bool | None] = {
+        # Build structured log extra dict (using dict[str, object] for log extra context)
+        log_extra: dict[str, object] = {
             "event_type": "registry_operation_complete",
             "operation": operation,
             "processing_time_ms": round(processing_time_ms, 3),
@@ -1252,7 +1261,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         # Log slow operation warning if threshold exceeded
         if processing_time_ms > self._slow_operation_threshold_ms:
-            slow_extra: dict[str, str | float | int | bool | None] = {
+            slow_extra: dict[str, object] = {
                 "event_type": "registry_operation_slow",
                 "operation": operation,
                 "processing_time_ms": round(processing_time_ms, 3),

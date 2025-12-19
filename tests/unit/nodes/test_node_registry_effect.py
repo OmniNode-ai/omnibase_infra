@@ -2784,7 +2784,7 @@ class TestNodeRegistryEffectDependencyResolution:
         This error occurs during node initialization when the container doesn't
         have a ProtocolEnvelopeExecutor registered with name='consul'.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
 
@@ -2823,7 +2823,7 @@ class TestNodeRegistryEffectDependencyResolution:
         This error occurs during node initialization when the container doesn't
         have a ProtocolEnvelopeExecutor registered with name='postgres'.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
 
@@ -2865,8 +2865,10 @@ class TestNodeRegistryEffectDependencyResolution:
         This ensures we don't unnecessarily re-resolve dependencies or
         overwrite handlers that may have been customized after initial resolution.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -2917,8 +2919,10 @@ class TestNodeRegistryEffectDependencyResolution:
         Resolution should complete successfully even if ProtocolEventBus is not
         registered in the container.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -3007,7 +3011,7 @@ class TestNodeRegistryEffectDependencyResolution:
         The factory method should propagate the RuntimeError from
         _resolve_dependencies() when the consul handler is not registered.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
 
@@ -3037,7 +3041,7 @@ class TestNodeRegistryEffectDependencyResolution:
         The factory method should propagate the RuntimeError from
         _resolve_dependencies() when the postgres handler is not registered.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
 
@@ -3072,7 +3076,7 @@ class TestNodeRegistryEffectDependencyResolution:
         The RuntimeError should chain the original exception via 'from e' to
         preserve the full error context for debugging.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
 
@@ -3112,7 +3116,7 @@ class TestNodeRegistryEffectDependencyResolution:
         The RuntimeError should chain the original exception via 'from e' to
         preserve the full error context for debugging.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
 

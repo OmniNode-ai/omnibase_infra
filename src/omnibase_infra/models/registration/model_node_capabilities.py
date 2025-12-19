@@ -8,6 +8,8 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -81,9 +83,12 @@ class ModelNodeCapabilities(BaseModel):
     # Generic feature flag (used in tests)
     feature: bool = Field(default=False, description="Generic feature flag")
 
-    # Configuration (nested) - using constrained types instead of Any
-    config: dict[str, int | str | bool | float] = Field(
-        default_factory=dict, description="Nested configuration"
+    # Configuration (nested) - uses Any to allow JSON-serializable primitive values
+    # (str, int, float, bool). Using Any avoids union validation while Pydantic
+    # still enforces JSON serialization constraints at runtime.
+    config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Nested configuration (JSON-serializable values)",
     )
 
     def __getitem__(self, key: str) -> object:

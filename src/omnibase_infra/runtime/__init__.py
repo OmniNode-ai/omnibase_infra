@@ -33,12 +33,22 @@ Runtime Components
 - **Wiring functions**: Register handlers and event buses with registries
 - **Envelope validation**: Validate event envelope structures
 
+Message Dispatch Engine
+-----------------------
+- **MessageDispatchEngine**: Runtime dispatch engine for message routing
+- **DispatcherRegistry**: Thread-safe registry for message dispatchers with freeze pattern
+- **ProtocolMessageDispatcher**: Protocol for category-based message dispatchers
+
 The runtime module serves as the entry point for running infrastructure services
 and configuring the handler and policy ecosystem.
 """
 
 from __future__ import annotations
 
+from omnibase_infra.runtime.dispatcher_registry import (
+    DispatcherRegistry,
+    ProtocolMessageDispatcher,
+)
 from omnibase_infra.runtime.envelope_validator import (
     PAYLOAD_REQUIRED_OPERATIONS,
     validate_envelope,
@@ -70,6 +80,7 @@ from omnibase_infra.runtime.health_server import (
 from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
@@ -129,4 +140,8 @@ __all__: list[str] = [
     # Envelope validation
     "PAYLOAD_REQUIRED_OPERATIONS",
     "validate_envelope",
+    # Message dispatch engine
+    "MessageDispatchEngine",
+    "DispatcherRegistry",
+    "ProtocolMessageDispatcher",
 ]

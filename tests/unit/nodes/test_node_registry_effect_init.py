@@ -48,8 +48,10 @@ def create_mock_container(
     Returns:
         Mock container configured for NodeRegistryEffect dependency resolution.
     """
-    from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+    from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
         ProtocolEnvelopeExecutor,
+    )
+    from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
         ProtocolEventBus,
     )
 

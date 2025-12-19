@@ -1,119 +1,31 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Protocol definitions for Registry Effect Node dependencies.
+"""Re-export module for backwards compatibility.
 
-These protocols define the interfaces for handler and event bus dependencies
-using duck typing with Python's Protocol class.
+This module re-exports protocols and types from their split module locations
+to maintain backwards compatibility with existing imports.
 
-Type Aliases:
-    JsonPrimitive: Basic JSON-serializable types (str, int, float, bool, None)
-    JsonValue: Recursive JSON value type supporting nested structures
-    EnvelopeDict: Dictionary type for operation envelopes
-    ResultDict: Dictionary type for operation results
+The protocols were split into separate files for better organization:
+- protocol_types.py: Type aliases (EnvelopeDict, ResultDict)
+- protocol_envelope_executor.py: ProtocolEnvelopeExecutor
+- protocol_event_bus.py: ProtocolEventBus
 """
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-from uuid import UUID
-
-# JSON-serializable value type for strong typing (per ONEX guidelines: never use Any/object).
-#
-# DESIGN NOTE: Why we use `dict | list` instead of recursive `dict[str, JsonValue]`:
-# 1. Recursive type aliases cause infinite recursion in mypy/pyright during type inference
-# 2. Pydantic v2 cannot generate JSON schema for recursively-defined type aliases
-# 3. The runtime behavior is identical - Python's dict/list accept any JSON-serializable values
-#
-# This is a documented ONEX exception for JSON-value containers. The trade-off is reduced
-# static type safety for nested structures in exchange for practical tooling compatibility.
-# For strongly-typed nested data, prefer explicit Pydantic models over JsonValue.
-JsonPrimitive = str | int | float | bool | None
-JsonValue = str | int | float | bool | None | dict | list
-
-# Envelope dictionary types for protocol methods.
-# These types are intentionally broad to support various payload structures
-# while still being more specific than 'Any' or 'object'.
-# The 'payload' value can be a dict with various JSON-serializable values,
-# including typed lists like list[str] for SQL parameters.
-EnvelopeDict = dict[str, str | dict[str, JsonValue | list[str]] | list[str] | UUID]
-ResultDict = dict[
-    str, str | dict[str, JsonValue | list[dict]] | list[dict] | int | bool
-]
-
-
-@runtime_checkable
-class ProtocolEnvelopeExecutor(Protocol):
-    """Protocol for envelope executor objects (Consul, PostgreSQL).
-
-    Executors must implement an async execute method that accepts an envelope
-    dictionary and returns a result dictionary.
-    """
-
-    async def execute(self, envelope: EnvelopeDict) -> ResultDict:
-        """Execute an operation based on the envelope contents.
-
-        Args:
-            envelope: Dictionary containing operation details with keys:
-                - operation: The operation to perform (e.g., "consul.register", "db.execute")
-                - payload: Operation-specific data
-                - correlation_id: UUID for distributed tracing
-
-        Returns:
-            Dictionary with operation results, typically containing:
-                - status: "success" or "failed"
-                - payload: Operation-specific result data
-        """
-        ...
-
-
-@runtime_checkable
-class ProtocolEventBus(Protocol):
-    """Protocol for event bus objects.
-
-    Event bus must implement an async publish method for sending messages
-    to topics.
-
-    Future Enhancement (NITPICK):
-        Consider replacing the raw `publish(topic, key, value)` signature with a
-        Pydantic model-based approach for improved type safety and validation:
-
-        ```python
-        class ModelPublishParams(BaseModel):
-            topic: str
-            key: bytes
-            value: bytes
-            headers: dict[str, str] = Field(default_factory=dict)
-            partition_key: str | None = None
-
-        async def publish(self, params: ModelPublishParams) -> None:
-            ...
-        ```
-
-        Benefits:
-        - Automatic validation of topic format, key/value encoding
-        - Easy extension with new fields (headers, partition keys)
-        - Self-documenting parameter structure
-        - Consistent with ONEX contract-driven patterns
-
-        This is a non-breaking change that can be implemented in a future version
-        by adding a new `publish_model` method alongside the existing `publish`.
-    """
-
-    async def publish(self, topic: str, key: bytes, value: bytes) -> None:
-        """Publish a message to a topic.
-
-        Args:
-            topic: The topic name to publish to
-            key: Message key as bytes
-            value: Message value as bytes (typically JSON-encoded)
-        """
-        ...
-
+from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
+    ProtocolEnvelopeExecutor,
+)
+from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
+    ProtocolEventBus,
+)
+from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_types import (
+    EnvelopeDict,
+    ResultDict,
+)
 
 __all__ = [
     "EnvelopeDict",
-    "JsonPrimitive",
-    "JsonValue",
     "ProtocolEnvelopeExecutor",
     "ProtocolEventBus",
     "ResultDict",
