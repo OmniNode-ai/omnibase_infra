@@ -2679,3 +2679,310 @@ class TestCommandAndIntentDispatch:
         assert result.status == EnumDispatchStatus.SUCCESS
         assert len(results) == 1
         assert result.message_category == EnumMessageCategory.INTENT
+
+
+# ============================================================================
+# Error Sanitization Tests
+# ============================================================================
+
+
+class TestErrorSanitization:
+    """
+    Tests for error message sanitization in dispatch results.
+
+    Verifies that sensitive information (connection strings, passwords, API keys)
+    is properly sanitized before being included in ModelDispatchResult.error_message
+    and per-dispatcher metrics.
+
+    Security requirements:
+        - Connection strings with credentials must be redacted
+        - Passwords and API keys must not leak in error messages
+        - Protocol URLs (postgres://, mongodb://, etc.) must be sanitized
+        - Long error messages should be truncated
+    """
+
+    @pytest.fixture
+    def sanitization_engine(self) -> MessageDispatchEngine:
+        """Create a fresh engine for sanitization tests."""
+        return MessageDispatchEngine()
+
+    @pytest.fixture
+    def event_envelope(self) -> ModelEventEnvelope[UserCreatedEvent]:
+        """Create a test event envelope."""
+        return ModelEventEnvelope(
+            correlation_id=uuid4(),
+            payload=UserCreatedEvent(user_id="test-123", name="Test User"),
+        )
+
+    async def test_connection_string_password_is_sanitized(
+        self,
+        sanitization_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that connection strings with passwords are sanitized."""
+
+        async def failing_handler(
+            envelope: ModelEventEnvelope[Any],
+        ) -> None:
+            # Simulate a database driver error that includes connection string
+            raise ConnectionError(
+                "Failed to connect to postgresql://user:supersecretpass@db.example.com:5432/mydb"
+            )
+
+        sanitization_engine.register_dispatcher(
+            dispatcher_id="db-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        sanitization_engine.register_route(
+            ModelDispatchRoute(
+                route_id="db-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="db-handler",
+            )
+        )
+        sanitization_engine.freeze()
+
+        result = await sanitization_engine.dispatch(
+            "dev.user.events.v1", event_envelope
+        )
+
+        assert result.status == EnumDispatchStatus.HANDLER_ERROR
+        assert result.error_message is not None
+        # The connection string should be redacted
+        assert "supersecretpass" not in result.error_message
+        assert "postgresql://" not in result.error_message
+        assert "[REDACTED" in result.error_message
+
+    async def test_password_in_error_is_sanitized(
+        self,
+        sanitization_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that errors mentioning passwords are sanitized."""
+
+        async def failing_handler(
+            envelope: ModelEventEnvelope[Any],
+        ) -> None:
+            raise ValueError("Authentication failed with password=secret123")
+
+        sanitization_engine.register_dispatcher(
+            dispatcher_id="auth-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        sanitization_engine.register_route(
+            ModelDispatchRoute(
+                route_id="auth-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="auth-handler",
+            )
+        )
+        sanitization_engine.freeze()
+
+        result = await sanitization_engine.dispatch(
+            "dev.user.events.v1", event_envelope
+        )
+
+        assert result.status == EnumDispatchStatus.HANDLER_ERROR
+        assert result.error_message is not None
+        # The password value should be redacted
+        assert "secret123" not in result.error_message
+        assert "password" not in result.error_message.lower()
+        assert "[REDACTED" in result.error_message
+
+    async def test_api_key_in_error_is_sanitized(
+        self,
+        sanitization_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that API keys in errors are sanitized."""
+
+        async def failing_handler(
+            envelope: ModelEventEnvelope[Any],
+        ) -> None:
+            raise RuntimeError("API call failed with api_key=sk-1234567890abcdef")
+
+        sanitization_engine.register_dispatcher(
+            dispatcher_id="api-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        sanitization_engine.register_route(
+            ModelDispatchRoute(
+                route_id="api-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="api-handler",
+            )
+        )
+        sanitization_engine.freeze()
+
+        result = await sanitization_engine.dispatch(
+            "dev.user.events.v1", event_envelope
+        )
+
+        assert result.status == EnumDispatchStatus.HANDLER_ERROR
+        assert result.error_message is not None
+        # The API key should be redacted
+        assert "sk-1234567890abcdef" not in result.error_message
+        assert "api_key" not in result.error_message.lower()
+        assert "[REDACTED" in result.error_message
+
+    async def test_safe_error_is_not_redacted(
+        self,
+        sanitization_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that safe error messages are passed through (not redacted)."""
+
+        async def failing_handler(
+            envelope: ModelEventEnvelope[Any],
+        ) -> None:
+            raise ValueError("User with ID 12345 not found in database")
+
+        sanitization_engine.register_dispatcher(
+            dispatcher_id="user-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        sanitization_engine.register_route(
+            ModelDispatchRoute(
+                route_id="user-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="user-handler",
+            )
+        )
+        sanitization_engine.freeze()
+
+        result = await sanitization_engine.dispatch(
+            "dev.user.events.v1", event_envelope
+        )
+
+        assert result.status == EnumDispatchStatus.HANDLER_ERROR
+        assert result.error_message is not None
+        # Safe error should not be redacted
+        assert "[REDACTED" not in result.error_message
+        assert "User with ID 12345 not found" in result.error_message
+
+    async def test_long_error_message_is_truncated(
+        self,
+        sanitization_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that very long error messages are truncated."""
+
+        async def failing_handler(
+            envelope: ModelEventEnvelope[Any],
+        ) -> None:
+            # Create a very long error message (over 500 chars)
+            long_message = "Error: " + "x" * 600
+            raise ValueError(long_message)
+
+        sanitization_engine.register_dispatcher(
+            dispatcher_id="long-error-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        sanitization_engine.register_route(
+            ModelDispatchRoute(
+                route_id="long-error-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="long-error-handler",
+            )
+        )
+        sanitization_engine.freeze()
+
+        result = await sanitization_engine.dispatch(
+            "dev.user.events.v1", event_envelope
+        )
+
+        assert result.status == EnumDispatchStatus.HANDLER_ERROR
+        assert result.error_message is not None
+        # Error should be truncated
+        assert "[truncated]" in result.error_message
+        # Original message was 607 chars, should be limited
+        # The format is: "Dispatcher 'X' failed: ValueError: <truncated>"
+        # So total could be longer, but the ValueError content is truncated
+        assert len(result.error_message) < 700
+
+    async def test_mongodb_connection_string_is_sanitized(
+        self,
+        sanitization_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that MongoDB connection strings are sanitized."""
+
+        async def failing_handler(
+            envelope: ModelEventEnvelope[Any],
+        ) -> None:
+            raise ConnectionError(
+                "Failed: mongodb://admin:password123@mongo.example.com:27017/db"
+            )
+
+        sanitization_engine.register_dispatcher(
+            dispatcher_id="mongo-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        sanitization_engine.register_route(
+            ModelDispatchRoute(
+                route_id="mongo-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="mongo-handler",
+            )
+        )
+        sanitization_engine.freeze()
+
+        result = await sanitization_engine.dispatch(
+            "dev.user.events.v1", event_envelope
+        )
+
+        assert result.status == EnumDispatchStatus.HANDLER_ERROR
+        assert result.error_message is not None
+        assert "password123" not in result.error_message
+        assert "mongodb://" not in result.error_message
+        assert "[REDACTED" in result.error_message
+
+    async def test_dispatcher_metrics_use_sanitized_error(
+        self,
+        sanitization_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that per-dispatcher metrics also use sanitized error messages."""
+
+        async def failing_handler(
+            envelope: ModelEventEnvelope[Any],
+        ) -> None:
+            raise ConnectionError("redis://user:secret_token@redis.example.com:6379")
+
+        sanitization_engine.register_dispatcher(
+            dispatcher_id="redis-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        sanitization_engine.register_route(
+            ModelDispatchRoute(
+                route_id="redis-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="redis-handler",
+            )
+        )
+        sanitization_engine.freeze()
+
+        await sanitization_engine.dispatch("dev.user.events.v1", event_envelope)
+
+        # Check per-dispatcher metrics
+        dispatcher_metrics = sanitization_engine.get_dispatcher_metrics("redis-handler")
+        assert dispatcher_metrics is not None
+        assert dispatcher_metrics.last_error_message is not None
+        # The error message in metrics should also be sanitized
+        assert "secret_token" not in dispatcher_metrics.last_error_message
+        assert "redis://" not in dispatcher_metrics.last_error_message
+        assert "[REDACTED" in dispatcher_metrics.last_error_message

@@ -776,6 +776,59 @@ if is_open:
 - Never suppress InfraUnavailableError from circuit breaker
 - Never use circuit breaker for non-transient errors
 
+### Dispatcher Resilience Pattern
+
+**Dispatchers own their own resilience** - the `MessageDispatchEngine` does NOT wrap dispatchers with circuit breakers.
+
+**Design Rationale**:
+- **Separation of concerns**: Each dispatcher knows its specific failure modes and recovery strategies
+- **Transport-specific tuning**: Kafka dispatchers need different thresholds than HTTP dispatchers
+- **No hidden behavior**: Engine users see exactly what resilience each dispatcher provides
+- **Composability**: Dispatchers can combine circuit breakers with retry, backoff, or degradation
+
+**Dispatcher Implementation Pattern**:
+```python
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.enums import EnumInfraTransportType
+
+class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
+    """Dispatcher with built-in circuit breaker resilience."""
+
+    def __init__(self, config: DispatcherConfig):
+        self._init_circuit_breaker(
+            threshold=config.failure_threshold,
+            reset_timeout=config.reset_timeout_seconds,
+            service_name=f"dispatcher.{config.target_service}",
+            transport_type=config.transport_type,
+        )
+
+    async def dispatch(self, message: ModelDispatchableMessage) -> ModelDispatchResult:
+        """Dispatch with circuit breaker protection."""
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("dispatch", message.correlation_id)
+
+        try:
+            result = await self._do_dispatch(message)
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+            return result
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("dispatch", message.correlation_id)
+            raise
+```
+
+**What the Engine Does NOT Do**:
+- Does not wrap dispatcher calls with circuit breakers
+- Does not implement retry logic around dispatchers
+- Does not catch and suppress dispatcher errors (except for error aggregation)
+
+**What Dispatchers Should Do**:
+- Implement `MixinAsyncCircuitBreaker` for external service calls
+- Configure thresholds appropriate to their transport type
+- Raise `InfraUnavailableError` when circuit opens (engine will capture this)
+- Optionally combine with retry logic for transient failures
+
 ### Node Introspection Security Considerations
 
 The `MixinNodeIntrospection` mixin uses Python reflection (via the `inspect` module) to automatically discover node capabilities. This provides powerful service discovery but has security implications that developers should understand.

@@ -92,6 +92,26 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #
 # These exemptions are handled via exempted_patterns in validate_infra_patterns(),
 # NOT by modifying global thresholds.
+#
+# Exemption Pattern Examples (explicit format):
+# ---------------------------------------------
+# KafkaEventBus method count:
+#   {"file_pattern": r"kafka_event_bus\.py", "class_pattern": r"Class 'KafkaEventBus'",
+#    "violation_pattern": r"has \d+ methods"}
+#
+# KafkaEventBus __init__ params:
+#   {"file_pattern": r"kafka_event_bus\.py", "method_pattern": r"Function '__init__'",
+#    "violation_pattern": r"has \d+ parameters"}
+#
+# RuntimeHostProcess method count:
+#   {"file_pattern": r"runtime_host_process\.py", "class_pattern": r"Class 'RuntimeHostProcess'",
+#    "violation_pattern": r"has \d+ methods"}
+#
+# RuntimeHostProcess __init__ params:
+#   {"file_pattern": r"runtime_host_process\.py", "method_pattern": r"Function '__init__'",
+#    "violation_pattern": r"has \d+ parameters"}
+#
+# See exempted_patterns list in validate_infra_patterns() for complete definitions.
 # ============================================================================
 
 # Maximum allowed complex union types in infrastructure code.

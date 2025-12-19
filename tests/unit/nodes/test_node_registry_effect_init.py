@@ -422,8 +422,10 @@ class TestNodeRegistryEffectEnsureDependencies:
         the consul_handler is still None (should not happen in normal flow).
         """
         # Create a mock container that returns None for consul
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -472,8 +474,10 @@ class TestNodeRegistryEffectEnsureDependencies:
         This tests the edge case where dependencies_resolved is True but
         the db_handler is still None (should not happen in normal flow).
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -552,8 +556,10 @@ class TestNodeRegistryEffectResolveRequiredHandler:
         Verifies the KeyError/LookupError/ServiceResolutionError path.
         """
         from omnibase_infra.errors import ServiceResolutionError
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -598,8 +604,10 @@ class TestNodeRegistryEffectResolveRequiredHandler:
         Verifies the KeyError/LookupError/ServiceResolutionError path.
         """
         from omnibase_infra.errors import ServiceResolutionError
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -641,8 +649,10 @@ class TestNodeRegistryEffectResolveRequiredHandler:
     ) -> None:
         """Test that ServiceResolutionError is properly wrapped in RuntimeError."""
         from omnibase_infra.errors import ServiceResolutionError
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -680,8 +690,10 @@ class TestNodeRegistryEffectResolveRequiredHandler:
 
         Verifies the ValueError/TypeError path for configuration errors.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -721,8 +733,10 @@ class TestNodeRegistryEffectResolveRequiredHandler:
 
         Verifies the TypeError path for type mismatch errors.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -765,8 +779,10 @@ class TestNodeRegistryEffectResolveRequiredHandler:
 
         Verifies the generic Exception path for unexpected errors.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -845,8 +861,10 @@ class TestNodeRegistryEffectResolveOptionalService:
 
         Configuration errors for optional services should not fail initialization.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -887,8 +905,10 @@ class TestNodeRegistryEffectResolveOptionalService:
         mock_db_handler: AsyncMock,
     ) -> None:
         """Test that TypeError during event bus resolution returns None."""
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
@@ -929,8 +949,10 @@ class TestNodeRegistryEffectResolveOptionalService:
         Graceful degradation: unexpected errors for optional services should
         not prevent initialization.
         """
-        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
+        )
+        from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
 
