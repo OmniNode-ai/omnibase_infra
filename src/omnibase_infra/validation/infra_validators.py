@@ -267,6 +267,93 @@ def validate_infra_patterns(
             "file_pattern": r"model_policy_registration\.py",
             "violation_pattern": r"Field 'policy_id' should use UUID",
         },
+        # ================================================================================
+        # Execution Shape Validator Exemptions (OMN-958)
+        # ================================================================================
+        # EnumHandlerType 'Handler' naming exemption
+        # The term 'Handler' is intentional here - this enum defines ONEX handler types
+        # (Effect, Compute, Reducer, Orchestrator) which are architectural concepts,
+        # not implementation classes that should avoid *Handler naming.
+        {
+            "file_pattern": r"enum_handler_type\.py",
+            "violation_pattern": r"contains anti-pattern 'Handler'",
+        },
+        # HandlerInfo 'Handler' naming exemption
+        # This is a validation data class for describing handler information during
+        # AST analysis - it describes handlers, not implements handler behavior.
+        {
+            "file_pattern": r"execution_shape_validator\.py",
+            "class_pattern": r"Class name 'HandlerInfo'",
+            "violation_pattern": r"contains anti-pattern 'Handler'",
+        },
+        # ExecutionShapeValidator method count exemption
+        # Validator class requires multiple methods for comprehensive AST analysis:
+        # - validate_file, validate_directory (entry points)
+        # - _extract_handlers, _find_handler_type (handler detection)
+        # - _detect_return_type, _analyze_return_statement (return analysis)
+        # - _check_forbidden_calls, _categorize_output (violation detection)
+        # This is a cohesive validator pattern, not class decomposition needed.
+        {
+            "file_pattern": r"execution_shape_validator\.py",
+            "class_pattern": r"Class 'ExecutionShapeValidator'",
+            "violation_pattern": r"has \d+ methods",
+        },
+        # TopicCategoryASTVisitor visit_* methods exemption
+        # These method names follow Python ast.NodeVisitor convention (PEP 8 exception)
+        # visit_ClassDef, visit_Call are standard AST visitor method names that the
+        # ast module dispatches to. Using snake_case like visit_class_def would break
+        # the ast.NodeVisitor contract.
+        {
+            "file_pattern": r"topic_category_validator\.py",
+            "violation_pattern": r"Function name 'visit_ClassDef' should use snake_case",
+        },
+        {
+            "file_pattern": r"topic_category_validator\.py",
+            "violation_pattern": r"Function name 'visit_Call' should use snake_case",
+        },
+        # RuntimeShapeValidator.validate_handler_output parameter count exemption
+        # Validation requires multiple context parameters for proper violation reporting:
+        # handler_type, output, output_category, source_file, line_number, correlation_id
+        # These are distinct required contexts, not candidates for a model wrapper.
+        {
+            "file_pattern": r"runtime_shape_validator\.py",
+            "method_pattern": r"Function 'validate_handler_output'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # RuntimeShapeValidator.validate_and_raise parameter count exemption
+        # Same rationale as validate_handler_output - requires distinct context params
+        {
+            "file_pattern": r"runtime_shape_validator\.py",
+            "method_pattern": r"Function 'validate_and_raise'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # ================================================================================
+        # MixinNodeIntrospection Exemptions (OMN-958)
+        # ================================================================================
+        # MixinNodeIntrospection.initialize_introspection parameter count exemption
+        # This legacy interface is kept for backward compatibility. A new preferred method
+        # initialize_introspection_from_config() was added that takes a ModelIntrospectionConfig
+        # model, reducing the parameter count to 2 (self, config). The legacy method with
+        # 8 parameters is preserved to avoid breaking existing consumers.
+        # See: ModelIntrospectionConfig in model_introspection_config.py
+        {
+            "file_pattern": r"mixin_node_introspection\.py",
+            "method_pattern": r"Function 'initialize_introspection'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # MixinNodeIntrospection method count exemption
+        # Introspection mixin legitimately requires multiple methods for:
+        # - Lifecycle (initialize_introspection, start/stop tasks)
+        # - Capability discovery (get_capabilities, get_endpoints, get_current_state)
+        # - Caching (invalidate_introspection_cache)
+        # - Publishing (publish_introspection)
+        # - Background tasks (heartbeat, registry listener)
+        # This is an established mixin pattern, not a code smell.
+        {
+            "file_pattern": r"mixin_node_introspection\.py",
+            "class_pattern": r"Class 'MixinNodeIntrospection'",
+            "violation_pattern": r"has \d+ methods",
+        },
     ]
 
     # Filter errors using regex-based pattern matching
@@ -405,6 +492,11 @@ def validate_infra_contract_deep(
     Uses ProtocolContractValidator for comprehensive contract checking
     suitable for autonomous code generation.
 
+    Performance Note:
+        This function uses a cached singleton ProtocolContractValidator instance
+        for optimal performance in hot paths. The validator is stateless after
+        initialization, making it safe to reuse across calls.
+
     Args:
         contract_path: Path to the contract YAML file.
         contract_type: Type of contract to validate. Defaults to "effect".
@@ -412,8 +504,25 @@ def validate_infra_contract_deep(
     Returns:
         ModelContractValidationResult with validation status, score, and any errors.
     """
-    validator = ProtocolContractValidator()
-    return validator.validate_contract_file(Path(contract_path), contract_type)
+    return _contract_validator.validate_contract_file(
+        Path(contract_path), contract_type
+    )
+
+
+# ==============================================================================
+# Module-Level Singleton Validators
+# ==============================================================================
+#
+# Performance Optimization: The ProtocolContractValidator is stateless after
+# initialization. Creating new instances on every validation call is wasteful
+# in hot paths. Instead, we use a module-level singleton.
+#
+# Why a singleton is safe here:
+# - The validator has no mutable state after initialization
+# - All validation state is created fresh for each file
+# - No per-validation state is stored in the validator instance
+
+_contract_validator = ProtocolContractValidator()
 
 
 def validate_infra_union_usage(
@@ -426,15 +535,47 @@ def validate_infra_union_usage(
 
     Prevents overly complex union types that complicate infrastructure code.
 
+    Exemptions:
+        ModelNodeCapabilities.config (model_node_capabilities.py) - Documented infrastructure pattern:
+        - The `config` field uses `dict[str, int | str | bool | float]` for nested configuration.
+        - This is a standard JSON-like configuration pattern where config values can be
+          any primitive type (similar to JSON's null, boolean, number, string).
+        - Creating a `ModelConfigValue` wrapper would add unnecessary complexity without benefit.
+        - This pattern is intentional and documented per ONEX infrastructure guidelines.
+
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
         max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (200).
         strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:
-        ModelValidationResult with validation status and any errors.
+        ModelValidationResult with validation status and filtered errors.
+        Documented exemptions are filtered from error list.
     """
-    return validate_union_usage(str(directory), max_unions=max_unions, strict=strict)
+    # Run base validation
+    base_result = validate_union_usage(
+        str(directory), max_unions=max_unions, strict=strict
+    )
+
+    # Filter known infrastructure union exemptions using regex-based matching
+    # Patterns match file names and violation types without hardcoded line numbers
+    exempted_patterns: list[ExemptionPattern] = [
+        # ModelNodeCapabilities.config field exemption
+        # The config field uses dict[str, int | str | bool | float] for nested configuration
+        # values. This is a standard JSON-like config pattern where values can be any
+        # primitive type. Creating a ModelConfigValue wrapper would add unnecessary
+        # complexity without real benefit for this infrastructure domain.
+        {
+            "file_pattern": r"model_node_capabilities\.py",
+            "violation_pattern": r"Union with 4\+ primitive types.*bool.*float.*int.*str",
+        },
+    ]
+
+    # Filter errors using regex-based pattern matching
+    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
+
+    # Create wrapper result (avoid mutation)
+    return _create_filtered_result(base_result, filtered_errors)
 
 
 def validate_infra_circular_imports(
