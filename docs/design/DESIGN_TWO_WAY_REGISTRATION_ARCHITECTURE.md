@@ -1,7 +1,7 @@
 # DESIGN: Event-Driven Orchestration and Reducer Pattern
 ## Canonical Workflow Architecture for ONEX
 
-    Version: 2.1.0
+    Version: 2.1.1
     Status: Design (Canonical, Public)
     Created: 2025-12-18
     Updated: 2025-12-19
@@ -354,6 +354,13 @@
     - Manage time-based behavior via emitted events.
     - Read current state from projections.
 
+    Note on projection reads:
+        - Orchestrators query projections directly from storage (e.g., PostgreSQL).
+        - This read path is synchronous and outside the event-driven message flow.
+        - The data flow diagram (section 2.2) shows the event-driven write path only;
+          the read path from projections back to orchestrators is implicit.
+        - See ticket C0 (OMN-930) for ProtocolProjectionReader interface details.
+
 ### 8.2 Timeout Handling
 
     Timeouts must be durable and restart-safe.
@@ -362,6 +369,19 @@
         - Store deadlines in projections.
         - Periodically query for overdue entities.
         - Emit timeout events after validating current state.
+
+    Periodic scan mechanism:
+        - The runtime emits RuntimeTick events on a configurable cadence
+          (see ticket B6: Runtime Scheduler, OMN-953).
+        - Orchestrators consume RuntimeTick events to trigger timeout evaluation.
+        - This is event-driven, not polling: orchestrators do not run background
+          threads or timers. The runtime scheduler owns the tick emission.
+        - RuntimeTick provides an injected "now" timestamp for consistent
+          time evaluation across all orchestrators.
+
+    See also:
+        - ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md, section B6 (Runtime Scheduler)
+        - ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md, section C2 (Durable Timeout Handling)
 
 ---
 
@@ -428,21 +448,29 @@
 
 ## 12. Testing Requirements
 
+    This section provides high-level test focus areas. For detailed acceptance
+    criteria and success metrics, see ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md,
+    sections G1-G5 (Testing tickets).
+
     Reducers:
         - Event-sequence determinism tests.
         - No command handling.
+        - Acceptance criteria: see G1 (OMN-950) and D3 (OMN-942).
 
     Orchestrators:
         - Event/command to decision-event tests.
         - Durable timeout behavior.
+        - Acceptance criteria: see G2 (OMN-952).
 
     Effects:
         - Intent execution tests.
         - Idempotency and retry behavior.
+        - Acceptance criteria: see G4 (OMN-954).
 
     Integration:
         - End-to-end workflows.
         - Restart and duplicate delivery scenarios.
+        - Acceptance criteria: see G3 (OMN-915) and G5 (OMN-955).
 
 ---
 

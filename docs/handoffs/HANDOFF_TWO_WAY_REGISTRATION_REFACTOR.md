@@ -328,9 +328,17 @@ class NodeRegistryEffect(NodeEffect):
 |------------|--------|-------|
 | `omnibase_core.nodes.NodeOrchestrator` | Available | Base class for orchestrator |
 | `omnibase_core.nodes.NodeEffect` | Available | Base class for effect |
+| `omnibase_core.nodes.NodeReducer` | Available | Base class for reducer |
 | `NodeRuntime` | Available | Handler execution runtime |
 | Intent models in `omnibase_core.models.intents` | Available | `ModelConsulRegisterIntent`, etc. |
 | FSM contract loader | Available | Already in reducer |
+
+### Import Paths
+
+```python
+from omnibase_core.nodes import NodeOrchestrator, NodeEffect, NodeReducer
+from omnibase_core.models.intent import ModelIntent
+```
 
 ### External Services
 
@@ -369,38 +377,45 @@ class NodeRegistryEffect(NodeEffect):
 
 ## 9. Open Questions
 
-### Architecture Decisions Needed
+### Decisions Required Before Phase 1
+
+These decisions block Phase 1 implementation and must be resolved first:
 
 1. **Command Source**: Where do `RegisterNodeCommand`s originate?
    - Option A: API endpoint creates commands
    - Option B: Introspection events auto-generate commands
    - Option C: Both (API for manual, introspection for automatic)
+   - **Blocking**: Needed for orchestrator contract design
 
 2. **Intent Topics**: Topic naming convention for intents?
    - Proposed: `dev.omnibase-infra.intent.<backend>.<operation>.v1`
    - Example: `dev.omnibase-infra.intent.consul.register.v1`
+   - **Blocking**: Needed for reducer integration
 
-3. **Result Events**: How do result events flow back to orchestrator?
+3. **Reducer Invocation**: Does orchestrator call reducer directly or via event?
+   - Direct call is simpler for MVP
+   - Event-based is more decoupled
+   - **Blocking**: Affects orchestrator implementation
+
+### Can Be Deferred
+
+These questions can be answered during implementation:
+
+4. **Result Events**: How do result events flow back to orchestrator?
    - Option A: Orchestrator subscribes to result topics
    - Option B: Effect publishes completion events, separate aggregator handles
 
-4. **Timeout Handling**: Where does timeout tracking live?
+5. **Timeout Handling**: Where does timeout tracking live?
    - Current: Effect node has `_slow_operation_threshold_ms`
    - Proposed: Orchestrator tracks workflow-level timeouts
 
-5. **Existing Tests**: What to do with `tests/unit/nodes/test_node_registry_effect.py`?
+6. **Existing Tests**: What to do with `tests/unit/nodes/test_node_registry_effect.py`?
    - Rewrite for new architecture
    - Many tests are testing wrong patterns
 
-### Technical Decisions
-
-6. **Handler Registration**: When are handlers registered with NodeRuntime?
+7. **Handler Registration**: When are handlers registered with NodeRuntime?
    - Container wiring phase?
    - Effect node initialization?
-
-7. **Reducer Invocation**: Does orchestrator call reducer directly or via event?
-   - Direct call is simpler for MVP
-   - Event-based is more decoupled
 
 ---
 
@@ -435,9 +450,9 @@ class NodeRegistryEffect(NodeEffect):
 
 ## 12. Related Documents
 
-- `/workspace/omnibase_infra3/docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`
-- `/workspace/omnibase_infra3/docs/architecture/CURRENT_NODE_ARCHITECTURE.md`
-- `/workspace/omnibase_infra3/contracts/fsm/dual_registration_reducer_fsm.yaml`
+- `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`
+- `docs/architecture/CURRENT_NODE_ARCHITECTURE.md`
+- `contracts/fsm/dual_registration_reducer_fsm.yaml`
 - `omnibase_core` documentation for NodeRuntime, NodeOrchestrator, NodeEffect
 
 ---

@@ -37,6 +37,15 @@
         - No v1_0_0, v2, etc.
         - Versioning is logical, not structural
 
+        Clarification:
+            - This constraint applies to NEW components created under this plan
+            - Existing v1_0_0 directories (e.g., nodes/<name>/v1_0_0/) are legacy patterns
+              from earlier architectural decisions that will be migrated
+            - Versioning approach: semantic versioning through contract_version field
+              in contract.yaml, not directory hierarchy
+            - See ticket H1 (Legacy Component Refactor Plan) for migration of existing
+              versioned directories to the new pattern
+
     7. Handler vs Node terminology
         - Handlers are execution units within a node
         - Nodes host handlers; handlers do not own lifecycle or messaging
@@ -199,10 +208,23 @@
                 - topic name (onex.<domain>.*) AND
                 - message type registry entry domain
             - Runtime rejects mismatches between topic domain and message type domain
+
+        Domain derivation rule:
+            - Domain is derived from the message type's module path prefix
+            - The first segment of the fully-qualified message type path is the domain
+            - Examples:
+                - registration.events.NodeRegistrationAccepted -> domain = "registration"
+                - discovery.events.NodeDiscovered -> domain = "discovery"
+                - health.commands.CheckNodeHealth -> domain = "health"
+            - Topic domain MUST match message type domain prefix
+            - Validation occurs at:
+                1. Registration time (configuration validation)
+                2. Publish time (runtime validation)
     Acceptance:
         - Startup-time validation that fails fast before consumers start processing messages
         - Missing handler mappings fail fast
         - Runtime rejects mismatches between topic domain and message type domain
+        - Domain derivation from module path prefix is documented and enforced
 
 ### B2. Handler Output Model
     Priority: P0
@@ -487,6 +509,26 @@
             - Runtime invokes projector to persist projections
             - Projector enforces ordering and idempotency
 
+        Projector invocation sequence (relationship to B2):
+            B2 defines the output ordering: projections -> intents -> events.
+            This ticket (F0) clarifies HOW projections are "published":
+
+            Runtime receives handler output
+              -> Runtime invokes Projector.persist(projection) synchronously
+              -> Projector writes to storage with idempotency check
+              -> Runtime then publishes intents to Kafka topic
+              -> Runtime then publishes events to Kafka topic
+
+            Important: "Publish" means different things for different output types:
+                - Projections: "persist to storage" (PostgreSQL, Redis, etc.)
+                  NOT "publish to Kafka topic"
+                - Intents: publish to Kafka intent topic
+                - Events: publish to Kafka event topic
+
+            The synchronous persistence of projections before topic publications
+            ensures read models are consistent before downstream consumers
+            receive the corresponding events.
+
         Ordering rules:
             - Per-entity monotonic application based on (partition, offset) or sequence
             - Reject stale updates
@@ -497,6 +539,8 @@
     Acceptance:
         - Offset-aware idempotent writes implemented
         - Restart-safe projection rebuild process defined
+        - Projector is invoked synchronously by runtime before topic publications
+        - Projector.persist() writes to storage, not Kafka
 
 ### F1. Registration Projection Schema
     Priority: P0
