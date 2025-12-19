@@ -6,7 +6,7 @@ This module provides runtime validation of handler outputs against the
 ONEX 4-node architecture execution shape constraints. It ensures that
 handlers only produce message types that are allowed for their handler type.
 
-Execution Shape Rules:
+Execution Shape Rules (imported from execution_shape_validator):
     - EFFECT: Can return EVENTs and COMMANDs, but not PROJECTIONs
     - COMPUTE: Can return any message type (most permissive)
     - REDUCER: Can return PROJECTIONs only, not EVENTs (deterministic state management)
@@ -63,52 +63,13 @@ from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
 
+# Import canonical execution shape rules from execution_shape_validator (single source of truth)
+from omnibase_infra.validation.execution_shape_validator import (
+    EXECUTION_SHAPE_RULES,
+)
+
 # Type variable for generic function signature preservation
 F = TypeVar("F", bound=Callable[..., object])
-
-
-# ==============================================================================
-# Pre-configured Execution Shape Rules
-# ==============================================================================
-
-EXECUTION_SHAPE_RULES: dict[EnumHandlerType, ModelExecutionShapeRule] = {
-    EnumHandlerType.EFFECT: ModelExecutionShapeRule(
-        handler_type=EnumHandlerType.EFFECT,
-        allowed_return_types=[EnumMessageCategory.EVENT, EnumMessageCategory.COMMAND],
-        forbidden_return_types=[EnumMessageCategory.PROJECTION],
-        can_publish_directly=False,
-        can_access_system_time=True,
-    ),
-    EnumHandlerType.COMPUTE: ModelExecutionShapeRule(
-        handler_type=EnumHandlerType.COMPUTE,
-        allowed_return_types=[
-            EnumMessageCategory.EVENT,
-            EnumMessageCategory.COMMAND,
-            EnumMessageCategory.INTENT,
-            EnumMessageCategory.PROJECTION,
-        ],
-        forbidden_return_types=[],
-        can_publish_directly=False,
-        can_access_system_time=True,
-    ),
-    EnumHandlerType.REDUCER: ModelExecutionShapeRule(
-        handler_type=EnumHandlerType.REDUCER,
-        allowed_return_types=[EnumMessageCategory.PROJECTION],
-        forbidden_return_types=[EnumMessageCategory.EVENT],
-        can_publish_directly=False,
-        can_access_system_time=False,
-    ),
-    EnumHandlerType.ORCHESTRATOR: ModelExecutionShapeRule(
-        handler_type=EnumHandlerType.ORCHESTRATOR,
-        allowed_return_types=[EnumMessageCategory.COMMAND, EnumMessageCategory.EVENT],
-        forbidden_return_types=[
-            EnumMessageCategory.INTENT,
-            EnumMessageCategory.PROJECTION,
-        ],
-        can_publish_directly=False,
-        can_access_system_time=True,
-    ),
-}
 
 
 # ==============================================================================
@@ -172,11 +133,15 @@ class ExecutionShapeViolationError(ModelOnexError):
             violation: The execution shape violation result with full context.
         """
         self.violation = violation
+        # handler_type may be None if the handler type couldn't be determined
+        handler_type_value = (
+            violation.handler_type.value if violation.handler_type is not None else None
+        )
         super().__init__(
             message=violation.message,
             error_code=EnumCoreErrorCode.VALIDATION_FAILED,
             violation_type=violation.violation_type.value,
-            handler_type=violation.handler_type.value,
+            handler_type=handler_type_value,
             severity=violation.severity,
             file_path=violation.file_path,
             line_number=violation.line_number,
@@ -371,8 +336,8 @@ class RuntimeShapeValidator:
         violation_key = (handler_type, output_category)
         violation_type = _VIOLATION_TYPE_MAP.get(
             violation_key,
-            # Default to a generic return type violation based on handler
-            EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH,
+            # Fallback to generic forbidden return type for unmapped violations
+            EnumExecutionShapeViolation.FORBIDDEN_RETURN_TYPE,
         )
 
         # Build descriptive message

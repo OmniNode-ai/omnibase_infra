@@ -28,7 +28,9 @@ class ModelExecutionShapeViolationResult(BaseModel):
 
     Attributes:
         violation_type: The specific violation detected.
-        handler_type: The handler type where the violation occurred.
+        handler_type: The handler type where the violation occurred, or None
+            if the handler type cannot be determined (e.g., runtime validation
+            without handler context, or file-level errors like syntax errors).
         file_path: Absolute path to the source file containing the violation.
         line_number: Line number where the violation was detected.
         message: Human-readable description of the violation.
@@ -53,9 +55,14 @@ class ModelExecutionShapeViolationResult(BaseModel):
         ...,
         description="The specific execution shape violation detected",
     )
-    handler_type: EnumHandlerType = Field(
-        ...,
-        description="The handler type where the violation occurred",
+    handler_type: EnumHandlerType | None = Field(
+        default=None,
+        description=(
+            "The handler type where the violation occurred, or None if unknown. "
+            "Handler type may be None for runtime validation without handler context, "
+            "file-level errors (syntax errors, file not found), or when the handler "
+            "type cannot be inferred from the code structure."
+        ),
     )
     file_path: str = Field(
         ...,

@@ -40,9 +40,17 @@ class ModelExecutionShapeRule(BaseModel):
         ... )
 
     Note:
-        The allowed and forbidden lists may overlap with the universe of
-        message categories. Categories not in either list are implicitly
-        allowed. Categories in both lists result in forbidden behavior.
+        The validation logic uses both `allowed_return_types` and
+        `forbidden_return_types`:
+
+        - Categories in `forbidden_return_types` are always rejected.
+        - If `allowed_return_types` is non-empty, categories must be in
+          that list to be allowed (allow-list mode).
+        - If `allowed_return_types` is empty, all non-forbidden categories
+          are implicitly allowed (permissive mode).
+
+        This enables strict validation for most handlers while allowing
+        COMPUTE handlers to remain fully permissive.
     """
 
     handler_type: EnumHandlerType = Field(
@@ -75,17 +83,38 @@ class ModelExecutionShapeRule(BaseModel):
     def is_return_type_allowed(self, category: EnumMessageCategory) -> bool:
         """Check if a message category is allowed as a return type.
 
+        The validation logic applies the following rules in order:
+
+        1. If the category is in `forbidden_return_types`, it is always forbidden.
+        2. If `allowed_return_types` is non-empty, the category must be in that list
+           to be allowed (explicit allow-list mode).
+        3. If `allowed_return_types` is empty, all non-forbidden categories are
+           implicitly allowed (permissive mode for COMPUTE handlers).
+
         Args:
             category: The message category to check.
 
         Returns:
             True if the category is allowed, False if forbidden.
-            Categories in the forbidden list are always forbidden.
-            Categories in the allowed list (and not forbidden) are allowed.
-            Categories in neither list are implicitly allowed.
+
+        Example:
+            >>> # REDUCER: allowed=[PROJECTION], forbidden=[EVENT]
+            >>> rule.is_return_type_allowed(EnumMessageCategory.PROJECTION)  # True
+            >>> rule.is_return_type_allowed(EnumMessageCategory.EVENT)  # False
+            >>> rule.is_return_type_allowed(EnumMessageCategory.COMMAND)  # False (not in allowed)
+            >>>
+            >>> # COMPUTE: allowed=[all 4 categories], forbidden=[]
+            >>> rule.is_return_type_allowed(EnumMessageCategory.EVENT)  # True
         """
+        # Rule 1: Forbidden categories are always rejected
         if category in self.forbidden_return_types:
             return False
+
+        # Rule 2: If allowed list is specified, category must be in it
+        if self.allowed_return_types and category not in self.allowed_return_types:
+            return False
+
+        # Rule 3: All other categories are allowed
         return True
 
 

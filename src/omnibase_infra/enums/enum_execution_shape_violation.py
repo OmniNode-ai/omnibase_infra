@@ -24,6 +24,8 @@ class EnumExecutionShapeViolation(str, Enum):
     the 4-node architecture rules.
 
     Return Type Violations:
+        FORBIDDEN_RETURN_TYPE: Generic violation for handler returning forbidden type.
+            Used as fallback when no specific violation type is mapped.
         REDUCER_RETURNS_EVENTS: Reducer handlers cannot emit events.
             Reducers manage state; event emission is an effect operation.
         ORCHESTRATOR_RETURNS_INTENTS: Orchestrators cannot emit intents.
@@ -45,6 +47,7 @@ class EnumExecutionShapeViolation(str, Enum):
     """
 
     # Return type violations
+    FORBIDDEN_RETURN_TYPE = "forbidden_return_type"
     REDUCER_RETURNS_EVENTS = "reducer_returns_events"
     ORCHESTRATOR_RETURNS_INTENTS = "orchestrator_returns_intents"
     ORCHESTRATOR_RETURNS_PROJECTIONS = "orchestrator_returns_projections"

@@ -28,6 +28,7 @@ from __future__ import annotations
 import ast
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from omnibase_infra.enums.enum_execution_shape_violation import (
@@ -148,6 +149,7 @@ EXECUTION_SHAPE_RULES: dict[EnumHandlerType, ModelExecutionShapeRule] = {
 }
 
 
+@dataclass
 class HandlerInfo:
     """Information about a detected handler in source code.
 
@@ -159,28 +161,11 @@ class HandlerInfo:
         file_path: The absolute path to the source file.
     """
 
-    def __init__(
-        self,
-        name: str,
-        handler_type: EnumHandlerType,
-        node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
-        line_number: int,
-        file_path: str,
-    ) -> None:
-        """Initialize HandlerInfo.
-
-        Args:
-            name: The handler name.
-            handler_type: The detected handler type.
-            node: The AST node.
-            line_number: Line number in source.
-            file_path: Path to source file.
-        """
-        self.name = name
-        self.handler_type = handler_type
-        self.node = node
-        self.line_number = line_number
-        self.file_path = file_path
+    name: str
+    handler_type: EnumHandlerType
+    node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+    line_number: int
+    file_path: str
 
 
 class ExecutionShapeValidator:
@@ -204,13 +189,8 @@ class ExecutionShapeValidator:
         ...     print(v.format_for_ci())
     """
 
-    def __init__(self, strict: bool = False) -> None:
-        """Initialize the validator.
-
-        Args:
-            strict: If True, treat warnings as errors.
-        """
-        self.strict = strict
+    def __init__(self) -> None:
+        """Initialize the validator."""
         self._rules = EXECUTION_SHAPE_RULES
 
     def validate_file(self, file_path: Path) -> list[ModelExecutionShapeViolationResult]:
@@ -768,15 +748,15 @@ class ExecutionShapeValidator:
 
 def validate_execution_shapes(
     directory: Path,
-    strict: bool = False,
 ) -> list[ModelExecutionShapeViolationResult]:
     """Validate all Python files in directory for execution shape violations.
 
     This is the main entry point for batch validation of handler files.
 
+    Uses a cached singleton validator for performance in hot paths.
+
     Args:
         directory: Path to the directory containing handler files.
-        strict: If True, treat warnings as errors.
 
     Returns:
         List of all detected violations across all files.
@@ -786,8 +766,9 @@ def validate_execution_shapes(
         >>> for v in violations:
         ...     print(f"{v.file_path}:{v.line_number}: {v.message}")
     """
-    validator = ExecutionShapeValidator(strict=strict)
-    return validator.validate_directory(directory)
+    # Use cached singleton validator for performance
+    # Singleton is safe because ExecutionShapeValidator is stateless after init
+    return _validator.validate_directory(directory)
 
 
 def validate_execution_shapes_ci(
@@ -814,7 +795,7 @@ def validate_execution_shapes_ci(
         ...         print(v.format_for_ci())
         ...     sys.exit(1)
     """
-    violations = validate_execution_shapes(directory, strict=True)
+    violations = validate_execution_shapes(directory)
 
     # Check if any blocking violations exist
     has_blocking = any(v.is_blocking() for v in violations)
@@ -829,6 +810,24 @@ def get_execution_shape_rules() -> dict[EnumHandlerType, ModelExecutionShapeRule
         Dictionary mapping handler types to their execution shape rules.
     """
     return EXECUTION_SHAPE_RULES.copy()
+
+
+# ==============================================================================
+# Module-Level Singleton Validator
+# ==============================================================================
+#
+# Performance Optimization: The ExecutionShapeValidator is stateless after
+# initialization (only stores rules dictionary). Creating new instances on
+# every validation call is wasteful in hot paths. Instead, we use a
+# module-level singleton.
+#
+# Why a singleton is safe here:
+# - The validator's rules dictionary is immutable after initialization
+# - No per-validation state is stored in the validator instance
+# - AST parsing happens per-file (no shared mutable state)
+# - The HandlerInfo and violations are created fresh for each file
+
+_validator = ExecutionShapeValidator()
 
 
 __all__ = [

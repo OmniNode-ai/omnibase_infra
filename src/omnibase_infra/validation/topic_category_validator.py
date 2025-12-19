@@ -32,9 +32,9 @@ Usage:
 from __future__ import annotations
 
 import ast
+import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
@@ -45,9 +45,7 @@ from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
 
-if TYPE_CHECKING:
-    from typing import Literal
-
+logger = logging.getLogger(__name__)
 
 # Topic naming patterns for each message category
 # Matches patterns like: order.events, user-service.commands, checkout.intents
@@ -177,7 +175,7 @@ class TopicCategoryValidator:
         expected_suffix = self.suffixes.get(message_category, "unknown")
         return ModelExecutionShapeViolationResult(
             violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-            handler_type=EnumHandlerType.EFFECT,  # Default, may be refined by caller
+            handler_type=None,  # Unknown at runtime validation without handler context
             file_path="<runtime>",  # Runtime validation has no file context
             line_number=1,
             message=(
@@ -453,12 +451,20 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
             topic_name = first_arg.value
         elif isinstance(first_arg, ast.JoinedStr):
-            # f-string - try to extract static parts
-            parts = []
-            for value in first_arg.values:
-                if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    parts.append(value.value)
-            topic_name = "".join(parts) if parts else None
+            # f-string handling - extract and validate static parts carefully.
+            #
+            # LIMITATION: f-strings with interpolated values (e.g., f"{domain}.events")
+            # only yield partial static content. We must avoid false positives/negatives
+            # from incomplete topic names like ".events" or "order." that could falsely
+            # match or miss patterns.
+            #
+            # Strategy:
+            # 1. Extract all static parts from the f-string
+            # 2. Check if result forms a COMPLETE valid topic pattern (domain.suffix)
+            # 3. If we only get a partial fragment (starts with "." or ends with "."),
+            #    skip validation for this f-string - we can't reliably validate it
+            # 4. If no static parts exist, skip validation entirely
+            topic_name = self._extract_topic_from_fstring(first_arg)
 
         if topic_name is None:
             return
@@ -468,10 +474,11 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
 
         if inferred_category is None:
             # Topic doesn't follow naming convention - add warning
+            # Use current_handler_type if available (from class context), otherwise None
             self.violations.append(
                 ModelExecutionShapeViolationResult(
                     violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                    handler_type=self.current_handler_type or EnumHandlerType.EFFECT,
+                    handler_type=self.current_handler_type,  # May be None if outside handler class
                     file_path=str(self.file_path.absolute()),
                     line_number=node.lineno,
                     message=(
@@ -538,10 +545,11 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         message_hint = self._infer_message_category_from_expr(second_arg)
 
         if message_hint is not None and message_hint != topic_category:
+            # Use current_handler_type if available (from class context), otherwise None
             self.violations.append(
                 ModelExecutionShapeViolationResult(
                     violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                    handler_type=self.current_handler_type or EnumHandlerType.EFFECT,
+                    handler_type=self.current_handler_type,  # May be None if outside handler class
                     file_path=str(self.file_path.absolute()),
                     line_number=node.lineno,
                     message=(
@@ -604,6 +612,84 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
 
         return None
 
+    def _extract_topic_from_fstring(
+        self,
+        node: ast.JoinedStr,
+    ) -> str | None:
+        """Safely extract a topic name from an f-string AST node.
+
+        f-strings with interpolated values (e.g., f"{domain}.events") only yield
+        partial static content when analyzed statically. This method extracts
+        the static parts and validates that the result forms a complete, valid
+        topic pattern before returning it for validation.
+
+        LIMITATION: This method intentionally skips validation for f-strings
+        that produce incomplete topic fragments. This is a conservative approach
+        to avoid:
+        - False positives: ".events" falsely matching as a valid topic
+        - False negatives: "order." being flagged as invalid when the full
+          topic might be "order.events"
+
+        Args:
+            node: The AST JoinedStr node representing an f-string.
+
+        Returns:
+            The extracted topic name if it forms a complete valid pattern,
+            or None if the f-string cannot be reliably validated.
+
+        Examples:
+            - f"order.events" -> "order.events" (fully static, valid)
+            - f"{domain}.events" -> None (partial: ".events" is incomplete)
+            - f"order.{suffix}" -> None (partial: "order." is incomplete)
+            - f"{prefix}.{suffix}" -> None (no static parts)
+            - f"{get_topic()}" -> None (no static parts)
+        """
+        # Extract all static string parts from the f-string
+        static_parts: list[str] = []
+        has_interpolation = False
+
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                static_parts.append(value.value)
+            else:
+                # This is a FormattedValue (interpolated expression)
+                has_interpolation = True
+
+        # If no static parts, we can't validate anything
+        if not static_parts:
+            return None
+
+        # Join the static parts to see what we have
+        joined = "".join(static_parts)
+
+        # If there are interpolations, check if the result is a valid partial
+        if has_interpolation:
+            # Skip validation for incomplete fragments that could cause
+            # false positives or negatives:
+            # - Starts with "." (e.g., ".events" from f"{domain}.events")
+            # - Ends with "." (e.g., "order." from f"order.{suffix}")
+            # - Contains only a suffix without domain (e.g., ".events", ".commands")
+            if joined.startswith(".") or joined.endswith("."):
+                return None
+
+            # Check if the joined result matches a complete topic pattern.
+            # Only validate if we have what looks like a complete topic name.
+            # A complete topic should match: domain.suffix (e.g., "order.events")
+            for pattern in self.validator.patterns.values():
+                if pattern.match(joined):
+                    # This partial f-string happens to form a valid complete topic
+                    # This is rare but possible (e.g., f"{'order'}.events" with
+                    # a constant expression that evaluates to a string literal)
+                    return joined
+
+            # The static parts don't form a valid complete topic pattern.
+            # Skip validation to avoid false positives/negatives.
+            return None
+
+        # No interpolations - this is a fully static f-string (unusual but valid)
+        # For example: f"order.events" (no interpolated values)
+        return joined if joined else None
+
 
 def validate_topic_categories_in_file(
     file_path: Path,
@@ -617,6 +703,10 @@ def validate_topic_categories_in_file(
 
     This function is designed for CI integration to catch topic
     mismatches before runtime.
+
+    Uses a cached singleton TopicCategoryValidator for performance in hot paths.
+    The TopicCategoryASTVisitor is still created per-file since it stores
+    file-specific state (violations, current handler context).
 
     Args:
         file_path: Path to the Python file to analyze.
@@ -633,16 +723,11 @@ def validate_topic_categories_in_file(
         ...     print(v.format_for_ci())
     """
     if not file_path.exists():
-        return [
-            ModelExecutionShapeViolationResult(
-                violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                handler_type=EnumHandlerType.EFFECT,
-                file_path=str(file_path.absolute()),
-                line_number=1,
-                message=f"File not found: {file_path}",
-                severity="error",
-            )
-        ]
+        # File not existing is not a topic/category violation - it's a file system issue.
+        # Log a warning and return empty list since this function analyzes code content,
+        # not file existence. Callers should validate file existence if needed.
+        logger.warning("Cannot validate topic categories: file not found: %s", file_path)
+        return []
 
     if file_path.suffix != ".py":
         return []  # Skip non-Python files
@@ -651,10 +736,12 @@ def validate_topic_categories_in_file(
         source = file_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(file_path))
     except SyntaxError as e:
+        # Syntax error is a file-level issue, not a handler-specific violation.
+        # handler_type is None because we can't analyze the code structure.
         return [
             ModelExecutionShapeViolationResult(
                 violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
-                handler_type=EnumHandlerType.EFFECT,
+                handler_type=None,  # Cannot determine handler type from unparseable file
                 file_path=str(file_path.absolute()),
                 line_number=e.lineno or 1,
                 message=f"Syntax error in file: {e.msg}",
@@ -662,8 +749,9 @@ def validate_topic_categories_in_file(
             )
         ]
 
-    validator = TopicCategoryValidator()
-    visitor = TopicCategoryASTVisitor(file_path, validator)
+    # Use cached singleton validator for performance
+    # TopicCategoryASTVisitor needs fresh instance per-file (stores file state)
+    visitor = TopicCategoryASTVisitor(file_path, _default_validator)
     visitor.visit(tree)
 
     return visitor.violations
@@ -681,6 +769,8 @@ def validate_message_on_topic(
 
     This function should be called at message processing boundaries
     to ensure architectural consistency.
+
+    Uses a cached singleton TopicCategoryValidator for performance in hot paths.
 
     Args:
         message: The message object (used for context in error messages).
@@ -709,8 +799,8 @@ def validate_message_on_topic(
         ... )
         >>> assert result is not None  # Violation
     """
-    validator = TopicCategoryValidator()
-    result = validator.validate_message_topic(message_category, topic)
+    # Use cached singleton validator for performance in hot paths
+    result = _default_validator.validate_message_topic(message_category, topic)
 
     if result is not None:
         # Enhance the message with message type info if available
@@ -769,6 +859,26 @@ def validate_topic_categories_in_directory(
             violations.extend(validate_topic_categories_in_file(py_file))
 
     return violations
+
+
+# ==============================================================================
+# Module-Level Singleton Validator
+# ==============================================================================
+#
+# Performance Optimization: The TopicCategoryValidator is stateless after
+# initialization (only stores patterns, suffixes, and handler_categories which
+# are all module-level constants). Creating new instances on every validation
+# call is wasteful in hot paths. Instead, we use a module-level singleton.
+#
+# Why a singleton is safe here:
+# - The validator only stores references to module-level immutable constants
+# - No per-validation state is stored in the validator instance
+# - All mutable state is in TopicCategoryASTVisitor (created per-file)
+#
+# Note: TopicCategoryASTVisitor still requires per-file instantiation because
+# it stores file-specific state (violations list, current_handler_type, etc.).
+
+_default_validator = TopicCategoryValidator()
 
 
 __all__ = [

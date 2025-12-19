@@ -388,10 +388,14 @@ class TestValidateTopicCategoriesInFile:
     """Test validate_topic_categories_in_file function."""
 
     def test_file_not_found(self) -> None:
-        """Verify error handling for non-existent files."""
+        """Verify non-existent files return empty violations list.
+
+        File existence is not a topic/category concern - this function
+        validates code content, not file system state. Missing files
+        are logged as warnings but don't produce violations.
+        """
         violations = validate_topic_categories_in_file(Path("/nonexistent/file.py"))
-        assert len(violations) == 1
-        assert "not found" in violations[0].message.lower()
+        assert len(violations) == 0
 
     def test_non_python_file_skipped(self) -> None:
         """Verify non-Python files are skipped."""
@@ -528,6 +532,185 @@ class OrderReducer:
             )
         # Should not find violations in subdirectory
         assert len(violations) == 0
+
+
+class TestFStringTopicExtraction:
+    """Test f-string topic extraction in AST analysis.
+
+    These tests verify that the _extract_topic_from_fstring method correctly
+    handles various f-string patterns to avoid false positives and negatives
+    when extracting topic names for validation.
+    """
+
+    def test_fstring_with_interpolated_domain_skipped(self) -> None:
+        """Verify f-strings like f"{domain}.events" are skipped.
+
+        When the domain is interpolated, we can only extract ".events" which
+        is an incomplete fragment. This should be skipped to avoid false positives.
+        """
+        source = '''
+class OrderEffect:
+    def setup(self, consumer, domain):
+        consumer.subscribe(f"{domain}.events")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - f-string with interpolated domain is skipped
+        assert len(visitor.violations) == 0
+
+    def test_fstring_with_interpolated_suffix_skipped(self) -> None:
+        """Verify f-strings like f"order.{suffix}" are skipped.
+
+        When the suffix is interpolated, we can only extract "order." which
+        is an incomplete fragment. This should be skipped to avoid false negatives.
+        """
+        source = '''
+class OrderEffect:
+    def setup(self, consumer, suffix):
+        consumer.subscribe(f"order.{suffix}")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - f-string with interpolated suffix is skipped
+        assert len(visitor.violations) == 0
+
+    def test_fstring_fully_interpolated_skipped(self) -> None:
+        """Verify f-strings like f"{prefix}.{suffix}" are skipped.
+
+        When both parts are interpolated, we have no static content to validate.
+        """
+        source = '''
+class OrderEffect:
+    def setup(self, consumer, prefix, suffix):
+        consumer.subscribe(f"{prefix}.{suffix}")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - fully interpolated f-string is skipped
+        assert len(visitor.violations) == 0
+
+    def test_fstring_single_expression_skipped(self) -> None:
+        """Verify f-strings like f"{get_topic()}" are skipped.
+
+        When the entire topic is a single expression, there's nothing to validate.
+        """
+        source = '''
+class OrderEffect:
+    def setup(self, consumer):
+        consumer.subscribe(f"{self.get_topic()}")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - single expression f-string is skipped
+        assert len(visitor.violations) == 0
+
+    def test_fstring_static_content_validated(self) -> None:
+        """Verify fully static f-strings are validated.
+
+        f-strings without interpolation (unusual but valid) should be validated
+        just like regular string literals.
+        """
+        source = '''
+class OrderReducer:
+    def setup(self, consumer):
+        # Unusual but valid: f-string with no interpolation
+        consumer.subscribe(f"order.commands")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should detect the violation - reducer shouldn't subscribe to commands
+        assert len(visitor.violations) == 1
+        assert (
+            visitor.violations[0].violation_type
+            == EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH
+        )
+
+    def test_fstring_valid_static_no_violation(self) -> None:
+        """Verify fully static f-strings with valid topics pass."""
+        source = '''
+class OrderReducer:
+    def setup(self, consumer):
+        consumer.subscribe(f"order.events")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - valid static f-string
+        assert len(visitor.violations) == 0
+
+    def test_fstring_partial_matches_complete_pattern_validated(self) -> None:
+        """Verify f-strings where static parts form complete pattern are validated.
+
+        This is a rare edge case where the static parts of an f-string happen
+        to form a complete valid topic pattern.
+        """
+        # This tests a rare case where static parts form a complete pattern
+        # For example, an f-string with an empty string expression wouldn't
+        # affect the final topic name
+        source = '''
+class OrderReducer:
+    def setup(self, consumer):
+        # Static parts form complete pattern (empty expression doesn't affect result)
+        consumer.subscribe(f"order.events{''}")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # The static part "order.events" is complete and valid for reducer
+        # Note: has_interpolation is True, but joined result matches pattern
+        assert len(visitor.violations) == 0
+
+    def test_fstring_no_false_positive_from_suffix_only(self) -> None:
+        """Verify ".events" from f"{domain}.events" doesn't cause false positives.
+
+        Previously, extracting only static parts could yield ".events" which
+        might be incorrectly processed. This test ensures we skip such cases.
+        """
+        source = '''
+class OrderReducer:
+    def setup(self, consumer, domain):
+        # This should NOT generate a warning about non-conforming topic name
+        # because we can't reliably determine the full topic name
+        consumer.subscribe(f"{domain}.events")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - incomplete f-string is skipped entirely
+        assert len(visitor.violations) == 0
+
+    def test_fstring_no_false_negative_from_prefix_only(self) -> None:
+        """Verify "order." from f"order.{suffix}" doesn't cause false negatives.
+
+        Previously, extracting only static parts could yield "order." which
+        might be incorrectly flagged as invalid. This test ensures we skip such cases.
+        """
+        source = '''
+class OrderReducer:
+    def setup(self, consumer, suffix):
+        # This should NOT generate a warning about non-conforming topic name
+        # because we can't reliably determine the full topic name
+        consumer.subscribe(f"order.{suffix}")
+'''
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - incomplete f-string is skipped entirely
+        assert len(visitor.violations) == 0
 
 
 class TestIntegration:

@@ -511,7 +511,8 @@ class TestRoutingCoverageValidator:
         assert len(violations) > 0
         violation = violations[0]
         assert violation.violation_type == EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH
-        assert violation.handler_type == EnumHandlerType.ORCHESTRATOR
+        # handler_type is None because routing coverage is not handler-specific
+        assert violation.handler_type is None
         assert violation.severity == "error"
         assert "not registered" in violation.message
 
