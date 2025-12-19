@@ -2,7 +2,7 @@
 
     Status: Canonical
     Audience: Internal + Public
-    Document Version: 1.0.0
+    Document Version: 1.1.0
     Purpose:
         This ticket set defines the authoritative execution, orchestration, reducer, handler,
         projector, and effect model for ONEX. All future workflows MUST conform.
@@ -167,6 +167,7 @@
 
         Canonical envelope principle:
             - ONE ModelEnvelope applies to ALL message categories (commands, events, intents)
+            - ONE ModelEnvelope applies to ALL architectural planes (no plane-specific envelopes)
             - The envelope is transport-agnostic and plane-agnostic
             - Payload differs by message type; envelope structure is invariant
 
@@ -175,6 +176,10 @@
             - Decision Plane: Uses ModelEnvelope for orchestrator context propagation
             - State Plane: Uses ModelEnvelope for reducer/projector message handling
             - Execution Plane: Uses ModelEnvelope for effect intent processing
+
+            IMPORTANT: "Single envelope per architectural plane" means the SAME ModelEnvelope
+            structure is used in each plane - NOT that each plane has its own envelope type.
+            The phrase describes consistent usage across planes, not envelope specialization.
 
             There is NO separate envelope type per plane. The same ModelEnvelope
             structure is used everywhere; only the payload contents differ.
@@ -226,6 +231,7 @@
         - Envelope structure is identical for commands, events, and intents
         - Per-plane usage documented and enforced by runtime
         - Contract schema validation tests verify envelope field requirements
+          (See G1-G4 for test structure; envelope validation is part of reducer and effect tests)
         - Document envelope usage rules and migration path for dict-based envelopes
     Implementation Note:
         - Implementation sequencing: A2 and A2a can be built in parallel after A1
@@ -656,6 +662,11 @@
         Circuit Breaker Requirements (see CLAUDE.md "Circuit Breaker Pattern" section):
             - Effect handlers use MixinAsyncCircuitBreaker for fault tolerance
             - Thread safety verified: all circuit breaker calls hold _circuit_breaker_lock
+            - Thread safety verification test required:
+                - Test must verify _check_circuit_breaker is only called while holding lock
+                - Test must verify _record_circuit_failure is only called while holding lock
+                - Test must verify _reset_circuit_breaker is only called while holding lock
+                - Test must verify concurrent access does not cause race conditions
             - Circuit breaker state (CLOSED/OPEN/HALF_OPEN) is monitored and logged
             - Configuration: threshold and reset_timeout tuned per external service
             - InfraUnavailableError raised when circuit is OPEN (fail-fast behavior)
@@ -956,15 +967,18 @@
             Then output.projections list is ordered before output.intents
             And runtime processes projections first per B2 ordering contract
 
-    Suggested Test Directory Structure:
+    Test Directory Structure (per project conventions):
         tests/
-        └── domain/
+        └── unit/
             └── registration/
                 └── reducer/
                     ├── __init__.py
                     ├── test_registration_reducer_determinism.py
                     ├── test_registration_reducer_ordering.py
                     └── test_registration_reducer_fsm.py
+
+        Note: Project uses tests/unit/ for unit tests and tests/integration/ for
+        integration tests. Do not use tests/domain/ as a top-level directory.
 
 ### G2. Orchestrator Tests
     Priority: P0
@@ -989,15 +1003,17 @@
             And datetime.now() is never called (verified via mock.patch)
             And context.now is the only time source used
 
-    Suggested Test Directory Structure:
+    Test Directory Structure (per project conventions):
         tests/
-        └── domain/
+        └── unit/
             └── registration/
                 └── orchestrator/
                     ├── __init__.py
                     ├── test_registration_orchestrator_events.py
                     ├── test_registration_orchestrator_time.py
                     └── test_registration_orchestrator_timeout.py
+
+        Note: Orchestrator tests are unit tests (pure, no I/O) and belong in tests/unit/.
 
 ### G3. End-to-End Integration Tests
     Priority: P0
@@ -1026,7 +1042,7 @@
             Then orchestrator reads deadline from projection
             And emits NodeRegistrationAckTimedOut if deadline passed
 
-    Suggested Test Directory Structure:
+    Test Directory Structure (per project conventions):
         tests/
         └── integration/
             └── registration/
@@ -1034,6 +1050,10 @@
                 ├── test_registration_e2e_happy_path.py
                 ├── test_registration_e2e_restart.py
                 └── test_registration_e2e_duplicate_delivery.py
+
+        Note: E2E tests involve multiple components and external services, so they
+        belong in tests/integration/. These tests require Docker containers for
+        Kafka, Consul, and PostgreSQL.
 
 ### G4. Effect Idempotency and Retry Tests
     Priority: P0
@@ -1083,9 +1103,9 @@
             Then error context includes correlation_id="corr-123"
             And error message is sanitized (no secrets/credentials)
 
-    Suggested Test Directory Structure:
+    Test Directory Structure (per project conventions):
         tests/
-        └── domain/
+        └── unit/
             └── registration/
                 └── effect/
                     ├── __init__.py
@@ -1093,6 +1113,10 @@
                     ├── test_effect_circuit_breaker.py
                     ├── test_effect_retry_backoff.py
                     └── test_effect_error_handling.py
+
+        Note: Effect unit tests (with mocked external services) belong in tests/unit/.
+        Integration tests that require actual Kafka/Consul/PostgreSQL belong in
+        tests/integration/registration/.
 
 ### G5. Chaos and Replay Tests
     Priority: P2
@@ -1112,6 +1136,10 @@
 
 ### H1. Legacy Component Refactor Plan
     Priority: P1
+
+    > **BLOCKER**: This ticket is blocked by OMN-959 (omnibase_core 0.5.x adoption).
+    > H1 CANNOT begin until OMN-959 is complete.
+
     Dependencies:
         - OMN-959 (omnibase_core 0.5.x adoption) - BLOCKING DEPENDENCY
           This ticket CANNOT begin until OMN-959 is complete. The new node base
@@ -1177,15 +1205,34 @@
     Description:
         Validate that legacy v1_0_0 migration is complete and safe before proceeding.
 
-        Validation checklist:
-            - All legacy imports updated to flat structure
-            - No import errors in CI
-            - Integration tests pass with new structure
-            - Documentation updated with new paths
+        Validation checklist (pre-migration):
+            - [ ] Complete inventory of all v1_0_0 directories documented
+            - [ ] Dependency analysis complete (what imports from each v1_0_0 path)
+            - [ ] Target flat structure defined for each component
+            - [ ] Rollback plan documented and tested
+
+        Validation checklist (during migration):
+            - [ ] All legacy imports updated to flat structure
+            - [ ] Deprecation warnings added for legacy paths
+            - [ ] Feature flag ONEX_LEGACY_IMPORT_PATHS_ENABLED tested in both states
+            - [ ] No import errors in CI with new paths
+
+        Validation checklist (post-migration):
+            - [ ] Integration tests pass with new structure
+            - [ ] Documentation updated with new paths
+            - [ ] Performance baseline comparison complete (no regression)
+            - [ ] Canary deployment stable for 24h in staging
+            - [ ] Legacy paths can be disabled without errors
+
+        DLQ verification (cross-reference F0, E3):
+            - [ ] DLQ topic exists and is configured
+            - [ ] Failed projection persistence routes to DLQ correctly
+            - [ ] DLQ messages include required context (original event, error, correlation_id)
     Acceptance:
         - CI green with migrated paths
         - No runtime import errors
-        - No deprecated path warnings in logs
+        - No deprecated path warnings in logs (after migration complete)
+        - Performance metrics within baseline thresholds (see H1 Pre-Refactor Requirements)
 
 ### H2. Migration Checklist
     Priority: P1
@@ -1413,7 +1460,8 @@ once all blocking dependencies from previous waves are complete.
 
     Dependency visualization tips:
         - Critical path highlighted: A1 -> A2 -> ... -> H2
-        - Blocking dependency (OMN-959) shown in red
+        - Blocking dependency (OMN-959) shown in red via `style OMN959 fill:#ff6b6b,stroke:#333,color:#fff`
+          This visually distinguishes it as a hard blocker that gates Wave 6 execution
         - Parallel execution opportunities visible at same vertical level
         - Cross-section dependencies shown with dashed lines where applicable
         - Use `graph TD` for top-down flow; `graph LR` for left-right if preferred

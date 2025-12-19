@@ -33,7 +33,7 @@
 > **Action Required**: Verify 0.5.x availability BEFORE starting Phase 1 (see Phase 0 Task 0 gate).
 >
 > See also:
-> - `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.0.0)
+> - `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.1.0)
 > - `/workspace/omnibase_infra3/docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2)
 
 ---
@@ -620,6 +620,11 @@ async def handle(
 | `NodeDualRegistrationReducer` | Intent emission, FSM transitions, validation |
 | Intent handlers | Intent parsing, handler invocation |
 
+**Acceptance Criteria:**
+- Orchestrator tests verify command validation without mocking I/O
+- Reducer tests verify deterministic intent emission for identical inputs
+- Intent handler tests verify correct payload parsing and handler dispatch
+
 ### 8.2 Integration Tests
 
 | Test | Description |
@@ -629,11 +634,22 @@ async def handle(
 | Circuit breaker | Effect-level circuit breaker behavior |
 | Idempotency | Re-registration produces consistent state |
 
+**Acceptance Criteria:**
+- Full registration flow completes with node visible in both Consul and PostgreSQL
+- Partial failure test verifies error handling and state consistency
+- Circuit breaker test verifies OPEN state after threshold failures
+- Idempotency test verifies re-registration produces identical state
+
 ### 8.3 Contract Tests
 
 - FSM contract (`dual_registration_reducer_fsm.yaml`) validation
 - Orchestrator contract validation
 - Effect contract validation
+
+**Acceptance Criteria:**
+- FSM contract validation passes with all valid state transitions
+- Orchestrator contract validates command/event shapes
+- Effect contract validates intent consumption and result emission
 
 ---
 
@@ -674,9 +690,15 @@ These decisions block Phase 1 implementation and must be resolved first.
 
 #### Decision RACI Matrix
 
-> **ACTION REQUIRED**: The Tech Lead MUST populate the "Responsible", "Accountable", and
-> "Target Date" columns below BEFORE the pre-implementation meeting. Phase 1 cannot begin
-> until this matrix is complete with specific names and dates.
+> **TEMPLATE - REQUIRES POPULATION BEFORE EXECUTION**
+>
+> This RACI matrix is intentionally provided as a TEMPLATE with placeholder values.
+> The Tech Lead MUST populate the "Responsible", "Accountable", and "Target Date"
+> columns BEFORE the pre-implementation meeting. Phase 1 cannot begin until this
+> matrix is complete with specific names and dates.
+>
+> **Placeholder Format**: Values shown as `[Tech Lead: Assign ...]` indicate fields
+> that MUST be replaced with actual names and dates during project planning.
 
 | Decision | Responsible | Accountable | Consulted | Informed | Target Date |
 |----------|-------------|-------------|-----------|----------|-------------|
@@ -739,6 +761,27 @@ resolved by their target dates, follow this escalation path:
 **Wave 2 Impact**: If decisions block Wave 2 start by more than 1 week, Tech Lead
 should evaluate partial Wave 2 execution using default decisions with documented
 technical debt tickets for potential refactor.
+
+#### Decision Timeline Guidance
+
+**Recommended Timeline** (relative to planned Phase 1 start date):
+
+| Milestone | Target | Notes |
+|-----------|--------|-------|
+| RACI Matrix Populated | T-10 days | Tech Lead assigns owners and dates |
+| Decision Owners Acknowledged | T-8 days | All assignees confirm availability |
+| First Decision Draft | T-5 days | Initial proposals for each decision |
+| Pre-Implementation Meeting | T-3 days | Finalize decisions, create ADRs |
+| ADRs Committed | T-1 day | All three ADRs merged to main |
+| Phase 1 Gate Check | T-0 | Verify all prerequisites met |
+
+**Timeline Rationale**: This schedule provides:
+- 5 days for decision drafting and review
+- 3 days buffer for meeting scheduling conflicts
+- 1 day final verification before Phase 1 kickoff
+
+**If timeline is compressed**: Minimum viable timeline is T-3 days for all milestones,
+but this increases risk of incomplete decisions requiring mid-phase corrections.
 
 #### Pre-Implementation Meeting Requirements
 
@@ -947,7 +990,7 @@ The following documentation artifacts must be created as part of this refactorin
 ## 13. Related Documents
 
 **Canonical References** (authoritative for this refactor):
-- `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.0.0)
+- `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.1.0)
   - Defines ticket structure, global constraints, and execution model
 - `/workspace/omnibase_infra3/docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2)
   - Defines workflow architecture patterns and terminology
