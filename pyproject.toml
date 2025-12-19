@@ -24,8 +24,8 @@ python = "^3.12"
 # - Supply chain security: Cannot be retroactively modified (unlike branches/tags)
 # - Audit trail: Each SHA maps to a verifiable point in git history
 # To update: 1) Review changes in target repo, 2) Update SHA, 3) Run tests
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "87be33cf999fea50157f3c57ca9e2544b99feda0" }
-omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", rev = "65a2ec579661456325d7c6c4e522d91c33462b35" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "main" }
+omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 
 # Core dependencies
 pydantic = "^2.11.7"
