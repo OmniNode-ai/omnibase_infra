@@ -322,41 +322,56 @@ class NodeRegistryEffect(NodeEffect):
 
 ## 7. Dependencies
 
+### Version Requirements
+
+> **⚠️ IMPORTANT**: This refactor requires `omnibase_core >= 0.5.0`. The current project
+> uses `omnibase-core = "^0.4.0"`. Before starting Phase 1, update `pyproject.toml` to
+> `omnibase-core = "^0.5.0"` once the release is available.
+>
+> **Release Status**: `omnibase_core` 0.5.3 release is imminent
+> (see [PR #216](https://github.com/OmniNode-ai/omnibase_core/pull/216)).
+
+| Package | Required Version | Current Project Version | Action Required |
+|---------|------------------|------------------------|-----------------|
+| `omnibase_core` | `>= 0.5.0` | `^0.4.0` | Update to `^0.5.0` when released |
+| `omnibase_spi` | `>= 0.4.0` | `^0.4.0` | Already compatible |
+
 ### Required Before Starting
 
 | Dependency | Status | Notes |
 |------------|--------|-------|
-| `omnibase_core.nodes.NodeOrchestrator` | Available | Base class for orchestrator |
-| `omnibase_core.nodes.NodeEffect` | Available | Base class for effect |
-| `omnibase_core.nodes.NodeReducer` | Available | Base class for reducer |
-| `NodeRuntime` | Available | Handler execution runtime |
-| Intent models in `omnibase_core.models.intents` | Available | `ModelConsulRegisterIntent`, etc. |
-| FSM contract loader | Available | Already in reducer |
+| `omnibase_core.nodes.NodeOrchestrator` | Requires 0.5.x | Base class for orchestrator |
+| `omnibase_core.nodes.NodeEffect` | Requires 0.5.x | Base class for effect |
+| `omnibase_core.nodes.NodeReducer` | Requires 0.5.x | Base class for reducer |
+| `NodeRuntime` | Requires 0.5.x | Handler execution runtime |
+| Intent models in `omnibase_core.models.intents` | Requires 0.5.x | `ModelConsulRegisterIntent`, etc. |
+| FSM contract loader | Available (0.4.x) | Already in reducer |
 
-### Import Paths
+### Target Import Paths
+
+The following import paths are the **target** paths once `omnibase_core >= 0.5.0` is available:
 
 ```python
-# Base Classes
+# Base Classes (available in omnibase_core >= 0.5.0)
 from omnibase_core.nodes import NodeOrchestrator, NodeEffect, NodeReducer
 
-# Intent Models
+# Intent Models (available in omnibase_core >= 0.5.0)
 from omnibase_core.models.intent import ModelIntent
 from omnibase_core.models.intents import (
     ModelConsulRegisterIntent,
     ModelPostgresUpsertRegistrationIntent,
 )
 
-# Runtime
+# Runtime (available in omnibase_core >= 0.5.0)
 from omnibase_core.runtime import NodeRuntime
 
-# Protocols (from SPI)
+# Protocols (from SPI, available in omnibase_spi >= 0.4.0)
 from omnibase_spi.protocols import ProtocolIntentHandler, ProtocolNodeRuntime
 ```
 
-### Version Requirements
-
-- **omnibase_core >= 0.5.0** - NodeOrchestrator, NodeEffect, NodeReducer base classes
-- **omnibase_spi >= 0.4.0** - Protocol definitions (ProtocolIntentHandler, ProtocolNodeRuntime)
+> **Note**: In the current 0.4.x codebase, legacy node classes exist as `NodeEffectLegacy`,
+> `NodeReducerLegacy`, etc. These will be renamed/refactored in 0.5.x per
+> `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`. Do not build on the legacy classes.
 
 ### Expected Method Signatures
 
