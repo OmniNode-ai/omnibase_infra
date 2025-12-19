@@ -14,7 +14,7 @@
 ## Related Documents
 
     Canonical Plan:
-        - ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.0.0)
+        - ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.1.0)
           Authoritative ticket definitions, global constraints, and execution model
 
     Implementation Handoff:
@@ -23,7 +23,7 @@
 
 ## Linear Ticket References
 
-    Canonical Plan: ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.0.0)
+    Canonical Plan: ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.1.0)
 
     Foundation:
         A1  Terminology & Layering      OMN-931
@@ -109,7 +109,7 @@
 ## 1. Terminology
 
     Note: This terminology aligns with Global Constraint #7 in
-    ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.0.0).
+    ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.1.0).
 
     Command:
         - A request directed to a decision-making component.

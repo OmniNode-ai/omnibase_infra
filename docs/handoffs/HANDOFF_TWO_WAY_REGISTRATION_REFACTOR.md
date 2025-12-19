@@ -33,8 +33,8 @@
 > **Action Required**: Verify 0.5.x availability BEFORE starting Phase 1 (see Phase 0 Task 0 gate).
 >
 > See also:
-> - `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.1.0)
-> - `/workspace/omnibase_infra3/docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2)
+> - `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.1.0)
+> - `docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2)
 
 ---
 
@@ -81,7 +81,7 @@ The current `NodeRegistryEffect` implementation (3,065 lines) completely violate
 
 > **Note on Directory Structure**: The existing `v1_0_0/` directories shown below are LEGACY patterns
 > from earlier architectural decisions. Per CLAUDE.md policy "NO VERSIONED DIRECTORIES", new
-> components use flat structure. See ticket H1 (OMN-956) in `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`
+> components use flat structure. See ticket H1 (OMN-956) in `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`
 > for migration plan of existing versioned directories. This aligns with Global Constraint #6 in the ticket plan.
 
 ```
@@ -138,6 +138,16 @@ The `NodeDualRegistrationReducer` at `nodes/reducers/node_dual_registration_redu
 > container at initialization. State queries (e.g., "is this node already registered?")
 > are synchronous reads against the projection store (PostgreSQL), not Kafka topic scans.
 > See `omnibase_spi/protocols/protocol_projection_reader.py` for the protocol definition.
+>
+> **Orchestrator State-Reading Path**: The state-reading path is:
+> 1. Orchestrator receives event or RuntimeTick
+> 2. Orchestrator invokes `projection_reader.get_projection(entity_id)`
+> 3. Projection reader queries PostgreSQL (or cache layer) synchronously
+> 4. Orchestrator uses projection state to make workflow decisions
+> 5. Orchestrator emits decision events based on projection state
+>
+> Orchestrators NEVER scan Kafka topics for state. All state is materialized in projections
+> and queried via the projection reader protocol.
 
 > **CRITICAL Terminology - Projection "Persistence" vs Event Publishing**:
 > Projections are **PERSISTED to storage** (PostgreSQL), NOT **published to Kafka**.
@@ -147,7 +157,7 @@ The `NodeDualRegistrationReducer` at `nodes/reducers/node_dual_registration_redu
 > - **Ordering Guarantee**: Runtime invokes Projector.persist() and waits for acknowledgment
 >   before publishing intents to Kafka (see F0 ↔ B2 interaction sequence diagram in design doc)
 >
-> See ticket F0 in `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` for the authoritative
+> See ticket F0 in `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` for the authoritative
 > definition of projection execution model and the F0 ↔ B2 interaction sequence diagram showing
 > the synchronization between Handler Output Model (B2) and Projector Execution (F0).
 >
@@ -210,7 +220,7 @@ The `NodeDualRegistrationReducer` at `nodes/reducers/node_dual_registration_redu
 
 ### 3.2 Key Architectural Invariants
 
-From `/workspace/omnibase_infra3/docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`:
+From `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`:
 
 1. **NodeRuntime is the only executable event loop** - Effect nodes don't run their own loops
 2. **Node logic is pure: no I/O, no mixins, no inheritance** (except base classes)
@@ -219,7 +229,7 @@ From `/workspace/omnibase_infra3/docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN
 5. **Infra owns all I/O and real system integrations** - Handlers live in infra
 6. **Contract-driven behavior** - YAML contracts define everything
 
-> **Terminology Note** (per Global Constraint #7 in `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`):
+> **Terminology Note** (per Global Constraint #7 in `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`):
 > - **Node**: The deployable/addressable unit that hosts one or more handlers
 > - **Handler**: A pure function that processes a specific message type within a node
 > - **Runtime**: Infrastructure that dispatches messages to handlers and publishes outputs
@@ -279,7 +289,7 @@ Version is tracked via `contract_version` field in `contract.yaml`, not director
 
 > **IMPORTANT**: Per CLAUDE.md policy "NO VERSIONED DIRECTORIES", new components use FLAT structure.
 > Version is tracked via `contract_version` field in `contract.yaml`, not directory hierarchy.
-> See Global Constraint #6 in `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`.
+> See Global Constraint #6 in `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`.
 > Migration of existing versioned directories is tracked by ticket H1 (OMN-956).
 
 ```
@@ -439,6 +449,10 @@ If `omnibase_core 0.5.x` is not available when Phase 1 is scheduled to begin:
 
 > **GATE TASKS**: Tasks 0 and 1 below are BLOCKING gates. Do not proceed to Task 2+ until both gates pass.
 > If either gate fails, Phase 1 is BLOCKED - see Phase 0 contingency plan.
+>
+> **Task 0 is the CRITICAL DEPENDENCY GATE**: This task verifies that omnibase_core 0.5.x is available.
+> Without 0.5.x, Phase 1 cannot proceed. See Phase 0 "Contingency Plan: If omnibase_core 0.5.x is Delayed"
+> for mitigation options if this gate fails.
 
 0. **[GATE - DEPENDENCY] Verify omnibase_core 0.5.x is available and installable**
    - Check that [PR #216](https://github.com/OmniNode-ai/omnibase_core/pull/216) is merged
@@ -451,7 +465,7 @@ If `omnibase_core 0.5.x` is not available when Phase 1 is scheduled to begin:
      from omnibase_core.runtime import NodeRuntime
      ```
    - **Exit Criteria**: Imports resolve, poetry install succeeds
-   - **If FAILED**: Phase 1 is BLOCKED - activate Phase 0 contingency plan
+   - **If FAILED**: Phase 1 is BLOCKED - activate Phase 0 contingency plan (see "Contingency Plan: If omnibase_core 0.5.x is Delayed" in Phase 0 section above)
 
 1. **[GATE - VALIDATION] Run integration tests with new dependency**
    - Run `pytest tests/` - all existing tests must pass
@@ -459,6 +473,7 @@ If `omnibase_core 0.5.x` is not available when Phase 1 is scheduled to begin:
    - Document any required migration steps
    - **Exit Criteria**: All tests pass, no regressions detected
    - **If FAILED**: Phase 1 is BLOCKED - coordinate with omnibase_core team
+   - **Note**: This gate verifies v0.5.0 compatibility and must pass before proceeding to Task 2+
 
 2. Create `nodes/node_registration_orchestrator/` directory structure (FLAT, no v1_0_0)
 3. Implement `ModelRegisterNodeCommand` and workflow state models
@@ -544,6 +559,16 @@ for this refactor. These classes do not exist in 0.4.x:
 > These are NOT compatible with this refactor and will be deprecated in 0.5.x.
 > Do not extend legacy classes.
 
+**Dependency Version Table** (Minimum Required):
+
+| Component | Package | Version | Purpose |
+|-----------|---------|---------|---------|
+| `NodeOrchestrator` | `omnibase_core` | 0.5.0 | Workflow coordination base class |
+| `NodeEffect` | `omnibase_core` | 0.5.0 | I/O execution base class |
+| `NodeReducer` | `omnibase_core` | 0.5.0 | Pure transformation base class |
+| `NodeRuntime` | `omnibase_core` | 0.5.0 | Handler lifecycle management |
+| `ModelIntent` | `omnibase_core` | 0.5.0 | Typed intent base model |
+
 ### Required Before Starting
 
 | Dependency | Status | Notes |
@@ -579,7 +604,7 @@ from omnibase_spi.protocols import ProtocolIntentHandler, ProtocolNodeRuntime
 
 > **Note**: In the current 0.4.x codebase, legacy node classes exist as `NodeEffectLegacy`,
 > `NodeReducerLegacy`, etc. These will be renamed/refactored in 0.5.x per
-> `/workspace/omnibase_infra3/docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`. Do not build on the legacy classes.
+> `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`. Do not build on the legacy classes.
 
 ### Expected Method Signatures
 
@@ -614,42 +639,28 @@ async def handle(
 
 ### 8.1 Unit Tests (No I/O)
 
-| Component | Test Focus |
-|-----------|------------|
-| `NodeRegistrationOrchestrator` | Command validation, reducer invocation, workflow state |
-| `NodeDualRegistrationReducer` | Intent emission, FSM transitions, validation |
-| Intent handlers | Intent parsing, handler invocation |
-
-**Acceptance Criteria:**
-- Orchestrator tests verify command validation without mocking I/O
-- Reducer tests verify deterministic intent emission for identical inputs
-- Intent handler tests verify correct payload parsing and handler dispatch
+| Component | Test Focus | Acceptance Criteria |
+|-----------|------------|---------------------|
+| `NodeRegistrationOrchestrator` | Command validation, reducer invocation, workflow state | Acceptance Criteria: Orchestrator tests verify command validation without mocking I/O. All workflow decisions are deterministic given projection state and injected time. |
+| `NodeDualRegistrationReducer` | Intent emission, FSM transitions, validation | Acceptance Criteria: Reducer tests verify deterministic intent emission for identical inputs. Same event sequence produces identical projections and intents. |
+| Intent handlers | Intent parsing, handler invocation | Acceptance Criteria: Intent handler tests verify correct payload parsing and handler dispatch. Handler invocation matches runtime contract. |
 
 ### 8.2 Integration Tests
 
-| Test | Description |
-|------|-------------|
-| Full registration flow | Command -> Orchestrator -> Reducer -> Effect -> Handlers |
-| Partial failure handling | One backend fails, other succeeds |
-| Circuit breaker | Effect-level circuit breaker behavior |
-| Idempotency | Re-registration produces consistent state |
-
-**Acceptance Criteria:**
-- Full registration flow completes with node visible in both Consul and PostgreSQL
-- Partial failure test verifies error handling and state consistency
-- Circuit breaker test verifies OPEN state after threshold failures
-- Idempotency test verifies re-registration produces identical state
+| Test | Description | Acceptance Criteria |
+|------|-------------|---------------------|
+| Full registration flow | Command -> Orchestrator -> Reducer -> Effect -> Handlers | Acceptance Criteria: Full registration flow completes with node visible in both Consul and PostgreSQL. End-to-end latency is within performance thresholds. |
+| Partial failure handling | One backend fails, other succeeds | Acceptance Criteria: Partial failure test verifies error handling and state consistency. System maintains consistency when Consul succeeds but PostgreSQL fails (or vice versa). |
+| Circuit breaker | Effect-level circuit breaker behavior | Acceptance Criteria: Circuit breaker test verifies OPEN state after threshold failures. Subsequent requests fail fast with InfraUnavailableError until reset timeout. |
+| Idempotency | Re-registration produces consistent state | Acceptance Criteria: Idempotency test verifies re-registration produces identical state. Duplicate message_id or natural key causes no additional side effects. |
 
 ### 8.3 Contract Tests
 
-- FSM contract (`dual_registration_reducer_fsm.yaml`) validation
-- Orchestrator contract validation
-- Effect contract validation
-
-**Acceptance Criteria:**
-- FSM contract validation passes with all valid state transitions
-- Orchestrator contract validates command/event shapes
-- Effect contract validates intent consumption and result emission
+| Test | Description | Acceptance Criteria |
+|------|-------------|---------------------|
+| FSM contract validation | `dual_registration_reducer_fsm.yaml` state machine validation | Acceptance Criteria: FSM contract validation passes with all valid state transitions. Invalid transitions are rejected deterministically. |
+| Orchestrator contract | Command/event shape validation | Acceptance Criteria: Orchestrator contract validates command/event shapes. All required envelope fields are present and typed correctly. |
+| Effect contract | Intent consumption and result emission validation | Acceptance Criteria: Effect contract validates intent consumption and result emission. Intent handlers produce optional result events matching contract. |
 
 ---
 
@@ -668,24 +679,31 @@ These decisions block Phase 1 implementation and must be resolved first.
 
 > **BLOCKING**: The following questions MUST be resolved before Phase 1 implementation can begin.
 > No development work on Phase 1 tasks should start until these decisions are documented as ADRs.
+>
+> **Target Dates Required**: Each decision below MUST have a target completion date assigned
+> in the RACI matrix. Target dates MUST be before the Phase 1 start date to avoid blocking
+> Wave 1 execution. See "Decision Timeline Guidance" below for recommended scheduling.
 
 1. **[BLOCKING] Command Source**: Where do `RegisterNodeCommand`s originate?
    - Option A: API endpoint creates commands
    - Option B: Introspection events auto-generate commands
    - Option C: Both (API for manual, introspection for automatic)
    - **Blocking**: Needed for orchestrator contract design
+   - **Target Date**: [Tech Lead: Assign in RACI matrix - MUST be before Phase 1]
    - **ADR**: Decision will be documented in `docs/adr/ADR-XXX-command-source.md`
 
 2. **[BLOCKING] Intent Topics**: Topic naming convention for intents?
    - Proposed: `dev.omnibase-infra.intent.<backend>.<operation>.v1`
    - Example: `dev/omnibase-infra.intent.consul.register.v1`
    - **Blocking**: Needed for reducer integration
+   - **Target Date**: [Tech Lead: Assign in RACI matrix - MUST be before Phase 1]
    - **ADR**: Decision will be documented in `docs/adr/ADR-XXX-intent-topic-naming.md`
 
 3. **[BLOCKING] Reducer Invocation**: Does orchestrator call reducer directly or via event?
    - Direct call is simpler for MVP
    - Event-based is more decoupled
    - **Blocking**: Affects orchestrator implementation
+   - **Target Date**: [Tech Lead: Assign in RACI matrix - MUST be before Phase 1]
    - **ADR**: Decision will be documented in `docs/adr/ADR-XXX-reducer-invocation-pattern.md`
 
 #### Decision RACI Matrix
@@ -699,22 +717,31 @@ These decisions block Phase 1 implementation and must be resolved first.
 >
 > **Placeholder Format**: Values shown as `[Tech Lead: Assign ...]` indicate fields
 > that MUST be replaced with actual names and dates during project planning.
+>
+> **CRITICAL**: Decision owners MUST be assigned before Wave 1 starts. See "Pre-Implementation
+> Meeting Requirements" below for the formal assignment process.
 
 | Decision | Responsible | Accountable | Consulted | Informed | Target Date |
 |----------|-------------|-------------|-----------|----------|-------------|
-| Command Source | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date] |
-| Intent Topics | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date] |
-| Reducer Invocation | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date] |
+| Command Source | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date - BEFORE Phase 1] |
+| Intent Topics | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date - BEFORE Phase 1] |
+| Reducer Invocation | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date - BEFORE Phase 1] |
 
 **RACI Matrix Completion Checklist**:
 - [ ] Tech Lead has assigned "Responsible" person for each decision
 - [ ] Tech Lead has assigned "Accountable" person for each decision
-- [ ] Tech Lead has set "Target Date" for each decision (before Phase 1 start)
+- [ ] Tech Lead has set "Target Date" for each decision (MUST be before Phase 1 start)
 - [ ] All assigned persons have acknowledged their roles
+- [ ] All target dates are realistic and account for review cycles
+- [ ] Escalation contacts identified for each decision area
 
 > **Note**: Specific names and dates must be assigned before Phase 1 starts. The Tech Lead
 > is responsible for populating this matrix during the pre-implementation planning meeting.
 > Placeholder values `[Tech Lead: Assign ...]` indicate incomplete assignments.
+>
+> **Decision Owner Assignment Requirement**: All decision owners (Responsible and Accountable)
+> MUST be formally assigned and acknowledged before Wave 1 (Phase 1) execution begins. The
+> pre-implementation meeting is the mandatory forum for completing these assignments.
 
 #### Escalation Path for Decision Blockers
 
@@ -758,9 +785,10 @@ resolved by their target dates, follow this escalation path:
 > documenting the decision rationale as "escalation default - subject to review". This
 > ensures traceability and allows for future reconsideration if needed.
 
-**Wave 2 Impact**: If decisions block Wave 2 start by more than 1 week, Tech Lead
-should evaluate partial Wave 2 execution using default decisions with documented
-technical debt tickets for potential refactor.
+**Wave 2 Impact Mitigation**: If decisions block Wave 2 start by more than 1 week, Tech Lead
+should evaluate partial Wave 2 execution using default decisions with documented technical
+debt tickets for potential refactor. This allows Wave 2 to proceed while decisions are refined
+in parallel, preventing cascading schedule impacts.
 
 #### Decision Timeline Guidance
 
@@ -799,20 +827,28 @@ but this increases risk of incomplete decisions requiring mid-phase corrections.
 **Meeting Agenda**:
 1. Review all three BLOCKING questions (Command Source, Intent Topics, Reducer Invocation)
 2. Select final options for each decision with documented rationale
-3. Validate omnibase_core 0.5.x availability status (Phase 0 verification complete)
+3. **Validate omnibase_core 0.5.x availability status** (Phase 0 Task 0 gate requirement - see Phase 1 Task 1)
 4. Document decisions as ADRs under `docs/adr/`
-5. Assign implementation owners for each Phase 1 task
-6. Populate RACI matrix with specific names and target dates
-7. Confirm timeline and resource availability
+5. **Assign decision owners**: Populate RACI matrix with specific names for Responsible/Accountable roles
+6. **Set target dates**: Assign completion dates for each decision (MUST be before Phase 1 start)
+7. Assign implementation owners for each Phase 1 task
+8. Confirm timeline and resource availability
+9. Identify escalation contacts for decision blockers
 
 **Meeting Output Requirements**:
 - All three BLOCKING decisions documented in ADRs
-- RACI matrix fully populated with names and dates
-- Phase 0 verification confirmed complete
+- **RACI matrix fully populated** with specific names and target dates (no placeholders remaining)
+- **Decision owners formally assigned** and acknowledged for all three decisions
+- **Phase 0 verification confirmed complete** (omnibase_core 0.5.x available - gate for Phase 1 Task 1)
 - Phase 1 kickoff formally approved
 - Implementation owners assigned and acknowledged
+- Escalation path validated and contacts confirmed
 
 **Exit Criteria**: Phase 1 may NOT begin until all meeting output requirements are satisfied.
+
+> **CRITICAL GATE**: The pre-implementation meeting MUST verify that Phase 0 Task 0
+> (omnibase_core 0.5.x availability) is complete. If 0.5.x is not available, Phase 1 Task 1
+> gate will fail. See Phase 0 contingency plan for mitigation options.
 
 ### 9.2 Deferrable Questions
 
@@ -826,8 +862,10 @@ These questions can be answered during implementation:
    - Current: Effect node has `_slow_operation_threshold_ms`
    - Proposed: Orchestrator tracks workflow-level timeouts
    - **Note**: Detailed timeout handling patterns are documented in:
-     - `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (tickets B6, C2)
-     - `/workspace/omnibase_infra3/docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (section 8.2)
+     - `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (tickets B6, C2)
+       - B6: Runtime scheduler configuration and tick interval bounds
+       - C2: Durable timeout handling with projection-backed deadlines
+     - `docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (section 8.2)
      This handoff does not prescribe specific timeout values - those are implementation details.
 
 6. **Existing Tests**: What to do with `tests/unit/nodes/test_node_registry_effect.py`?
@@ -883,8 +921,8 @@ When closing PR #52, include a clear explanation referencing this handoff docume
 > into a single monolithic file (3,065 lines), making it untestable and unmaintainable.
 >
 > **Architectural issues documented in**:
-> - `/workspace/omnibase_infra3/docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` (Section 2: Current State Analysis)
-> - `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (canonical execution model)
+> - `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` (Section 2: Current State Analysis)
+> - `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (canonical execution model)
 >
 > **Key violations**:
 > - Mixed I/O with business logic (violates Effect purity)
@@ -919,7 +957,7 @@ When closing PR #52, include a clear explanation referencing this handoff docume
 > for testability and maintainability.
 >
 > Full details are in the handoff document:
-> `/workspace/omnibase_infra3/docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md`
+> `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md`
 >
 > The work you did is valuable and will inform the new implementation. Would you like to
 > be involved in the refactored approach?
@@ -947,7 +985,13 @@ The following documentation artifacts must be created as part of this refactorin
 
 > **Note**: ADR numbers (XXX) will be assigned during the pre-implementation meeting.
 > ADR template: `docs/adr/ADR-TEMPLATE.md` (if available) or follow standard ADR format.
-> Related ticket references map to `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`.
+> Related ticket references map to `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`.
+>
+> **ADR Requirements from Ticket Plan Section 9.1**:
+> All three blocking decisions (Command Source, Intent Topics, Reducer Invocation) MUST be
+> documented as ADRs before Phase 1 implementation begins. These are mandatory prerequisites,
+> not optional refinements. See Section 9.1 in this document for decision requirements,
+> RACI matrix, and escalation paths.
 
 ### Operational Documentation
 
@@ -962,6 +1006,13 @@ The following documentation artifacts must be created as part of this refactorin
 - Consul/PostgreSQL registration state inspection
 - Common failure scenarios and resolution steps
 - Monitoring dashboards and alert response
+- Feature flag rollback procedures (H1 migration)
+- DLQ monitoring and recovery workflows
+
+> **Operator Runbook Reference**:
+> The registration workflow runbook is REQUIRED for production readiness. This runbook must
+> be created and validated before deploying the refactored registration system. Operators
+> should be trained on the runbook procedures during the H1 migration phase.
 
 ### Developer Documentation
 
@@ -975,6 +1026,13 @@ The following documentation artifacts must be created as part of this refactorin
 - Contract.yaml version field usage
 - Backwards compatibility shim removal timeline
 - Testing migration completeness
+
+> **Developer Migration Guide Reference**:
+> The v1_0_0 migration guide is REQUIRED for ticket H1 (Legacy Component Refactor Plan).
+> This guide documents how to migrate from versioned directory structure (nodes/<name>/v1_0_0/)
+> to flat structure (nodes/<name>/), including import path changes, contract.yaml version
+> field usage, and testing migration completeness. See H1 ticket in the Ticket Plan for
+> detailed migration requirements.
 
 ### Documentation Checklist
 
@@ -990,14 +1048,14 @@ The following documentation artifacts must be created as part of this refactorin
 ## 13. Related Documents
 
 **Canonical References** (authoritative for this refactor):
-- `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.1.0)
+- `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.1.0)
   - Defines ticket structure, global constraints, and execution model
-- `/workspace/omnibase_infra3/docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2)
+- `docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2)
   - Defines workflow architecture patterns and terminology
 
 **Architecture References**:
-- `/workspace/omnibase_infra3/docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`
-- `/workspace/omnibase_infra3/docs/architecture/CURRENT_NODE_ARCHITECTURE.md`
+- `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`
+- `docs/architecture/CURRENT_NODE_ARCHITECTURE.md`
 
 **Contract References**:
 - `contracts/fsm/dual_registration_reducer_fsm.yaml`

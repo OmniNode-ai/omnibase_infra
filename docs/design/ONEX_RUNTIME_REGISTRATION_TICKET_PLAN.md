@@ -59,8 +59,12 @@
             - This constraint applies to NEW components created under this plan
             - Existing v1_0_0 directories (e.g., nodes/<name>/v1_0_0/) are legacy patterns
               from earlier architectural decisions that will be migrated
-            - Versioning approach: semantic versioning through contract_version field
-              in contract.yaml, not directory hierarchy
+            - Versioning approach: Semantic versioning (MAJOR.MINOR.PATCH) through
+              contract_version field in contract.yaml, not directory hierarchy
+            - Version field semantics:
+                - MAJOR: Breaking changes to contract (incompatible with previous versions)
+                - MINOR: Backward-compatible new features or enhancements
+                - PATCH: Backward-compatible bug fixes and documentation updates
             - See ticket H1 (Legacy Component Refactor Plan) for migration of existing
               versioned directories to the new pattern
 
@@ -343,15 +347,22 @@
                 - discovery.events.NodeDiscovered -> domain = "discovery"
                 - discovery.events.NodeLost -> domain = "discovery"
                 - discovery.intents.ScanNetworkIntent -> domain = "discovery"
+                - discovery.commands.TriggerDiscovery -> domain = "discovery"
                 - health.commands.CheckNodeHealth -> domain = "health"
                 - health.events.HealthCheckCompleted -> domain = "health"
+                - health.events.HealthCheckFailed -> domain = "health"
                 - health.intents.PingNodeIntent -> domain = "health"
+                - health.intents.ProbeServiceIntent -> domain = "health"
                 - provisioning.intents.ProvisionResourceIntent -> domain = "provisioning"
                 - provisioning.events.ResourceProvisioned -> domain = "provisioning"
+                - provisioning.events.ResourceProvisioningFailed -> domain = "provisioning"
                 - provisioning.commands.RequestResourceProvisioning -> domain = "provisioning"
+                - provisioning.commands.DecommissionResource -> domain = "provisioning"
                 - runtime.events.RuntimeTick -> domain = "runtime"
                 - runtime.events.RuntimeStarted -> domain = "runtime"
                 - runtime.events.RuntimeShutdown -> domain = "runtime"
+                - runtime.commands.ShutdownRuntime -> domain = "runtime"
+                - runtime.intents.ScheduleTask -> domain = "runtime"
 
             Invalid examples (rejected by validation):
                 - NodeRegistrationAccepted (missing domain and category prefix)
@@ -359,6 +370,9 @@
                 - registration.NodeRegistrationAccepted (missing category segment)
                 - registration.invalid.NodeRegistrationAccepted (invalid category, must be events/commands/intents)
                 - Registration.events.NodeRegistrationAccepted (domain must be lowercase)
+                - registration.Events.NodeRegistrationAccepted (category must be lowercase)
+                - registration.events.node_registration_accepted (message name must be PascalCase)
+                - my-domain.events.MyEvent (domain cannot contain hyphens, use underscores)
 
             - Topic domain MUST match message type domain prefix
             - Validation occurs at:
@@ -977,6 +991,26 @@
                     ├── test_registration_reducer_ordering.py
                     └── test_registration_reducer_fsm.py
 
+        Example test file structure:
+            # tests/unit/registration/reducer/test_registration_reducer_determinism.py
+            import pytest
+            from omnibase_infra.nodes.reducers.node_dual_registration_reducer import NodeDualRegistrationReducer
+
+            def test_same_event_sequence_produces_identical_outputs():
+                '''Given identical event sequences, reducer produces byte-for-byte identical outputs.'''
+                reducer = NodeDualRegistrationReducer()
+                events = [NodeRegistrationAccepted(...), NodeRegistrationAckReceived(...)]
+
+                # First run
+                output1 = reducer.fold_events(events)
+
+                # Second run with same events
+                output2 = reducer.fold_events(events)
+
+                # Assert identical outputs
+                assert output1.projections == output2.projections
+                assert output1.intents == output2.intents
+
         Note: Project uses tests/unit/ for unit tests and tests/integration/ for
         integration tests. Do not use tests/domain/ as a top-level directory.
 
@@ -1438,11 +1472,20 @@ once all blocking dependencies from previous waves are complete.
 
     The timelines in this plan assume:
         - OMN-959 (omnibase_core 0.5.x) is resolved before P0 implementation begins
-        - No blocking architectural decisions are pending
+        - All blocking architectural decisions (A3, B6, C2) are resolved before Wave 1 starts
+        - Decision owners are assigned and acknowledged per RACI matrix before Wave 1
         - Team capacity is available for parallel execution where indicated
         - CI/CD infrastructure supports the testing requirements
 
     If blocking dependencies are NOT resolved, timelines will slip accordingly.
+
+    Escalation path for decision delays:
+        - If blocking decisions are not resolved by their target dates, see
+          HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md Section 9.1 "Escalation Path
+          for Decision Blockers" for mitigation steps
+        - Escalation timeline: 1-2 days (reminder), 3-4 days (dedicated meeting),
+          5+ days (Engineering Manager escalation with default decisions)
+
     Track blockers in Linear and update this plan when resolution dates are known.
 
 ### Visualization Notes
@@ -1465,6 +1508,20 @@ once all blocking dependencies from previous waves are complete.
         - Parallel execution opportunities visible at same vertical level
         - Cross-section dependencies shown with dashed lines where applicable
         - Use `graph TD` for top-down flow; `graph LR` for left-right if preferred
+
+    Ticket dependency visualization tools:
+        - Linear: Use the built-in "Dependencies" tab in ticket view to visualize blocking/blocked-by relationships
+        - Mermaid diagram: Copy the mermaid code above into Linear ticket description for embedded rendering
+        - GitHub: Markdown preview renders mermaid diagrams automatically
+        - VS Code: Install "Markdown Preview Mermaid Support" extension for local rendering
+        - Export options: Use `mermaid-cli` to generate PNG/SVG for presentations
+
+    Recommended visualization workflow:
+        1. Create Linear tickets from this plan (one ticket per section/subsection)
+        2. Add ticket IDs to dependency graph nodes (e.g., A1 -> OMN-941, B1 -> OMN-942)
+        3. Use Linear's "Add blocking" feature to link tickets per dependency graph
+        4. Update mermaid diagram with actual ticket IDs for tracking
+        5. Embed mermaid diagram in project README or wiki for team visibility
 
 ---
 
