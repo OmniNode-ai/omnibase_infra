@@ -336,8 +336,47 @@ class NodeRegistryEffect(NodeEffect):
 ### Import Paths
 
 ```python
+# Base Classes
 from omnibase_core.nodes import NodeOrchestrator, NodeEffect, NodeReducer
+
+# Intent Models
 from omnibase_core.models.intent import ModelIntent
+from omnibase_core.models.intents import (
+    ModelConsulRegisterIntent,
+    ModelPostgresUpsertRegistrationIntent,
+)
+
+# Runtime
+from omnibase_core.runtime import NodeRuntime
+
+# Protocols (from SPI)
+from omnibase_spi.protocols import ProtocolIntentHandler, ProtocolNodeRuntime
+```
+
+### Version Requirements
+
+- **omnibase_core >= 0.5.0** - NodeOrchestrator, NodeEffect, NodeReducer base classes
+- **omnibase_spi >= 0.4.0** - Protocol definitions (ProtocolIntentHandler, ProtocolNodeRuntime)
+
+### Expected Method Signatures
+
+For protocol documentation, see `omnibase_spi/protocols/`. Key signatures:
+
+```python
+# NodeRuntime handler execution
+async def execute_handler(
+    self,
+    handler_type: str,
+    operation: str,
+    payload: dict[str, Any],
+) -> ModelIntentResult: ...
+
+# Intent handler protocol
+async def handle(
+    self,
+    intent: ModelIntent,
+    context: ModelExecutionContext,
+) -> ModelIntentResult: ...
 ```
 
 ### External Services
@@ -375,11 +414,13 @@ from omnibase_core.models.intent import ModelIntent
 
 ---
 
-## 9. Open Questions
+## 9. Open Questions and Decision Process
 
-### Decisions Required Before Phase 1
+### 9.1 Decisions Required Before Phase 1
 
-These decisions block Phase 1 implementation and must be resolved first:
+These decisions block Phase 1 implementation and must be resolved first.
+
+#### Blocking Questions
 
 1. **Command Source**: Where do `RegisterNodeCommand`s originate?
    - Option A: API endpoint creates commands
@@ -397,7 +438,17 @@ These decisions block Phase 1 implementation and must be resolved first:
    - Event-based is more decoupled
    - **Blocking**: Affects orchestrator implementation
 
-### Can Be Deferred
+#### Decision RACI Matrix
+
+| Decision | Responsible | Accountable | Consulted | Informed | Target Date |
+|----------|-------------|-------------|-----------|----------|-------------|
+| Command Source | TBD | Tech Lead | Platform Team | All Devs | Before Phase 1 |
+| Intent Topics | TBD | Tech Lead | Platform Team | All Devs | Before Phase 1 |
+| Reducer Invocation | TBD | Tech Lead | Platform Team | All Devs | Before Phase 1 |
+
+**Note**: Decisions will be documented in ADRs under `docs/adr/` once resolved.
+
+### 9.2 Deferrable Questions
 
 These questions can be answered during implementation:
 
