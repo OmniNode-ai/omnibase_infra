@@ -510,7 +510,10 @@ class TestRoutingCoverageValidator:
 
         assert len(violations) > 0
         violation = violations[0]
-        assert violation.violation_type == EnumExecutionShapeViolation.UNMAPPED_MESSAGE_ROUTE
+        assert (
+            violation.violation_type
+            == EnumExecutionShapeViolation.UNMAPPED_MESSAGE_ROUTE
+        )
         # handler_type is None because routing coverage is not handler-specific
         assert violation.handler_type is None
         assert violation.severity == "error"
@@ -600,9 +603,7 @@ class TestValidateRoutingCoverageOnStartup:
         )
         assert result is False
 
-    def test_returns_true_when_all_mapped(
-        self, temp_source_dir: Path
-    ) -> None:
+    def test_returns_true_when_all_mapped(self, temp_source_dir: Path) -> None:
         """Verify returns True when all types are mapped."""
         # Create matching events and registrations
         events_file = temp_source_dir / "events.py"
@@ -644,9 +645,7 @@ class TestCheckRoutingCoverageCi:
         assert passed is False
         assert len(violations) > 0
 
-    def test_returns_true_with_empty_violations(
-        self, temp_source_dir: Path
-    ) -> None:
+    def test_returns_true_with_empty_violations(self, temp_source_dir: Path) -> None:
         """Verify returns (True, []) when all types are mapped."""
         # Create matching events and registrations
         events_file = temp_source_dir / "events.py"

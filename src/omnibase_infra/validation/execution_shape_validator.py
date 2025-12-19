@@ -150,33 +150,39 @@ _MESSAGE_CATEGORY_PATTERNS: dict[str, EnumMessageCategory] = {
 }
 
 # Forbidden direct publish method names
-_FORBIDDEN_PUBLISH_METHODS: frozenset[str] = frozenset({
-    "publish",
-    "send_event",
-    "emit",
-    "emit_event",
-    "dispatch",
-    "dispatch_event",
-})
+_FORBIDDEN_PUBLISH_METHODS: frozenset[str] = frozenset(
+    {
+        "publish",
+        "send_event",
+        "emit",
+        "emit_event",
+        "dispatch",
+        "dispatch_event",
+    }
+)
 
 # System time access patterns (non-deterministic for reducers)
-_SYSTEM_TIME_PATTERNS: frozenset[str] = frozenset({
-    "time.time",
-    "datetime.now",
-    "datetime.utcnow",
-    "datetime.datetime.now",
-    "datetime.datetime.utcnow",
-    # Django timezone support
-    "timezone.now",
-    "django.utils.timezone.now",
-})
+_SYSTEM_TIME_PATTERNS: frozenset[str] = frozenset(
+    {
+        "time.time",
+        "datetime.now",
+        "datetime.utcnow",
+        "datetime.datetime.now",
+        "datetime.datetime.utcnow",
+        # Django timezone support
+        "timezone.now",
+        "django.utils.timezone.now",
+    }
+)
 
 # Module-level time function patterns
-_TIME_FUNCTION_NAMES: frozenset[str] = frozenset({
-    "time",
-    "now",
-    "utcnow",
-})
+_TIME_FUNCTION_NAMES: frozenset[str] = frozenset(
+    {
+        "time",
+        "now",
+        "utcnow",
+    }
+)
 
 # Canonical execution shape rules for each handler type
 EXECUTION_SHAPE_RULES: dict[EnumHandlerType, ModelExecutionShapeRule] = {
@@ -277,7 +283,9 @@ class ExecutionShapeValidator:
         """Initialize the validator."""
         self._rules = EXECUTION_SHAPE_RULES
 
-    def validate_file(self, file_path: Path) -> list[ModelExecutionShapeViolationResult]:
+    def validate_file(
+        self, file_path: Path
+    ) -> list[ModelExecutionShapeViolationResult]:
         """Validate a single Python file for execution shape violations.
 
         Args:
@@ -638,9 +646,7 @@ class ExecutionShapeValidator:
         # Check actual return statements
         for node in ast.walk(method):
             if isinstance(node, ast.Return) and node.value is not None:
-                return_violations = self._analyze_return_value(
-                    node, handler, rule
-                )
+                return_violations = self._analyze_return_value(node, handler, rule)
                 violations.extend(return_violations)
 
         return violations
@@ -813,7 +819,9 @@ class ExecutionShapeValidator:
                 )
         elif handler.handler_type == EnumHandlerType.ORCHESTRATOR:
             if category == EnumMessageCategory.INTENT:
-                violation_type = EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS
+                violation_type = (
+                    EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS
+                )
                 message = (
                     f"Orchestrator '{handler.name}' returns INTENT type '{type_name}'. "
                     "Intents originate from external systems, not orchestration."

@@ -417,7 +417,9 @@ def validate_infra_contract_deep(
     Returns:
         ModelContractValidationResult with validation status, score, and any errors.
     """
-    return _contract_validator.validate_contract_file(Path(contract_path), contract_type)
+    return _contract_validator.validate_contract_file(
+        Path(contract_path), contract_type
+    )
 
 
 # ==============================================================================

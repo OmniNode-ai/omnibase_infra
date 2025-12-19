@@ -89,9 +89,7 @@ class TestReducerReturningEventsRejected:
         assert reducer_event_violations[0].handler_type == EnumHandlerType.REDUCER
         assert "event" in reducer_event_violations[0].message.lower()
 
-    def test_reducer_returning_event_call_rejected_by_ast(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reducer_returning_event_call_rejected_by_ast(self, tmp_path: Path) -> None:
         """Reducer returning Event(...) call detected by AST validator."""
         bad_code = textwrap.dedent("""
             class OrderReducer:
@@ -310,7 +308,8 @@ class TestEffectReturningProjectionsRejected:
         projection_violations = [
             v
             for v in violations
-            if v.violation_type == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
+            if v.violation_type
+            == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
         ]
         assert len(projection_violations) >= 1
         assert projection_violations[0].handler_type == EnumHandlerType.EFFECT
@@ -334,7 +333,8 @@ class TestEffectReturningProjectionsRejected:
         projection_violations = [
             v
             for v in violations
-            if v.violation_type == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
+            if v.violation_type
+            == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
         ]
         assert len(projection_violations) >= 1
 
@@ -408,9 +408,7 @@ class TestReducerAccessingSystemTimeRejected:
         assert time_violations[0].handler_type == EnumHandlerType.REDUCER
         assert "deterministic" in time_violations[0].message.lower()
 
-    def test_reducer_calling_datetime_now_rejected_by_ast(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reducer_calling_datetime_now_rejected_by_ast(self, tmp_path: Path) -> None:
         """Reducer calling datetime.now() detected by AST validator."""
         bad_code = textwrap.dedent("""
             from datetime import datetime
@@ -542,9 +540,7 @@ class TestHandlerDirectPublishRejected:
         assert len(publish_violations) >= 1
         assert ".publish()" in publish_violations[0].message
 
-    def test_handler_calling_send_event_rejected_by_ast(
-        self, tmp_path: Path
-    ) -> None:
+    def test_handler_calling_send_event_rejected_by_ast(self, tmp_path: Path) -> None:
         """Handler calling .send_event() detected by AST validator."""
         bad_code = textwrap.dedent("""
             class PaymentReducerHandler:
@@ -614,7 +610,8 @@ class TestHandlerDirectPublishRejected:
             publish_violations = [
                 v
                 for v in violations
-                if v.violation_type == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
+                if v.violation_type
+                == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
             ]
             assert len(publish_violations) >= 1, (
                 f"{handler_type_name} handler should have direct publish violation"
@@ -848,13 +845,17 @@ class TestAllowedReturnTypesValidation:
         effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
         assert effect_rule.is_return_type_allowed(EnumMessageCategory.EVENT) is True
         assert effect_rule.is_return_type_allowed(EnumMessageCategory.COMMAND) is True
-        assert effect_rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is False
+        assert (
+            effect_rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is False
+        )
         # INTENT is not in allowed list, so should be False
         assert effect_rule.is_return_type_allowed(EnumMessageCategory.INTENT) is False
 
         # REDUCER: allowed = [PROJECTION], forbidden = [EVENT]
         reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
-        assert reducer_rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is True
+        assert (
+            reducer_rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is True
+        )
         assert reducer_rule.is_return_type_allowed(EnumMessageCategory.EVENT) is False
         # COMMAND is not in allowed list
         assert reducer_rule.is_return_type_allowed(EnumMessageCategory.COMMAND) is False

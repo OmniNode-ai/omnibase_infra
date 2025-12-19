@@ -288,7 +288,9 @@ class TestTopicCategoryValidatorExtractDomain:
         """Verify domain extraction from events topic."""
         validator = TopicCategoryValidator()
         assert validator.extract_domain_from_topic("order.events") == "order"
-        assert validator.extract_domain_from_topic("user-service.events") == "user-service"
+        assert (
+            validator.extract_domain_from_topic("user-service.events") == "user-service"
+        )
 
     def test_extract_domain_from_commands_topic(self) -> None:
         """Verify domain extraction from commands topic."""
@@ -314,9 +316,16 @@ class TestTopicCategoryValidatorGetExpectedSuffix:
     def test_get_suffix_for_each_category(self) -> None:
         """Verify expected suffixes for all categories."""
         validator = TopicCategoryValidator()
-        assert validator.get_expected_topic_suffix(EnumMessageCategory.EVENT) == "events"
-        assert validator.get_expected_topic_suffix(EnumMessageCategory.COMMAND) == "commands"
-        assert validator.get_expected_topic_suffix(EnumMessageCategory.INTENT) == "intents"
+        assert (
+            validator.get_expected_topic_suffix(EnumMessageCategory.EVENT) == "events"
+        )
+        assert (
+            validator.get_expected_topic_suffix(EnumMessageCategory.COMMAND)
+            == "commands"
+        )
+        assert (
+            validator.get_expected_topic_suffix(EnumMessageCategory.INTENT) == "intents"
+        )
         assert validator.get_expected_topic_suffix(EnumMessageCategory.PROJECTION) == ""
 
 
@@ -428,8 +437,12 @@ class TestValidateTopicCategoriesInFile:
         try:
             violations = validate_topic_categories_in_file(file_path)
             assert len(violations) == 1
-            assert violations[0].violation_type == EnumExecutionShapeViolation.SYNTAX_ERROR
-            assert violations[0].handler_type is None  # Can't determine from unparseable file
+            assert (
+                violations[0].violation_type == EnumExecutionShapeViolation.SYNTAX_ERROR
+            )
+            assert (
+                violations[0].handler_type is None
+            )  # Can't determine from unparseable file
             assert "syntax error" in violations[0].message.lower()
         finally:
             file_path.unlink(missing_ok=True)

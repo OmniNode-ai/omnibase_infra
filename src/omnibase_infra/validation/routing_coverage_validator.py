@@ -194,7 +194,9 @@ def _get_category_from_base(base_name: str) -> EnumMessageCategory | None:
     return None
 
 
-def _has_message_decorator(node: ast.ClassDef) -> tuple[bool, EnumMessageCategory | None]:
+def _has_message_decorator(
+    node: ast.ClassDef,
+) -> tuple[bool, EnumMessageCategory | None]:
     """Check if class has a message type decorator.
 
     Args:

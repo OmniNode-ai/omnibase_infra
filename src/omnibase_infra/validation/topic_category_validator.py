@@ -894,7 +894,9 @@ def validate_topic_categories_in_file(
         # File not existing is not a topic/category violation - it's a file system issue.
         # Log a warning and return empty list since this function analyzes code content,
         # not file existence. Callers should validate file existence if needed.
-        logger.warning("Cannot validate topic categories: file not found: %s", file_path)
+        logger.warning(
+            "Cannot validate topic categories: file not found: %s", file_path
+        )
         return []
 
     if file_path.suffix != ".py":
