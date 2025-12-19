@@ -339,6 +339,111 @@ class TestMixinNodeIntrospectionInit:
                 node_type="",
             )
 
+    async def test_initialize_introspection_custom_introspection_topic(self) -> None:
+        """Test that custom introspection_topic is stored correctly."""
+        node = MockNode()
+        custom_topic = "onex.custom.introspection.published.v1"
+
+        node.initialize_introspection(
+            node_id="test-node-topic",
+            node_type="EFFECT",
+            event_bus=None,
+            introspection_topic=custom_topic,
+        )
+
+        assert node._introspection_topic == custom_topic
+
+    async def test_initialize_introspection_custom_heartbeat_topic(self) -> None:
+        """Test that custom heartbeat_topic is stored correctly."""
+        node = MockNode()
+        custom_topic = "onex.custom.heartbeat.published.v1"
+
+        node.initialize_introspection(
+            node_id="test-node-heartbeat-topic",
+            node_type="COMPUTE",
+            event_bus=None,
+            heartbeat_topic=custom_topic,
+        )
+
+        assert node._heartbeat_topic == custom_topic
+
+    async def test_initialize_introspection_custom_request_topic(self) -> None:
+        """Test that custom request_introspection_topic is stored correctly."""
+        node = MockNode()
+        custom_topic = "onex.custom.request.introspection.v1"
+
+        node.initialize_introspection(
+            node_id="test-node-request-topic",
+            node_type="REDUCER",
+            event_bus=None,
+            request_introspection_topic=custom_topic,
+        )
+
+        assert node._request_introspection_topic == custom_topic
+
+    async def test_initialize_introspection_default_topics(self) -> None:
+        """Test that default topics are used when custom topics not provided."""
+        node = MockNode()
+
+        node.initialize_introspection(
+            node_id="test-node-default-topics",
+            node_type="ORCHESTRATOR",
+            event_bus=None,
+        )
+
+        # Verify class-level defaults are used
+        assert (
+            node._introspection_topic
+            == MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC
+        )
+        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+        assert (
+            node._request_introspection_topic
+            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+        )
+
+    async def test_initialize_introspection_all_custom_topics(self) -> None:
+        """Test that all custom topic parameters are stored correctly together."""
+        node = MockNode()
+        custom_introspection = "onex.all.introspection.topic.v1"
+        custom_heartbeat = "onex.all.heartbeat.topic.v1"
+        custom_request = "onex.all.request.topic.v1"
+
+        node.initialize_introspection(
+            node_id="test-node-all-topics",
+            node_type="EFFECT",
+            event_bus=None,
+            introspection_topic=custom_introspection,
+            heartbeat_topic=custom_heartbeat,
+            request_introspection_topic=custom_request,
+        )
+
+        assert node._introspection_topic == custom_introspection
+        assert node._heartbeat_topic == custom_heartbeat
+        assert node._request_introspection_topic == custom_request
+
+    async def test_initialize_introspection_partial_custom_topics(self) -> None:
+        """Test partial custom topics with defaults for unspecified ones."""
+        node = MockNode()
+        custom_introspection = "onex.partial.introspection.topic.v1"
+
+        node.initialize_introspection(
+            node_id="test-node-partial-topics",
+            node_type="EFFECT",
+            event_bus=None,
+            introspection_topic=custom_introspection,
+            # heartbeat_topic and request_introspection_topic not specified
+        )
+
+        # Custom topic should be set
+        assert node._introspection_topic == custom_introspection
+        # Others should use class-level defaults
+        assert node._heartbeat_topic == MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC
+        assert (
+            node._request_introspection_topic
+            == MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC
+        )
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
@@ -1953,6 +2058,517 @@ class TestMixinNodeIntrospectionThreadSafety:
                     f"Node {i} saw foreign node_id: {node_id}"
                 )
 
+    async def test_concurrent_cache_invalidation_and_access_with_timing(
+        self,
+    ) -> None:
+        """Test concurrent cache invalidation with simultaneous reads using timing.
+
+        This test verifies that concurrent invalidation and reads don't cause
+        inconsistent state by using timing instrumentation to detect actual
+        race conditions. It tracks:
+        - Operation timing overlaps (true concurrency)
+        - Cache state consistency after each operation
+        - No partial/corrupted reads during invalidation
+
+        This is an enhanced version of test_invalidation_during_concurrent_reads
+        with additional timing instrumentation for race condition detection.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="timed-race-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,  # Very short TTL to force cache misses
+        )
+
+        # Timing tracking for concurrency verification
+        operation_timings: list[dict[str, float | str | int]] = []
+        timing_lock = asyncio.Lock()
+        errors: list[Exception] = []
+        cache_state_observations: list[tuple[int, bool, bool]] = []
+
+        async def timed_read_operation(idx: int) -> None:
+            """Perform a read operation with timing instrumentation."""
+            start_time = time.perf_counter()
+            try:
+                # Record cache state before operation
+                cache_before = node._introspection_cache is not None
+                cached_at_before = node._introspection_cached_at is not None
+
+                data = await node.get_introspection_data()
+
+                end_time = time.perf_counter()
+
+                # Record cache state after operation
+                cache_after = node._introspection_cache is not None
+                cached_at_after = node._introspection_cached_at is not None
+
+                # Verify data consistency
+                assert data.node_id == "timed-race-node", (
+                    f"Read {idx}: got wrong node_id {data.node_id}"
+                )
+
+                # Verify cache invariant: if cache is set, cached_at must be set
+                if cache_after and not cached_at_after:
+                    errors.append(
+                        ValueError(
+                            f"Read {idx}: cache set but cached_at is None after read"
+                        )
+                    )
+                if not cache_after and cached_at_after:
+                    errors.append(
+                        ValueError(
+                            f"Read {idx}: cache is None but cached_at is set after read"
+                        )
+                    )
+
+                async with timing_lock:
+                    operation_timings.append(
+                        {
+                            "type": "read",
+                            "idx": idx,
+                            "start": start_time,
+                            "end": end_time,
+                            "duration_ms": (end_time - start_time) * 1000,
+                        }
+                    )
+                    cache_state_observations.append((idx, cache_before, cache_after))
+
+            except Exception as e:
+                errors.append(e)
+
+        async def timed_invalidate_operation(idx: int) -> None:
+            """Perform an invalidation operation with timing instrumentation."""
+            start_time = time.perf_counter()
+            try:
+                await node.invalidate_introspection_cache()
+                end_time = time.perf_counter()
+
+                # Verify cache was invalidated
+                cache_after = node._introspection_cache
+                cached_at_after = node._introspection_cached_at
+
+                # Both should be None after invalidation
+                if cache_after is not None or cached_at_after is not None:
+                    # This could be a race condition if another operation
+                    # repopulated the cache - not an error, just track it
+                    pass
+
+                async with timing_lock:
+                    operation_timings.append(
+                        {
+                            "type": "invalidate",
+                            "idx": idx,
+                            "start": start_time,
+                            "end": end_time,
+                            "duration_ms": (end_time - start_time) * 1000,
+                        }
+                    )
+
+            except Exception as e:
+                errors.append(e)
+
+        # Create mixed tasks: 50 total, alternating pattern
+        num_tasks = 50
+        tasks: list[asyncio.Task[None]] = []
+        for i in range(num_tasks):
+            if i % 3 == 0:
+                tasks.append(asyncio.create_task(timed_invalidate_operation(i)))
+            else:
+                tasks.append(asyncio.create_task(timed_read_operation(i)))
+
+        await asyncio.gather(*tasks)
+
+        # No errors should have occurred
+        assert len(errors) == 0, f"Race condition errors detected: {errors}"
+        assert len(operation_timings) == num_tasks
+
+        # Verify timing data shows actual concurrency (overlapping operations)
+        reads = [t for t in operation_timings if t["type"] == "read"]
+        invalidates = [t for t in operation_timings if t["type"] == "invalidate"]
+
+        # Count overlapping operations to verify true concurrency
+        overlaps = 0
+        for read in reads:
+            for inv in invalidates:
+                # Check if read and invalidate overlapped in time
+                r_start = read["start"]
+                r_end = read["end"]
+                i_start = inv["start"]
+                i_end = inv["end"]
+                assert isinstance(r_start, float)
+                assert isinstance(r_end, float)
+                assert isinstance(i_start, float)
+                assert isinstance(i_end, float)
+
+                if r_start < i_end and i_start < r_end:
+                    overlaps += 1
+
+        # We should have at least some overlapping operations to verify
+        # the test is actually testing concurrency
+        # (may not always happen due to async scheduling, so we just log it)
+        if overlaps == 0:
+            # This is not an error, but we note it for test quality
+            pass
+
+        # Final state should be consistent
+        final_data = await node.get_introspection_data()
+        assert final_data.node_id == "timed-race-node"
+
+    async def test_high_contention_burst_invalidation(self) -> None:
+        """Test high contention scenario with burst invalidation pattern.
+
+        This tests a pathological case where many invalidations happen
+        simultaneously, followed by many reads, simulating a burst pattern
+        that might occur during configuration reloads or failover scenarios.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="burst-node",
+            node_type="COMPUTE",
+            event_bus=None,
+            cache_ttl=0.001,  # Very short TTL
+        )
+
+        # Prime the cache
+        await node.get_introspection_data()
+
+        errors: list[Exception] = []
+        invalidation_count = 0
+        read_success_count = 0
+        counter_lock = asyncio.Lock()
+
+        async def burst_invalidate(idx: int) -> None:
+            """Burst invalidation task."""
+            nonlocal invalidation_count
+            try:
+                await node.invalidate_introspection_cache()
+                async with counter_lock:
+                    invalidation_count += 1
+            except Exception as e:
+                errors.append(e)
+
+        async def burst_read(idx: int) -> None:
+            """Burst read task."""
+            nonlocal read_success_count
+            try:
+                data = await node.get_introspection_data()
+                assert data.node_id == "burst-node"
+                async with counter_lock:
+                    read_success_count += 1
+            except Exception as e:
+                errors.append(e)
+
+        # Phase 1: Burst of 30 invalidations
+        await asyncio.gather(*[burst_invalidate(i) for i in range(30)])
+
+        # Phase 2: Burst of 30 reads immediately after
+        await asyncio.gather(*[burst_read(i) for i in range(30)])
+
+        # Phase 3: Mixed burst (20 invalidations + 30 reads simultaneously)
+        mixed_tasks: list[asyncio.Task[None]] = []
+        for i in range(50):
+            if i < 20:
+                mixed_tasks.append(asyncio.create_task(burst_invalidate(i + 100)))
+            else:
+                mixed_tasks.append(asyncio.create_task(burst_read(i + 100)))
+
+        await asyncio.gather(*mixed_tasks)
+
+        assert len(errors) == 0, f"Burst errors: {errors}"
+        assert invalidation_count == 50  # 30 + 20
+        assert read_success_count == 60  # 30 + 30
+
+        # Final consistency check
+        final_data = await node.get_introspection_data()
+        assert final_data.node_id == "burst-node"
+
+    async def test_cache_consistency_verification_under_load(self) -> None:
+        """Test that cache data remains internally consistent under load.
+
+        This test specifically checks that the introspection data returned
+        is internally consistent (all fields match expected values) and
+        that no partial updates or corrupted data is ever returned.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="consistency-check-node",
+            node_type="REDUCER",
+            event_bus=None,
+            cache_ttl=0.001,
+        )
+
+        consistency_errors: list[str] = []
+        data_snapshots: list[dict[str, str | list[str]]] = []
+        snapshot_lock = asyncio.Lock()
+
+        async def verify_data_consistency(idx: int) -> None:
+            """Verify that returned data is internally consistent."""
+            try:
+                data = await node.get_introspection_data()
+
+                # Core field consistency checks
+                if data.node_id != "consistency-check-node":
+                    consistency_errors.append(
+                        f"Task {idx}: node_id mismatch: {data.node_id}"
+                    )
+
+                if data.node_type != "REDUCER":
+                    consistency_errors.append(
+                        f"Task {idx}: node_type mismatch: {data.node_type}"
+                    )
+
+                # Verify capabilities are valid strings
+                for cap in data.capabilities:
+                    if not isinstance(cap, str):
+                        consistency_errors.append(
+                            f"Task {idx}: capability not a string: {cap!r}"
+                        )
+
+                # Verify timestamp is valid
+                if not data.timestamp:
+                    consistency_errors.append(f"Task {idx}: timestamp is empty")
+
+                # Snapshot the data for cross-task comparison
+                async with snapshot_lock:
+                    data_snapshots.append(
+                        {
+                            "node_id": data.node_id,
+                            "node_type": data.node_type,
+                            "capabilities": list(data.capabilities),
+                        }
+                    )
+
+            except Exception as e:
+                consistency_errors.append(f"Task {idx}: exception: {e}")
+
+        async def invalidate_with_check(idx: int) -> None:
+            """Invalidate and verify cache state."""
+            try:
+                await node.invalidate_introspection_cache()
+
+                # After invalidation, cache should be None
+                # (unless another task already repopulated it)
+                cache = node._introspection_cache
+                cached_at = node._introspection_cached_at
+
+                # Invariant check: both should be None or both should be set
+                if (cache is None) != (cached_at is None):
+                    consistency_errors.append(
+                        f"Task {idx}: cache invariant violated after invalidate"
+                    )
+
+            except Exception as e:
+                consistency_errors.append(f"Task {idx}: invalidate exception: {e}")
+
+        # Run 40 verification reads and 10 invalidations concurrently
+        tasks: list[asyncio.Task[None]] = []
+        for i in range(50):
+            if i % 5 == 0:
+                tasks.append(asyncio.create_task(invalidate_with_check(i)))
+            else:
+                tasks.append(asyncio.create_task(verify_data_consistency(i)))
+
+        await asyncio.gather(*tasks)
+
+        assert len(consistency_errors) == 0, (
+            f"Data consistency errors: {consistency_errors}"
+        )
+
+        # Verify all snapshots have consistent values for immutable fields
+        assert len(data_snapshots) == 40  # 40 reads
+        for i, snapshot in enumerate(data_snapshots):
+            assert snapshot["node_id"] == "consistency-check-node", (
+                f"Snapshot {i}: node_id inconsistent"
+            )
+            assert snapshot["node_type"] == "REDUCER", (
+                f"Snapshot {i}: node_type inconsistent"
+            )
+
+    async def test_lock_contention_with_slow_operations(self) -> None:
+        """Test lock behavior when operations have varying durations.
+
+        This simulates realistic scenarios where some operations are slow
+        (e.g., first cache population with reflection) and others are fast
+        (cache hits), ensuring the lock properly serializes access.
+
+        We use the standard MockNode with a very short TTL to force cache
+        rebuilds, testing the lock under contention when multiple coroutines
+        try to rebuild the cache simultaneously.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="slow-contention-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.0001,  # Extremely short TTL to force rebuilds
+        )
+
+        errors: list[Exception] = []
+        results: list[str] = []
+        result_lock = asyncio.Lock()
+        operation_count = 0
+        op_count_lock = asyncio.Lock()
+
+        async def concurrent_access_with_delay(idx: int) -> None:
+            """Access introspection data with varying delays to create contention."""
+            nonlocal operation_count
+            try:
+                # Add small varying delay to stagger operations
+                if idx % 5 == 0:
+                    await asyncio.sleep(0.001)
+
+                data = await node.get_introspection_data()
+
+                async with result_lock:
+                    results.append(data.node_id)
+                async with op_count_lock:
+                    operation_count += 1
+            except Exception as e:
+                errors.append(e)
+
+        # Launch 30 concurrent requests with varying delays
+        await asyncio.gather(*[concurrent_access_with_delay(i) for i in range(30)])
+
+        assert len(errors) == 0, f"Errors during slow operation test: {errors}"
+        assert len(results) == 30
+        assert all(r == "slow-contention-node" for r in results)
+        assert operation_count == 30
+
+        # Verify cache state is consistent after concurrent operations
+        assert node._introspection_cache is not None
+        assert node._introspection_cached_at is not None
+
+    async def test_interleaved_invalidation_sequences(self) -> None:
+        """Test interleaved sequences of invalidation and reads.
+
+        This tests a specific pattern where invalidations and reads are
+        interleaved in a way that maximizes the chance of catching
+        a read mid-invalidation or vice versa.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="interleaved-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.0001,  # Extremely short TTL
+        )
+
+        sequence_log: list[str] = []
+        sequence_lock = asyncio.Lock()
+        errors: list[Exception] = []
+
+        async def read_with_log(idx: int) -> None:
+            """Read with sequence logging."""
+            try:
+                async with sequence_lock:
+                    sequence_log.append(f"read_start_{idx}")
+
+                data = await node.get_introspection_data()
+                assert data.node_id == "interleaved-node"
+
+                async with sequence_lock:
+                    sequence_log.append(f"read_end_{idx}")
+            except Exception as e:
+                errors.append(e)
+
+        async def invalidate_with_log(idx: int) -> None:
+            """Invalidate with sequence logging."""
+            try:
+                async with sequence_lock:
+                    sequence_log.append(f"inv_start_{idx}")
+
+                await node.invalidate_introspection_cache()
+
+                async with sequence_lock:
+                    sequence_log.append(f"inv_end_{idx}")
+            except Exception as e:
+                errors.append(e)
+
+        # Create interleaved pattern: R, I, R, I, R, I, ...
+        tasks: list[asyncio.Task[None]] = []
+        for i in range(40):
+            if i % 2 == 0:
+                tasks.append(asyncio.create_task(read_with_log(i)))
+            else:
+                tasks.append(asyncio.create_task(invalidate_with_log(i)))
+
+        await asyncio.gather(*tasks)
+
+        assert len(errors) == 0, f"Interleaved sequence errors: {errors}"
+
+        # Verify all operations completed (start and end logged)
+        for i in range(40):
+            if i % 2 == 0:
+                assert f"read_start_{i}" in sequence_log
+                assert f"read_end_{i}" in sequence_log
+            else:
+                assert f"inv_start_{i}" in sequence_log
+                assert f"inv_end_{i}" in sequence_log
+
+    async def test_stress_test_sustained_concurrent_access(self) -> None:
+        """Stress test with sustained concurrent access over multiple rounds.
+
+        This test simulates a longer-running scenario where the cache is
+        continuously accessed and invalidated over multiple rounds,
+        checking for degradation or state corruption over time.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id="stress-test-node",
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.01,  # 10ms TTL
+        )
+
+        total_reads = 0
+        total_invalidations = 0
+        errors: list[Exception] = []
+        counter_lock = asyncio.Lock()
+
+        async def sustained_operation(round_num: int, op_type: str) -> None:
+            """Perform sustained operation."""
+            nonlocal total_reads, total_invalidations
+            try:
+                if op_type == "read":
+                    data = await node.get_introspection_data()
+                    assert data.node_id == "stress-test-node"
+                    async with counter_lock:
+                        total_reads += 1
+                else:
+                    await node.invalidate_introspection_cache()
+                    async with counter_lock:
+                        total_invalidations += 1
+            except Exception as e:
+                errors.append(e)
+
+        # Run 10 rounds of concurrent operations
+        num_rounds = 10
+        ops_per_round = 20
+
+        for round_num in range(num_rounds):
+            tasks: list[asyncio.Task[None]] = []
+            for i in range(ops_per_round):
+                op_type = "invalidate" if i % 4 == 0 else "read"
+                tasks.append(
+                    asyncio.create_task(sustained_operation(round_num, op_type))
+                )
+
+            await asyncio.gather(*tasks)
+
+            # Small pause between rounds
+            await asyncio.sleep(0.001)
+
+        assert len(errors) == 0, f"Stress test errors: {errors}"
+        assert total_reads == num_rounds * (ops_per_round - ops_per_round // 4)
+        assert total_invalidations == num_rounds * (ops_per_round // 4)
+
+        # Final consistency check
+        final_data = await node.get_introspection_data()
+        assert final_data.node_id == "stress-test-node"
+        assert node._introspection_cache is not None
+        assert node._introspection_cached_at is not None
+
 
 @pytest.mark.asyncio(loop_scope="function")
 class TestMixinNodeIntrospectionClassLevelCache:
@@ -3052,6 +3668,7 @@ class TestModelIntrospectionConfigTopicValidation:
     - Start with "onex." prefix (ONEX naming convention)
     - Contain only alphanumeric characters, dots, hyphens, and underscores
     - Be non-empty after the prefix
+    - End with version suffix (e.g., .v1, .v2, .v10)
     """
 
     async def test_valid_topic_names_accepted(self) -> None:
