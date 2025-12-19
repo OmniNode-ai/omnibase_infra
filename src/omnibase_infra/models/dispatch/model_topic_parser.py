@@ -96,6 +96,14 @@ class ModelTopicParser:
         True
         >>> parser.matches_pattern("**.events", "dev.user.events.v1")
         True
+
+    See Also:
+        ONEX Topic Taxonomy: The topic naming convention follows the pattern
+        ``{prefix}.{domain}.{type}`` for ONEX Kafka format and
+        ``{env}.{domain}.{category}.{version}`` for Environment-Aware format.
+        Refer to ``docs/architecture/TOPIC_TAXONOMY.md`` for the complete
+        specification of topic naming conventions, domain registration,
+        and message routing rules.
     """
 
     # ONEX Kafka format: onex.<domain>.<type>
@@ -168,7 +176,7 @@ class ModelTopicParser:
         """
         if not topic or not topic.strip():
             return ModelParsedTopic(
-                raw_topic=topic or "",
+                raw_topic="<empty>",  # Use placeholder to satisfy min_length constraint
                 standard=EnumTopicStandard.UNKNOWN,
                 is_valid=False,
                 validation_error="Topic cannot be empty or whitespace",

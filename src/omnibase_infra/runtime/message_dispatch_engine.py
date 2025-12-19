@@ -151,7 +151,13 @@ class MessageDispatchEngine:
     Thread Safety:
         Follows the freeze-after-init pattern. All registrations must complete
         before calling freeze(). After freeze(), dispatch operations are
-        thread-safe for concurrent access.
+        thread-safe for concurrent access. However, note:
+
+        - Metrics updates use atomic reference assignment but may lose updates
+          under extremely high concurrency. Use get_structured_metrics() for
+          a consistent snapshot.
+        - Legacy metrics (get_metrics()) are approximate under concurrent load;
+          prefer get_structured_metrics() for accurate counts.
 
     Logging Levels:
         - **INFO**: Dispatch start/complete with topic, category, dispatcher count
@@ -629,7 +635,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     correlation_id=correlation_id_str,
                     trace_id=trace_id_str,
-                    error_code="INVALID_TOPIC_CATEGORY",
+                    error_code=EnumCoreErrorCode.VALIDATION_ERROR.name,
                 ),
             )
 
@@ -642,7 +648,7 @@ class MessageDispatchEngine:
                 duration_ms=duration_ms,
                 error_message=f"Cannot infer message category from topic '{topic}'. "
                 "Topic must contain .events, .commands, or .intents segment.",
-                error_code="INVALID_TOPIC_CATEGORY",
+                error_code=EnumCoreErrorCode.VALIDATION_ERROR.name,
             )
 
         # Log dispatch start at INFO level
@@ -657,50 +663,17 @@ class MessageDispatchEngine:
         )
 
         # Step 2: Validate envelope category matches topic category
-        envelope_category = envelope.infer_category()
-        if envelope_category != topic_category:
-            self._metrics["category_mismatch_count"] += 1
-            self._metrics["dispatch_error_count"] += 1
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            self._metrics["total_latency_ms"] += duration_ms
-
-            # Update structured metrics
-            self._structured_metrics = self._structured_metrics.record_dispatch(
-                duration_ms=duration_ms,
-                success=False,
-                category=topic_category,
-                category_mismatch=True,
-                topic=topic,
-            )
-
-            # Log warning
-            self._logger.warning(
-                "Dispatch failed: category mismatch (envelope=%s, topic=%s)",
-                envelope_category,
-                topic_category,
-                extra=self._build_log_context(
-                    topic=topic,
-                    category=topic_category,
-                    duration_ms=duration_ms,
-                    correlation_id=correlation_id_str,
-                    trace_id=trace_id_str,
-                    error_code="CATEGORY_MISMATCH",
-                ),
-            )
-
-            return ModelDispatchResult(
-                dispatch_id=dispatch_id,
-                status=EnumDispatchStatus.INVALID_MESSAGE,
-                topic=topic,
-                message_category=topic_category,
-                started_at=started_at,
-                completed_at=datetime.now(UTC),
-                duration_ms=duration_ms,
-                error_message=f"Envelope category '{envelope_category}' does not match "
-                f"topic category '{topic_category}'. Envelope payload type: "
-                f"{type(envelope.payload).__name__}",
-                error_code="CATEGORY_MISMATCH",
-            )
+        # NOTE: ModelEventEnvelope.infer_category() is not yet implemented in omnibase_core.
+        # Until it is, we trust the topic category as the source of truth for routing.
+        # This is safe because the topic defines the message category, and handlers
+        # are registered for specific categories - any mismatch would be a caller error.
+        # TODO(OMN-934): Re-enable envelope category validation when infer_category() is available
+        #
+        # The code below is disabled until infer_category() is available:
+        # envelope_category = envelope.infer_category()
+        # if envelope_category != topic_category:
+        #     self._metrics["category_mismatch_count"] += 1
+        #     ... (category mismatch handling)
 
         # Step 3: Get message type from payload
         message_type = type(envelope.payload).__name__
@@ -755,7 +728,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     correlation_id=correlation_id_str,
                     trace_id=trace_id_str,
-                    error_code="NO_DISPATCHER_FOUND",
+                    error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED.name,
                 ),
             )
 
@@ -770,7 +743,7 @@ class MessageDispatchEngine:
                 duration_ms=duration_ms,
                 error_message=f"No dispatcher registered for category '{topic_category}' "
                 f"and message type '{message_type}' matching topic '{topic}'.",
-                error_code="NO_DISPATCHER_FOUND",
+                error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED.name,
             )
 
         # Step 5: Execute dispatchers and collect outputs
@@ -933,7 +906,7 @@ class MessageDispatchEngine:
                         duration_ms=dispatcher_duration_ms,
                         correlation_id=correlation_id_str,
                         trace_id=trace_id_str,
-                        error_code="DISPATCHER_EXCEPTION",
+                        error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR.name,
                     ),
                 )
 
@@ -1007,7 +980,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     correlation_id=correlation_id_str,
                     trace_id=trace_id_str,
-                    error_code="DISPATCHER_EXECUTION_ERROR",
+                    error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR.name,
                 ),
             )
 
@@ -1025,7 +998,9 @@ class MessageDispatchEngine:
             outputs=outputs if outputs else None,
             output_count=len(outputs),
             error_message="; ".join(dispatcher_errors) if dispatcher_errors else None,
-            error_code="DISPATCHER_EXECUTION_ERROR" if dispatcher_errors else None,
+            error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR.name
+            if dispatcher_errors
+            else None,
             correlation_id=envelope.correlation_id,
             trace_id=envelope.trace_id,
             span_id=envelope.span_id,

@@ -73,6 +73,11 @@ class ModelDispatchMetrics(BaseModel):
     - Per-dispatcher metrics breakdown
     - Per-category metrics breakdown
 
+    Note:
+        In the freeze-after-init pattern, the dispatcher set is fixed after
+        engine.freeze() is called, so dispatcher_metrics growth is bounded
+        by the number of registered dispatchers.
+
     Attributes:
         total_dispatches: Total number of dispatch operations.
         successful_dispatches: Number of successful dispatches.

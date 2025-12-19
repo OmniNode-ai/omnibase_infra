@@ -96,12 +96,12 @@ def event_reducer_dispatcher() -> MockMessageDispatcher:
 
 
 @pytest.fixture
-def event_orchestrator_dispatcher() -> MockMessageDispatcher:
-    """Create a dispatcher for EVENT -> ORCHESTRATOR (valid shape)."""
+def event_compute_dispatcher() -> MockMessageDispatcher:
+    """Create a dispatcher for EVENT -> COMPUTE (valid shape)."""
     return MockMessageDispatcher(
-        dispatcher_id="event-orchestrator-dispatcher",
+        dispatcher_id="event-compute-dispatcher",
         category=EnumMessageCategory.EVENT,
-        node_kind=EnumNodeKind.ORCHESTRATOR,
+        node_kind=EnumNodeKind.COMPUTE,
     )
 
 
@@ -127,12 +127,12 @@ def command_effect_dispatcher() -> MockMessageDispatcher:
 
 
 @pytest.fixture
-def intent_effect_dispatcher() -> MockMessageDispatcher:
-    """Create a dispatcher for INTENT -> EFFECT (valid shape)."""
+def intent_orchestrator_dispatcher() -> MockMessageDispatcher:
+    """Create a dispatcher for INTENT -> ORCHESTRATOR (valid shape)."""
     return MockMessageDispatcher(
-        dispatcher_id="intent-effect-dispatcher",
+        dispatcher_id="intent-orchestrator-dispatcher",
         category=EnumMessageCategory.INTENT,
-        node_kind=EnumNodeKind.EFFECT,
+        node_kind=EnumNodeKind.ORCHESTRATOR,
         message_types={"SendEmail", "NotifyUser"},
     )
 
@@ -191,12 +191,12 @@ class TestDispatcherRegistration:
         self,
         dispatcher_registry: DispatcherRegistry,
         event_reducer_dispatcher: MockMessageDispatcher,
-        event_orchestrator_dispatcher: MockMessageDispatcher,
+        event_compute_dispatcher: MockMessageDispatcher,
         command_orchestrator_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should register multiple dispatchers successfully."""
         dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
-        dispatcher_registry.register_dispatcher(event_orchestrator_dispatcher)
+        dispatcher_registry.register_dispatcher(event_compute_dispatcher)
         dispatcher_registry.register_dispatcher(command_orchestrator_dispatcher)
         assert dispatcher_registry.dispatcher_count == 3
 
@@ -245,11 +245,11 @@ class TestDispatcherRegistration:
         """Should raise when registering duplicate dispatcher_id."""
         dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
 
-        # Create another dispatcher with same ID
+        # Create another dispatcher with same ID but valid execution shape
         duplicate = MockMessageDispatcher(
             dispatcher_id="event-reducer-dispatcher",  # Same ID
             category=EnumMessageCategory.EVENT,
-            node_kind=EnumNodeKind.ORCHESTRATOR,
+            node_kind=EnumNodeKind.COMPUTE,  # Valid shape: EVENT -> COMPUTE
         )
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -301,13 +301,13 @@ class TestExecutionShapeValidation:
         dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
         assert dispatcher_registry.dispatcher_count == 1
 
-    def test_valid_shapes_event_to_orchestrator(
+    def test_valid_shapes_event_to_compute(
         self,
         dispatcher_registry: DispatcherRegistry,
-        event_orchestrator_dispatcher: MockMessageDispatcher,
+        event_compute_dispatcher: MockMessageDispatcher,
     ) -> None:
-        """EVENT -> ORCHESTRATOR is a valid execution shape."""
-        dispatcher_registry.register_dispatcher(event_orchestrator_dispatcher)
+        """EVENT -> COMPUTE is a valid execution shape."""
+        dispatcher_registry.register_dispatcher(event_compute_dispatcher)
         assert dispatcher_registry.dispatcher_count == 1
 
     def test_valid_shapes_command_to_orchestrator(
@@ -328,13 +328,13 @@ class TestExecutionShapeValidation:
         dispatcher_registry.register_dispatcher(command_effect_dispatcher)
         assert dispatcher_registry.dispatcher_count == 1
 
-    def test_valid_shapes_intent_to_effect(
+    def test_valid_shapes_intent_to_orchestrator(
         self,
         dispatcher_registry: DispatcherRegistry,
-        intent_effect_dispatcher: MockMessageDispatcher,
+        intent_orchestrator_dispatcher: MockMessageDispatcher,
     ) -> None:
-        """INTENT -> EFFECT is a valid execution shape."""
-        dispatcher_registry.register_dispatcher(intent_effect_dispatcher)
+        """INTENT -> ORCHESTRATOR is a valid execution shape."""
+        dispatcher_registry.register_dispatcher(intent_orchestrator_dispatcher)
         assert dispatcher_registry.dispatcher_count == 1
 
     def test_invalid_shape_command_to_reducer_raises(
@@ -383,14 +383,14 @@ class TestExecutionShapeValidation:
 
         assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
 
-    def test_invalid_shape_intent_to_orchestrator_raises(
+    def test_invalid_shape_intent_to_effect_raises(
         self, dispatcher_registry: DispatcherRegistry
     ) -> None:
-        """INTENT -> ORCHESTRATOR is an invalid execution shape."""
+        """INTENT -> EFFECT is an invalid execution shape."""
         invalid_dispatcher = MockMessageDispatcher(
             dispatcher_id="invalid-dispatcher",
             category=EnumMessageCategory.INTENT,
-            node_kind=EnumNodeKind.ORCHESTRATOR,  # Invalid!
+            node_kind=EnumNodeKind.EFFECT,  # Invalid!
         )
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -497,11 +497,11 @@ class TestDispatcherLookup:
         self,
         dispatcher_registry: DispatcherRegistry,
         event_reducer_dispatcher: MockMessageDispatcher,
-        event_orchestrator_dispatcher: MockMessageDispatcher,
+        event_compute_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should return all dispatchers for a category."""
         dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
-        dispatcher_registry.register_dispatcher(event_orchestrator_dispatcher)
+        dispatcher_registry.register_dispatcher(event_compute_dispatcher)
         dispatcher_registry.freeze()
 
         dispatchers = dispatcher_registry.get_dispatchers(EnumMessageCategory.EVENT)
@@ -511,28 +511,28 @@ class TestDispatcherLookup:
         self,
         dispatcher_registry: DispatcherRegistry,
         event_reducer_dispatcher: MockMessageDispatcher,
-        event_orchestrator_dispatcher: MockMessageDispatcher,
+        event_compute_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Should filter dispatchers by message type."""
         dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
-        dispatcher_registry.register_dispatcher(event_orchestrator_dispatcher)
+        dispatcher_registry.register_dispatcher(event_compute_dispatcher)
         dispatcher_registry.freeze()
 
-        # event_reducer_dispatcher has specific types, event_orchestrator has none (all)
+        # event_reducer_dispatcher has specific types, event_compute has none (all)
         dispatchers = dispatcher_registry.get_dispatchers(
             EnumMessageCategory.EVENT,
             message_type="UserCreated",
         )
-        # Both should match: reducer has UserCreated, orchestrator accepts all
+        # Both should match: reducer has UserCreated, compute accepts all
         assert len(dispatchers) == 2
 
-        # Only orchestrator should match (reducer doesn't have UnknownEvent)
+        # Only compute should match (reducer doesn't have UnknownEvent)
         dispatchers = dispatcher_registry.get_dispatchers(
             EnumMessageCategory.EVENT,
             message_type="UnknownEvent",
         )
         assert len(dispatchers) == 1
-        assert dispatchers[0].dispatcher_id == "event-orchestrator-dispatcher"
+        assert dispatchers[0].dispatcher_id == "event-compute-dispatcher"
 
     def test_get_dispatchers_empty_category(
         self,
@@ -605,18 +605,18 @@ class TestUnregistration:
         self,
         dispatcher_registry: DispatcherRegistry,
         event_reducer_dispatcher: MockMessageDispatcher,
-        event_orchestrator_dispatcher: MockMessageDispatcher,
+        event_compute_dispatcher: MockMessageDispatcher,
     ) -> None:
         """Unregistered dispatcher should be removed from category index."""
         dispatcher_registry.register_dispatcher(event_reducer_dispatcher)
-        dispatcher_registry.register_dispatcher(event_orchestrator_dispatcher)
+        dispatcher_registry.register_dispatcher(event_compute_dispatcher)
 
         dispatcher_registry.unregister_dispatcher("event-reducer-dispatcher")
         dispatcher_registry.freeze()
 
         dispatchers = dispatcher_registry.get_dispatchers(EnumMessageCategory.EVENT)
         assert len(dispatchers) == 1
-        assert dispatchers[0].dispatcher_id == "event-orchestrator-dispatcher"
+        assert dispatchers[0].dispatcher_id == "event-compute-dispatcher"
 
 
 # =============================================================================

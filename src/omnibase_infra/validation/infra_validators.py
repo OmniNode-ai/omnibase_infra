@@ -201,13 +201,16 @@ def validate_infra_patterns(
     # Filter known infrastructure pattern exemptions using regex-based matching
     # Patterns match class/method names and violation types without hardcoded line numbers
     exempted_patterns: list[ExemptionPattern] = [
-        # KafkaEventBus method count exemption
+        # KafkaEventBus method count exemption (OMN-934)
+        # KafkaEventBus complexity is acceptable for event bus pattern - requires
+        # lifecycle management, pub/sub operations, circuit breaker, and protocol compatibility
         {
             "file_pattern": r"kafka_event_bus\.py",
             "class_pattern": r"Class 'KafkaEventBus'",
             "violation_pattern": r"has \d+ methods",
         },
-        # KafkaEventBus __init__ parameter count exemption
+        # KafkaEventBus __init__ parameter count exemption (OMN-934)
+        # Backwards compatibility during config migration requires multiple parameters
         {
             "file_pattern": r"kafka_event_bus\.py",
             "method_pattern": r"Function '__init__'",
