@@ -40,6 +40,7 @@ Integration with ONEX Architecture:
 from __future__ import annotations
 
 import ast
+import logging
 import re
 import threading
 from pathlib import Path
@@ -57,6 +58,7 @@ from omnibase_infra.models.validation.model_execution_shape_violation import (
 if TYPE_CHECKING:
     from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Custom Exception
@@ -309,8 +311,24 @@ def discover_message_types(
         try:
             file_content = file_path.read_text(encoding="utf-8")
             tree = ast.parse(file_content, filename=str(file_path))
-        except (SyntaxError, UnicodeDecodeError):
-            # Skip files that can't be parsed
+        except SyntaxError as e:
+            # Log and skip files with syntax errors
+            logger.debug(
+                "Skipping file with syntax error during message type discovery: %s "
+                "(line %s: %s)",
+                file_path,
+                e.lineno,
+                e.msg,
+            )
+            continue
+        except UnicodeDecodeError as e:
+            # Log and skip files with encoding errors
+            logger.debug(
+                "Skipping file with encoding error during message type discovery: %s "
+                "(%s)",
+                file_path,
+                e.reason,
+            )
             continue
 
         for node in ast.walk(tree):
@@ -489,7 +507,19 @@ def _discover_routes_static(source_directory: Path) -> set[str]:
             for pattern in compiled_patterns:
                 matches = pattern.findall(content)
                 registered_types.update(matches)
-        except (UnicodeDecodeError, OSError):
+        except UnicodeDecodeError as e:
+            logger.debug(
+                "Skipping file with encoding error during route discovery: %s (%s)",
+                file_path,
+                e.reason,
+            )
+            continue
+        except OSError as e:
+            logger.debug(
+                "Skipping file with OS error during route discovery: %s (%s)",
+                file_path,
+                e.strerror,
+            )
             continue
 
     return registered_types

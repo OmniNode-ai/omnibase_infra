@@ -610,12 +610,18 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         if name is None:
             return None
 
+        # ==================================================================
+        # Pattern Matching Order: By Specificity (most specific first)
+        # ==================================================================
+        #
         # Phase 1: Check suffix patterns (most reliable, fewest false positives)
         # Suffix matching is preferred because message types conventionally
         # END with their category: OrderCreatedEvent, CreateOrderCommand
         #
-        # Check longer suffixes first to avoid partial matches:
-        # "CreatedEvent" should match before "Event"
+        # IMPORTANT: Suffix order matters! Longer/more-specific suffixes are
+        # checked first to avoid partial matches. For example:
+        # - "OrderCreatedEvent" should match "Event" suffix (not just "Created")
+        # - The suffix list is ordered by semantic specificity, not length
         event_suffixes = ("Event", "Created", "Updated", "Deleted", "Occurred")
         for suffix in event_suffixes:
             if name.endswith(suffix):
@@ -629,7 +635,11 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
 
         # Phase 2: Check prefix patterns for CQRS-style command naming
         # Commands often start with verbs: CreateOrder, UpdateUser, DeleteItem
-        # Note: This is less reliable as many non-message types start with verbs
+        #
+        # NOTE: Prefix matching is LESS reliable than suffix matching because
+        # many non-message types start with verbs (e.g., CreateUserService,
+        # UpdateHandler, DeleteButton). This phase runs after suffix matching
+        # to ensure names like "CreateOrderCommand" match as COMMAND via suffix.
         command_prefixes = ("Create", "Update", "Delete", "Execute", "Do")
         for prefix in command_prefixes:
             if name.startswith(prefix):
@@ -637,6 +647,10 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
 
         # Phase 3: Check for Model* prefix patterns (ONEX naming convention)
         # ONEX models use "Model" prefix: ModelEvent, ModelCommand, etc.
+        #
+        # This phase is LAST because it's ONEX-specific and the generic suffix
+        # patterns in Phase 1 would already catch most cases (e.g., ModelOrderEvent
+        # ends with "Event" and would be caught in Phase 1).
         if name.startswith("ModelEvent"):
             return EnumMessageCategory.EVENT
         if name.startswith("ModelCommand"):
@@ -657,19 +671,31 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         the static parts and validates that the result forms a complete, valid
         topic pattern before returning it for validation.
 
-        LIMITATION: This method intentionally skips validation for f-strings
-        that produce incomplete topic fragments. This is a conservative approach
-        to avoid:
-        - False positives: ".events" falsely matching as a valid topic
-        - False negatives: "order." being flagged as invalid when the full
+        IMPORTANT - INCOMPLETE TOPIC NAME HANDLING:
+        This method intentionally skips validation for f-strings that produce
+        incomplete topic fragments. The result may be an incomplete topic name
+        for f-strings with interpolated variables. For example:
+
+        - f"{domain}.events" yields only ".events" (domain is unknown)
+        - f"order.{suffix}" yields only "order." (suffix is unknown)
+        - f"{get_prefix()}.{get_suffix()}" yields "" (all dynamic)
+
+        These incomplete fragments are NOT returned for validation because:
+        - False positives: ".events" could falsely match as a valid topic
+        - False negatives: "order." would be flagged as invalid when the full
           topic might be "order.events"
+
+        This is a deliberate design decision to prefer missing violations over
+        incorrect violations. Runtime validation should catch what static
+        analysis cannot.
 
         Args:
             node: The AST JoinedStr node representing an f-string.
 
         Returns:
             The extracted topic name if it forms a complete valid pattern,
-            or None if the f-string cannot be reliably validated.
+            or None if the f-string cannot be reliably validated (including
+            when only incomplete fragments are available).
 
         Examples:
             - f"order.events" -> "order.events" (fully static, valid)

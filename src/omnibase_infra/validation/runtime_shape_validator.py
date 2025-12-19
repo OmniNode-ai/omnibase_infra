@@ -6,6 +6,29 @@ This module provides runtime validation of handler outputs against the
 ONEX 4-node architecture execution shape constraints. It ensures that
 handlers only produce message types that are allowed for their handler type.
 
+Scope and Design:
+    This is a RUNTIME validator, not static analysis. It operates under these
+    assumptions:
+
+    1. **Syntactically Valid Code**: Code has already been parsed by Python's
+       interpreter. Syntax errors are detected at import/compile time before
+       this validator runs.
+
+    2. **Executing Handler Context**: The validator operates on actual return
+       values from executing handlers, not on AST representations.
+
+    3. **Known Handler Type**: Handler type is explicitly declared via the
+       @enforce_execution_shape decorator or passed to validation methods.
+
+    **Complementary Validators**:
+    - execution_shape_validator.py: AST-based static analysis (catches issues
+      before runtime, analyzes code structure)
+    - runtime_shape_validator.py (this module): Runtime validation (catches
+      issues when actual values are produced)
+
+    The runtime validator catches violations that cannot be determined statically,
+    such as dynamically constructed return values or conditional returns.
+
 Execution Shape Rules (imported from execution_shape_validator):
     - EFFECT: Can return EVENTs and COMMANDs, but not PROJECTIONs
     - COMPUTE: Can return any message type (most permissive)
@@ -313,12 +336,39 @@ class RuntimeShapeValidator:
 
         Returns:
             True if the output category is allowed, False if forbidden.
+
+        Security Note (Intentional Fail-Open Design):
+            This method returns True (allowing the output) when no rule exists
+            for the given handler type. This is an INTENTIONAL design decision,
+            not a security vulnerability:
+
+            1. **Extensibility**: New handler types should work by default without
+               requiring immediate rule definitions. This prevents blocking valid
+               code during handler type evolution.
+
+            2. **Validation vs Security Boundary**: This validator enforces
+               architectural constraints (ONEX 4-node patterns), NOT security
+               policies. It catches developer errors at build/test time, not
+               malicious inputs at runtime.
+
+            3. **Defense in Depth**: Security boundaries should be implemented
+               at the infrastructure layer (authentication, authorization,
+               input validation) - not in architectural pattern validators.
+
+            4. **Fail-Safe for Unknown Types**: Unknown handler types represent
+               future extensions or custom implementations. Blocking them would
+               break forward compatibility without security benefit.
+
+            If strict validation is required for security-critical contexts,
+            use a fail-closed wrapper or policy decorator.
         """
         try:
             rule = self.get_rule(handler_type)
             return rule.is_return_type_allowed(output_category)
         except KeyError:
-            # If no rule exists, allow by default (fail open)
+            # SECURITY DESIGN: Fail-open for unknown handler types.
+            # See docstring "Security Note" for rationale.
+            # This is intentional - new handler types should be allowed by default.
             return True
 
     def validate_handler_output(
@@ -478,6 +528,33 @@ def enforce_execution_shape(handler_type: EnumHandlerType) -> Callable[[F], F]:
     Note:
         The decorator uses inspect to determine the source file and line
         number of the decorated function for better error reporting.
+
+    Security Note (Intentional Fail-Open Design):
+        When the message category cannot be determined from the return value,
+        the decorator skips validation and allows the return. This is an
+        INTENTIONAL design decision for the following reasons:
+
+        1. **Graceful Handling of Unknown Types**: Not all return types will
+           have detectable categories (e.g., primitive types, third-party
+           objects, custom domain objects). Blocking these would cause false
+           positives and break legitimate code.
+
+        2. **Progressive Adoption**: Teams can adopt execution shape validation
+           incrementally. Handlers returning non-categorized types continue
+           working while teams add category annotations to their message types.
+
+        3. **Validation Tool, Not Security Gate**: This decorator catches
+           architectural mistakes (e.g., reducer returning events), not
+           security threats. Unknown categories don't represent attack vectors.
+
+        4. **Type Detection Limitations**: Category detection relies on naming
+           conventions and explicit attributes. Overly strict enforcement would
+           require all types to implement specific interfaces, which is
+           impractical for existing codebases.
+
+        For strict enforcement, ensure all message types either:
+        - Have a `category` or `message_category` attribute
+        - Follow naming conventions (e.g., `*Event`, `*Command`, `*Projection`)
     """
 
     def decorator(func: F) -> F:
@@ -497,7 +574,9 @@ def enforce_execution_shape(handler_type: EnumHandlerType) -> Callable[[F], F]:
             # Detect category of the result
             output_category = detect_message_category(result)
 
-            # If we can't determine the category, skip validation (fail-open)
+            # SECURITY DESIGN: Fail-open for undetectable message categories.
+            # See docstring "Security Note" for detailed rationale.
+            # This is intentional - unknown types shouldn't block execution.
             if output_category is None:
                 return result
 
