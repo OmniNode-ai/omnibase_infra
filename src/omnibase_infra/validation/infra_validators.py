@@ -405,6 +405,11 @@ def validate_infra_contract_deep(
     Uses ProtocolContractValidator for comprehensive contract checking
     suitable for autonomous code generation.
 
+    Performance Note:
+        This function uses a cached singleton ProtocolContractValidator instance
+        for optimal performance in hot paths. The validator is stateless after
+        initialization, making it safe to reuse across calls.
+
     Args:
         contract_path: Path to the contract YAML file.
         contract_type: Type of contract to validate. Defaults to "effect".
@@ -412,8 +417,23 @@ def validate_infra_contract_deep(
     Returns:
         ModelContractValidationResult with validation status, score, and any errors.
     """
-    validator = ProtocolContractValidator()
-    return validator.validate_contract_file(Path(contract_path), contract_type)
+    return _contract_validator.validate_contract_file(Path(contract_path), contract_type)
+
+
+# ==============================================================================
+# Module-Level Singleton Validators
+# ==============================================================================
+#
+# Performance Optimization: The ProtocolContractValidator is stateless after
+# initialization. Creating new instances on every validation call is wasteful
+# in hot paths. Instead, we use a module-level singleton.
+#
+# Why a singleton is safe here:
+# - The validator has no mutable state after initialization
+# - All validation state is created fresh for each file
+# - No per-validation state is stored in the validator instance
+
+_contract_validator = ProtocolContractValidator()
 
 
 def validate_infra_union_usage(
