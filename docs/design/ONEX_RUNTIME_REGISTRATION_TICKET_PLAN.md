@@ -8,6 +8,11 @@
 
 ---
 
+> **BLOCKER**: This plan requires omnibase_core >= 0.5.0
+> See OMN-959 for dependency update tracking.
+
+---
+
 ## Global Architectural Constraints (Apply to ALL Tickets)
 
     1. Reducers fold EVENTS only
@@ -49,6 +54,17 @@
     7. Handler vs Node terminology
         - Handlers are execution units within a node
         - Nodes host handlers; handlers do not own lifecycle or messaging
+
+        Terminology mapping:
+            - Node: The deployable/addressable unit that hosts one or more handlers
+            - Handler: A pure function that processes a specific message type within a node
+            - Runtime: Infrastructure that dispatches messages to handlers and publishes outputs
+
+        Usage rules:
+            - Use "handler" when referring to message processing logic
+            - Use "node" when referring to deployment, lifecycle, or identity
+            - Never say "handler publishes" (only runtime publishes)
+            - Never say "node processes messages" (handlers process, nodes host)
 
 ---
 
@@ -103,14 +119,34 @@
             - commands must only be read from <domain>.commands topics
             - intents must only be read from <domain>.intents topics
         - Add routing coverage check: all message types must be registered in B1a, startup fails fast if unmapped
-        - Provide at least one "known bad" test case proving validator catches violations
         - Runtime MUST reject handler output that violates declared handler type
           (orchestrator, reducer, effect), even if the code compiles
+
+        Pattern Validator Test Requirements:
+            - Pattern validator catches reducer returning events
+            - Pattern validator catches orchestrator performing I/O
+            - Pattern validator catches effect returning projections
+            - At least one "known bad" test case per violation type:
+                - test_reducer_returning_events_rejected
+                - test_orchestrator_performing_io_rejected
+                - test_effect_returning_projections_rejected
+                - test_reducer_accessing_system_time_rejected
+                - test_handler_direct_publish_rejected
+            - All "known bad" test cases MUST:
+                - Construct a handler that violates the shape constraint
+                - Invoke the validator against it
+                - Assert the validator raises or returns failure
+            - Validator test coverage required before CI gate is enabled
 
 ### A2a. Canonical Message Envelope
     Priority: P0
     Description:
         Define and enforce a single envelope model for commands, events, and intents.
+
+        Canonical envelope principle:
+            - ONE ModelEnvelope applies to ALL message categories (commands, events, intents)
+            - The envelope is transport-agnostic and plane-agnostic
+            - Payload differs by message type; envelope structure is invariant
 
         Required fields:
             - message_id
@@ -124,15 +160,45 @@
             - entity_id is the partition key and identity anchor for ordering
             - For registration domain: entity_id = node_id
               (removes partition-key ambiguity for registration workflows)
+
+        Envelope usage per architectural plane:
+
+            Ingestion Plane:
+                - Envelope wraps incoming messages from external sources
+                - message_id assigned at ingestion boundary
+                - correlation_id inherited from caller or generated if absent
+                - emitted_at set by ingress runtime
+
+            Decision Plane (Orchestrators):
+                - Envelope fields propagated to orchestrator context
+                - correlation_id maintained across workflow decisions
+                - causation_id links decision events to triggering event
+                - emitted_at used for timeout calculations (via injected now)
+
+            State Plane (Reducers, Projectors):
+                - entity_id determines partition affinity and ordering
+                - message_id used for idempotency (last_applied_event_id)
+                - emitted_at is the only time field reducers may reference
+                - Ordering enforced by (partition, offset) or sequence number
+
+            Execution Plane (Effects):
+                - correlation_id and causation_id propagated for distributed tracing
+                - message_id (as intent_id) used for effect idempotency
+                - entity_id identifies the target of I/O operations
+
     Deliverables:
         - omnibase_core/models/common/model_envelope.py
         - validation helpers (schema-level)
     Acceptance:
         - All registration messages compile with strict models
         - Unit tests reject missing or extra fields
+        - Envelope structure is identical for commands, events, and intents
+        - Per-plane usage documented and enforced by runtime
     Implementation Note:
         - Implementation sequencing: A2 and A2a can be built in parallel after A1
         - A2 enforcement can require envelope presence once A2a lands
+    Cross-Reference:
+        - See Global Constraint #7 for handler vs node terminology used in plane descriptions
 
 ### A2b. Canonical Topic Taxonomy
     Priority: P0
@@ -212,10 +278,30 @@
         Domain derivation rule:
             - Domain is derived from the message type's module path prefix
             - The first segment of the fully-qualified message type path is the domain
-            - Examples:
+            - Format: <domain>.<category>.<MessageName> where:
+                - domain: first segment (e.g., "registration", "discovery", "health")
+                - category: message category ("events", "commands", "intents")
+                - MessageName: the specific message type name
+
+            Valid examples:
                 - registration.events.NodeRegistrationAccepted -> domain = "registration"
+                - registration.events.NodeRegistrationRejected -> domain = "registration"
+                - registration.commands.RegisterNodeRequested -> domain = "registration"
                 - discovery.events.NodeDiscovered -> domain = "discovery"
+                - discovery.events.NodeLost -> domain = "discovery"
                 - health.commands.CheckNodeHealth -> domain = "health"
+                - health.events.HealthCheckCompleted -> domain = "health"
+                - provisioning.intents.ProvisionResourceIntent -> domain = "provisioning"
+                - provisioning.events.ResourceProvisioned -> domain = "provisioning"
+                - runtime.events.RuntimeTick -> domain = "runtime"
+
+            Invalid examples (rejected by validation):
+                - NodeRegistrationAccepted (missing domain and category prefix)
+                - events.NodeRegistrationAccepted (missing domain prefix)
+                - registration.NodeRegistrationAccepted (missing category segment)
+                - registration.invalid.NodeRegistrationAccepted (invalid category, must be events/commands/intents)
+                - Registration.events.NodeRegistrationAccepted (domain must be lowercase)
+
             - Topic domain MUST match message type domain prefix
             - Validation occurs at:
                 1. Registration time (configuration validation)
@@ -469,6 +555,28 @@
         - Natural key conflict handling:
             - If intent_id differs but natural key matches, effect treats as duplicate
             - Exception: payload differs in a way requiring explicit conflict handling
+        - Error sanitization requirements:
+            - Effects MUST sanitize errors before logging (no secrets, credentials, PII)
+            - Reference CLAUDE.md "Error Sanitization Guidelines" for allowed/forbidden content
+            - Use transport-aware error codes from EnumCoreErrorCode (see CLAUDE.md mapping)
+            - Safe to include: service names, operation names, correlation IDs, error codes,
+              sanitized hostnames, port numbers, retry counts, timeout values
+            - NEVER include: passwords, API keys, tokens, connection strings with credentials,
+              PII, private keys, session tokens
+        - Correlation ID requirements:
+            - Propagate correlation_id from intent envelope to all error contexts
+            - Use UUID4 format for any new correlation IDs (uuid4())
+            - Auto-generate correlation_id if not present in incoming intent
+            - Include correlation_id in all ModelInfraErrorContext instances
+            - Correlation chain: intent.correlation_id -> effect error context -> logs
+
+        Circuit Breaker Requirements (see CLAUDE.md "Circuit Breaker Pattern" section):
+            - Effect handlers use MixinAsyncCircuitBreaker for fault tolerance
+            - Thread safety verified: all circuit breaker calls hold _circuit_breaker_lock
+            - Circuit breaker state (CLOSED/OPEN/HALF_OPEN) is monitored and logged
+            - Configuration: threshold and reset_timeout tuned per external service
+            - InfraUnavailableError raised when circuit is OPEN (fail-fast behavior)
+            - Tests verify circuit breaker transitions under failure conditions
 
 ### E2. Compensation and Retry Policy
     Priority: P1
@@ -509,25 +617,106 @@
             - Runtime invokes projector to persist projections
             - Projector enforces ordering and idempotency
 
-        Projector invocation sequence (relationship to B2):
-            B2 defines the output ordering: projections -> intents -> events.
-            This ticket (F0) clarifies HOW projections are "published":
+        Relationship to B2 (Handler Output Model):
+            B2 defines WHAT handlers return and the output ordering contract:
+                - Orchestrator handlers: events only
+                - Reducer handlers: projections + intents only
+                - Effect handlers: optional result events only
+                - Runtime publishes in order: projections -> intents -> events
 
-            Runtime receives handler output
-              -> Runtime invokes Projector.persist(projection) synchronously
-              -> Projector writes to storage with idempotency check
-              -> Runtime then publishes intents to Kafka topic
-              -> Runtime then publishes events to Kafka topic
+            F0 defines HOW the runtime processes reducer outputs specifically:
+                - Projections are persisted synchronously via Projector (not published to Kafka)
+                - Intents and events are published to Kafka after projection persistence
+                - This ensures read models are consistent before downstream processing
 
-            Important: "Publish" means different things for different output types:
-                - Projections: "persist to storage" (PostgreSQL, Redis, etc.)
-                  NOT "publish to Kafka topic"
-                - Intents: publish to Kafka intent topic
-                - Events: publish to Kafka event topic
+        End-to-End Flow Sequence Diagram (Orchestrator -> Reducer -> Effect):
 
-            The synchronous persistence of projections before topic publications
-            ensures read models are consistent before downstream consumers
-            receive the corresponding events.
+            The following diagram shows how an event flows through the complete
+            orchestrator -> reducer -> effect pipeline. The runtime coordinates
+            handler invocation and output publishing per B2 ordering rules.
+
+            ┌─────────────┐     ┌─────────────┐     ┌───────────┐     ┌───────────┐
+            │ Event Log   │     │   Runtime   │     │ Projector │     │  Storage  │
+            │ (Kafka)     │     │             │     │           │     │ (Postgres)│
+            └──────┬──────┘     └──────┬──────┘     └─────┬─────┘     └─────┬─────┘
+                   │                   │                  │                 │
+            ═══════════════════════════════════════════════════════════════════════
+            PHASE 1: Orchestrator Processing (emits decision events)
+            ═══════════════════════════════════════════════════════════════════════
+                   │                   │                  │                 │
+                   │  NodeIntrospected │                  │                 │
+                   │──────────────────>│                  │                 │
+                   │                   │                  │                 │
+                   │                   │ invoke Orchestrator Handler        │
+                   │                   │────────────────────────────────────>
+                   │                   │         (reads projections)        │
+                   │                   │<────────────────────────────────────
+                   │                   │                  │                 │
+                   │                   │ Orchestrator returns:              │
+                   │                   │   events: [NodeRegistrationAccepted]
+                   │                   │                  │                 │
+                   │ publish events    │                  │                 │
+                   │<──────────────────│                  │                 │
+                   │                   │                  │                 │
+            ═══════════════════════════════════════════════════════════════════════
+            PHASE 2: Reducer Processing (per B2: projections -> intents -> events)
+            ═══════════════════════════════════════════════════════════════════════
+                   │                   │                  │                 │
+                   │ NodeRegistration- │                  │                 │
+                   │ Accepted          │                  │                 │
+                   │──────────────────>│                  │                 │
+                   │                   │                  │                 │
+                   │                   │ invoke Reducer Handler             │
+                   │                   │─────────────────────────────────────>
+                   │                   │                  │                 │
+                   │                   │ Reducer returns (B2 output model): │
+                   │                   │   projections: [RegistrationProj]  │
+                   │                   │   intents: [ConsulRegisterIntent,  │
+                   │                   │             PostgresUpsertIntent]  │
+                   │                   │                  │                 │
+                   │                   │ 1. persist projections (sync, F0)  │
+                   │                   │─────────────────>│                 │
+                   │                   │                  │ write projection│
+                   │                   │                  │────────────────>│
+                   │                   │                  │      ack        │
+                   │                   │                  │<────────────────│
+                   │                   │       ack        │                 │
+                   │                   │<─────────────────│                 │
+                   │                   │                  │                 │
+                   │ 2. publish intents│                  │                 │
+                   │<──────────────────│                  │                 │
+                   │                   │                  │                 │
+            ═══════════════════════════════════════════════════════════════════════
+            PHASE 3: Effect Processing (executes I/O from intents)
+            ═══════════════════════════════════════════════════════════════════════
+                   │                   │                  │                 │
+                   │ ConsulRegister-   │                  │                 │
+                   │ Intent            │                  │                 │
+                   │──────────────────>│                  │                 │
+                   │                   │                  │                 │
+                   │                   │ invoke Effect Handler              │
+                   │                   │─────────────────────────────────────>
+                   │                   │   (executes Consul API call)       │
+                   │                   │                  │                 │
+                   │                   │ Effect returns:                    │
+                   │                   │   events: [optional result event]  │
+                   │                   │                  │                 │
+                   │ 3. publish events │                  │                 │
+                   │ (if any)          │                  │                 │
+                   │<──────────────────│                  │                 │
+                   │                   │                  │                 │
+
+            Key synchronization point (F0 guarantee):
+                Projector.persist() completes BEFORE intents are published.
+                This ensures the projection (read model) is updated before
+                any downstream consumer receives the intent, preventing
+                race conditions where effects execute before state is visible.
+
+        Important: "Publish" means different things for different output types:
+            - Projections: "persist to storage" (PostgreSQL, Redis, etc.)
+              NOT "publish to Kafka topic"
+            - Intents: publish to Kafka intent topic
+            - Events: publish to Kafka event topic
 
         Ordering rules:
             - Per-entity monotonic application based on (partition, offset) or sequence
@@ -541,6 +730,7 @@
         - Restart-safe projection rebuild process defined
         - Projector is invoked synchronously by runtime before topic publications
         - Projector.persist() writes to storage, not Kafka
+        - Sequence diagram accurately reflects B2 output ordering contract
 
 ### F1. Registration Projection Schema
     Priority: P0
@@ -598,6 +788,15 @@
 ### G5. Chaos and Replay Tests
     Priority: P2
 
+### G5a. Property-Based Testing
+    Priority: P2
+    Description:
+        Add property-based tests for reducer determinism
+        and orchestrator idempotency using Hypothesis.
+    Acceptance:
+        - Reducer outputs identical results for identical input sequences
+        - Orchestrator decisions are deterministic under replay
+
 ---
 
 ## H. Migration (P1)
@@ -616,6 +815,17 @@
         - No dual-write paths allowed:
             - legacy and canonical systems must not both emit authoritative events
             - cutover is event-boundary based, not code-path based
+        - Existing v1_0_0 directories identified and migration path documented:
+            - complete inventory of all nodes/<name>/v1_0_0/ directories
+            - per-directory migration plan with target flat structure
+            - dependency analysis for each directory (what imports from it)
+        - New components do not use versioned directories per Global Constraint #6
+        - Cutover strategy for each legacy v1_0_0 directory defined:
+            - contract.yaml versioning via contract_version field (not directory hierarchy)
+            - import path migration plan (old versioned paths -> new flat paths)
+            - backwards compatibility shim period (if needed) with explicit end date
+            - deprecation warnings added before removal
+            - final removal milestone and verification criteria
 
 ### H2. Migration Checklist
     Priority: P1

@@ -1,7 +1,7 @@
 # DESIGN: Event-Driven Orchestration and Reducer Pattern
 ## Canonical Workflow Architecture for ONEX
 
-    Version: 2.1.1
+    Version: 2.1.2
     Status: Design (Canonical, Public)
     Created: 2025-12-18
     Updated: 2025-12-19
@@ -132,7 +132,8 @@
         - Contains no business decision logic.
 
     Projector:
-        - Persists reducer outputs into materialized read models.
+        - Persists reducer projection outputs to storage (PostgreSQL, Redis, etc.).
+        - Does NOT publish to Kafka; projections go to storage only.
         - Tracks offsets and ensures idempotent writes.
 
 ---
@@ -172,7 +173,7 @@
         Orchestrator Handlers
                 |
                 v
-        Immutable Event Log
+        Immutable Event Log (Kafka)
                 |
                 v
         Reducer Handlers
@@ -182,9 +183,22 @@
           |            |
           v            v
       Projector    Effect Handlers
-                        |
-                        v
-                  External Systems
+      (Storage)         |
+          |             v
+          v       External Systems
+      PostgreSQL,
+      Redis, etc.
+
+    Important: Output types have different destinations:
+
+        - Projections: Persisted to storage (PostgreSQL, Redis, etc.)
+          via Projector. NOT published to Kafka.
+
+        - Intents: Published to Kafka intent topics for consumption
+          by Effect Handlers.
+
+        - Events: Published to Kafka event topics for consumption
+          by downstream handlers.
 
 ---
 
@@ -219,9 +233,9 @@
                 ...
 
         class ModelHandlerOutput(BaseModel):
-            events: list[BaseModel] = []
-            intents: list[BaseModel] = []
-            projections: list[BaseModel] = []
+            events: list[BaseModel] = []       # Published to Kafka event topics
+            intents: list[BaseModel] = []      # Published to Kafka intent topics
+            projections: list[BaseModel] = []  # Persisted to storage (NOT Kafka)
             metrics: dict[str, float] = {}
             logs: list[str] = []
 
@@ -404,9 +418,18 @@
 
 ### 10.1 Responsibilities
 
-    - Persist projections.
+    - Persist projections to storage (PostgreSQL, Redis, etc.).
     - Track last processed offset.
     - Ensure idempotent writes.
+
+    Important distinction:
+
+        Projectors persist data to storage systems. They do NOT publish
+        to Kafka topics. The term "publish" in the context of projections
+        means "write to the configured storage backend."
+
+        This differs from events and intents, which ARE published to
+        Kafka topics for consumption by downstream handlers.
 
     Example:
 

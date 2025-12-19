@@ -281,6 +281,51 @@ class NodeRegistryEffect(NodeEffect):
 
 ## 6. Migration Steps
 
+### Phase 0: Dependency Verification (Before Phase 1)
+
+**Task 0: Verify omnibase_core 0.5.x Availability**
+
+Before starting any implementation work, verify that `omnibase_core >= 0.5.0` is available and
+compatible with this project:
+
+1. **Check Release Status**: Verify [omnibase_core PR #216](https://github.com/OmniNode-ai/omnibase_core/pull/216) is merged and 0.5.x is released
+2. **Update pyproject.toml**: Change `omnibase-core = "^0.4.0"` to `omnibase-core = "^0.5.0"`
+3. **Install and Verify**: Run `poetry update omnibase-core` and verify installation succeeds
+4. **Validate Imports**: Confirm required imports are available:
+   ```python
+   from omnibase_core.nodes import NodeOrchestrator, NodeEffect, NodeReducer
+   from omnibase_core.models.intent import ModelIntent
+   from omnibase_core.runtime import NodeRuntime
+   ```
+5. **Run Existing Tests**: Ensure no regressions with `pytest tests/`
+
+**Exit Criteria**: All imports resolve, existing tests pass, no breaking changes detected.
+
+#### Contingency Plan: If omnibase_core 0.5.x is Delayed
+
+If `omnibase_core 0.5.x` is not available when Phase 1 is scheduled to begin:
+
+**Work That CAN Proceed in Parallel (No 0.5.x Dependency)**:
+- [ ] Create orchestrator directory structure and contract.yaml
+- [ ] Define command and workflow state models (Pydantic models are independent)
+- [ ] Write orchestrator unit tests with mocked base classes
+- [ ] Draft intent topic naming conventions and Kafka configuration
+- [ ] Write integration test scaffolding with mock handlers
+- [ ] Document architectural decisions in ADRs
+
+**Work That is BLOCKED (Requires 0.5.x)**:
+- [ ] Implement `NodeRegistrationOrchestrator` class (requires `NodeOrchestrator` base class)
+- [ ] Implement rewritten `NodeRegistryEffect` class (requires `NodeEffect` base class)
+- [ ] Integrate with `NodeRuntime` for handler execution
+- [ ] Wire components in `container_wiring.py` with actual base classes
+
+**Mitigation Actions**:
+1. **Escalate**: Notify Tech Lead if 0.5.x is delayed more than 3 days past expected release
+2. **Coordinate**: Work with omnibase_core team to understand blockers and timeline
+3. **Adapt**: If delay exceeds 1 week, consider creating temporary stub base classes for development (with clear TODO markers for replacement)
+
+---
+
 ### Phase 1: Create Orchestrator (3-4 days)
 
 1. Create `nodes/node_registration_orchestrator/v1_0_0/` directory structure
@@ -457,9 +502,20 @@ These decisions block Phase 1 implementation and must be resolved first.
 
 | Decision | Responsible | Accountable | Consulted | Informed | Target Date |
 |----------|-------------|-------------|-----------|----------|-------------|
-| Command Source | TBD | Tech Lead | Platform Team | All Devs | Before Phase 1 |
-| Intent Topics | TBD | Tech Lead | Platform Team | All Devs | Before Phase 1 |
-| Reducer Invocation | TBD | Tech Lead | Platform Team | All Devs | Before Phase 1 |
+| Command Source | Lead Developer | Tech Lead | Platform Team | All Devs | Before Phase 1 Start |
+| Intent Topics | Lead Developer | Tech Lead | Platform Team | All Devs | Before Phase 1 Start |
+| Reducer Invocation | Lead Developer | Tech Lead | Platform Team | All Devs | Before Phase 1 Start |
+
+**Decision Review Meeting**: Schedule a decision-review meeting with Tech Lead and Platform Team
+**before** Phase 1 begins. This meeting should:
+1. Review all three blocking questions and select final options
+2. Validate omnibase_core 0.5.x availability status (Phase 0 verification)
+3. Document decisions as ADRs under `docs/adr/`
+4. Assign implementation owners for Phase 1 tasks
+5. Confirm timeline and resource availability
+
+**Meeting Output**: All three decisions documented in ADRs, Phase 0 verification completed,
+Phase 1 kickoff approved.
 
 **Note**: Decisions will be documented in ADRs under `docs/adr/` once resolved.
 
@@ -489,13 +545,15 @@ These questions can be answered during implementation:
 
 | Phase | Duration | Dependencies |
 |-------|----------|--------------|
-| Phase 1: Create Orchestrator | 3-4 days | None |
+| Phase 0: Dependency Verification | 1 day | omnibase_core 0.5.x release |
+| Phase 1: Create Orchestrator | 3-4 days | Phase 0 complete |
 | Phase 2: Rewrite Effect Node | 2-3 days | Phase 1 |
 | Phase 3: Wire Integration | 2 days | Phase 1, 2 |
 | Phase 4: Validation/Cleanup | 2 days | Phase 3 |
-| **Total** | **9-11 days** | |
+| **Total** | **10-12 days** | |
 
 **Risk Factors**:
+- **omnibase_core 0.5.x delay**: See Phase 0 contingency plan for mitigation
 - Open questions may add 1-2 days if decisions require discussion
 - Integration issues with NodeRuntime may surface
 - Existing test refactoring may take longer than estimated
