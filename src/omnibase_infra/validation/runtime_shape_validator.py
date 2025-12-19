@@ -323,13 +323,13 @@ def detect_message_category(message: object) -> EnumMessageCategory | None:
 
     # Strategy 1: Check for explicit category attribute
     if hasattr(message, "category"):
-        category = message.category  # type: ignore[union-attr]
+        category = message.category
         if isinstance(category, EnumMessageCategory):
             return category
 
     # Strategy 2: Check for message_category attribute
     if hasattr(message, "message_category"):
-        category = message.message_category  # type: ignore[union-attr]
+        category = message.message_category
         if isinstance(category, EnumMessageCategory):
             return category
 

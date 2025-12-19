@@ -86,9 +86,9 @@ Security Design (Intentional Fail-Open Architecture):
     | Network layer | TLS, firewall rules, service mesh policies |
 
     See individual validator modules for detailed fail-open documentation:
-    - execution_shape_validator.py: AST-based static analysis (lines 280-370)
-    - runtime_shape_validator.py: Runtime validation (lines 52-121)
-    - routing_coverage_validator.py: Routing gap detection
+    - execution_shape_validator.py: AST-based static analysis (module docstring, lines 17-49)
+    - runtime_shape_validator.py: Runtime validation (Security Design section, lines 52-121)
+    - routing_coverage_validator.py: Routing gap detection (module docstring)
 """
 
 from omnibase_core.validation import (
