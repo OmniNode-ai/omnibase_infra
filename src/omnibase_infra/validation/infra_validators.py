@@ -327,6 +327,33 @@ def validate_infra_patterns(
             "method_pattern": r"Function 'validate_and_raise'",
             "violation_pattern": r"has \d+ parameters",
         },
+        # ================================================================================
+        # MixinNodeIntrospection Exemptions (OMN-958)
+        # ================================================================================
+        # MixinNodeIntrospection.initialize_introspection parameter count exemption
+        # This legacy interface is kept for backward compatibility. A new preferred method
+        # initialize_introspection_from_config() was added that takes a ModelIntrospectionConfig
+        # model, reducing the parameter count to 2 (self, config). The legacy method with
+        # 8 parameters is preserved to avoid breaking existing consumers.
+        # See: ModelIntrospectionConfig in model_introspection_config.py
+        {
+            "file_pattern": r"mixin_node_introspection\.py",
+            "method_pattern": r"Function 'initialize_introspection'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # MixinNodeIntrospection method count exemption
+        # Introspection mixin legitimately requires multiple methods for:
+        # - Lifecycle (initialize_introspection, start/stop tasks)
+        # - Capability discovery (get_capabilities, get_endpoints, get_current_state)
+        # - Caching (invalidate_introspection_cache)
+        # - Publishing (publish_introspection)
+        # - Background tasks (heartbeat, registry listener)
+        # This is an established mixin pattern, not a code smell.
+        {
+            "file_pattern": r"mixin_node_introspection\.py",
+            "class_pattern": r"Class 'MixinNodeIntrospection'",
+            "violation_pattern": r"has \d+ methods",
+        },
     ]
 
     # Filter errors using regex-based pattern matching
@@ -508,15 +535,47 @@ def validate_infra_union_usage(
 
     Prevents overly complex union types that complicate infrastructure code.
 
+    Exemptions:
+        ModelNodeCapabilities.config (model_node_capabilities.py) - Documented infrastructure pattern:
+        - The `config` field uses `dict[str, int | str | bool | float]` for nested configuration.
+        - This is a standard JSON-like configuration pattern where config values can be
+          any primitive type (similar to JSON's null, boolean, number, string).
+        - Creating a `ModelConfigValue` wrapper would add unnecessary complexity without benefit.
+        - This pattern is intentional and documented per ONEX infrastructure guidelines.
+
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
         max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (200).
         strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:
-        ModelValidationResult with validation status and any errors.
+        ModelValidationResult with validation status and filtered errors.
+        Documented exemptions are filtered from error list.
     """
-    return validate_union_usage(str(directory), max_unions=max_unions, strict=strict)
+    # Run base validation
+    base_result = validate_union_usage(
+        str(directory), max_unions=max_unions, strict=strict
+    )
+
+    # Filter known infrastructure union exemptions using regex-based matching
+    # Patterns match file names and violation types without hardcoded line numbers
+    exempted_patterns: list[ExemptionPattern] = [
+        # ModelNodeCapabilities.config field exemption
+        # The config field uses dict[str, int | str | bool | float] for nested configuration
+        # values. This is a standard JSON-like config pattern where values can be any
+        # primitive type. Creating a ModelConfigValue wrapper would add unnecessary
+        # complexity without real benefit for this infrastructure domain.
+        {
+            "file_pattern": r"model_node_capabilities\.py",
+            "violation_pattern": r"Union with 4\+ primitive types.*bool.*float.*int.*str",
+        },
+    ]
+
+    # Filter errors using regex-based pattern matching
+    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
+
+    # Create wrapper result (avoid mutation)
+    return _create_filtered_result(base_result, filtered_errors)
 
 
 def validate_infra_circular_imports(
