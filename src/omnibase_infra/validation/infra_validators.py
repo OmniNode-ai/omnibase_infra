@@ -267,6 +267,66 @@ def validate_infra_patterns(
             "file_pattern": r"model_policy_registration\.py",
             "violation_pattern": r"Field 'policy_id' should use UUID",
         },
+        # ================================================================================
+        # Execution Shape Validator Exemptions (OMN-958)
+        # ================================================================================
+        # EnumHandlerType 'Handler' naming exemption
+        # The term 'Handler' is intentional here - this enum defines ONEX handler types
+        # (Effect, Compute, Reducer, Orchestrator) which are architectural concepts,
+        # not implementation classes that should avoid *Handler naming.
+        {
+            "file_pattern": r"enum_handler_type\.py",
+            "violation_pattern": r"contains anti-pattern 'Handler'",
+        },
+        # HandlerInfo 'Handler' naming exemption
+        # This is a validation data class for describing handler information during
+        # AST analysis - it describes handlers, not implements handler behavior.
+        {
+            "file_pattern": r"execution_shape_validator\.py",
+            "class_pattern": r"Class name 'HandlerInfo'",
+            "violation_pattern": r"contains anti-pattern 'Handler'",
+        },
+        # ExecutionShapeValidator method count exemption
+        # Validator class requires multiple methods for comprehensive AST analysis:
+        # - validate_file, validate_directory (entry points)
+        # - _extract_handlers, _find_handler_type (handler detection)
+        # - _detect_return_type, _analyze_return_statement (return analysis)
+        # - _check_forbidden_calls, _categorize_output (violation detection)
+        # This is a cohesive validator pattern, not class decomposition needed.
+        {
+            "file_pattern": r"execution_shape_validator\.py",
+            "class_pattern": r"Class 'ExecutionShapeValidator'",
+            "violation_pattern": r"has \d+ methods",
+        },
+        # TopicCategoryASTVisitor visit_* methods exemption
+        # These method names follow Python ast.NodeVisitor convention (PEP 8 exception)
+        # visit_ClassDef, visit_Call are standard AST visitor method names that the
+        # ast module dispatches to. Using snake_case like visit_class_def would break
+        # the ast.NodeVisitor contract.
+        {
+            "file_pattern": r"topic_category_validator\.py",
+            "violation_pattern": r"Function name 'visit_ClassDef' should use snake_case",
+        },
+        {
+            "file_pattern": r"topic_category_validator\.py",
+            "violation_pattern": r"Function name 'visit_Call' should use snake_case",
+        },
+        # RuntimeShapeValidator.validate_handler_output parameter count exemption
+        # Validation requires multiple context parameters for proper violation reporting:
+        # handler_type, output, output_category, source_file, line_number, correlation_id
+        # These are distinct required contexts, not candidates for a model wrapper.
+        {
+            "file_pattern": r"runtime_shape_validator\.py",
+            "method_pattern": r"Function 'validate_handler_output'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # RuntimeShapeValidator.validate_and_raise parameter count exemption
+        # Same rationale as validate_handler_output - requires distinct context params
+        {
+            "file_pattern": r"runtime_shape_validator\.py",
+            "method_pattern": r"Function 'validate_and_raise'",
+            "violation_pattern": r"has \d+ parameters",
+        },
     ]
 
     # Filter errors using regex-based pattern matching
