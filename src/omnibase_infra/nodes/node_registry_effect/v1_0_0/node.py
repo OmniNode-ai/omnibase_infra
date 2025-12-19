@@ -57,13 +57,12 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, TypeVar, cast
+from typing import Literal, TypeVar, cast
 from uuid import UUID
 
-if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
-
+from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
+from omnibase_core.nodes import ModelEffectInput, ModelEffectOutput, NodeEffect
 
 from omnibase_infra.enums import EnumInfraTransportType
 
@@ -281,11 +280,16 @@ SENSITIVE_PATTERNS: tuple[tuple[str, str], ...] = (
 )
 
 
-class NodeRegistryEffect(MixinAsyncCircuitBreaker):
+class NodeRegistryEffect(NodeEffect, MixinAsyncCircuitBreaker):
     """Registry Effect Node for dual registration to Consul and PostgreSQL.
 
-    This node implements the EFFECT node type, performing I/O operations
-    to external services (Consul, PostgreSQL, Kafka) for node registration.
+    This node extends NodeEffect from omnibase_core, implementing the EFFECT node
+    type for performing I/O operations to external services (Consul, PostgreSQL,
+    Kafka) for node registration.
+
+    Architecture:
+        - Extends NodeEffect: Provides contract-driven effect node capabilities
+        - Uses MixinAsyncCircuitBreaker: Infrastructure-specific circuit breaker patterns
 
     Thread Safety:
         Uses MixinAsyncCircuitBreaker for circuit breaker state management.
@@ -358,7 +362,20 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         Do NOT confuse these two concepts:
         - `await node.execute(ModelRegistryRequest(operation="register", ...))` - external registration
         - `await container.service_registry.resolve_service(SomeProtocol)` - DI resolution
+
+    Protocol Compliance:
+        Implements ProtocolOnexEffectNode from omnibase_spi:
+        - node_id: Returns "node-registry-effect"
+        - node_type: Returns "effect"
+        - version: Returns "1.0.0"
+        - execute_effect(): Delegates to execute() with ModelRegistryRequest
+        - process(): Bridges NodeEffect interface to execute()
     """
+
+    # Node identification constants
+    _NODE_ID: str = "node-registry-effect"
+    _NODE_TYPE: str = "effect"
+    _NODE_VERSION: str = "1.0.0"
 
     def __init__(
         self,
@@ -394,8 +411,21 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             await node.initialize()  # Async initialization
             ```
         """
-        self._container = container
+        # Initialize NodeEffect base class (from omnibase_core)
+        # This sets up container, node_id, created_at, state, metrics, contract_data, version
+        NodeEffect.__init__(self, container)
+
+        # Initialize MixinAsyncCircuitBreaker for infrastructure-specific circuit breaker
+        # Note: _init_circuit_breaker creates self._circuit_breaker_lock
         self._config = config or ModelNodeRegistryEffectConfig()
+        self._init_circuit_breaker(
+            threshold=self._config.circuit_breaker_threshold,
+            reset_timeout=self._config.circuit_breaker_reset_timeout,
+            service_name="node_registry_effect",
+            transport_type=EnumInfraTransportType.RUNTIME,
+        )
+
+        # Node-specific state
         self._consul_handler: ProtocolConsulExecutor | None = None
         self._db_handler: ProtocolDbExecutor | None = None
         self._event_bus: ProtocolEventBus | None = None
@@ -407,13 +437,212 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             self._config.slow_operation_threshold_ms
         )
 
-        # Initialize circuit breaker
-        self._init_circuit_breaker(
-            threshold=self._config.circuit_breaker_threshold,
-            reset_timeout=self._config.circuit_breaker_reset_timeout,
-            service_name="node_registry_effect",
-            transport_type=EnumInfraTransportType.RUNTIME,
+    # =========================================================================
+    # Infra Circuit Breaker Wrappers
+    # =========================================================================
+    # These methods explicitly delegate to MixinAsyncCircuitBreaker to avoid
+    # MRO conflicts with MixinEffectExecution._check_circuit_breaker which has
+    # a different signature. NodeEffect extends both mixins, and without explicit
+    # qualification, the wrong method would be called.
+
+    async def _infra_check_circuit_breaker(
+        self, operation: str, correlation_id: UUID | None = None
+    ) -> None:
+        """Check infrastructure circuit breaker - delegates to MixinAsyncCircuitBreaker."""
+        await MixinAsyncCircuitBreaker._check_circuit_breaker(
+            self, operation, correlation_id
         )
+
+    async def _infra_reset_circuit_breaker(self) -> None:
+        """Reset infrastructure circuit breaker - delegates to MixinAsyncCircuitBreaker."""
+        await MixinAsyncCircuitBreaker._reset_circuit_breaker(self)
+
+    async def _infra_record_circuit_failure(
+        self, operation: str, correlation_id: UUID | None = None
+    ) -> None:
+        """Record circuit failure - delegates to MixinAsyncCircuitBreaker."""
+        await MixinAsyncCircuitBreaker._record_circuit_failure(
+            self, operation, correlation_id
+        )
+
+    # =========================================================================
+    # Protocol Properties (ProtocolOnexEffectNode compliance)
+    # =========================================================================
+
+    @property
+    def registry_node_id(self) -> str:
+        """Get the node identifier for this registry effect node.
+
+        Returns:
+            str: "node-registry-effect" - unique identifier for this node type.
+
+        Note:
+            Named `registry_node_id` to avoid conflict with `node_id` from
+            NodeCoreBase which returns a UUID. This property returns the
+            human-readable node identifier required by ProtocolOnexEffectNode.
+        """
+        return self._NODE_ID
+
+    @property
+    def registry_node_type(self) -> str:
+        """Get the node type identifier.
+
+        Returns:
+            str: "effect" - indicates this is an effect node.
+        """
+        return self._NODE_TYPE
+
+    @property
+    def registry_version(self) -> str:
+        """Get the node version.
+
+        Returns:
+            str: "1.0.0" - semantic version of this node implementation.
+        """
+        return self._NODE_VERSION
+
+    # =========================================================================
+    # NodeEffect Interface Implementation
+    # =========================================================================
+
+    async def process(self, input_data: ModelEffectInput) -> ModelEffectOutput:
+        """Process effect input using the NodeEffect interface.
+
+        This method bridges the NodeEffect interface from omnibase_core to the
+        registry-specific execute() method. It extracts registry request data
+        from the generic ModelEffectInput and delegates to execute().
+
+        Args:
+            input_data: Generic effect input containing operation_data with:
+                - operation: One of "register", "deregister", "discover",
+                  "request_introspection"
+                - correlation_id: UUID for distributed tracing
+                - introspection_event: Required for "register" operation
+                - node_id: Required for "deregister" operation
+                - filters: Optional dict for "discover" operation
+
+        Returns:
+            ModelEffectOutput containing:
+                - result: The ModelRegistryResponse as a dict
+                - transaction_state: COMMITTED on success, ROLLED_BACK on failure
+                - duration_ms: Operation duration
+                - metadata: Additional context
+
+        Raises:
+            RuntimeHostError: If not initialized or invalid request.
+            InfraUnavailableError: If circuit breaker is open.
+
+        Example:
+            ```python
+            # Using process() with ModelEffectInput
+            from omnibase_core.nodes import ModelEffectInput
+            from omnibase_core.enums.enum_effect_types import EnumEffectType
+
+            effect_input = ModelEffectInput(
+                effect_type=EnumEffectType.API_CALL,
+                operation_data={
+                    "operation": "register",
+                    "correlation_id": str(uuid4()),
+                    "introspection_event": {...},
+                },
+            )
+            result = await node.process(effect_input)
+            ```
+
+        Note:
+            For direct registry operations, prefer using execute() with
+            ModelRegistryRequest which provides stronger typing.
+        """
+        from uuid import uuid4
+
+        from omnibase_core.enums.enum_effect_types import EnumTransactionState
+
+        start_time = time.perf_counter()
+
+        # Extract operation data
+        op_data = input_data.operation_data
+
+        # Build ModelRegistryRequest from operation_data
+        operation = op_data.get("operation", "discover")
+        correlation_id_str = op_data.get("correlation_id")
+        correlation_id = (
+            UUID(correlation_id_str) if isinstance(correlation_id_str, str) else uuid4()
+        )
+
+        # Build introspection event if present
+        introspection_event = None
+        if "introspection_event" in op_data:
+            introspection_data = op_data["introspection_event"]
+            if isinstance(introspection_data, dict):
+                introspection_event = ModelNodeIntrospectionPayload(
+                    **introspection_data
+                )
+            elif isinstance(introspection_data, ModelNodeIntrospectionPayload):
+                introspection_event = introspection_data
+
+        # Build request
+        request = ModelRegistryRequest(
+            operation=operation,
+            correlation_id=correlation_id,
+            introspection_event=introspection_event,
+            node_id=op_data.get("node_id"),
+            filters=op_data.get("filters", {}),
+        )
+
+        try:
+            # Execute the registry operation
+            response = await self.execute(request)
+
+            duration_ms = (time.perf_counter() - start_time) * 1000
+
+            # Determine transaction state based on response
+            transaction_state = (
+                EnumTransactionState.COMMITTED
+                if response.success
+                else EnumTransactionState.ROLLED_BACK
+            )
+
+            return ModelEffectOutput(
+                result=response.model_dump(mode="json"),
+                transaction_state=transaction_state,
+                duration_ms=duration_ms,
+                metadata={
+                    "operation": response.operation,
+                    "status": response.status,
+                    "correlation_id": str(response.correlation_id),
+                },
+            )
+        except Exception as e:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            return ModelEffectOutput(
+                result={"error": str(e)},
+                transaction_state=EnumTransactionState.ROLLED_BACK,
+                duration_ms=duration_ms,
+                metadata={
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+    async def execute_effect(
+        self, contract: ModelRegistryRequest
+    ) -> ModelRegistryResponse:
+        """Execute effect workflow (ProtocolOnexEffectNode interface).
+
+        This method provides the ProtocolOnexEffectNode interface, delegating
+        to execute() for the actual implementation.
+
+        Args:
+            contract: Registry request containing operation configuration.
+
+        Returns:
+            ModelRegistryResponse with operation results.
+
+        Note:
+            This is an alias for execute() to satisfy ProtocolOnexEffectNode.
+            For direct usage, prefer execute() which has identical behavior.
+        """
+        return await self.execute(contract)
 
     async def _resolve_dependencies(self) -> None:
         """Resolve handler dependencies from container.
@@ -477,7 +706,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             RuntimeError: If the handler is not registered or resolution fails.
         """
         try:
-            handler = await self._container.service_registry.resolve_service(
+            handler = await self.container.service_registry.resolve_service(
                 protocol_type, name=handler_name
             )
             logger.debug(
@@ -571,11 +800,11 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         """
         try:
             if service_name:
-                service = await self._container.service_registry.resolve_service(
+                service = await self.container.service_registry.resolve_service(
                     service_type, name=service_name
                 )
             else:
-                service = await self._container.service_registry.resolve_service(
+                service = await self.container.service_registry.resolve_service(
                     service_type
                 )
             logger.debug(
@@ -1466,7 +1695,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         This method is idempotent and safe to call multiple times.
         """
         async with self._circuit_breaker_lock:
-            await self._reset_circuit_breaker()
+            await self._infra_reset_circuit_breaker()
         self._initialized = False
         logger.info("NodeRegistryEffect shutdown")
 
@@ -1575,7 +1804,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         # Check circuit breaker
         async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker(
+            await self._infra_check_circuit_breaker(
                 operation=request.operation,
                 correlation_id=request.correlation_id,
             )
@@ -1607,7 +1836,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         except (OSError, ConnectionError, TimeoutError) as e:
             # Network-level errors - record circuit breaker failure and wrap
             async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
+                await self._infra_record_circuit_failure(
                     operation=request.operation,
                     correlation_id=request.correlation_id,
                 )
@@ -1631,7 +1860,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         except (ValueError, TypeError, KeyError) as e:
             # Data/validation errors - record circuit breaker failure and wrap
             async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
+                await self._infra_record_circuit_failure(
                     operation=request.operation,
                     correlation_id=request.correlation_id,
                 )
@@ -1657,7 +1886,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         except Exception as e:
             # Catch-all for unexpected errors - log at error level and wrap
             async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
+                await self._infra_record_circuit_failure(
                     operation=request.operation,
                     correlation_id=request.correlation_id,
                 )
@@ -1740,7 +1969,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         # Reset circuit breaker on success
         if success:
             async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
+                await self._infra_reset_circuit_breaker()
 
         # Log structured performance metrics
         self._log_operation_performance(
@@ -2018,7 +2247,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
 
         if success:
             async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
+                await self._infra_reset_circuit_breaker()
 
         # Log structured performance metrics
         self._log_operation_performance(
@@ -2295,7 +2524,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             processing_time_ms = (time.perf_counter() - start_time) * 1000
 
             async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
+                await self._infra_reset_circuit_breaker()
 
             # Log structured performance metrics for successful discovery
             self._log_operation_performance(
@@ -2319,7 +2548,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             # Network-level errors (connection refused, timeout, DNS failure)
             # Record circuit breaker failure
             async with self._circuit_breaker_lock:
-                await self._record_circuit_failure("discover", request.correlation_id)
+                await self._infra_record_circuit_failure(
+                    "discover", request.correlation_id
+                )
 
             logger.warning(
                 f"Node discovery failed (network error): {type(e).__name__}",
@@ -2353,7 +2584,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             # Data/protocol errors (malformed response, missing keys, invalid JSON)
             # Record circuit breaker failure
             async with self._circuit_breaker_lock:
-                await self._record_circuit_failure("discover", request.correlation_id)
+                await self._infra_record_circuit_failure(
+                    "discover", request.correlation_id
+                )
 
             logger.warning(
                 f"Node discovery failed (data error): {type(e).__name__}",
@@ -2389,7 +2622,9 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
         except Exception as e:
             # Catch-all for unexpected errors - log at error level for investigation
             async with self._circuit_breaker_lock:
-                await self._record_circuit_failure("discover", request.correlation_id)
+                await self._infra_record_circuit_failure(
+                    "discover", request.correlation_id
+                )
 
             logger.exception(
                 f"Node discovery failed (unexpected error): {type(e).__name__}",
@@ -2478,7 +2713,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             processing_time_ms = (time.perf_counter() - start_time) * 1000
 
             async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
+                await self._infra_reset_circuit_breaker()
 
             # Log structured performance metrics for successful introspection request
             self._log_operation_performance(
