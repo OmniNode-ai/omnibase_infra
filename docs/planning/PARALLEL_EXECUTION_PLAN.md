@@ -229,5 +229,5 @@ OMN-931 → OMN-933 → OMN-934 → OMN-937 → OMN-941 → OMN-945 → OMN-948 
 ## Blockers Before Starting
 
 1. ✅ omnibase_core 0.5.3 release ([PR #216](https://github.com/OmniNode-ai/omnibase_core/pull/216))
-2. ⏳ Update omnibase_infra pyproject.toml to `omnibase-core = "^0.5.0"`
+2. ⏳ [OMN-959](https://linear.app/omninode/issue/OMN-959) - Update omnibase_infra pyproject.toml to `omnibase-core = "^0.5.0"`
 3. 🚀 Start Wave 1 with [OMN-931](https://linear.app/omninode/issue/OMN-931) (Terminology)
