@@ -27,20 +27,39 @@ Limitations:
 
     **Known Limitations:**
     - Cannot detect dynamically constructed type names or factory patterns
+      (e.g., `type(f"{prefix}Event", (BaseEvent,), {})`)
     - Cannot follow imports to resolve types from other modules
-    - Cannot detect indirect calls (e.g., `getattr(self, "publish")()`)
-    - Substring matching may produce false positives (e.g., a class named
-      `EventProcessor` will be flagged as returning EVENT even if it doesn't)
+      (e.g., `from events import OrderEvent` then `return OrderEvent(...)`)
+    - Cannot detect indirect calls via reflection
+      (e.g., `getattr(self, "publish")()`, `method_name = "emit"; getattr(self, method_name)()`)
+    - Substring matching may produce false positives for non-message types
+      (e.g., `EventProcessor`, `CommandLineArgs`, `IntentionallyBlank`)
     - Handler type detection requires conventional naming or explicit markers
-    - Does not analyze runtime behavior or conditional paths
+    - Does not analyze runtime behavior, conditional paths, or dynamic dispatch
+    - Cannot validate return types from external function calls
+      (e.g., `return some_factory.create_event()`)
 
     **False Positive Scenarios:**
     - Variable names containing message category keywords (e.g., `event_count`)
     - Classes with category-like suffixes that aren't message types
     - Overridden methods that don't follow base class behavior
+    - Helper classes or utilities with message-like names
 
     For runtime validation that handles dynamic cases, use
     :class:`RuntimeShapeValidator` which validates actual return values.
+
+Performance:
+    This module uses a module-level singleton validator (`_validator`) for
+    efficiency. The `validate_execution_shapes()` and `validate_execution_shapes_ci()`
+    functions use this cached instance. The singleton is thread-safe because:
+
+    - The validator is stateless after initialization (only stores immutable rules)
+    - AST parsing happens per-file with no shared mutable state
+    - Each validation creates fresh HandlerInfo and violation objects
+
+    For custom validation rules, create a new `ExecutionShapeValidator` instance.
+    For repeated validation of the same files, the singleton pattern provides
+    optimal performance.
 
 Usage:
     >>> from omnibase_infra.validation.execution_shape_validator import (
@@ -233,6 +252,20 @@ class ExecutionShapeValidator:
         - HANDLER_DIRECT_PUBLISH: Any handler calls .publish() directly
         - REDUCER_ACCESSES_SYSTEM_TIME: Reducer calls time.time(), datetime.now(), etc.
 
+    Thread Safety:
+        ExecutionShapeValidator instances are stateless after initialization.
+        The rules dictionary is immutable and no per-validation state is stored.
+        Multiple threads can safely call validate_file() or validate_directory()
+        on the same validator instance concurrently.
+
+    Performance:
+        For repeated validation (e.g., CI pipelines), use the module-level
+        functions `validate_execution_shapes()` or `validate_execution_shapes_ci()`
+        which use a cached singleton validator for optimal performance.
+
+        Creating new validator instances is cheap but unnecessary in most cases.
+        Create a new instance only if you need custom rules or isolation.
+
     Example:
         >>> validator = ExecutionShapeValidator()
         >>> violations = validator.validate_file(Path("src/handlers/my_handler.py"))
@@ -307,7 +340,11 @@ class ExecutionShapeValidator:
                 except Exception as e:
                     logger.warning(
                         "Failed to validate file",
-                        extra={"file": str(file_path), "error": str(e)},
+                        extra={
+                            "file": str(file_path),
+                            "error_type": type(e).__name__,
+                            "error": str(e),
+                        },
                     )
                     continue
 
@@ -961,8 +998,24 @@ def validate_execution_shapes_ci(
 def get_execution_shape_rules() -> dict[EnumHandlerType, ModelExecutionShapeRule]:
     """Get the canonical execution shape rules.
 
+    Returns a shallow copy of the rules dictionary to prevent modification
+    of the module-level canonical rules. The values (ModelExecutionShapeRule
+    instances) are frozen Pydantic models (immutable), so a shallow copy
+    is sufficient for immutability - callers cannot modify either the
+    dictionary structure or the rule objects.
+
     Returns:
         Dictionary mapping handler types to their execution shape rules.
+        Callers may safely modify the returned dictionary without affecting
+        the canonical rules.
+
+    Example:
+        >>> rules = get_execution_shape_rules()
+        >>> # Safe to modify the returned dict (won't affect original)
+        >>> del rules[EnumHandlerType.COMPUTE]
+        >>>
+        >>> # But rule objects are immutable (will raise TypeError)
+        >>> rules[EnumHandlerType.EFFECT].can_publish_directly = True  # Raises!
     """
     return EXECUTION_SHAPE_RULES.copy()
 
@@ -981,6 +1034,17 @@ def get_execution_shape_rules() -> dict[EnumHandlerType, ModelExecutionShapeRule
 # - No per-validation state is stored in the validator instance
 # - AST parsing happens per-file (no shared mutable state)
 # - The HandlerInfo and violations are created fresh for each file
+#
+# Thread Safety:
+# - The singleton is created at module import time (before any threads)
+# - All read operations on the rules dictionary are thread-safe
+# - Each validation creates fresh local state (handlers, violations lists)
+# - No locks are needed because there's no shared mutable state
+#
+# When NOT to use the singleton:
+# - If you need custom execution shape rules (create your own instance)
+# - If you need to mock the validator in tests (inject or patch)
+# - If you're validating in a context that requires isolation
 
 _validator = ExecutionShapeValidator()
 

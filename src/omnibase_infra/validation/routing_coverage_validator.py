@@ -369,37 +369,65 @@ def discover_registered_routes(
 ) -> set[str]:
     """Discover routing registrations from registry or source code.
 
-    This function can inspect:
-    - A runtime ProtocolBindingRegistry instance if provided
-    - Source code for static analysis of registration calls
+    This function supports two discovery strategies with different semantics:
 
-    Note:
-        The registry strategy returns handler categories (e.g., "http", "db",
-        "kafka") from protocol bindings, NOT individual message type names.
-        For full message-to-handler mapping, use the source_directory strategy
-        which discovers message types from registration patterns in code.
+    **Strategy 1: Runtime Registry Inspection**
+        When `registry` is provided, inspects the ProtocolBindingRegistry
+        to find registered protocol handlers. This returns handler categories
+        (e.g., "http", "db", "kafka") representing the types of handlers
+        registered, NOT individual message type names.
+
+        This is useful for verifying that handler infrastructure is configured,
+        but does NOT provide message-level routing coverage.
+
+    **Strategy 2: Static Source Analysis**
+        When `source_directory` is provided, scans source files for message
+        registration patterns using regex-based static analysis. This returns
+        message type class names (e.g., "OrderCreatedEvent", "CreateUserCommand").
+
+        This is the preferred approach for routing coverage validation because
+        it discovers which specific message types have handler registrations.
+
+    **Important**: The two strategies return DIFFERENT types of identifiers:
+        - Registry: Handler categories (protocol types)
+        - Source analysis: Message type class names
+
+    When both parameters are provided, results are combined. However, this
+    may produce inconsistent sets that shouldn't be directly compared.
+    For routing coverage validation, use source_directory alone.
 
     Args:
-        registry: Optional runtime registry instance to inspect. Returns
-            handler categories (protocol types), not message types.
+        registry: Optional runtime registry instance to inspect. When used,
+            returns handler categories (protocol types like "http", "kafka").
+            Useful for infrastructure health checks, not coverage validation.
         source_directory: Optional source directory for static analysis.
-            Returns message type names found in registration patterns.
+            Returns message type class names found in registration patterns.
+            Preferred for routing coverage validation.
 
     Returns:
-        Set of discovered route identifiers. When using registry, these are
-        handler categories (http, db, kafka). When using source_directory,
-        these are message type class names.
+        Set of discovered route identifiers. The semantics depend on which
+        parameters were provided:
+        - Registry only: Handler categories (http, db, kafka)
+        - Source directory only: Message type class names (OrderEvent, etc.)
+        - Both: Combined set (not recommended for coverage validation)
 
     Example:
-        >>> # Runtime inspection - returns handler categories
+        >>> # Runtime inspection - returns handler categories (infrastructure check)
         >>> routes = discover_registered_routes(registry=get_handler_registry())
         >>> # Returns: {"http", "kafka", "db"}
+        >>> # Use case: Verify handler infrastructure is configured
 
-        >>> # Static analysis - returns message type names
+        >>> # Static analysis - returns message type names (coverage validation)
         >>> routes = discover_registered_routes(
         ...     source_directory=Path("src/omnibase_infra")
         ... )
-        >>> # Returns: {"OrderCreated", "UserRegistered", ...}
+        >>> # Returns: {"OrderCreatedEvent", "UserRegisteredEvent", ...}
+        >>> # Use case: Validate message routing coverage
+
+        >>> # For coverage validation, compare with discover_message_types():
+        >>> message_types = discover_message_types(Path("src/omnibase_infra"))
+        >>> registered = discover_registered_routes(source_directory=Path("src"))
+        >>> unmapped = set(message_types.keys()) - registered
     """
     registered_types: set[str] = set()
 
@@ -541,6 +569,33 @@ class RoutingCoverageValidator:
         source_directory: Root directory to scan for message types.
         registry: Optional runtime registry for route inspection.
 
+    Thread Safety:
+        This validator uses lazy initialization with double-checked locking.
+        The first call to validate_coverage() or get_unmapped_types() triggers
+        discovery, which is protected by a threading.Lock. Subsequent calls
+        use cached results without locking overhead.
+
+        Multiple threads can safely call validation methods concurrently.
+        The cached discovery results are immutable after initialization.
+
+    Performance:
+        **Lazy Initialization**: Discovery is deferred until first validation
+        call. This allows creating validators early without blocking on I/O.
+
+        **Caching**: After first discovery, results are cached. Repeated calls
+        to validate_coverage() reuse cached data without re-scanning.
+
+        **Refresh**: If source files change, call refresh() to clear cache
+        and re-discover on next validation call.
+
+        **When to create new instances vs reuse**:
+        - Reuse: Within a single application run for consistent results
+        - New instance: After source code changes, or for different directories
+        - CI pipelines: Typically create fresh instance per run
+
+        For startup validation, use validate_routing_coverage_on_startup()
+        which creates a fresh validator and performs immediate validation.
+
     Example:
         >>> validator = RoutingCoverageValidator(Path("src/omnibase_infra"))
         >>> violations = validator.validate_coverage()
@@ -551,6 +606,10 @@ class RoutingCoverageValidator:
         >>> # Get coverage statistics
         >>> report = validator.get_coverage_report()
         >>> print(f"Coverage: {report['coverage_percent']:.1f}%")
+
+        >>> # After source changes, refresh the cache
+        >>> validator.refresh()
+        >>> violations = validator.validate_coverage()  # Re-discovers
     """
 
     def __init__(
@@ -802,6 +861,40 @@ def check_routing_coverage_ci(
 
     return passed, violations
 
+
+# =============================================================================
+# Design Note: Why No Module-Level Singleton
+# =============================================================================
+#
+# Unlike other validators (ExecutionShapeValidator, RuntimeShapeValidator,
+# TopicCategoryValidator), the RoutingCoverageValidator is NOT cached as a
+# module-level singleton. This is an intentional design decision:
+#
+# 1. **Parameterized Construction**: Each RoutingCoverageValidator requires a
+#    source_directory parameter. Different callers may validate different
+#    directories (e.g., "src/handlers" vs "src/events").
+#
+# 2. **Stateful Discovery**: The validator caches discovered message types
+#    and routes internally. This state is tied to the specific source_directory.
+#    A singleton would only work for one directory.
+#
+# 3. **Built-in Caching**: The validator already implements lazy initialization
+#    with thread-safe locking (_ensure_discovery). Callers who need repeated
+#    validation of the same directory should keep a reference to their validator
+#    instance rather than relying on a module-level singleton.
+#
+# 4. **Refresh Capability**: The refresh() method allows re-scanning after
+#    source file changes. This per-instance state management wouldn't work
+#    well with a shared singleton.
+#
+# Performance Recommendation for Callers:
+#     # For repeated validation of the same directory, reuse the instance:
+#     validator = RoutingCoverageValidator(Path("src/handlers"))
+#     violations = validator.validate_coverage()  # Discovery happens here
+#     report = validator.get_coverage_report()    # Uses cached discovery
+#
+#     # For one-time CI validation, the integration functions are sufficient:
+#     passed, violations = check_routing_coverage_ci(Path("src/handlers"))
 
 # =============================================================================
 # Module Exports

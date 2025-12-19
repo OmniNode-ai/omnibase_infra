@@ -12,11 +12,15 @@ Test Cases:
     3. test_effect_returning_projections_rejected - Effect cannot return PROJECTION
     4. test_reducer_accessing_system_time_rejected - Reducer cannot access time.time()/datetime.now()
     5. test_handler_direct_publish_rejected - All handlers forbidden from direct .publish()
+
+Note:
+    This module uses pytest's tmp_path fixture for temporary file management.
+    The fixture automatically handles cleanup after each test, eliminating
+    the need for manual try/finally blocks with file.unlink().
 """
 
 from __future__ import annotations
 
-import tempfile
 import textwrap
 from pathlib import Path
 
@@ -35,10 +39,30 @@ from omnibase_infra.validation import (
 )
 
 
+def _write_test_file(tmp_path: Path, code: str) -> Path:
+    """Write test code to a temporary Python file.
+
+    Helper function that creates a temporary .py file with the given code.
+    The file is automatically cleaned up by pytest's tmp_path fixture.
+
+    Args:
+        tmp_path: pytest's tmp_path fixture providing a temp directory.
+        code: Python source code to write to the file.
+
+    Returns:
+        Path to the created temporary file.
+    """
+    file_path = tmp_path / "test_handler.py"
+    file_path.write_text(code)
+    return file_path
+
+
 class TestReducerReturningEventsRejected:
     """Test case 1: Reducer handler returning Event type must be rejected."""
 
-    def test_reducer_returning_event_type_annotation_rejected_by_ast(self) -> None:
+    def test_reducer_returning_event_type_annotation_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Reducer with Event return type annotation detected by AST validator."""
         bad_code = textwrap.dedent("""
             class OrderCreatedEvent:
@@ -50,32 +74,24 @@ class TestReducerReturningEventsRejected:
                     return OrderCreatedEvent(order_id="123")
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        # Assert REDUCER_RETURNS_EVENTS violation found
+        assert len(violations) >= 1
+        reducer_event_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS
+        ]
+        assert len(reducer_event_violations) >= 1
+        assert reducer_event_violations[0].handler_type == EnumHandlerType.REDUCER
+        assert "event" in reducer_event_violations[0].message.lower()
 
-            # Assert REDUCER_RETURNS_EVENTS violation found
-            assert len(violations) >= 1
-            reducer_event_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS
-            ]
-            assert len(reducer_event_violations) >= 1
-            assert reducer_event_violations[0].handler_type == EnumHandlerType.REDUCER
-            assert "event" in reducer_event_violations[0].message.lower()
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_reducer_returning_event_call_rejected_by_ast(self) -> None:
+    def test_reducer_returning_event_call_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Reducer returning Event(...) call detected by AST validator."""
         bad_code = textwrap.dedent("""
             class OrderReducer:
@@ -84,26 +100,16 @@ class TestReducerReturningEventsRejected:
                     return OrderCreatedEvent(order_id=action.order_id)
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
-
-            reducer_event_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS
-            ]
-            assert len(reducer_event_violations) >= 1
-        finally:
-            file_path.unlink(missing_ok=True)
+        reducer_event_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS
+        ]
+        assert len(reducer_event_violations) >= 1
 
     def test_reducer_returning_event_rejected_by_runtime(self) -> None:
         """Reducer returning Event rejected by runtime shape validator."""
@@ -151,7 +157,9 @@ class TestReducerReturningEventsRejected:
 class TestOrchestratorPerformingIORejected:
     """Test case 2: Orchestrator handler returning Intent or Projection must be rejected."""
 
-    def test_orchestrator_returning_intent_rejected_by_ast(self) -> None:
+    def test_orchestrator_returning_intent_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Orchestrator returning Intent type detected by AST validator."""
         bad_code = textwrap.dedent("""
             class CheckoutIntent:
@@ -162,30 +170,23 @@ class TestOrchestratorPerformingIORejected:
                     return CheckoutIntent()
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        # Assert ORCHESTRATOR_RETURNS_INTENTS violation found
+        intent_violations = [
+            v
+            for v in violations
+            if v.violation_type
+            == EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS
+        ]
+        assert len(intent_violations) >= 1
+        assert intent_violations[0].handler_type == EnumHandlerType.ORCHESTRATOR
 
-            # Assert ORCHESTRATOR_RETURNS_INTENTS violation found
-            intent_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS
-            ]
-            assert len(intent_violations) >= 1
-            assert intent_violations[0].handler_type == EnumHandlerType.ORCHESTRATOR
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_orchestrator_returning_projection_rejected_by_ast(self) -> None:
+    def test_orchestrator_returning_projection_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Orchestrator returning Projection type detected by AST validator."""
         bad_code = textwrap.dedent("""
             class OrderSummaryProjection:
@@ -196,28 +197,19 @@ class TestOrchestratorPerformingIORejected:
                     return OrderSummaryProjection()
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
-
-            # Assert ORCHESTRATOR_RETURNS_PROJECTIONS violation found
-            projection_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_PROJECTIONS
-            ]
-            assert len(projection_violations) >= 1
-            assert projection_violations[0].handler_type == EnumHandlerType.ORCHESTRATOR
-        finally:
-            file_path.unlink(missing_ok=True)
+        # Assert ORCHESTRATOR_RETURNS_PROJECTIONS violation found
+        projection_violations = [
+            v
+            for v in violations
+            if v.violation_type
+            == EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_PROJECTIONS
+        ]
+        assert len(projection_violations) >= 1
+        assert projection_violations[0].handler_type == EnumHandlerType.ORCHESTRATOR
 
     def test_orchestrator_returning_intent_rejected_by_runtime(self) -> None:
         """Orchestrator returning Intent rejected by runtime validator."""
@@ -297,7 +289,9 @@ class TestOrchestratorPerformingIORejected:
 class TestEffectReturningProjectionsRejected:
     """Test case 3: Effect handler returning Projection type must be rejected."""
 
-    def test_effect_returning_projection_type_annotation_rejected_by_ast(self) -> None:
+    def test_effect_returning_projection_type_annotation_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Effect with Projection return type annotation detected by AST validator."""
         bad_code = textwrap.dedent("""
             class UserProfileProjection:
@@ -308,31 +302,23 @@ class TestEffectReturningProjectionsRejected:
                     return UserProfileProjection()
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        # Assert EFFECT_RETURNS_PROJECTIONS violation found
+        projection_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
+        ]
+        assert len(projection_violations) >= 1
+        assert projection_violations[0].handler_type == EnumHandlerType.EFFECT
+        assert "projection" in projection_violations[0].message.lower()
 
-            # Assert EFFECT_RETURNS_PROJECTIONS violation found
-            projection_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
-            ]
-            assert len(projection_violations) >= 1
-            assert projection_violations[0].handler_type == EnumHandlerType.EFFECT
-            assert "projection" in projection_violations[0].message.lower()
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_effect_returning_projection_call_rejected_by_ast(self) -> None:
+    def test_effect_returning_projection_call_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Effect returning Projection(...) call detected by AST validator."""
         bad_code = textwrap.dedent("""
             class DatabaseEffect:
@@ -341,26 +327,16 @@ class TestEffectReturningProjectionsRejected:
                     return OrderSummaryProjection(total=100)
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
-
-            projection_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
-            ]
-            assert len(projection_violations) >= 1
-        finally:
-            file_path.unlink(missing_ok=True)
+        projection_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
+        ]
+        assert len(projection_violations) >= 1
 
     def test_effect_returning_projection_rejected_by_runtime(self) -> None:
         """Effect returning Projection rejected by runtime shape validator."""
@@ -405,7 +381,7 @@ class TestEffectReturningProjectionsRejected:
 class TestReducerAccessingSystemTimeRejected:
     """Test case 4: Reducer handler accessing system time must be rejected."""
 
-    def test_reducer_calling_time_time_rejected_by_ast(self) -> None:
+    def test_reducer_calling_time_time_rejected_by_ast(self, tmp_path: Path) -> None:
         """Reducer calling time.time() detected by AST validator."""
         bad_code = textwrap.dedent("""
             import time
@@ -417,31 +393,24 @@ class TestReducerAccessingSystemTimeRejected:
                     return {"updated_at": timestamp}
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        # Assert REDUCER_ACCESSES_SYSTEM_TIME violation found
+        time_violations = [
+            v
+            for v in violations
+            if v.violation_type
+            == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
+        ]
+        assert len(time_violations) >= 1
+        assert time_violations[0].handler_type == EnumHandlerType.REDUCER
+        assert "deterministic" in time_violations[0].message.lower()
 
-            # Assert REDUCER_ACCESSES_SYSTEM_TIME violation found
-            time_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
-            ]
-            assert len(time_violations) >= 1
-            assert time_violations[0].handler_type == EnumHandlerType.REDUCER
-            assert "deterministic" in time_violations[0].message.lower()
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_reducer_calling_datetime_now_rejected_by_ast(self) -> None:
+    def test_reducer_calling_datetime_now_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Reducer calling datetime.now() detected by AST validator."""
         bad_code = textwrap.dedent("""
             from datetime import datetime
@@ -453,28 +422,21 @@ class TestReducerAccessingSystemTimeRejected:
                     return {"processed_at": current_time}
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        time_violations = [
+            v
+            for v in violations
+            if v.violation_type
+            == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
+        ]
+        assert len(time_violations) >= 1
 
-            time_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
-            ]
-            assert len(time_violations) >= 1
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_reducer_calling_datetime_utcnow_rejected_by_ast(self) -> None:
+    def test_reducer_calling_datetime_utcnow_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Reducer calling datetime.utcnow() detected by AST validator."""
         bad_code = textwrap.dedent("""
             from datetime import datetime
@@ -486,28 +448,21 @@ class TestReducerAccessingSystemTimeRejected:
                     return {"last_update": utc_time}
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        time_violations = [
+            v
+            for v in violations
+            if v.violation_type
+            == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
+        ]
+        assert len(time_violations) >= 1
 
-            time_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
-            ]
-            assert len(time_violations) >= 1
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_reducer_calling_datetime_datetime_now_rejected_by_ast(self) -> None:
+    def test_reducer_calling_datetime_datetime_now_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Reducer calling datetime.datetime.now() detected by AST validator."""
         bad_code = textwrap.dedent("""
             import datetime
@@ -519,28 +474,19 @@ class TestReducerAccessingSystemTimeRejected:
                     return {"timestamp": now}
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        time_violations = [
+            v
+            for v in violations
+            if v.violation_type
+            == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
+        ]
+        assert len(time_violations) >= 1
 
-            time_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
-            ]
-            assert len(time_violations) >= 1
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_non_reducer_can_access_system_time(self) -> None:
+    def test_non_reducer_can_access_system_time(self, tmp_path: Path) -> None:
         """Effect handlers are allowed to access system time."""
         valid_code = textwrap.dedent("""
             import time
@@ -554,33 +500,24 @@ class TestReducerAccessingSystemTimeRejected:
                     return {"timestamp": timestamp, "now": now}
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(valid_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, valid_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
-
-            # No system time violations for effect handlers
-            time_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
-            ]
-            assert len(time_violations) == 0
-        finally:
-            file_path.unlink(missing_ok=True)
+        # No system time violations for effect handlers
+        time_violations = [
+            v
+            for v in violations
+            if v.violation_type
+            == EnumExecutionShapeViolation.REDUCER_ACCESSES_SYSTEM_TIME
+        ]
+        assert len(time_violations) == 0
 
 
 class TestHandlerDirectPublishRejected:
     """Test case 5: Any handler directly publishing must be rejected."""
 
-    def test_handler_calling_publish_rejected_by_ast(self) -> None:
+    def test_handler_calling_publish_rejected_by_ast(self, tmp_path: Path) -> None:
         """Handler calling .publish() detected by AST validator."""
         bad_code = textwrap.dedent("""
             class OrderEffectHandler:
@@ -592,30 +529,22 @@ class TestHandlerDirectPublishRejected:
                     self.event_bus.publish({"type": "OrderCreated"})
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        # Assert HANDLER_DIRECT_PUBLISH violation found
+        publish_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
+        ]
+        assert len(publish_violations) >= 1
+        assert ".publish()" in publish_violations[0].message
 
-            # Assert HANDLER_DIRECT_PUBLISH violation found
-            publish_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
-            ]
-            assert len(publish_violations) >= 1
-            assert ".publish()" in publish_violations[0].message
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_handler_calling_send_event_rejected_by_ast(self) -> None:
+    def test_handler_calling_send_event_rejected_by_ast(
+        self, tmp_path: Path
+    ) -> None:
         """Handler calling .send_event() detected by AST validator."""
         bad_code = textwrap.dedent("""
             class PaymentReducerHandler:
@@ -624,29 +553,19 @@ class TestHandlerDirectPublishRejected:
                     self.bus.send_event(event)
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        publish_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
+        ]
+        assert len(publish_violations) >= 1
+        assert ".send_event()" in publish_violations[0].message
 
-            publish_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
-            ]
-            assert len(publish_violations) >= 1
-            assert ".send_event()" in publish_violations[0].message
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_handler_calling_emit_rejected_by_ast(self) -> None:
+    def test_handler_calling_emit_rejected_by_ast(self, tmp_path: Path) -> None:
         """Handler calling .emit() detected by AST validator."""
         bad_code = textwrap.dedent("""
             class NotificationOrchestrator:
@@ -655,29 +574,21 @@ class TestHandlerDirectPublishRejected:
                     self.emitter.emit("notification.sent", {"user": "123"})
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
+        publish_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
+        ]
+        assert len(publish_violations) >= 1
+        assert ".emit()" in publish_violations[0].message
 
-            publish_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
-            ]
-            assert len(publish_violations) >= 1
-            assert ".emit()" in publish_violations[0].message
-        finally:
-            file_path.unlink(missing_ok=True)
-
-    def test_all_handler_types_forbidden_from_direct_publish(self) -> None:
+    def test_all_handler_types_forbidden_from_direct_publish(
+        self, tmp_path: Path
+    ) -> None:
         """All handler types (Effect, Compute, Reducer, Orchestrator) are forbidden."""
         handler_templates = [
             ("OrderEffectHandler", "Effect"),
@@ -686,37 +597,30 @@ class TestHandlerDirectPublishRejected:
             ("OrderOrchestratorHandler", "Orchestrator"),
         ]
 
-        for class_name, handler_type_name in handler_templates:
+        for idx, (class_name, handler_type_name) in enumerate(handler_templates):
             bad_code = textwrap.dedent(f"""
                 class {class_name}:
                     def handle(self, data):
                         self.bus.publish({{"type": "test"}})
             """)
 
-            with tempfile.NamedTemporaryFile(
-                suffix=".py", delete=False, mode="w"
-            ) as f:
-                f.write(bad_code)
-                f.flush()
-                file_path = Path(f.name)
+            # Use unique file names for each iteration
+            file_path = tmp_path / f"test_handler_{idx}.py"
+            file_path.write_text(bad_code)
 
-            try:
-                validator = ExecutionShapeValidator()
-                violations = validator.validate_file(file_path)
+            validator = ExecutionShapeValidator()
+            violations = validator.validate_file(file_path)
 
-                publish_violations = [
-                    v
-                    for v in violations
-                    if v.violation_type
-                    == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
-                ]
-                assert len(publish_violations) >= 1, (
-                    f"{handler_type_name} handler should have direct publish violation"
-                )
-            finally:
-                file_path.unlink(missing_ok=True)
+            publish_violations = [
+                v
+                for v in violations
+                if v.violation_type == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
+            ]
+            assert len(publish_violations) >= 1, (
+                f"{handler_type_name} handler should have direct publish violation"
+            )
 
-    def test_dispatch_method_also_rejected(self) -> None:
+    def test_dispatch_method_also_rejected(self, tmp_path: Path) -> None:
         """Handler calling .dispatch() is also detected as direct publish."""
         bad_code = textwrap.dedent("""
             class WorkflowOrchestratorHandler:
@@ -725,33 +629,23 @@ class TestHandlerDirectPublishRejected:
                     self.dispatcher.dispatch(command)
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
-
-            publish_violations = [
-                v
-                for v in violations
-                if v.violation_type
-                == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
-            ]
-            assert len(publish_violations) >= 1
-            assert ".dispatch()" in publish_violations[0].message
-        finally:
-            file_path.unlink(missing_ok=True)
+        publish_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumExecutionShapeViolation.HANDLER_DIRECT_PUBLISH
+        ]
+        assert len(publish_violations) >= 1
+        assert ".dispatch()" in publish_violations[0].message
 
 
 class TestViolationFormatting:
     """Test that violations can be properly formatted for CI output."""
 
-    def test_ast_violation_format_for_ci(self) -> None:
+    def test_ast_violation_format_for_ci(self, tmp_path: Path) -> None:
         """AST violations can be formatted for CI output."""
         bad_code = textwrap.dedent("""
             class OrderReducerHandler:
@@ -759,23 +653,14 @@ class TestViolationFormatting:
                     return OrderCreatedEvent()
         """)
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", delete=False, mode="w"
-        ) as f:
-            f.write(bad_code)
-            f.flush()
-            file_path = Path(f.name)
+        file_path = _write_test_file(tmp_path, bad_code)
+        validator = ExecutionShapeValidator()
+        violations = validator.validate_file(file_path)
 
-        try:
-            validator = ExecutionShapeValidator()
-            violations = validator.validate_file(file_path)
-
-            assert len(violations) >= 1
-            ci_output = violations[0].format_for_ci()
-            assert "::error" in ci_output
-            assert "reducer_returns_events" in ci_output
-        finally:
-            file_path.unlink(missing_ok=True)
+        assert len(violations) >= 1
+        ci_output = violations[0].format_for_ci()
+        assert "::error" in ci_output
+        assert "reducer_returns_events" in ci_output
 
     def test_runtime_violation_format_for_ci(self) -> None:
         """Runtime violations can be formatted for CI output."""

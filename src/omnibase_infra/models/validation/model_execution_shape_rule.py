@@ -30,6 +30,9 @@ class ModelExecutionShapeRule(BaseModel):
         can_access_system_time: Whether handler can access non-deterministic time.
 
     Example:
+        >>> from omnibase_infra.enums import EnumHandlerType, EnumMessageCategory
+        >>> from omnibase_infra.models.validation import ModelExecutionShapeRule
+        >>>
         >>> # Reducer rule: can return projections, cannot return events
         >>> rule = ModelExecutionShapeRule(
         ...     handler_type=EnumHandlerType.REDUCER,
@@ -38,21 +41,38 @@ class ModelExecutionShapeRule(BaseModel):
         ...     can_publish_directly=False,
         ...     can_access_system_time=False,
         ... )
+        >>>
+        >>> # Check if a return type is allowed
+        >>> rule.is_return_type_allowed(EnumMessageCategory.PROJECTION)  # True
+        >>> rule.is_return_type_allowed(EnumMessageCategory.EVENT)  # False
+        >>> rule.is_return_type_allowed(EnumMessageCategory.COMMAND)  # False (not in allowed)
 
     Note:
-        The validation logic uses both `allowed_return_types` and
-        `forbidden_return_types` together:
+        **Interaction between allowed_return_types and forbidden_return_types:**
 
-        - Categories in `forbidden_return_types` are always rejected.
-        - If `allowed_return_types` is non-empty, categories must be in
-          that list AND not in `forbidden_return_types` to be allowed.
-        - If `allowed_return_types` is empty, all non-forbidden categories
-          are implicitly allowed (permissive mode).
+        The validation logic applies rules in the following priority order:
 
-        In practice, most handler rules explicitly list their allowed
-        categories. For example, COMPUTE handlers list all 4 categories
-        to make their permissiveness explicit, while REDUCER only lists
-        PROJECTION.
+        1. **Forbidden check (highest priority)**: Categories in
+           `forbidden_return_types` are ALWAYS rejected, regardless of
+           whether they appear in `allowed_return_types`.
+
+        2. **Allowed check**: If `allowed_return_types` is non-empty,
+           the category must be in that list to be allowed (explicit
+           allow-list mode).
+
+        3. **Permissive fallback**: If `allowed_return_types` is empty,
+           all non-forbidden categories are implicitly allowed. This mode
+           is not typically used in ONEX handlers.
+
+        **Practical usage in ONEX:**
+
+        Most handler rules explicitly list their allowed categories for
+        clarity and type safety:
+
+        - EFFECT: allowed=[EVENT, COMMAND], forbidden=[PROJECTION]
+        - COMPUTE: allowed=[all 4 categories], forbidden=[] (fully permissive)
+        - REDUCER: allowed=[PROJECTION], forbidden=[EVENT]
+        - ORCHESTRATOR: allowed=[COMMAND, EVENT], forbidden=[INTENT, PROJECTION]
     """
 
     handler_type: EnumHandlerType = Field(
@@ -64,7 +84,10 @@ class ModelExecutionShapeRule(BaseModel):
         description=(
             "Message categories this handler type is explicitly allowed to return. "
             "If non-empty, acts as an allow-list: only listed categories pass validation. "
-            "If empty, all non-forbidden categories are implicitly allowed (permissive mode)."
+            "If empty, all non-forbidden categories are implicitly allowed (permissive mode). "
+            "Used by is_return_type_allowed() method for validation. "
+            "Example: REDUCER sets [PROJECTION] to only allow projections, "
+            "while COMPUTE sets all 4 categories to be fully permissive."
         ),
     )
     forbidden_return_types: list[EnumMessageCategory] = Field(

@@ -49,6 +49,28 @@ logger = logging.getLogger(__name__)
 
 # Topic naming patterns for each message category
 # Matches patterns like: order.events, user-service.commands, checkout.intents
+#
+# DESIGN DECISION - Regex vs Substring Matching:
+# We use regex patterns instead of simple substring/suffix checks for validation
+# because:
+#
+# 1. **Domain validation**: The pattern `^[\w-]+\.` ensures the domain portion
+#    contains only valid characters (alphanumeric, underscore, hyphen). A simple
+#    `.endswith(".events")` check would accept malformed topics like "...events"
+#    or topics with invalid characters in the domain.
+#
+# 2. **Exactness**: The `^` and `$` anchors ensure we match the ENTIRE topic name.
+#    This prevents false positives on topics like "order.events.dlq" or
+#    "prefix.order.events" which would incorrectly match a suffix check.
+#
+# 3. **Consistency**: All patterns use the same validation logic, making it
+#    easier to reason about and extend (e.g., adding new patterns for other
+#    topic types).
+#
+# Trade-off: Regex is slightly slower than substring checks, but the validation
+# accuracy and correctness benefits outweigh the performance cost for this
+# use case (topic names are short strings, validation happens at configuration
+# time, not in hot paths).
 TOPIC_CATEGORY_PATTERNS: dict[EnumMessageCategory, re.Pattern[str]] = {
     EnumMessageCategory.EVENT: re.compile(r"^[\w-]+\.events$"),
     EnumMessageCategory.COMMAND: re.compile(r"^[\w-]+\.commands$"),
@@ -376,6 +398,25 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         - *Reducer -> REDUCER
         - *Orchestrator -> ORCHESTRATOR
 
+        PATTERN MATCHING ORDER:
+        The order of keyword checks (effect, compute, reducer, orchestrator)
+        matters when a class name contains multiple keywords. The checks are
+        ordered by specificity of the ONEX handler types:
+
+        1. "effect" - Checked first because EFFECT handlers are most common
+           for I/O operations and have the most restrictive constraints
+        2. "compute" - Pure computation handlers, checked second
+        3. "reducer" - State projection handlers with strict determinism rules
+        4. "orchestrator" - Workflow coordination handlers
+
+        Example edge cases:
+        - "EffectReducer" would be classified as EFFECT (first match wins)
+        - "ComputeOrchestrator" would be classified as COMPUTE
+
+        In practice, handler class names should be unambiguous and follow
+        the convention of using a single handler type in the name suffix
+        (e.g., "OrderEffectHandler", not "OrderEffectReducer").
+
         Args:
             node: The AST ClassDef node.
 
@@ -387,7 +428,8 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
 
         self.current_class_name = node.name
 
-        # Infer handler type from class name
+        # Infer handler type from class name.
+        # Order matters: first match wins for ambiguous names.
         class_name = node.name.lower()
         if "effect" in class_name:
             self.current_handler_type = EnumHandlerType.EFFECT

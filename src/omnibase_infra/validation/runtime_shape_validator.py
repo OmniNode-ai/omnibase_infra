@@ -35,6 +35,76 @@ Execution Shape Rules (imported from execution_shape_validator):
     - REDUCER: Can return PROJECTIONs only, not EVENTs (deterministic state management)
     - ORCHESTRATOR: Can return COMMANDs and EVENTs, but not INTENTs or PROJECTIONs
 
+Security Design (Intentional Fail-Open Architecture):
+    This validator uses a FAIL-OPEN design by default. This is an INTENTIONAL
+    architectural decision, NOT a security vulnerability. Understanding the
+    rationale is critical for proper security architecture.
+
+    **What Fail-Open Means Here**:
+    - Unknown handler types: Validation returns True (allowed) instead of blocking
+    - Undetectable message categories: Decorator skips validation and allows return
+    - Missing rules: No exception raised, output is permitted
+
+    **Why Fail-Open is Correct for This Validator**:
+
+    1. **This is an Architectural Validator, NOT a Security Boundary**:
+       The RuntimeShapeValidator enforces ONEX 4-node design patterns (Effect,
+       Compute, Reducer, Orchestrator) to catch developer mistakes at build/test
+       time. It is NOT designed to prevent malicious inputs or unauthorized access.
+
+    2. **Defense-in-Depth Model**:
+       Security boundaries should be implemented at the infrastructure layer,
+       not in architectural pattern validators:
+
+       - Authentication: Verify identity at API gateway/ingress (OAuth, JWT, mTLS)
+       - Authorization: Enforce permissions in service layer (RBAC, ABAC policies)
+       - Input Validation: Sanitize untrusted data at entry points (schema validation)
+       - Network Security: Restrict access via firewall rules and service mesh
+
+       This validator operates AFTER these security layers, on trusted internal
+       handler outputs, making fail-open safe and appropriate.
+
+    3. **Extensibility and Forward Compatibility**:
+       New handler types or message categories should work by default without
+       requiring immediate rule definitions. Fail-closed would break valid code
+       during handler type evolution and prevent progressive adoption.
+
+    4. **Developer Experience**:
+       Teams can adopt execution shape validation incrementally. Handlers
+       returning non-categorized types continue working while teams add category
+       annotations to their message types.
+
+    **When Strict Validation is Needed**:
+    If your use case requires fail-closed behavior (e.g., security-critical
+    enforcement in production), implement one of these approaches:
+
+    1. **Fail-Closed Wrapper**::
+
+           def strict_is_output_allowed(handler_type, output_category) -> bool:
+               if handler_type not in EXECUTION_SHAPE_RULES:
+                   return False  # Fail-closed for unknown types
+               return validator.is_output_allowed(handler_type, output_category)
+
+    2. **Policy Decorator**::
+
+           @require_known_category  # Custom decorator that rejects None categories
+           @enforce_execution_shape(EnumHandlerType.REDUCER)
+           def my_strict_handler(event):
+               return result
+
+    3. **Pre-Validation Check**::
+
+           category = detect_message_category(result)
+           if category is None:
+               raise ValueError("All outputs must have detectable categories")
+           validator.validate_and_raise(handler_type, result, category)
+
+    **Security Responsibility Boundaries**:
+    - This validator: Architectural pattern enforcement (developer guardrails)
+    - Infrastructure layer: Authentication, authorization, input validation
+    - Application layer: Business logic validation, access control
+    - Network layer: TLS, firewall rules, service mesh policies
+
 Usage:
     >>> from omnibase_infra.validation.runtime_shape_validator import (
     ...     RuntimeShapeValidator,
@@ -484,10 +554,25 @@ class RuntimeShapeValidator:
 
 
 # ==============================================================================
-# Global Validator Instance
+# Module-Level Singleton Validator
 # ==============================================================================
+#
+# Performance Optimization: The RuntimeShapeValidator is stateless after
+# initialization (only stores a reference to EXECUTION_SHAPE_RULES which is
+# a module-level constant). Creating new instances on every validation call
+# is wasteful in hot paths (e.g., the @enforce_execution_shape decorator).
+# Instead, we use a module-level singleton.
+#
+# Why a singleton is safe here:
+# - The validator only stores a reference to immutable EXECUTION_SHAPE_RULES
+# - No per-validation state is stored in the validator instance
+# - All validation methods are pure functions that produce new results
+# - Thread-safe: concurrent calls create independent violation results
+#
+# Performance Note for Callers:
+# If you need custom rules, instantiate your own RuntimeShapeValidator with
+# a custom rules dictionary. The singleton uses the default EXECUTION_SHAPE_RULES.
 
-# Default validator instance for convenience
 _default_validator = RuntimeShapeValidator()
 
 
