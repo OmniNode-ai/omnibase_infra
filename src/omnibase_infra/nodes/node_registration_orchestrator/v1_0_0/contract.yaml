@@ -1,0 +1,165 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# ONEX Node Contract - Registration Orchestrator Node
+contract_version: "1.0.0"
+node_version: "1.0.0"
+name: "node_registration_orchestrator"
+node_type: "ORCHESTRATOR"
+description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution."
+
+input_model:
+  name: "ModelOrchestratorInput"
+  module: "omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models"
+  description: "Input containing introspection event and workflow configuration."
+
+output_model:
+  name: "ModelOrchestratorOutput"
+  module: "omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models"
+  description: "Output containing dual registration outcome and workflow status."
+
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "node_registration_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      execution_mode: sequential
+      description: "Registers nodes with Consul and PostgreSQL based on introspection events"
+
+    execution_graph:
+      nodes:
+        - node_id: "receive_introspection"
+          node_type: effect
+          description: "Receive introspection event from Kafka"
+          step_config:
+            event_pattern: "node.introspection.*"
+
+        - node_id: "compute_intents"
+          node_type: reducer
+          description: "Compute registration intents from introspection event"
+          depends_on: ["receive_introspection"]
+          step_config:
+            reducer_protocol: "ProtocolReducer"
+            output_type: "list[ModelRegistrationIntent]"
+
+        - node_id: "execute_consul_registration"
+          node_type: effect
+          description: "Execute Consul registration intent"
+          depends_on: ["compute_intents"]
+          step_config:
+            effect_node: "node_registry_effect"
+            intent_filter: "consul.*"
+
+        - node_id: "execute_postgres_registration"
+          node_type: effect
+          description: "Execute PostgreSQL registration intent"
+          depends_on: ["compute_intents"]
+          step_config:
+            effect_node: "node_registry_effect"
+            intent_filter: "postgres.*"
+
+        - node_id: "aggregate_results"
+          node_type: compute
+          description: "Aggregate registration results"
+          depends_on: ["execute_consul_registration", "execute_postgres_registration"]
+          step_config:
+            aggregation_strategy: "all_or_partial"
+
+        - node_id: "publish_outcome"
+          node_type: effect
+          description: "Publish registration outcome event"
+          depends_on: ["aggregate_results"]
+          step_config:
+            event_type: "NodeRegistrationResultEvent"
+
+    coordination_rules:
+      parallel_execution_allowed: false
+      failure_recovery_strategy: retry
+      max_retries: 3
+      timeout_ms: 30000
+      checkpoint_enabled: true
+      rollback_enabled: true
+
+  execution_mode: sequential
+  max_parallel_branches: 1
+  checkpoint_enabled: true
+  checkpoint_interval_ms: 5000
+  state_persistence_enabled: true
+  rollback_enabled: true
+  timeout_ms: 30000
+  recovery_enabled: true
+
+consumed_events:
+  - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
+    event_type: "NodeIntrospectionEvent"
+  - topic: "{env}.{namespace}.onex.evt.registry-request-introspection.v1"
+    event_type: "RegistryRequestIntrospectionEvent"
+
+published_events:
+  - topic: "{env}.{namespace}.onex.evt.node-registration-result.v1"
+    event_type: "NodeRegistrationResultEvent"
+
+intent_consumption:
+  subscribed_intents:
+    - "consul.register"
+    - "consul.deregister"
+    - "postgres.upsert_registration"
+  intent_routing_table:
+    "consul.register": "node_registry_effect"
+    "consul.deregister": "node_registry_effect"
+    "postgres.upsert_registration": "node_registry_effect"
+
+dependencies:
+  - name: "reducer_protocol"
+    type: "protocol"
+    description: "Protocol for calling reducer to get intents."
+  - name: "effect_node"
+    type: "node"
+    module: "omnibase_infra.nodes.node_registry_effect"
+    description: "Effect node for executing intents."
+
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "EffectExecutionError"
+      - "ConnectionError"
+      - "TimeoutError"
+
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+
+  error_types:
+    - name: "ReducerError"
+      description: "Error from reducer during intent generation"
+      recoverable: true
+      retry_strategy: "none"
+    - name: "EffectExecutionError"
+      description: "Error from effect node during intent execution"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "AggregationError"
+      description: "Error during result aggregation"
+      recoverable: false
+      retry_strategy: "none"
+
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+
+metadata:
+  author: "OmniNode Team"
+  created: "2025-12-18"
+  tags:
+    - "orchestrator"
+    - "registration"
+    - "workflow"
+    - "mvp"
