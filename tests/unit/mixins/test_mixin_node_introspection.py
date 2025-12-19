@@ -41,7 +41,7 @@ import json
 import os
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
@@ -54,6 +54,9 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     MixinNodeIntrospection,
 )
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+
+if TYPE_CHECKING:
+    from omnibase_infra.event_bus.models import ModelEventMessage
 
 # CI environments may be slower - apply multiplier for performance thresholds
 _CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
@@ -127,7 +130,7 @@ class MockEventBus:
         self,
         topic: str,
         group_id: str,
-        on_message: Callable[[Any], Awaitable[None]],
+        on_message: "Callable[[ModelEventMessage], Awaitable[None]]",
     ) -> Callable[[], Awaitable[None]]:
         """Mock subscribe method for protocol compliance.
 
@@ -3957,6 +3960,415 @@ class TestModelIntrospectionConfigTopicValidation:
         assert ".v1" in error_msg or ".v2" in error_msg
         # Error should show the invalid value
         assert "onex.node.introspection.published" in error_msg
+
+    # =========================================================================
+    # Version Suffix Edge Cases (PR #54 review coverage)
+    # =========================================================================
+
+    async def test_version_zero_accepted(self) -> None:
+        """Test that version 0 is a valid version suffix.
+
+        Edge case: .v0 should be accepted as a valid version suffix.
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic="onex.node.introspection.v0",
+        )
+        assert config.introspection_topic == "onex.node.introspection.v0"
+
+    async def test_large_version_number_accepted(self) -> None:
+        """Test that large version numbers are accepted.
+
+        Edge case: .v999 should be accepted as a valid version suffix.
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic="onex.node.introspection.v999",
+        )
+        assert config.introspection_topic == "onex.node.introspection.v999"
+
+        # Also test very large version numbers
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="COMPUTE",
+            heartbeat_topic="onex.node.heartbeat.v12345",
+        )
+        assert config.heartbeat_topic == "onex.node.heartbeat.v12345"
+
+    async def test_non_numeric_version_rejected(self) -> None:
+        """Test that non-numeric version suffixes are rejected.
+
+        Edge case: .vX, .vABC should be rejected (non-numeric).
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # .vX (letter instead of number)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.node.introspection.vX",
+            )
+        assert "version suffix" in str(exc_info.value).lower()
+
+        # .vABC (letters instead of number)
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                heartbeat_topic="onex.node.heartbeat.vABC",
+            )
+
+    async def test_decimal_version_rejected(self) -> None:
+        """Test that decimal version suffixes are rejected.
+
+        Edge case: .v1.0, .v2.1 should be rejected (not just .vN pattern).
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # .v1.0 (decimal version)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.node.introspection.v1.0",
+            )
+        # The topic ends with .0, not .vN, so it fails version suffix check
+        assert "version suffix" in str(exc_info.value).lower()
+
+        # .v2.1 (semantic version in suffix)
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="COMPUTE",
+                heartbeat_topic="onex.node.heartbeat.v2.1",
+            )
+
+    async def test_negative_version_rejected(self) -> None:
+        """Test that negative version suffixes are rejected.
+
+        Edge case: .v-1 should be rejected (negative numbers not allowed).
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # .v-1 (negative version)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.node.introspection.v-1",
+            )
+        # The topic ends with .v-1, which contains invalid character (hyphen after v)
+        # or fails version suffix pattern (regex expects \d+ after .v)
+        error_msg = str(exc_info.value).lower()
+        assert "version suffix" in error_msg or "invalid" in error_msg
+
+    # =========================================================================
+    # Invalid Topic Name Patterns (PR #54 review coverage)
+    # =========================================================================
+
+    async def test_special_characters_at_sign_rejected(self) -> None:
+        """Test that @ character in topic names is rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic@invalid.v1",
+            )
+        assert "invalid characters" in str(exc_info.value).lower()
+
+    async def test_special_characters_hash_rejected(self) -> None:
+        """Test that # character in topic names is rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic#channel.v1",
+            )
+        assert "invalid characters" in str(exc_info.value).lower()
+
+    async def test_special_characters_dollar_rejected(self) -> None:
+        """Test that $ character in topic names is rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic$value.v1",
+            )
+        assert "invalid characters" in str(exc_info.value).lower()
+
+    async def test_special_characters_asterisk_rejected(self) -> None:
+        """Test that * wildcard character in topic names is rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic.*.v1",
+            )
+        assert "invalid characters" in str(exc_info.value).lower()
+
+    async def test_unicode_characters_rejected(self) -> None:
+        """Test that unicode characters in topic names are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Emoji character (rocket emoji U+1F680)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic.\U0001f680rocket.v1",
+            )
+        assert "invalid characters" in str(exc_info.value).lower()
+
+        # Non-ASCII letter (e.g., accented character e with acute accent)
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                heartbeat_topic="onex.topic.caf\u00e9.v1",
+            )
+
+        # CJK character (Chinese character for "test")
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                request_introspection_topic="onex.topic.\u6d4b\u8bd5.v1",
+            )
+
+    async def test_extremely_long_topic_name_accepted(self) -> None:
+        """Test that very long topic names are accepted (no length limit enforced).
+
+        This tests the boundary condition for topic name length. While extremely
+        long names may not be practical, the validator should not reject them
+        purely based on length (Kafka topic limit is 249 chars, but we don't
+        enforce this at the config level).
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Create a topic name that's 200+ characters
+        long_segment = "a" * 200  # 200 chars
+        long_topic = f"onex.{long_segment}.published.v1"
+
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic=long_topic,
+        )
+        assert config.introspection_topic == long_topic
+        assert len(config.introspection_topic) > 200
+
+    async def test_consecutive_dots_allowed_by_current_validator(self) -> None:
+        """Test that consecutive dots in topic names are currently allowed.
+
+        Note: The current regex pattern `^[a-zA-Z0-9._-]+$` allows consecutive dots.
+        This test documents the current behavior. Consecutive dots could be
+        rejected in a future enhancement if deemed necessary for stricter
+        topic naming conventions.
+
+        Edge case: onex..double.dot.v1 contains consecutive dots but passes
+        the current character validation since dots are valid characters.
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Double dots are currently allowed (passes character validation)
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic="onex..double.dot.v1",
+        )
+        # Documents that consecutive dots are currently accepted
+        assert config.introspection_topic == "onex..double.dot.v1"
+
+    async def test_trailing_dot_before_version_allowed(self) -> None:
+        """Test that trailing dots before version suffix are allowed.
+
+        Note: The current validator does not check for empty segments created
+        by consecutive dots. This test documents current behavior.
+
+        Edge case: onex.topic..v1 has consecutive dots before version.
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Consecutive dots before version currently allowed
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic="onex.topic..v1",
+        )
+        # Documents that this is currently accepted
+        assert config.introspection_topic == "onex.topic..v1"
+
+    async def test_brackets_rejected(self) -> None:
+        """Test that bracket characters in topic names are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Square brackets
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic[0].v1",
+            )
+
+        # Curly braces
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                heartbeat_topic="onex.topic{key}.v1",
+            )
+
+        # Parentheses
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                request_introspection_topic="onex.topic(1).v1",
+            )
+
+    async def test_quotes_rejected(self) -> None:
+        """Test that quote characters in topic names are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Single quote
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic's.name.v1",
+            )
+
+        # Double quote
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                heartbeat_topic='onex.topic"name".v1',
+            )
+
+    async def test_backslash_rejected(self) -> None:
+        """Test that backslash character in topic names is rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic\\name.v1",
+            )
+
+    async def test_colon_rejected(self) -> None:
+        """Test that colon character in topic names is rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        with pytest.raises(ValidationError):
+            ModelIntrospectionConfig(
+                node_id="test-node",
+                node_type="EFFECT",
+                introspection_topic="onex.topic:name.v1",
+            )
+
+    # =========================================================================
+    # Custom Topic Parameter Tests (PR #54 review coverage)
+    # =========================================================================
+
+    async def test_all_topics_independently_customizable(self) -> None:
+        """Test that all 3 topic fields can be customized independently.
+
+        Verifies that each topic field accepts custom values without
+        affecting the others.
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Customize only introspection_topic
+        config1 = ModelIntrospectionConfig(
+            node_id="test-node-1",
+            node_type="EFFECT",
+            introspection_topic="onex.custom.intro.v1",
+        )
+        assert config1.introspection_topic == "onex.custom.intro.v1"
+        assert config1.heartbeat_topic is None
+        assert config1.request_introspection_topic is None
+
+        # Customize only heartbeat_topic
+        config2 = ModelIntrospectionConfig(
+            node_id="test-node-2",
+            node_type="COMPUTE",
+            heartbeat_topic="onex.custom.heartbeat.v1",
+        )
+        assert config2.introspection_topic is None
+        assert config2.heartbeat_topic == "onex.custom.heartbeat.v1"
+        assert config2.request_introspection_topic is None
+
+        # Customize only request_introspection_topic
+        config3 = ModelIntrospectionConfig(
+            node_id="test-node-3",
+            node_type="REDUCER",
+            request_introspection_topic="onex.custom.request.v1",
+        )
+        assert config3.introspection_topic is None
+        assert config3.heartbeat_topic is None
+        assert config3.request_introspection_topic == "onex.custom.request.v1"
+
+    async def test_partial_customization_works(self) -> None:
+        """Test that partial customization works (some topics default, some custom).
+
+        When only some topics are specified, others should remain None
+        (to be resolved to class defaults by the mixin).
+        """
+        from omnibase_infra.mixins import ModelIntrospectionConfig
+
+        # Customize 2 out of 3 topics
+        config = ModelIntrospectionConfig(
+            node_id="test-node",
+            node_type="EFFECT",
+            introspection_topic="onex.custom.intro.v1",
+            heartbeat_topic="onex.custom.heartbeat.v1",
+            # request_introspection_topic not specified
+        )
+
+        assert config.introspection_topic == "onex.custom.intro.v1"
+        assert config.heartbeat_topic == "onex.custom.heartbeat.v1"
+        assert config.request_introspection_topic is None
 
 
 @pytest.mark.unit

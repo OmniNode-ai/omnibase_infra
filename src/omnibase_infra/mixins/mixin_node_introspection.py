@@ -139,7 +139,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Protocol, TypedDict, cast, runtime_checkable
 from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
@@ -369,6 +369,39 @@ class ModelIntrospectionConfig(BaseModel):
 
     # Regex pattern for valid topic name characters (alphanumeric, dots, hyphens, underscores)
     _TOPIC_NAME_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+    @field_validator("node_id", "node_type", mode="before")
+    @classmethod
+    def validate_non_empty_string(cls, v: str | None, info: ValidationInfo) -> str:
+        """Validate that required string fields are non-empty and not whitespace-only.
+
+        This validator provides explicit, user-friendly error messages for empty
+        string cases, which is clearer than the default Pydantic min_length error.
+
+        Args:
+            v: The field value (expected to be a string)
+            info: Pydantic validation context with field name
+
+        Returns:
+            The validated string value
+
+        Raises:
+            ValueError: If the value is None, empty, or whitespace-only
+
+        Example:
+            Valid: "my-node-id", "EFFECT"
+            Invalid: None, "", "   "
+        """
+        if v is None:
+            raise ValueError(f"{info.field_name} is required and cannot be None")
+        if not isinstance(v, str):
+            raise ValueError(
+                f"{info.field_name} must be a string, got {type(v).__name__}"
+            )
+        if v.strip() == "":
+            raise ValueError(f"{info.field_name} cannot be empty or whitespace-only")
+        return v
+
     _TOPIC_PREFIX: ClassVar[str] = "onex."
     # Regex pattern for version suffix (e.g., .v1, .v2, .v10)
     _VERSION_SUFFIX_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"\.v\d+$")
@@ -393,7 +426,7 @@ class ModelIntrospectionConfig(BaseModel):
             v: Topic name string or None
 
         Returns:
-            The validated topic name, or None if input was None
+            The validated topic name, or None if input was None or empty
 
         Raises:
             ValueError: If topic name format is invalid
@@ -403,8 +436,9 @@ class ModelIntrospectionConfig(BaseModel):
             Invalid: "onex.node.introspection.published" (missing version suffix)
             Invalid: "onex.node.introspection.published.v" (incomplete version)
         """
-        if v is None:
-            return v
+        # Handle None and empty string - both treated as "not provided"
+        if v is None or v == "":
+            return None
 
         # Check for ONEX prefix
         if not v.startswith(cls._TOPIC_PREFIX):

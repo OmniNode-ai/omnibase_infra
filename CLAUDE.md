@@ -843,6 +843,12 @@ The mixin uses `asyncio.Lock` for thread-safe cache operations:
 
 Unlike `MixinAsyncCircuitBreaker` which uses a caller-held locking pattern, `MixinNodeIntrospection` manages the lock internally - callers do not need to acquire the lock manually.
 
+**Breaking Change (PR #54)**: The `invalidate_introspection_cache()` method was changed from synchronous to asynchronous:
+- **Old**: `def invalidate_introspection_cache(self) -> None`
+- **New**: `async def invalidate_introspection_cache(self) -> None`
+- **Migration**: Add `await` before all calls to `invalidate_introspection_cache()`
+- **Rationale**: Thread-safe cache invalidation requires holding the async lock (`_introspection_cache_lock`), which can only be acquired in an async context. Making the method async ensures proper concurrency control and prevents race conditions when multiple coroutines attempt to invalidate the cache simultaneously.
+
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
 - Thread Safety Pattern: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md` (similar pattern)

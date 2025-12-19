@@ -758,7 +758,7 @@ class RegistryEffectNode(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=contract.metadata.name,
             node_type=contract.metadata.node_type,
-            node_version=contract.metadata.version,
+            version=contract.metadata.version,
             event_bus=event_bus,
             # Map contract event_channels to introspection topics
             introspection_topic=publishes.get("introspection"),  # onex.node.introspection.published.v1
