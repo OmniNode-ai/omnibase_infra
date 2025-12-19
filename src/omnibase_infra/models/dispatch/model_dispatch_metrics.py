@@ -73,10 +73,30 @@ class ModelDispatchMetrics(BaseModel):
     - Per-dispatcher metrics breakdown
     - Per-category metrics breakdown
 
-    Note:
-        In the freeze-after-init pattern, the dispatcher set is fixed after
-        engine.freeze() is called, so dispatcher_metrics growth is bounded
-        by the number of registered dispatchers.
+    Memory Considerations:
+        The dispatcher_metrics dictionary size is bounded by the number
+        of registered dispatchers. Under the freeze-after-init pattern,
+        dispatchers are registered during initialization and then frozen,
+        ensuring predictable memory usage.
+
+        Specifically:
+        - dispatcher_metrics: Bounded by registered dispatcher count (fixed after freeze)
+        - category_metrics: Fixed 3 keys (event, command, intent)
+        - latency_histogram: Fixed 13 buckets
+
+        The freeze-after-init pattern guarantees that after engine.freeze()
+        is called, no new dispatchers can be registered. This means the
+        dispatcher_metrics dictionary has a known maximum size equal to
+        the number of dispatchers registered during initialization.
+
+        For production deployments, typical dispatcher counts are:
+        - Small systems: 5-20 dispatchers
+        - Medium systems: 20-100 dispatchers
+        - Large systems: 100-500 dispatchers
+
+        Each ModelDispatcherMetrics instance is approximately 200-500 bytes,
+        so even large systems with 500 dispatchers use under 250KB for
+        dispatcher metrics.
 
     Attributes:
         total_dispatches: Total number of dispatch operations.
@@ -185,7 +205,17 @@ class ModelDispatchMetrics(BaseModel):
     # ---- Per-Dispatcher Metrics ----
     dispatcher_metrics: dict[str, ModelDispatcherMetrics] = Field(
         default_factory=dict,
-        description="Per-dispatcher metrics keyed by dispatcher_id.",
+        description="""Per-dispatcher metrics keyed by dispatcher_id.
+
+        Memory Bounds:
+            This dictionary is bounded by the number of registered dispatchers,
+            which is fixed after freeze(). The freeze-after-init pattern ensures
+            no new dispatchers can be added after initialization, making the
+            maximum size predictable and bounded.
+
+            For dynamic dispatcher scenarios (not currently supported), consider
+            implementing LRU eviction or periodic metrics export/reset.
+        """,
     )
 
     # ---- Per-Category Metrics ----

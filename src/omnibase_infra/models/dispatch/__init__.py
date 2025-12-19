@@ -100,7 +100,12 @@ from omnibase_infra.models.dispatch.model_dispatcher_registration import (
     ModelDispatcherRegistration,
 )
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
-from omnibase_infra.models.dispatch.model_topic_parser import ModelTopicParser
+from omnibase_infra.models.dispatch.model_topic_parser import (
+    CacheInfo,
+    ModelTopicParser,
+    clear_topic_parse_cache,
+    get_topic_parse_cache_info,
+)
 
 __all__ = [
     # Enums
@@ -114,4 +119,8 @@ __all__ = [
     "ModelDispatcherRegistration",
     "ModelParsedTopic",
     "ModelTopicParser",
+    # Cache utilities
+    "CacheInfo",
+    "get_topic_parse_cache_info",
+    "clear_topic_parse_cache",
 ]

@@ -64,6 +64,35 @@ class ExemptionPattern(TypedDict, total=False):
 INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
+# ============================================================================
+# Pattern Validator Threshold Reference (from omnibase_core.validation)
+# ============================================================================
+# These thresholds are defined in omnibase_core and applied by validate_patterns().
+# Documented here for reference and to explain infrastructure exemptions.
+#
+# See CLAUDE.md "Accepted Pattern Exceptions" section for full rationale.
+# Ticket: OMN-934 (message dispatch engine implementation)
+#
+# DEFAULT_MAX_METHODS = 10     # Maximum methods per class
+# DEFAULT_MAX_INIT_PARAMS = 5  # Maximum __init__ parameters
+#
+# Infrastructure Pattern Exemptions:
+# ----------------------------------
+# KafkaEventBus (14 methods, 10 __init__ params):
+#   - Event bus pattern requires: lifecycle (start/stop/health), pub/sub
+#     (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility
+#   - Backwards compatibility during config migration requires multiple __init__ params
+#   - See: kafka_event_bus.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
+#
+# RuntimeHostProcess (11+ methods, 6+ __init__ params):
+#   - Central coordinator requires: lifecycle management, message handling,
+#     graceful shutdown, handler management
+#   - See: runtime_host_process.py class docstring, CLAUDE.md "Accepted Pattern Exceptions"
+#
+# These exemptions are handled via exempted_patterns in validate_infra_patterns(),
+# NOT by modifying global thresholds.
+# ============================================================================
+
 # Maximum allowed complex union types in infrastructure code.
 # TECH DEBT (OMN-934): Baseline of 350 unions as of 2025-12-19
 # Target: Reduce incrementally through refactoring
@@ -202,15 +231,20 @@ def validate_infra_patterns(
     # Patterns match class/method names and violation types without hardcoded line numbers
     exempted_patterns: list[ExemptionPattern] = [
         # KafkaEventBus method count exemption (OMN-934)
-        # KafkaEventBus complexity is acceptable for event bus pattern - requires
-        # lifecycle management, pub/sub operations, circuit breaker, and protocol compatibility
+        # Threshold: 10 methods (default), KafkaEventBus has 14+ methods
+        # Rationale: Event bus pattern requires lifecycle (start/stop/health),
+        # pub/sub (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility
+        # Reference: CLAUDE.md "Accepted Pattern Exceptions" section
         {
             "file_pattern": r"kafka_event_bus\.py",
             "class_pattern": r"Class 'KafkaEventBus'",
             "violation_pattern": r"has \d+ methods",
         },
         # KafkaEventBus __init__ parameter count exemption (OMN-934)
-        # Backwards compatibility during config migration requires multiple parameters
+        # Threshold: 5 params (default), KafkaEventBus has 10+ params
+        # Rationale: Backwards compatibility during config migration from direct
+        # parameters to ModelKafkaConfig object
+        # Reference: CLAUDE.md "Accepted Pattern Exceptions" section
         {
             "file_pattern": r"kafka_event_bus\.py",
             "method_pattern": r"Function '__init__'",

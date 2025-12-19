@@ -52,18 +52,218 @@ Example:
     True
 
 See Also:
-    omnibase_infra.enums.EnumMessageCategory: Message category enum
-    omnibase_infra.enums.EnumTopicType: Topic type enum
-    omnibase_core.constants.constants_topic_taxonomy: Topic naming constants
+    omnibase_infra.enums.EnumMessageCategory: Message category classification
+        (EVENT, COMMAND, INTENT) for routing decisions.
+    omnibase_infra.enums.EnumTopicType: Topic type suffix enumeration
+        (events, commands, intents, snapshots).
+    omnibase_infra.enums.EnumTopicStandard: Topic naming standard detection
+        (ONEX_KAFKA, ENVIRONMENT_AWARE, UNKNOWN).
+    omnibase_infra.models.dispatch.ModelParsedTopic: Structured parse result
+        with extracted components and validation status.
+    omnibase_infra.runtime.MessageDispatchEngine: Uses topic parsing for
+        deterministic message routing to registered dispatchers.
+
+Topic Taxonomy Reference:
+    The ONEX topic naming taxonomy defines standardized patterns for message
+    routing:
+
+    **ONEX Kafka Format** (canonical):
+        Pattern: ``onex.<domain>.<type>``
+        - Prefix: Always ``onex`` (fixed namespace identifier)
+        - Domain: Bounded context name (e.g., registration, discovery, order)
+        - Type: Message category suffix (events, commands, intents, snapshots)
+        - Examples:
+            - ``onex.registration.events`` - Domain events from registration
+            - ``onex.discovery.commands`` - Commands for discovery service
+            - ``onex.checkout.intents`` - User intents for checkout workflow
+
+    **Environment-Aware Format** (deployment-specific):
+        Pattern: ``<env>.<domain>.<category>.<version>``
+        - Environment: Deployment target (dev, staging, prod, test, local)
+        - Domain: Bounded context name
+        - Category: Message category suffix (events, commands, intents)
+        - Version: API version identifier (v1, v2, etc.)
+        - Examples:
+            - ``dev.user.events.v1`` - Development user events, version 1
+            - ``prod.order.commands.v2`` - Production order commands, version 2
+            - ``staging.payment.intents.v1`` - Staging payment intents
+
+    **Domain Naming Rules**:
+        - Lowercase alphanumeric characters with hyphens
+        - Must start with a letter
+        - Single letter domains are allowed (e.g., ``onex.a.events``)
+        - Multi-part domains use hyphens (e.g., ``order-fulfillment``)
+
+    **Category-Based Routing**:
+        Topic category determines the message processing pattern:
+        - ``events``: Immutable facts processed by reducers and projections
+        - ``commands``: Action instructions processed by command handlers
+        - ``intents``: User intentions processed by orchestrators
+        - ``snapshots``: State snapshots for materialized views (no category mapping)
 """
 
 import re
-from functools import cached_property
+from functools import cached_property, lru_cache
+from typing import NamedTuple
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.enums.enum_topic_type import EnumTopicType
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
+
+
+class CacheInfo(NamedTuple):
+    """Cache statistics returned by get_topic_parse_cache_info().
+
+    This mirrors functools._CacheInfo structure for type safety.
+    """
+
+    hits: int
+    misses: int
+    maxsize: int | None
+    currsize: int
+
+
+# Module-level LRU cache for topic parsing performance.
+# Since ModelTopicParser is stateless and all class-level attributes are constants,
+# we can safely cache parse results at the module level. This provides significant
+# performance benefits for repeated topic parsing (common in production).
+#
+# Cache size of 1024 is chosen to balance memory usage with hit rate:
+# - Typical production environments have 10-100 unique topics
+# - Cache can hold results for multiple environments/deployments
+# - LRU eviction ensures frequently-used topics stay cached
+_TOPIC_PARSE_CACHE_SIZE = 1024
+
+
+@lru_cache(maxsize=_TOPIC_PARSE_CACHE_SIZE)
+def _parse_topic_cached(topic: str) -> ModelParsedTopic:
+    """
+    Module-level cached topic parsing implementation.
+
+    This function contains the actual parsing logic and is decorated with
+    @lru_cache to provide automatic caching with LRU eviction.
+
+    Args:
+        topic: The topic string to parse (must be non-empty, stripped)
+
+    Returns:
+        ModelParsedTopic with extracted components and validation status
+
+    Note:
+        This function is internal to the module. Use ModelTopicParser.parse()
+        for the public API, which handles empty/whitespace topics before
+        delegating to this cached implementation.
+    """
+    # Try ONEX Kafka format first (canonical)
+    onex_match = ModelTopicParser._ONEX_KAFKA_PATTERN.match(topic)
+    if onex_match:
+        domain = onex_match.group("domain").lower()
+        type_str = onex_match.group("type").lower()
+
+        topic_type = ModelTopicParser._TOPIC_TYPE_MAP.get(type_str)
+        category = ModelTopicParser._CATEGORY_MAP.get(type_str)
+
+        return ModelParsedTopic(
+            raw_topic=topic,
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            domain=domain,
+            category=category,
+            topic_type=topic_type,
+            is_valid=True,
+        )
+
+    # Try Environment-Aware format
+    env_match = ModelTopicParser._ENV_AWARE_PATTERN.match(topic)
+    if env_match:
+        environment = env_match.group("env").lower()
+        domain = env_match.group("domain").lower()
+        category_str = env_match.group("category").lower()
+        version = env_match.group("version").lower()
+
+        topic_type = ModelTopicParser._TOPIC_TYPE_MAP.get(category_str)
+        category = ModelTopicParser._CATEGORY_MAP.get(category_str)
+
+        return ModelParsedTopic(
+            raw_topic=topic,
+            standard=EnumTopicStandard.ENVIRONMENT_AWARE,
+            domain=domain,
+            category=category,
+            topic_type=topic_type,
+            environment=environment,
+            version=version,
+            is_valid=True,
+        )
+
+    # Fallback: Try to extract category using existing EnumMessageCategory.from_topic
+    # This handles partial matches and legacy formats
+    category = EnumMessageCategory.from_topic(topic)
+    if category is not None:
+        # Extract domain by finding the category suffix position
+        topic_lower = topic.lower()
+        category_suffix = f".{category.topic_suffix}"
+        if category_suffix in topic_lower:
+            # Find the domain: everything before the category suffix
+            suffix_idx = topic_lower.find(category_suffix)
+            prefix = topic[:suffix_idx]
+            # Remove environment prefix if present
+            parts = prefix.split(".")
+            domain = parts[-1] if parts else None
+            env = parts[0] if len(parts) > 1 else None
+
+            return ModelParsedTopic(
+                raw_topic=topic,
+                standard=EnumTopicStandard.UNKNOWN,
+                domain=domain,
+                category=category,
+                environment=env,
+                is_valid=True,  # Partially valid - category extracted
+            )
+
+    # Unknown format
+    return ModelParsedTopic(
+        raw_topic=topic,
+        standard=EnumTopicStandard.UNKNOWN,
+        is_valid=False,
+        validation_error=(
+            f"Topic '{topic}' does not match any known format. "
+            "Expected: onex.<domain>.<type> or <env>.<domain>.<category>.<version>"
+        ),
+    )
+
+
+def get_topic_parse_cache_info() -> CacheInfo:
+    """
+    Get cache statistics for topic parsing.
+
+    Returns:
+        CacheInfo: A named tuple with hits, misses, maxsize, and currsize.
+
+    Example:
+        >>> from omnibase_infra.models.dispatch import get_topic_parse_cache_info
+        >>> info = get_topic_parse_cache_info()
+        >>> print(f"Cache hit rate: {info.hits / (info.hits + info.misses):.2%}")
+        Cache hit rate: 95.00%
+    """
+    # Convert from functools._CacheInfo to our typed CacheInfo
+    info = _parse_topic_cached.cache_info()
+    return CacheInfo(
+        hits=info.hits,
+        misses=info.misses,
+        maxsize=info.maxsize,
+        currsize=info.currsize,
+    )
+
+
+def clear_topic_parse_cache() -> None:
+    """
+    Clear the topic parsing cache.
+
+    This is useful for testing or when topic patterns change dynamically.
+    In production, this should rarely be needed as the LRU eviction
+    handles cache management automatically.
+    """
+    _parse_topic_cached.cache_clear()
 
 
 class ModelTopicParser:
@@ -97,13 +297,32 @@ class ModelTopicParser:
         >>> parser.matches_pattern("**.events", "dev.user.events.v1")
         True
 
+    Attributes:
+        _ONEX_KAFKA_PATTERN: Compiled regex for ONEX Kafka format validation.
+        _ENV_AWARE_PATTERN: Compiled regex for Environment-Aware format validation.
+        _DOMAIN_PATTERN: Compiled regex for domain name validation.
+        _VALID_TOPIC_TYPES: Frozenset of valid topic type suffixes.
+        _TOPIC_TYPE_MAP: Mapping from suffix to EnumTopicType enum values.
+        _CATEGORY_MAP: Mapping from suffix to EnumMessageCategory enum values.
+
     See Also:
-        ONEX Topic Taxonomy: The topic naming convention follows the pattern
-        ``{prefix}.{domain}.{type}`` for ONEX Kafka format and
-        ``{env}.{domain}.{category}.{version}`` for Environment-Aware format.
-        Refer to ``docs/architecture/TOPIC_TAXONOMY.md`` for the complete
-        specification of topic naming conventions, domain registration,
-        and message routing rules.
+        omnibase_infra.models.dispatch.ModelParsedTopic: The structured result
+            returned by parse(), containing all extracted topic components.
+        omnibase_infra.enums.EnumMessageCategory: Message category enum used
+            for deterministic routing (EVENT, COMMAND, INTENT).
+        omnibase_infra.enums.EnumTopicType: Topic type enum representing the
+            valid suffixes (events, commands, intents, snapshots).
+        omnibase_infra.enums.EnumTopicStandard: Enum for topic naming standard
+            detection (ONEX_KAFKA, ENVIRONMENT_AWARE, UNKNOWN).
+        omnibase_infra.runtime.MessageDispatchEngine: The dispatch engine that
+            uses this parser for topic-based routing decisions.
+        get_topic_parse_cache_info: Function to retrieve LRU cache statistics.
+        clear_topic_parse_cache: Function to clear the topic parse cache.
+
+    Topic Taxonomy:
+        See module-level docstring for complete topic taxonomy documentation,
+        including format specifications, domain naming rules, and category-based
+        routing semantics.
     """
 
     # ONEX Kafka format: onex.<domain>.<type>
@@ -158,6 +377,12 @@ class ModelTopicParser:
         Environment-Aware) and returns a structured result with all extracted
         components.
 
+        Caching:
+            Results are cached with LRU eviction (maxsize=1024) at the module
+            level. This provides significant performance benefits for repeated
+            topic parsing, which is common in production message dispatch.
+            Cache statistics can be monitored via get_topic_parse_cache_info().
+
         Args:
             topic: The topic string to parse
 
@@ -173,7 +398,12 @@ class ModelTopicParser:
             'registration'
             >>> result.category
             <EnumMessageCategory.EVENT: 'event'>
+
+        See Also:
+            get_topic_parse_cache_info: Get cache statistics (hits, misses, size)
+            clear_topic_parse_cache: Clear the parse cache if needed
         """
+        # Handle empty/whitespace topics (not cached - edge case)
         if not topic or not topic.strip():
             return ModelParsedTopic(
                 raw_topic="<empty>",  # Use placeholder to satisfy min_length constraint
@@ -182,91 +412,8 @@ class ModelTopicParser:
                 validation_error="Topic cannot be empty or whitespace",
             )
 
-        topic_stripped = topic.strip()
-
-        # Try ONEX Kafka format first (canonical)
-        onex_match = self._ONEX_KAFKA_PATTERN.match(topic_stripped)
-        if onex_match:
-            return self._parse_onex_kafka(topic_stripped, onex_match)
-
-        # Try Environment-Aware format
-        env_match = self._ENV_AWARE_PATTERN.match(topic_stripped)
-        if env_match:
-            return self._parse_env_aware(topic_stripped, env_match)
-
-        # Fallback: Try to extract category using existing EnumMessageCategory.from_topic
-        # This handles partial matches and legacy formats
-        category = EnumMessageCategory.from_topic(topic_stripped)
-        if category is not None:
-            # Extract domain by finding the category suffix position
-            topic_lower = topic_stripped.lower()
-            category_suffix = f".{category.topic_suffix}"
-            if category_suffix in topic_lower:
-                # Find the domain: everything before the category suffix
-                suffix_idx = topic_lower.find(category_suffix)
-                prefix = topic_stripped[:suffix_idx]
-                # Remove environment prefix if present
-                parts = prefix.split(".")
-                domain = parts[-1] if parts else None
-                env = parts[0] if len(parts) > 1 else None
-
-                return ModelParsedTopic(
-                    raw_topic=topic_stripped,
-                    standard=EnumTopicStandard.UNKNOWN,
-                    domain=domain,
-                    category=category,
-                    environment=env,
-                    is_valid=True,  # Partially valid - category extracted
-                )
-
-        # Unknown format
-        return ModelParsedTopic(
-            raw_topic=topic_stripped,
-            standard=EnumTopicStandard.UNKNOWN,
-            is_valid=False,
-            validation_error=(
-                f"Topic '{topic_stripped}' does not match any known format. "
-                "Expected: onex.<domain>.<type> or <env>.<domain>.<category>.<version>"
-            ),
-        )
-
-    def _parse_onex_kafka(self, topic: str, match: re.Match[str]) -> ModelParsedTopic:
-        """Parse ONEX Kafka format: onex.<domain>.<type>."""
-        domain = match.group("domain").lower()
-        type_str = match.group("type").lower()
-
-        topic_type = self._TOPIC_TYPE_MAP.get(type_str)
-        category = self._CATEGORY_MAP.get(type_str)
-
-        return ModelParsedTopic(
-            raw_topic=topic,
-            standard=EnumTopicStandard.ONEX_KAFKA,
-            domain=domain,
-            category=category,
-            topic_type=topic_type,
-            is_valid=True,
-        )
-
-    def _parse_env_aware(self, topic: str, match: re.Match[str]) -> ModelParsedTopic:
-        """Parse Environment-Aware format: <env>.<domain>.<category>.<version>."""
-        environment = match.group("env").lower()
-        domain = match.group("domain").lower()
-        category_str = match.group("category").lower()
-        version = match.group("version").lower()
-
-        topic_type = self._TOPIC_TYPE_MAP.get(category_str)
-        category = self._CATEGORY_MAP.get(category_str)
-
-        return ModelParsedTopic(
-            raw_topic=topic,
-            standard=EnumTopicStandard.ENVIRONMENT_AWARE,
-            domain=domain,
-            category=category,
-            topic_type=topic_type,
-            environment=environment,
-            version=version,
-            is_valid=True,
-        )
+        # Delegate to cached implementation for actual parsing
+        return _parse_topic_cached(topic.strip())
 
     def get_category(self, topic: str) -> EnumMessageCategory | None:
         """
@@ -290,6 +437,13 @@ class ModelTopicParser:
             <EnumMessageCategory.COMMAND: 'command'>
             >>> parser.get_category("invalid.topic")
             None
+
+        See Also:
+            EnumMessageCategory: The enum type returned, representing message
+                categories (EVENT, COMMAND, INTENT) for routing decisions.
+            EnumMessageCategory.topic_suffix: Property that returns the plural
+                suffix (events, commands, intents) for topic construction.
+            MessageDispatchEngine: Uses category for dispatcher selection.
         """
         parsed = self.parse(topic)
         return parsed.category
@@ -401,6 +555,13 @@ class ModelTopicParser:
             (False, "Topic 'dev.user.events.v1' does not match ONEX Kafka format...")
             >>> parser.validate_topic("invalid")
             (False, "Topic 'invalid' does not match any known format...")
+
+        See Also:
+            EnumTopicStandard: Enum used to classify topic naming standards.
+                ONEX_KAFKA is the canonical format; ENVIRONMENT_AWARE is for
+                deployment-specific topics; UNKNOWN indicates unrecognized format.
+            ModelParsedTopic.is_valid: Boolean indicating parse success.
+            ModelParsedTopic.validation_error: Error message on parse failure.
         """
         parsed = self.parse(topic)
 
@@ -435,6 +596,11 @@ class ModelTopicParser:
             True
             >>> parser.is_onex_kafka_format("dev.user.events.v1")
             False
+
+        See Also:
+            EnumTopicStandard.ONEX_KAFKA: The enum value for this format.
+            is_environment_aware_format: Check for the alternate format.
+            validate_topic: Validation with strict mode for ONEX Kafka only.
         """
         return bool(self._ONEX_KAFKA_PATTERN.match(topic.strip()))
 
@@ -454,6 +620,20 @@ class ModelTopicParser:
             True
             >>> parser.is_environment_aware_format("onex.registration.events")
             False
+
+        Note:
+            Environment-Aware format includes additional metadata:
+            - Environment prefix (dev, staging, prod, test, local)
+            - Version suffix (v1, v2, etc.)
+
+            These components are extracted via parse() and available in
+            ModelParsedTopic.environment and ModelParsedTopic.version.
+
+        See Also:
+            EnumTopicStandard.ENVIRONMENT_AWARE: The enum value for this format.
+            is_onex_kafka_format: Check for the canonical ONEX format.
+            ModelParsedTopic.environment: Environment extracted from topic.
+            ModelParsedTopic.version: Version extracted from topic.
         """
         return bool(self._ENV_AWARE_PATTERN.match(topic.strip()))
 
@@ -473,6 +653,17 @@ class ModelTopicParser:
             'registration'
             >>> parser.extract_domain("dev.user.events.v1")
             'user'
+
+        Note:
+            Domain naming follows these rules:
+            - Lowercase alphanumeric characters with hyphens
+            - Must start with a letter
+            - Single letter domains are valid (e.g., 'a', 'x')
+            - Multi-part domains use hyphens (e.g., 'order-fulfillment')
+
+        See Also:
+            ModelParsedTopic.domain: The domain field in parse results.
+            _DOMAIN_PATTERN: Class attribute with domain validation regex.
         """
         parsed = self.parse(topic)
         return parsed.domain
@@ -480,4 +671,6 @@ class ModelTopicParser:
 
 __all__ = [
     "ModelTopicParser",
+    "get_topic_parse_cache_info",
+    "clear_topic_parse_cache",
 ]

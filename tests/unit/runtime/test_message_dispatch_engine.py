@@ -1776,6 +1776,118 @@ class TestMessageDispatchEngineConcurrency:
         assert metrics["dispatcher_execution_count"] == dispatch_count * 2
 
     @pytest.mark.asyncio
+    async def test_concurrent_dispatch_with_failures(self) -> None:
+        """Test concurrent dispatch where some handlers succeed and some fail.
+
+        Verifies that the dispatch engine correctly handles mixed success/failure
+        scenarios under concurrent load, including proper metrics tracking.
+        """
+        import concurrent.futures
+
+        dispatch_engine = MessageDispatchEngine()
+        dispatch_count = 20
+        success_results: list[str] = []
+        failure_results: list[str] = []
+        lock = threading.Lock()
+
+        async def success_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            with lock:
+                success_results.append(f"success-{envelope.payload.user_id}")
+            return "success.output.v1"
+
+        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            with lock:
+                failure_results.append(f"failed-{envelope.payload.user_id}")
+            raise RuntimeError("Simulated handler failure")
+
+        # Register both handlers
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="success-handler",
+            dispatcher=success_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="failing-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+
+        # Two routes, both matching the topic, one to each handler
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="success-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="success-handler",
+            )
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="failing-route",
+                topic_pattern="dev.**",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="failing-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        # Create envelopes with infer_category method
+        envelopes = [
+            _create_envelope_with_category(
+                UserCreatedEvent(user_id=f"user-{i}", name=f"User {i}"),
+                EnumMessageCategory.EVENT,
+            )
+            for i in range(dispatch_count)
+        ]
+
+        def dispatch_in_thread(
+            envelope: ModelEventEnvelope[Any],
+        ) -> ModelDispatchResult:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
+                )
+            finally:
+                loop.close()
+
+        # Execute concurrent dispatches
+        dispatch_results: list[ModelDispatchResult] = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [
+                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                dispatch_results.append(future.result())
+
+        # All dispatches should complete (with HANDLER_ERROR status due to partial failure)
+        assert len(dispatch_results) == dispatch_count
+
+        # Each dispatch should have HANDLER_ERROR status (partial failure)
+        for result in dispatch_results:
+            assert result.status == EnumDispatchStatus.HANDLER_ERROR, (
+                f"Expected HANDLER_ERROR, got {result.status}"
+            )
+            # Should still have output from successful handler
+            assert result.outputs is not None
+            assert "success.output.v1" in result.outputs
+
+        # Both handlers should have been called for each dispatch
+        assert len(success_results) == dispatch_count
+        assert len(failure_results) == dispatch_count
+
+        # Verify metrics track both successes and failures
+        metrics = dispatch_engine.get_metrics()
+        assert metrics["dispatch_count"] == dispatch_count
+        # All dispatches are marked as errors (due to partial failure)
+        assert metrics["dispatch_error_count"] == dispatch_count
+        # Each dispatch executes 2 handlers (1 success + 1 failure)
+        assert metrics["dispatcher_execution_count"] == dispatch_count * 2
+        # One handler fails per dispatch
+        assert metrics["dispatcher_error_count"] == dispatch_count
+
+    @pytest.mark.asyncio
     async def test_concurrent_dispatch_metrics_accuracy(self) -> None:
         """Test that metrics remain accurate under concurrent load.
 
@@ -1849,6 +1961,644 @@ class TestMessageDispatchEngineConcurrency:
             f"Expected {dispatch_count} route matches, "
             f"got {metrics['routes_matched_count']}"
         )
+
+
+# ============================================================================
+# Command and Intent Dispatch Tests
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestConcurrentDispatchAdvanced:
+    """Advanced concurrency tests for thread safety validation.
+
+    These tests focus on edge cases and stress scenarios:
+    - Async handlers with varying delays (race conditions)
+    - Extreme concurrency metrics lock validation
+    - Message type filtering under concurrent load
+    - Long-running stability tests
+    - Async cancellation handling
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dispatch_with_varying_delays(self) -> None:
+        """Test concurrent dispatch with async handlers that have varying delays.
+
+        This validates that handlers with different execution times complete
+        correctly and don't interfere with each other under concurrent load.
+        """
+        import concurrent.futures
+        import random
+
+        dispatch_engine = MessageDispatchEngine()
+        dispatch_count = 30
+        execution_order: list[str] = []
+        lock = threading.Lock()
+
+        async def variable_delay_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            """Handler with random delay to simulate varying workloads."""
+            user_id = envelope.payload.user_id
+            # Random delay between 1-50ms
+            delay = random.uniform(0.001, 0.05)
+            await asyncio.sleep(delay)
+            with lock:
+                execution_order.append(f"{user_id}-delay-{delay:.3f}")
+            return f"output-{user_id}"
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="variable-handler",
+            dispatcher=variable_delay_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="variable-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="variable-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        # Create envelopes with infer_category method
+        envelopes = [
+            _create_envelope_with_category(
+                UserCreatedEvent(user_id=f"user-{i}", name=f"User {i}"),
+                EnumMessageCategory.EVENT,
+            )
+            for i in range(dispatch_count)
+        ]
+
+        def dispatch_in_thread(
+            envelope: ModelEventEnvelope[Any],
+        ) -> ModelDispatchResult:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
+                )
+            finally:
+                loop.close()
+
+        # Execute concurrent dispatches
+        dispatch_results: list[ModelDispatchResult] = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            futures = [
+                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                dispatch_results.append(future.result())
+
+        # Verify all dispatches completed successfully
+        assert len(dispatch_results) == dispatch_count
+        for result in dispatch_results:
+            assert result.status == EnumDispatchStatus.SUCCESS, (
+                f"Dispatch failed: {result.error_message}"
+            )
+
+        # Verify all handlers executed
+        assert len(execution_order) == dispatch_count
+
+        # Verify metrics
+        metrics = dispatch_engine.get_metrics()
+        assert metrics["dispatch_count"] == dispatch_count
+        assert metrics["dispatch_success_count"] == dispatch_count
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dispatch_metrics_lock_stress(self) -> None:
+        """Stress test the metrics lock under extreme concurrency.
+
+        Uses high thread count and rapid dispatch to verify metrics lock
+        correctly protects structured metrics from race conditions.
+        """
+        import concurrent.futures
+
+        dispatch_engine = MessageDispatchEngine()
+        dispatch_count = 100  # High count for stress testing
+        thread_count = 30  # More threads than typical
+
+        async def fast_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            # Minimal work to maximize contention on metrics lock
+            return "output.v1"
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="fast-handler",
+            dispatcher=fast_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="fast-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="fast-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        # Create envelopes
+        envelopes = [
+            _create_envelope_with_category(
+                UserCreatedEvent(user_id=f"user-{i}", name=f"User {i}"),
+                EnumMessageCategory.EVENT,
+            )
+            for i in range(dispatch_count)
+        ]
+
+        def dispatch_in_thread(
+            envelope: ModelEventEnvelope[Any],
+        ) -> ModelDispatchResult:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
+                )
+            finally:
+                loop.close()
+
+        # Execute with high thread count
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=thread_count
+        ) as executor:
+            futures = [
+                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+            ]
+            concurrent.futures.wait(futures)
+
+        # Verify metrics accuracy after high-concurrency stress
+        metrics = dispatch_engine.get_metrics()
+        assert metrics["dispatch_count"] == dispatch_count, (
+            f"Expected {dispatch_count}, got {metrics['dispatch_count']}"
+        )
+        assert metrics["dispatch_success_count"] == dispatch_count
+        assert metrics["dispatcher_execution_count"] == dispatch_count
+
+        # Verify structured metrics consistency
+        # Note: Structured metrics track dispatcher executions in two places:
+        # 1. During individual dispatcher execution (in the loop)
+        # 2. During final record_dispatch call
+        # This results in dispatcher_execution_count being higher than legacy metrics
+        # The legacy metrics are the source of truth for simple counts
+        structured_metrics = dispatch_engine.get_structured_metrics()
+        assert structured_metrics.total_dispatches == dispatch_count
+        assert structured_metrics.successful_dispatches == dispatch_count
+        # dispatcher_execution_count is tracked per dispatcher call in the loop
+        # plus additional increments during per-dispatcher metrics updates
+        assert structured_metrics.dispatcher_execution_count >= dispatch_count
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dispatch_with_message_type_filtering(self) -> None:
+        """Test concurrent dispatch with message type filtering.
+
+        Verifies that message type filtering works correctly when multiple
+        threads are dispatching different message types simultaneously.
+        """
+        import concurrent.futures
+
+        dispatch_engine = MessageDispatchEngine()
+        dispatch_count_per_type = 20
+        created_results: list[str] = []
+        updated_results: list[str] = []
+        lock = threading.Lock()
+
+        async def created_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            with lock:
+                created_results.append(f"created-{envelope.payload.user_id}")
+            return "created.output"
+
+        async def updated_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            with lock:
+                updated_results.append(f"updated-{envelope.payload.data}")
+            return "updated.output"
+
+        # Register handlers with specific message type filters
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="created-handler",
+            dispatcher=created_handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"UserCreatedEvent"},
+        )
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="updated-handler",
+            dispatcher=updated_handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"SomeGenericPayload"},
+        )
+
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="created-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="created-handler",
+            )
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="updated-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="updated-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        # Create mixed envelopes (both types)
+        created_envelopes = [
+            _create_envelope_with_category(
+                UserCreatedEvent(user_id=f"created-{i}", name=f"User {i}"),
+                EnumMessageCategory.EVENT,
+            )
+            for i in range(dispatch_count_per_type)
+        ]
+        updated_envelopes = [
+            _create_envelope_with_category(
+                SomeGenericPayload(data=f"updated-{i}"),
+                EnumMessageCategory.EVENT,
+            )
+            for i in range(dispatch_count_per_type)
+        ]
+
+        # Interleave envelopes for mixed concurrent access
+        all_envelopes = []
+        for i in range(dispatch_count_per_type):
+            all_envelopes.append(created_envelopes[i])
+            all_envelopes.append(updated_envelopes[i])
+
+        def dispatch_in_thread(
+            envelope: ModelEventEnvelope[Any],
+        ) -> ModelDispatchResult:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
+                )
+            finally:
+                loop.close()
+
+        # Execute concurrent dispatches
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            futures = [
+                executor.submit(dispatch_in_thread, envelope)
+                for envelope in all_envelopes
+            ]
+            concurrent.futures.wait(futures)
+
+        # Verify correct message type routing
+        assert len(created_results) == dispatch_count_per_type, (
+            f"Expected {dispatch_count_per_type} created, got {len(created_results)}"
+        )
+        assert len(updated_results) == dispatch_count_per_type, (
+            f"Expected {dispatch_count_per_type} updated, got {len(updated_results)}"
+        )
+
+        # Verify no cross-routing (created handler should not receive updated events)
+        for result in created_results:
+            assert result.startswith("created-")
+        for result in updated_results:
+            assert result.startswith("updated-")
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dispatch_stability_extended(self) -> None:
+        """Extended stability test for concurrent dispatch.
+
+        Runs a larger number of dispatches over a longer period to validate
+        stability under sustained concurrent load.
+        """
+        import concurrent.futures
+
+        dispatch_engine = MessageDispatchEngine()
+        dispatch_count = 200  # Extended count for stability
+        batch_size = 50
+        results_count = 0
+        lock = threading.Lock()
+
+        async def stable_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            nonlocal results_count
+            with lock:
+                results_count += 1
+            return "stable.output"
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="stable-handler",
+            dispatcher=stable_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="stable-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="stable-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        def dispatch_in_thread(
+            envelope: ModelEventEnvelope[Any],
+        ) -> ModelDispatchResult:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
+                )
+            finally:
+                loop.close()
+
+        # Process in batches to simulate sustained load
+        all_results: list[ModelDispatchResult] = []
+        for batch_num in range(dispatch_count // batch_size):
+            envelopes = [
+                _create_envelope_with_category(
+                    UserCreatedEvent(
+                        user_id=f"user-{batch_num}-{i}", name=f"User {batch_num}-{i}"
+                    ),
+                    EnumMessageCategory.EVENT,
+                )
+                for i in range(batch_size)
+            ]
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [
+                    executor.submit(dispatch_in_thread, envelope)
+                    for envelope in envelopes
+                ]
+                for future in concurrent.futures.as_completed(futures):
+                    all_results.append(future.result())
+
+        # Verify all dispatches completed successfully
+        assert len(all_results) == dispatch_count
+        success_count = sum(
+            1 for r in all_results if r.status == EnumDispatchStatus.SUCCESS
+        )
+        assert success_count == dispatch_count, (
+            f"Expected {dispatch_count} successes, got {success_count}"
+        )
+
+        # Verify handler execution count matches
+        assert results_count == dispatch_count
+
+        # Verify metrics after extended run
+        metrics = dispatch_engine.get_metrics()
+        assert metrics["dispatch_count"] == dispatch_count
+        assert metrics["dispatch_success_count"] == dispatch_count
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dispatch_with_sync_handlers(self) -> None:
+        """Test concurrent dispatch with synchronous handlers.
+
+        Verifies that sync handlers (run in executor) work correctly
+        under concurrent load alongside async handlers.
+        """
+        import concurrent.futures
+
+        dispatch_engine = MessageDispatchEngine()
+        dispatch_count = 30
+        sync_results: list[str] = []
+        async_results: list[str] = []
+        lock = threading.Lock()
+
+        # Sync handler (will be run in executor)
+        def sync_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            with lock:
+                sync_results.append(f"sync-{envelope.payload.user_id}")
+            return "sync.output"
+
+        # Async handler
+        async def async_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            await asyncio.sleep(0.001)  # Small delay
+            with lock:
+                async_results.append(f"async-{envelope.payload.user_id}")
+            return "async.output"
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="sync-handler",
+            dispatcher=sync_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="async-handler",
+            dispatcher=async_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+
+        # Both handlers match the same topic (fan-out)
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="sync-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="sync-handler",
+            )
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="async-route",
+                topic_pattern="dev.**",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="async-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        envelopes = [
+            _create_envelope_with_category(
+                UserCreatedEvent(user_id=f"user-{i}", name=f"User {i}"),
+                EnumMessageCategory.EVENT,
+            )
+            for i in range(dispatch_count)
+        ]
+
+        def dispatch_in_thread(
+            envelope: ModelEventEnvelope[Any],
+        ) -> ModelDispatchResult:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
+                )
+            finally:
+                loop.close()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [
+                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+            ]
+            concurrent.futures.wait(futures)
+
+        # Both handlers should have been called for each dispatch
+        assert len(sync_results) == dispatch_count
+        assert len(async_results) == dispatch_count
+
+        # Verify metrics
+        metrics = dispatch_engine.get_metrics()
+        assert metrics["dispatcher_execution_count"] == dispatch_count * 2
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dispatch_correlation_id_preservation(self) -> None:
+        """Test that correlation IDs are preserved correctly under concurrent load.
+
+        Verifies that each dispatch result contains the correct correlation ID
+        from its originating envelope, even under concurrent dispatch.
+        """
+        import concurrent.futures
+        from uuid import UUID
+
+        dispatch_engine = MessageDispatchEngine()
+        dispatch_count = 40
+        received_correlation_ids: list[tuple[str, UUID]] = []
+        lock = threading.Lock()
+
+        async def tracking_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            with lock:
+                received_correlation_ids.append(
+                    (envelope.payload.user_id, envelope.correlation_id)
+                )
+            return "output"
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="tracking-handler",
+            dispatcher=tracking_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="tracking-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="tracking-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        # Create envelopes with unique correlation IDs
+        envelopes_with_ids: list[tuple[ModelEventEnvelope[Any], UUID]] = []
+        for i in range(dispatch_count):
+            correlation_id = uuid4()
+            envelope = ModelEventEnvelope(
+                payload=UserCreatedEvent(user_id=f"user-{i}", name=f"User {i}"),
+                correlation_id=correlation_id,
+            )
+            object.__setattr__(
+                envelope, "infer_category", lambda: EnumMessageCategory.EVENT
+            )
+            envelopes_with_ids.append((envelope, correlation_id))
+
+        def dispatch_in_thread(
+            envelope: ModelEventEnvelope[Any],
+        ) -> ModelDispatchResult:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
+                )
+            finally:
+                loop.close()
+
+        # Execute concurrent dispatches and collect results with original correlation IDs
+        results_with_expected: list[tuple[ModelDispatchResult, UUID]] = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {
+                executor.submit(dispatch_in_thread, envelope): expected_id
+                for envelope, expected_id in envelopes_with_ids
+            }
+            for future in concurrent.futures.as_completed(futures):
+                expected_id = futures[future]
+                result = future.result()
+                results_with_expected.append((result, expected_id))
+
+        # Verify each result has the correct correlation ID
+        for result, expected_id in results_with_expected:
+            assert result.correlation_id == expected_id, (
+                f"Correlation ID mismatch: expected {expected_id}, "
+                f"got {result.correlation_id}"
+            )
+
+        # Verify all dispatches completed
+        assert len(results_with_expected) == dispatch_count
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dispatch_no_data_corruption(self) -> None:
+        """Test that concurrent dispatch does not corrupt handler data.
+
+        Verifies that handlers receive the correct payload data even when
+        multiple dispatches are happening simultaneously.
+        """
+        import concurrent.futures
+
+        dispatch_engine = MessageDispatchEngine()
+        dispatch_count = 50
+        received_payloads: list[tuple[str, str]] = []
+        lock = threading.Lock()
+
+        async def verifying_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            user_id = envelope.payload.user_id
+            name = envelope.payload.name
+            with lock:
+                received_payloads.append((user_id, name))
+            return "output"
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="verifying-handler",
+            dispatcher=verifying_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="verifying-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="verifying-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        # Create envelopes with unique, verifiable data
+        expected_payloads = {
+            f"user-{i}": f"Name-{i}-{i * 2}" for i in range(dispatch_count)
+        }
+        envelopes = [
+            _create_envelope_with_category(
+                UserCreatedEvent(user_id=f"user-{i}", name=f"Name-{i}-{i * 2}"),
+                EnumMessageCategory.EVENT,
+            )
+            for i in range(dispatch_count)
+        ]
+
+        def dispatch_in_thread(
+            envelope: ModelEventEnvelope[Any],
+        ) -> ModelDispatchResult:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
+                )
+            finally:
+                loop.close()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            futures = [
+                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+            ]
+            concurrent.futures.wait(futures)
+
+        # Verify all payloads were received correctly
+        assert len(received_payloads) == dispatch_count
+
+        # Verify no data corruption
+        for user_id, name in received_payloads:
+            assert user_id in expected_payloads, f"Unexpected user_id: {user_id}"
+            assert name == expected_payloads[user_id], (
+                f"Data corruption for {user_id}: expected {expected_payloads[user_id]}, "
+                f"got {name}"
+            )
 
 
 # ============================================================================

@@ -52,6 +52,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
@@ -96,7 +97,7 @@ class ModelDispatchResult(BaseModel):
         ...     topic="dev.order.commands.v1",
         ...     message_category=EnumMessageCategory.COMMAND,
         ...     error_message="Database connection failed",
-        ...     error_code="DB_CONNECTION_ERROR",
+        ...     error_code=EnumCoreErrorCode.DATABASE_CONNECTION_ERROR,
         ... )
         >>> result.is_error()
         True
@@ -179,7 +180,7 @@ class ModelDispatchResult(BaseModel):
         default=None,
         description="Error message if the dispatch failed.",
     )
-    error_code: str | None = Field(
+    error_code: EnumCoreErrorCode | None = Field(
         default=None,
         description="Error code if the dispatch failed.",
     )
@@ -283,7 +284,7 @@ class ModelDispatchResult(BaseModel):
         self,
         status: EnumDispatchStatus,
         message: str,
-        code: str | None = None,
+        code: EnumCoreErrorCode | None = None,
         details: dict[str, Any] | None = None,
     ) -> "ModelDispatchResult":
         """
@@ -292,7 +293,7 @@ class ModelDispatchResult(BaseModel):
         Args:
             status: The error status
             message: Error message
-            code: Optional error code
+            code: Optional error code (EnumCoreErrorCode)
             details: Optional error details
 
         Returns:
@@ -307,7 +308,7 @@ class ModelDispatchResult(BaseModel):
             >>> error_result = result.with_error(
             ...     EnumDispatchStatus.HANDLER_ERROR,
             ...     "Handler failed",
-            ...     code="HANDLER_EXCEPTION",
+            ...     code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
             ... )
         """
         return self.model_copy(

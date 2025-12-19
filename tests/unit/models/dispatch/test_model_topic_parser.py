@@ -642,3 +642,120 @@ class TestEnumTopicStandard:
         assert str(EnumTopicStandard.ONEX_KAFKA) == "onex_kafka"
         assert str(EnumTopicStandard.ENVIRONMENT_AWARE) == "environment_aware"
         assert str(EnumTopicStandard.UNKNOWN) == "unknown"
+
+
+# ============================================================================
+# LRU Cache Tests
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestLRUCache:
+    """Tests for topic parsing LRU cache performance optimization."""
+
+    def test_cache_info_available(self) -> None:
+        """Test that cache info is available via module function."""
+        from omnibase_infra.models.dispatch.model_topic_parser import (
+            get_topic_parse_cache_info,
+        )
+
+        info = get_topic_parse_cache_info()
+
+        # Should return a named tuple with cache statistics
+        assert hasattr(info, "hits")
+        assert hasattr(info, "misses")
+        assert hasattr(info, "maxsize")
+        assert hasattr(info, "currsize")
+
+    def test_cache_clear_available(self) -> None:
+        """Test that cache clear is available via module function."""
+        from omnibase_infra.models.dispatch.model_topic_parser import (
+            clear_topic_parse_cache,
+        )
+
+        # Should not raise
+        clear_topic_parse_cache()
+
+    def test_cache_reuses_results(self) -> None:
+        """Test that cache returns the same result for repeated calls."""
+        from omnibase_infra.models.dispatch.model_topic_parser import (
+            clear_topic_parse_cache,
+            get_topic_parse_cache_info,
+        )
+
+        # Clear cache to get clean state
+        clear_topic_parse_cache()
+
+        parser = ModelTopicParser()
+
+        # Parse the same topic twice
+        result1 = parser.parse("onex.test.events")
+        result2 = parser.parse("onex.test.events")
+
+        # Both results should be identical (from cache)
+        assert result1.raw_topic == result2.raw_topic
+        assert result1.domain == result2.domain
+        assert result1.category == result2.category
+        assert result1.standard == result2.standard
+
+        # Check that we have at least 1 hit (second parse)
+        info = get_topic_parse_cache_info()
+        assert info.hits >= 1
+
+    def test_cache_maxsize(self) -> None:
+        """Test that cache has the documented maxsize."""
+        from omnibase_infra.models.dispatch.model_topic_parser import (
+            get_topic_parse_cache_info,
+        )
+
+        info = get_topic_parse_cache_info()
+
+        # Cache should have maxsize of 1024 as documented
+        assert info.maxsize == 1024
+
+    def test_cache_handles_different_topics(self) -> None:
+        """Test that cache correctly stores different topics separately."""
+        from omnibase_infra.models.dispatch.model_topic_parser import (
+            clear_topic_parse_cache,
+        )
+
+        # Clear cache to get clean state
+        clear_topic_parse_cache()
+
+        parser = ModelTopicParser()
+
+        # Parse different topics
+        result1 = parser.parse("onex.user.events")
+        result2 = parser.parse("onex.order.events")
+        result3 = parser.parse("dev.user.events.v1")
+
+        # Results should be different for different topics
+        assert result1.domain == "user"
+        assert result2.domain == "order"
+        assert result3.domain == "user"
+
+        # Standards should be correct
+        assert result1.standard == EnumTopicStandard.ONEX_KAFKA
+        assert result2.standard == EnumTopicStandard.ONEX_KAFKA
+        assert result3.standard == EnumTopicStandard.ENVIRONMENT_AWARE
+
+    def test_cache_whitespace_not_cached(self) -> None:
+        """Test that whitespace-only topics are not cached (edge case)."""
+        from omnibase_infra.models.dispatch.model_topic_parser import (
+            clear_topic_parse_cache,
+            get_topic_parse_cache_info,
+        )
+
+        # Clear cache to get clean state
+        clear_topic_parse_cache()
+
+        parser = ModelTopicParser()
+        initial_size = get_topic_parse_cache_info().currsize
+
+        # Parse empty/whitespace topics (should not be cached)
+        parser.parse("")
+        parser.parse("   ")
+
+        # Cache size should not increase for empty/whitespace topics
+        final_size = get_topic_parse_cache_info().currsize
+        assert final_size == initial_size

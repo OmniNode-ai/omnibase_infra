@@ -63,6 +63,16 @@ Thread Safety:
     After freeze(), the engine becomes read-only and can be safely shared
     across threads for concurrent dispatch operations.
 
+    **Metrics Thread Safety**:
+    Structured metrics updates are protected by ``_metrics_lock`` to prevent
+    race conditions during concurrent dispatch operations. This lock ensures
+    atomic read-modify-write operations on ``_structured_metrics``. The lock
+    is held briefly only during metrics updates, not during dispatcher execution.
+
+    Legacy dict-based metrics (``_metrics``) use simple atomic increments and
+    may be approximate under very high concurrency. For production monitoring,
+    prefer ``get_structured_metrics()`` which returns a consistent snapshot.
+
 Related:
     - OMN-934: Message dispatch engine implementation
     - EnvelopeRouter: Transport-agnostic orchestrator (reference for freeze pattern)
@@ -151,13 +161,12 @@ class MessageDispatchEngine:
     Thread Safety:
         Follows the freeze-after-init pattern. All registrations must complete
         before calling freeze(). After freeze(), dispatch operations are
-        thread-safe for concurrent access. However, note:
+        thread-safe for concurrent access.
 
-        - Metrics updates use atomic reference assignment but may lose updates
-          under extremely high concurrency. Use get_structured_metrics() for
-          a consistent snapshot.
-        - Legacy metrics (get_metrics()) are approximate under concurrent load;
-          prefer get_structured_metrics() for accurate counts.
+        - Structured metrics updates are protected by ``_metrics_lock`` ensuring
+          atomic read-modify-write operations under concurrent dispatch.
+        - Legacy dict metrics (get_metrics()) use simple increments and may be
+          approximate under very high concurrency; prefer get_structured_metrics().
 
     Logging Levels:
         - **INFO**: Dispatch start/complete with topic, category, dispatcher count
@@ -195,6 +204,7 @@ class MessageDispatchEngine:
         _dispatchers_by_category: Index of dispatchers by category for fast lookup
         _frozen: If True, registration methods raise ModelOnexError
         _registration_lock: Lock protecting registration methods
+        _metrics_lock: Lock protecting structured metrics updates
         _structured_metrics: Pydantic-based metrics model for observability
         _logger: Optional custom logger for structured logging
 
@@ -241,6 +251,10 @@ class MessageDispatchEngine:
         # Freeze state
         self._frozen: bool = False
         self._registration_lock: threading.Lock = threading.Lock()
+
+        # Metrics lock for thread-safe structured metrics updates
+        # Protects read-modify-write operations on _structured_metrics
+        self._metrics_lock: threading.Lock = threading.Lock()
 
         # Structured metrics (Pydantic model)
         self._structured_metrics: ModelDispatchMetrics = ModelDispatchMetrics()
@@ -489,7 +503,7 @@ class MessageDispatchEngine:
         duration_ms: float | None = None,
         correlation_id: str | None = None,
         trace_id: str | None = None,
-        error_code: str | None = None,
+        error_code: EnumCoreErrorCode | None = None,
     ) -> dict[str, Any]:
         """
         Build structured log context dictionary.
@@ -526,7 +540,7 @@ class MessageDispatchEngine:
         if trace_id is not None:
             context["trace_id"] = trace_id
         if error_code is not None:
-            context["error_code"] = error_code
+            context["error_code"] = error_code.name
         return context
 
     async def dispatch(
@@ -607,25 +621,27 @@ class MessageDispatchEngine:
         )
         trace_id_str = str(envelope.trace_id) if envelope.trace_id else None
 
-        # Update dispatch count (atomic for simple int)
-        self._metrics["dispatch_count"] += 1
+        # Update dispatch count (protected by lock for thread safety)
+        with self._metrics_lock:
+            self._metrics["dispatch_count"] += 1
 
         # Step 1: Parse topic to get category
         topic_category = EnumMessageCategory.from_topic(topic)
         if topic_category is None:
-            self._metrics["dispatch_error_count"] += 1
             duration_ms = (time.perf_counter() - start_time) * 1000
-            self._metrics["total_latency_ms"] += duration_ms
 
-            # Update structured metrics
-            self._structured_metrics = self._structured_metrics.record_dispatch(
-                duration_ms=duration_ms,
-                success=False,
-                category=None,
-                no_handler=False,
-                category_mismatch=False,
-                topic=topic,
-            )
+            # Update metrics (protected by lock for thread safety)
+            with self._metrics_lock:
+                self._metrics["dispatch_error_count"] += 1
+                self._metrics["total_latency_ms"] += duration_ms
+                self._structured_metrics = self._structured_metrics.record_dispatch(
+                    duration_ms=duration_ms,
+                    success=False,
+                    category=None,
+                    no_handler=False,
+                    category_mismatch=False,
+                    topic=topic,
+                )
 
             # Log error
             self._logger.error(
@@ -635,7 +651,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     correlation_id=correlation_id_str,
                     trace_id=trace_id_str,
-                    error_code=EnumCoreErrorCode.VALIDATION_ERROR.name,
+                    error_code=EnumCoreErrorCode.VALIDATION_ERROR,
                 ),
             )
 
@@ -648,7 +664,7 @@ class MessageDispatchEngine:
                 duration_ms=duration_ms,
                 error_message=f"Cannot infer message category from topic '{topic}'. "
                 "Topic must contain .events, .commands, or .intents segment.",
-                error_code=EnumCoreErrorCode.VALIDATION_ERROR.name,
+                error_code=EnumCoreErrorCode.VALIDATION_ERROR,
             )
 
         # Log dispatch start at INFO level
@@ -701,19 +717,20 @@ class MessageDispatchEngine:
         )
 
         if not matching_dispatchers:
-            self._metrics["no_dispatcher_count"] += 1
-            self._metrics["dispatch_error_count"] += 1
             duration_ms = (time.perf_counter() - start_time) * 1000
-            self._metrics["total_latency_ms"] += duration_ms
 
-            # Update structured metrics
-            self._structured_metrics = self._structured_metrics.record_dispatch(
-                duration_ms=duration_ms,
-                success=False,
-                category=topic_category,
-                no_handler=True,
-                topic=topic,
-            )
+            # Update metrics (protected by lock for thread safety)
+            with self._metrics_lock:
+                self._metrics["no_dispatcher_count"] += 1
+                self._metrics["dispatch_error_count"] += 1
+                self._metrics["total_latency_ms"] += duration_ms
+                self._structured_metrics = self._structured_metrics.record_dispatch(
+                    duration_ms=duration_ms,
+                    success=False,
+                    category=topic_category,
+                    no_handler=True,
+                    topic=topic,
+                )
 
             # Log warning
             self._logger.warning(
@@ -728,7 +745,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     correlation_id=correlation_id_str,
                     trace_id=trace_id_str,
-                    error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED.name,
+                    error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
                 ),
             )
 
@@ -743,7 +760,7 @@ class MessageDispatchEngine:
                 duration_ms=duration_ms,
                 error_message=f"No dispatcher registered for category '{topic_category}' "
                 f"and message type '{message_type}' matching topic '{topic}'.",
-                error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED.name,
+                error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
             )
 
         # Step 5: Execute dispatchers and collect outputs
@@ -752,7 +769,9 @@ class MessageDispatchEngine:
         executed_dispatcher_ids: list[str] = []
 
         for dispatcher_entry in matching_dispatchers:
-            self._metrics["dispatcher_execution_count"] += 1
+            # Update execution count (protected by lock)
+            with self._metrics_lock:
+                self._metrics["dispatcher_execution_count"] += 1
             dispatcher_start_time = time.perf_counter()
 
             # Log dispatcher execution at DEBUG level
@@ -776,45 +795,48 @@ class MessageDispatchEngine:
                 ) * 1000
                 executed_dispatcher_ids.append(dispatcher_entry.dispatcher_id)
 
-                # Update per-dispatcher metrics
-                existing_dispatcher_metrics = (
-                    self._structured_metrics.dispatcher_metrics.get(
-                        dispatcher_entry.dispatcher_id
+                # Update per-dispatcher metrics (protected by lock)
+                with self._metrics_lock:
+                    existing_dispatcher_metrics = (
+                        self._structured_metrics.dispatcher_metrics.get(
+                            dispatcher_entry.dispatcher_id
+                        )
                     )
-                )
-                if existing_dispatcher_metrics is None:
-                    existing_dispatcher_metrics = ModelDispatcherMetrics(
-                        dispatcher_id=dispatcher_entry.dispatcher_id
+                    if existing_dispatcher_metrics is None:
+                        existing_dispatcher_metrics = ModelDispatcherMetrics(
+                            dispatcher_id=dispatcher_entry.dispatcher_id
+                        )
+                    new_dispatcher_metrics = (
+                        existing_dispatcher_metrics.record_execution(
+                            duration_ms=dispatcher_duration_ms,
+                            success=True,
+                            topic=topic,
+                        )
                     )
-                new_dispatcher_metrics = existing_dispatcher_metrics.record_execution(
-                    duration_ms=dispatcher_duration_ms,
-                    success=True,
-                    topic=topic,
-                )
-                new_dispatcher_metrics_dict = dict(
-                    self._structured_metrics.dispatcher_metrics
-                )
-                new_dispatcher_metrics_dict[dispatcher_entry.dispatcher_id] = (
-                    new_dispatcher_metrics
-                )
-                # Update structured metrics with new dispatcher metrics
-                self._structured_metrics = ModelDispatchMetrics(
-                    total_dispatches=self._structured_metrics.total_dispatches,
-                    successful_dispatches=self._structured_metrics.successful_dispatches,
-                    failed_dispatches=self._structured_metrics.failed_dispatches,
-                    no_handler_count=self._structured_metrics.no_handler_count,
-                    category_mismatch_count=self._structured_metrics.category_mismatch_count,
-                    dispatcher_execution_count=self._structured_metrics.dispatcher_execution_count
-                    + 1,
-                    dispatcher_error_count=self._structured_metrics.dispatcher_error_count,
-                    routes_matched_count=self._structured_metrics.routes_matched_count,
-                    total_latency_ms=self._structured_metrics.total_latency_ms,
-                    min_latency_ms=self._structured_metrics.min_latency_ms,
-                    max_latency_ms=self._structured_metrics.max_latency_ms,
-                    latency_histogram=self._structured_metrics.latency_histogram,
-                    dispatcher_metrics=new_dispatcher_metrics_dict,
-                    category_metrics=self._structured_metrics.category_metrics,
-                )
+                    new_dispatcher_metrics_dict = dict(
+                        self._structured_metrics.dispatcher_metrics
+                    )
+                    new_dispatcher_metrics_dict[dispatcher_entry.dispatcher_id] = (
+                        new_dispatcher_metrics
+                    )
+                    # Update structured metrics with new dispatcher metrics
+                    self._structured_metrics = ModelDispatchMetrics(
+                        total_dispatches=self._structured_metrics.total_dispatches,
+                        successful_dispatches=self._structured_metrics.successful_dispatches,
+                        failed_dispatches=self._structured_metrics.failed_dispatches,
+                        no_handler_count=self._structured_metrics.no_handler_count,
+                        category_mismatch_count=self._structured_metrics.category_mismatch_count,
+                        dispatcher_execution_count=self._structured_metrics.dispatcher_execution_count
+                        + 1,
+                        dispatcher_error_count=self._structured_metrics.dispatcher_error_count,
+                        routes_matched_count=self._structured_metrics.routes_matched_count,
+                        total_latency_ms=self._structured_metrics.total_latency_ms,
+                        min_latency_ms=self._structured_metrics.min_latency_ms,
+                        max_latency_ms=self._structured_metrics.max_latency_ms,
+                        latency_histogram=self._structured_metrics.latency_histogram,
+                        dispatcher_metrics=new_dispatcher_metrics_dict,
+                        category_metrics=self._structured_metrics.category_metrics,
+                    )
 
                 # Log dispatcher completion at DEBUG level
                 self._logger.debug(
@@ -847,51 +869,54 @@ class MessageDispatchEngine:
                 dispatcher_duration_ms = (
                     time.perf_counter() - dispatcher_start_time
                 ) * 1000
-                self._metrics["dispatcher_error_count"] += 1
                 error_msg = f"Dispatcher '{dispatcher_entry.dispatcher_id}' failed: {type(e).__name__}: {e}"
                 dispatcher_errors.append(error_msg)
 
-                # Update per-dispatcher metrics with error
-                existing_dispatcher_metrics = (
-                    self._structured_metrics.dispatcher_metrics.get(
-                        dispatcher_entry.dispatcher_id
+                # Update per-dispatcher metrics with error (protected by lock)
+                with self._metrics_lock:
+                    self._metrics["dispatcher_error_count"] += 1
+                    existing_dispatcher_metrics = (
+                        self._structured_metrics.dispatcher_metrics.get(
+                            dispatcher_entry.dispatcher_id
+                        )
                     )
-                )
-                if existing_dispatcher_metrics is None:
-                    existing_dispatcher_metrics = ModelDispatcherMetrics(
-                        dispatcher_id=dispatcher_entry.dispatcher_id
+                    if existing_dispatcher_metrics is None:
+                        existing_dispatcher_metrics = ModelDispatcherMetrics(
+                            dispatcher_id=dispatcher_entry.dispatcher_id
+                        )
+                    new_dispatcher_metrics = (
+                        existing_dispatcher_metrics.record_execution(
+                            duration_ms=dispatcher_duration_ms,
+                            success=False,
+                            topic=topic,
+                            error_message=str(e),
+                        )
                     )
-                new_dispatcher_metrics = existing_dispatcher_metrics.record_execution(
-                    duration_ms=dispatcher_duration_ms,
-                    success=False,
-                    topic=topic,
-                    error_message=str(e),
-                )
-                new_dispatcher_metrics_dict = dict(
-                    self._structured_metrics.dispatcher_metrics
-                )
-                new_dispatcher_metrics_dict[dispatcher_entry.dispatcher_id] = (
-                    new_dispatcher_metrics
-                )
-                # Update structured metrics with new dispatcher metrics
-                self._structured_metrics = ModelDispatchMetrics(
-                    total_dispatches=self._structured_metrics.total_dispatches,
-                    successful_dispatches=self._structured_metrics.successful_dispatches,
-                    failed_dispatches=self._structured_metrics.failed_dispatches,
-                    no_handler_count=self._structured_metrics.no_handler_count,
-                    category_mismatch_count=self._structured_metrics.category_mismatch_count,
-                    dispatcher_execution_count=self._structured_metrics.dispatcher_execution_count
-                    + 1,
-                    dispatcher_error_count=self._structured_metrics.dispatcher_error_count
-                    + 1,
-                    routes_matched_count=self._structured_metrics.routes_matched_count,
-                    total_latency_ms=self._structured_metrics.total_latency_ms,
-                    min_latency_ms=self._structured_metrics.min_latency_ms,
-                    max_latency_ms=self._structured_metrics.max_latency_ms,
-                    latency_histogram=self._structured_metrics.latency_histogram,
-                    dispatcher_metrics=new_dispatcher_metrics_dict,
-                    category_metrics=self._structured_metrics.category_metrics,
-                )
+                    new_dispatcher_metrics_dict = dict(
+                        self._structured_metrics.dispatcher_metrics
+                    )
+                    new_dispatcher_metrics_dict[dispatcher_entry.dispatcher_id] = (
+                        new_dispatcher_metrics
+                    )
+                    # Update structured metrics with new dispatcher metrics
+                    self._structured_metrics = ModelDispatchMetrics(
+                        total_dispatches=self._structured_metrics.total_dispatches,
+                        successful_dispatches=self._structured_metrics.successful_dispatches,
+                        failed_dispatches=self._structured_metrics.failed_dispatches,
+                        no_handler_count=self._structured_metrics.no_handler_count,
+                        category_mismatch_count=self._structured_metrics.category_mismatch_count,
+                        dispatcher_execution_count=self._structured_metrics.dispatcher_execution_count
+                        + 1,
+                        dispatcher_error_count=self._structured_metrics.dispatcher_error_count
+                        + 1,
+                        routes_matched_count=self._structured_metrics.routes_matched_count,
+                        total_latency_ms=self._structured_metrics.total_latency_ms,
+                        min_latency_ms=self._structured_metrics.min_latency_ms,
+                        max_latency_ms=self._structured_metrics.max_latency_ms,
+                        latency_histogram=self._structured_metrics.latency_histogram,
+                        dispatcher_metrics=new_dispatcher_metrics_dict,
+                        category_metrics=self._structured_metrics.category_metrics,
+                    )
 
                 # Log error
                 self._logger.exception(
@@ -906,42 +931,42 @@ class MessageDispatchEngine:
                         duration_ms=dispatcher_duration_ms,
                         correlation_id=correlation_id_str,
                         trace_id=trace_id_str,
-                        error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR.name,
+                        error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
                     ),
                 )
 
         # Step 6: Build result
         duration_ms = (time.perf_counter() - start_time) * 1000
-        self._metrics["total_latency_ms"] += duration_ms
-        self._metrics["routes_matched_count"] += len(matching_dispatchers)
 
         # Determine final status
         if dispatcher_errors:
-            if executed_dispatcher_ids:
-                # Partial success - some dispatchers executed
-                status = EnumDispatchStatus.HANDLER_ERROR
-                self._metrics["dispatch_error_count"] += 1
-            else:
-                # Total failure - no dispatchers executed
-                status = EnumDispatchStatus.HANDLER_ERROR
-                self._metrics["dispatch_error_count"] += 1
+            # Either partial or total failure
+            status = EnumDispatchStatus.HANDLER_ERROR
         else:
             status = EnumDispatchStatus.SUCCESS
-            self._metrics["dispatch_success_count"] += 1
 
-        # Update structured metrics with final dispatch result
-        self._structured_metrics = self._structured_metrics.record_dispatch(
-            duration_ms=duration_ms,
-            success=status == EnumDispatchStatus.SUCCESS,
-            category=topic_category,
-            dispatcher_id=executed_dispatcher_ids[0]
-            if executed_dispatcher_ids
-            else None,
-            handler_error=len(dispatcher_errors) > 0,
-            routes_matched=len(matching_dispatchers),
-            topic=topic,
-            error_message=dispatcher_errors[0] if dispatcher_errors else None,
-        )
+        # Update all metrics atomically (protected by lock)
+        with self._metrics_lock:
+            self._metrics["total_latency_ms"] += duration_ms
+            self._metrics["routes_matched_count"] += len(matching_dispatchers)
+            if dispatcher_errors:
+                self._metrics["dispatch_error_count"] += 1
+            else:
+                self._metrics["dispatch_success_count"] += 1
+            # NOTE: dispatcher_id is NOT passed here because per-dispatcher metrics
+            # (including dispatcher_execution_count) are already updated in the
+            # dispatcher loop above. Passing dispatcher_id here would cause
+            # double-counting of dispatcher_execution_count.
+            self._structured_metrics = self._structured_metrics.record_dispatch(
+                duration_ms=duration_ms,
+                success=status == EnumDispatchStatus.SUCCESS,
+                category=topic_category,
+                dispatcher_id=None,  # Already tracked in dispatcher loop
+                handler_error=len(dispatcher_errors) > 0,
+                routes_matched=len(matching_dispatchers),
+                topic=topic,
+                error_message=dispatcher_errors[0] if dispatcher_errors else None,
+            )
 
         # Find route ID that matched (first matching route for logging)
         matched_route_id: str | None = None
@@ -980,7 +1005,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     correlation_id=correlation_id_str,
                     trace_id=trace_id_str,
-                    error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR.name,
+                    error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
                 ),
             )
 
@@ -998,7 +1023,7 @@ class MessageDispatchEngine:
             outputs=outputs if outputs else None,
             output_count=len(outputs),
             error_message="; ".join(dispatcher_errors) if dispatcher_errors else None,
-            error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR.name
+            error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR
             if dispatcher_errors
             else None,
             correlation_id=envelope.correlation_id,
@@ -1102,6 +1127,12 @@ class MessageDispatchEngine:
         """
         Get dispatch metrics for observability (legacy format).
 
+        .. deprecated:: 0.4.0
+            Use :meth:`get_structured_metrics` instead. This method returns
+            a simple dict which may have approximate values under very high
+            concurrency. The structured metrics API provides consistent snapshots
+            and richer observability data.
+
         Returns a snapshot of current metrics including:
         - dispatch_count: Total number of dispatch calls
         - dispatch_success_count: Successful dispatches
@@ -1127,8 +1158,9 @@ class MessageDispatchEngine:
 
         .. versionadded:: 0.4.0
         """
-        # Return a copy to prevent external modification
-        return dict(self._metrics)
+        # Return a copy under lock to ensure consistent snapshot
+        with self._metrics_lock:
+            return dict(self._metrics)
 
     def get_structured_metrics(self) -> ModelDispatchMetrics:
         """
@@ -1140,6 +1172,11 @@ class MessageDispatchEngine:
         - Latency histogram for distribution analysis
         - Per-dispatcher metrics breakdown
         - Per-category metrics breakdown
+
+        Thread Safety:
+            This method acquires ``_metrics_lock`` to return a consistent snapshot.
+            The returned Pydantic model is immutable and safe to use after the
+            lock is released.
 
         Returns:
             ModelDispatchMetrics with all observability data
@@ -1153,7 +1190,9 @@ class MessageDispatchEngine:
 
         .. versionadded:: 0.4.0
         """
-        return self._structured_metrics
+        # Return under lock to ensure consistent snapshot
+        with self._metrics_lock:
+            return self._structured_metrics
 
     def reset_metrics(self) -> None:
         """
@@ -1162,29 +1201,31 @@ class MessageDispatchEngine:
         Useful for testing or when starting a new monitoring period.
         Resets both legacy dict-based metrics and structured metrics.
 
+        Thread Safety:
+            This method acquires ``_metrics_lock`` to ensure atomic reset
+            of all metrics. Safe to call during concurrent dispatch operations,
+            though the reset will briefly block in-flight metric updates.
+
         Example:
             >>> engine.reset_metrics()
             >>> assert engine.get_metrics()["dispatch_count"] == 0
             >>> assert engine.get_structured_metrics().total_dispatches == 0
 
-        Warning:
-            This method is NOT thread-safe. Call only during initialization
-            or when no dispatch operations are in progress.
-
         .. versionadded:: 0.4.0
         """
-        self._metrics = {
-            "dispatch_count": 0,
-            "dispatch_success_count": 0,
-            "dispatch_error_count": 0,
-            "total_latency_ms": 0.0,
-            "dispatcher_execution_count": 0,
-            "dispatcher_error_count": 0,
-            "routes_matched_count": 0,
-            "no_dispatcher_count": 0,
-            "category_mismatch_count": 0,
-        }
-        self._structured_metrics = ModelDispatchMetrics()
+        with self._metrics_lock:
+            self._metrics = {
+                "dispatch_count": 0,
+                "dispatch_success_count": 0,
+                "dispatch_error_count": 0,
+                "total_latency_ms": 0.0,
+                "dispatcher_execution_count": 0,
+                "dispatcher_error_count": 0,
+                "routes_matched_count": 0,
+                "no_dispatcher_count": 0,
+                "category_mismatch_count": 0,
+            }
+            self._structured_metrics = ModelDispatchMetrics()
         self._logger.debug("Metrics reset to initial state")
 
     def get_dispatcher_metrics(
@@ -1192,6 +1233,11 @@ class MessageDispatchEngine:
     ) -> ModelDispatcherMetrics | None:
         """
         Get metrics for a specific dispatcher.
+
+        Thread Safety:
+            This method acquires ``_metrics_lock`` to return a consistent snapshot.
+            The returned Pydantic model is immutable and safe to use after the
+            lock is released.
 
         Args:
             dispatcher_id: The dispatcher's unique identifier.
@@ -1207,7 +1253,8 @@ class MessageDispatchEngine:
 
         .. versionadded:: 0.4.0
         """
-        return self._structured_metrics.dispatcher_metrics.get(dispatcher_id)
+        with self._metrics_lock:
+            return self._structured_metrics.dispatcher_metrics.get(dispatcher_id)
 
     @property
     def route_count(self) -> int:
