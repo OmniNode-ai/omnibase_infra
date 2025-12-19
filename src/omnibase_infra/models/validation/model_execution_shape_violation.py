@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Execution Shape Violation Result Model.
+
+Defines the result structure for detected execution shape violations.
+Used by the execution shape validator to report constraint breaches
+with full context for debugging and CI gate integration.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.enums.enum_execution_shape_violation import (
+    EnumExecutionShapeViolation,
+)
+from omnibase_infra.enums.enum_handler_type import EnumHandlerType
+
+
+class ModelExecutionShapeViolationResult(BaseModel):
+    """Result of an execution shape violation detection.
+
+    Contains full context about a detected violation for debugging,
+    reporting, and CI gate integration. Each violation includes the
+    source location, violation type, and severity classification.
+
+    Attributes:
+        violation_type: The specific violation detected.
+        handler_type: The handler type where the violation occurred.
+        file_path: Absolute path to the source file containing the violation.
+        line_number: Line number where the violation was detected.
+        message: Human-readable description of the violation.
+        severity: Severity classification (error blocks CI, warning is advisory).
+
+    Example:
+        >>> result = ModelExecutionShapeViolationResult(
+        ...     violation_type=EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS,
+        ...     handler_type=EnumHandlerType.REDUCER,
+        ...     file_path="/src/handlers/order_reducer.py",
+        ...     line_number=42,
+        ...     message="Reducer 'OrderReducer.handle' returns EVENT type 'OrderCreated'",
+        ...     severity="error",
+        ... )
+
+    Note:
+        Violations with severity='error' should block CI pipelines.
+        Violations with severity='warning' are advisory and should be logged.
+    """
+
+    violation_type: EnumExecutionShapeViolation = Field(
+        ...,
+        description="The specific execution shape violation detected",
+    )
+    handler_type: EnumHandlerType = Field(
+        ...,
+        description="The handler type where the violation occurred",
+    )
+    file_path: str = Field(
+        ...,
+        description="Absolute path to the source file containing the violation",
+    )
+    line_number: int = Field(
+        ...,
+        ge=1,
+        description="Line number where the violation was detected (1-indexed)",
+    )
+    message: str = Field(
+        ...,
+        min_length=1,
+        description="Human-readable description of the violation",
+    )
+    severity: Literal["error", "warning"] = Field(
+        default="error",
+        description="Severity classification: 'error' blocks CI, 'warning' is advisory",
+    )
+
+    model_config = ConfigDict(
+        frozen=True,
+        str_strip_whitespace=True,
+        use_enum_values=False,  # Keep enum objects for type safety
+    )
+
+    def is_blocking(self) -> bool:
+        """Check if this violation should block CI.
+
+        Returns:
+            True if severity is 'error', False for 'warning'.
+        """
+        return self.severity == "error"
+
+    def format_for_ci(self) -> str:
+        """Format violation for CI output (GitHub Actions compatible).
+
+        Returns:
+            Formatted string in GitHub Actions annotation format.
+
+        Example:
+            ::error file=src/handler.py,line=42::REDUCER_RETURNS_EVENTS: Reducer...
+        """
+        annotation_type = "error" if self.is_blocking() else "warning"
+        return (
+            f"::{annotation_type} file={self.file_path},line={self.line_number}::"
+            f"{self.violation_type.value}: {self.message}"
+        )
+
+
+__all__ = ["ModelExecutionShapeViolationResult"]

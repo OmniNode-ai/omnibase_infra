@@ -18,9 +18,9 @@ onex-runtime = "omnibase_infra.runtime.kernel:main"
 [tool.poetry.dependencies]
 python = "^3.12"
 
-# ONEX dependencies - from PyPI
-omnibase-core = "^0.4.0"
-omnibase-spi = "^0.4.0"
+# ONEX dependencies - from GitHub main branch
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "main" }
+omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 
 # Core dependencies
 pydantic = "^2.11.7"

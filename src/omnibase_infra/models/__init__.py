@@ -12,6 +12,10 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
     ModelNodeRegistration,
 )
+from omnibase_infra.models.validation import (
+    ModelExecutionShapeRule,
+    ModelExecutionShapeViolationResult,
+)
 
 __all__ = [
     # Registration models
@@ -20,4 +24,7 @@ __all__ = [
     "ModelNodeIntrospectionEvent",
     "ModelNodeMetadata",
     "ModelNodeRegistration",
+    # Validation models
+    "ModelExecutionShapeRule",
+    "ModelExecutionShapeViolationResult",
 ]
