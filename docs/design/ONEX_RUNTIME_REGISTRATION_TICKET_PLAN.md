@@ -136,6 +136,10 @@
                 - Construct a handler that violates the shape constraint
                 - Invoke the validator against it
                 - Assert the validator raises or returns failure
+            - Include positive test cases demonstrating valid execution shapes:
+                - test_reducer_returning_projections_and_intents_accepted
+                - test_orchestrator_returning_events_only_accepted
+                - test_effect_returning_optional_events_accepted
             - Validator test coverage required before CI gate is enabled
 
 ### A2a. Canonical Message Envelope
@@ -199,6 +203,7 @@
         - A2 enforcement can require envelope presence once A2a lands
     Cross-Reference:
         - See Global Constraint #7 for handler vs node terminology used in plane descriptions
+        - See CLAUDE.md "Correlation ID Assignment Rules" for propagation patterns
 
 ### A2b. Canonical Topic Taxonomy
     Priority: P0
@@ -398,11 +403,25 @@
         Naming note:
             - Runtime emits RuntimeTick (infrastructure concern)
             - Orchestrators derive timeout decisions (domain concern)
+
+        Configuration:
+            - RuntimeTick interval is configurable (default: 1000ms / 1 second)
+            - Configuration source: environment variable ONEX_RUNTIME_TICK_INTERVAL_MS
+            - Minimum value: 100ms (prevents excessive CPU usage)
+            - Maximum value: 60000ms (1 minute, ensures timely timeout detection)
+            - Out-of-range values are clamped with warning log
+
+        Configuration validation:
+            - Runtime logs warning if interval < 100ms (clamped to 100ms)
+            - Runtime logs warning if interval > 60000ms (clamped to 60000ms)
+            - Invalid (non-numeric) values fall back to default with error log
     Dependencies: B4
     Acceptance:
         - RuntimeTick emitted on configurable interval
         - Orchestrators consume RuntimeTick for timeout evaluation
         - now field in RuntimeTick matches handler context injection
+        - Interval configurable via ONEX_RUNTIME_TICK_INTERVAL_MS environment variable
+        - Interval bounds enforced: 100ms <= interval <= 60000ms
 
 ---
 
@@ -629,11 +648,53 @@
                 - Intents and events are published to Kafka after projection persistence
                 - This ensures read models are consistent before downstream processing
 
+        F0 ↔ B2 Interaction Sequence (Reducer Output Processing):
+
+            This diagram shows the critical synchronization between B2 (Handler Output Model)
+            and F0 (Projector Execution). The Runtime processes reducer outputs in a specific
+            order to ensure consistency:
+
+            ┌─────────┐     ┌─────────┐     ┌───────────┐     ┌───────────┐
+            │ Reducer │     │ Runtime │     │ Projector │     │   Kafka   │
+            └────┬────┘     └────┬────┘     └─────┬─────┘     └─────┬─────┘
+                 │               │                │                 │
+                 │ returns       │                │                 │
+                 │ projections   │                │                 │
+                 │ + intents     │                │                 │
+                 │ (per B2)      │                │                 │
+                 │──────────────>│                │                 │
+                 │               │                │                 │
+                 │               │ ┌────────────────────────────────┐
+                 │               │ │ SYNCHRONOUS: projection first  │
+                 │               │ └────────────────────────────────┘
+                 │               │                │                 │
+                 │               │  1. persist()  │                 │
+                 │               │───────────────>│                 │
+                 │               │                │                 │
+                 │               │     ack        │                 │
+                 │               │<───────────────│                 │
+                 │               │                │                 │
+                 │               │ ┌────────────────────────────────┐
+                 │               │ │ AFTER persist ack: publish     │
+                 │               │ └────────────────────────────────┘
+                 │               │                │                 │
+                 │               │  2. publish intents              │
+                 │               │─────────────────────────────────>│
+                 │               │                │                 │
+                 │               │                │     ack         │
+                 │               │<─────────────────────────────────│
+                 │               │                │                 │
+
+            Guarantee: Projection is DURABLE before any intent reaches Kafka.
+            This prevents race conditions where an Effect executes before the
+            projection state is visible to queries.
+
         End-to-End Flow Sequence Diagram (Orchestrator -> Reducer -> Effect):
 
-            The following diagram shows how an event flows through the complete
-            orchestrator -> reducer -> effect pipeline. The runtime coordinates
-            handler invocation and output publishing per B2 ordering rules.
+            This is the canonical flow for all ONEX workflows. The diagram shows how
+            an event flows through the complete orchestrator -> reducer -> effect
+            pipeline. The runtime coordinates handler invocation and output publishing
+            per B2 ordering rules.
 
             ┌─────────────┐     ┌─────────────┐     ┌───────────┐     ┌───────────┐
             │ Event Log   │     │   Runtime   │     │ Projector │     │  Storage  │
@@ -712,6 +773,46 @@
                 any downstream consumer receives the intent, preventing
                 race conditions where effects execute before state is visible.
 
+        F0 Failure Handling:
+
+            Projection persistence is a critical synchronization point. Failure
+            handling follows these rules:
+
+            1. If Projector.persist() fails, Runtime MUST NOT publish intents
+               - The message remains uncommitted and will be retried
+               - No partial state visible to downstream consumers
+
+            2. Projection failure is a fatal error for the message
+               - After configured retries (see E2 for retry policy), send to DLQ
+               - DLQ message includes: original event, projection data, error context
+
+            3. Consistency guarantee: no intent is processed before its projection is durable
+               - Effects can safely assume projection state is current when they execute
+               - Orchestrators can safely read projections without stale data concerns
+
+            Failure Sequence Diagram:
+
+            ┌─────────┐     ┌─────────┐     ┌───────────┐     ┌───────────┐
+            │ Reducer │     │ Runtime │     │ Projector │     │    DLQ    │
+            └────┬────┘     └────┬────┘     └─────┬─────┘     └─────┬─────┘
+                 │ returns      │                │                 │
+                 │ projections  │                │                 │
+                 │ + intents    │                │                 │
+                 │─────────────>│                │                 │
+                 │              │  1. persist()  │                 │
+                 │              │───────────────>│                 │
+                 │              │     FAIL       │                 │
+                 │              │<───────────────│                 │
+                 │              │                │                 │
+                 │              │  2. retry (N times)              │
+                 │              │───────────────>│                 │
+                 │              │     FAIL       │                 │
+                 │              │<───────────────│                 │
+                 │              │                │                 │
+                 │              │  3. send to DLQ (intents NOT published)
+                 │              │─────────────────────────────────>│
+                 │              │                │                 │
+
         Important: "Publish" means different things for different output types:
             - Projections: "persist to storage" (PostgreSQL, Redis, etc.)
               NOT "publish to Kafka topic"
@@ -757,6 +858,16 @@
 
 ### G1. Reducer Tests
     Priority: P0
+    Acceptance:
+        - Same input event sequence produces same outputs
+        - Deterministic output order verified (projections before intents)
+        - Event.emitted_at used correctly (no system clock access)
+
+    Test Examples:
+        - test_same_event_sequence_produces_identical_outputs:
+            Given identical NodeRegistrationAccepted events,
+            When reducer processes them in sequence,
+            Then outputs (projections, intents) are byte-for-byte identical
 
 ### G2. Orchestrator Tests
     Priority: P0
@@ -764,6 +875,14 @@
         - Emits events only
         - No I/O
         - Uses injected now, not system clock
+
+    Test Examples:
+        - test_orchestrator_emits_events_only_no_io:
+            Given orchestrator handler with mock projection reader,
+            When processing NodeIntrospected event with injected now,
+            Then output contains only events (no intents, no projections)
+            And no I/O operations are performed (verified via mock)
+            And all datetime comparisons use injected now, not system clock
 
 ### G3. End-to-End Integration Tests
     Priority: P0
@@ -784,6 +903,28 @@
         - Duplicate intent safe
         - Circuit breaker verified
         - Backoff policy validated
+
+    Test Examples:
+        - test_duplicate_intent_causes_no_additional_side_effects:
+            Given an intent that was previously executed successfully,
+            When the same intent is delivered again (same intent_id),
+            Then no additional external I/O is performed
+            And the effect returns success (idempotent response)
+
+        - test_circuit_breaker_transitions_under_failure:
+            Given effect with circuit breaker threshold=3,
+            When 3 consecutive failures occur,
+            Then circuit breaker transitions to OPEN state
+            And subsequent calls raise InfraUnavailableError (fail-fast)
+            When reset_timeout elapses,
+            Then circuit breaker transitions to HALF_OPEN
+            And next successful call transitions to CLOSED
+
+        - test_backoff_policy_applied_on_transient_failure:
+            Given effect with exponential backoff policy,
+            When a transient failure occurs,
+            Then retry is attempted after configured backoff delay
+            And delay increases exponentially on subsequent failures
 
 ### G5. Chaos and Replay Tests
     Priority: P2
@@ -859,6 +1000,70 @@
     do not introduce contradictory contracts or shared-interface churn.
 
     This document is the canonical baseline for all future workflows.
+
+---
+
+## Target Import Paths
+
+The following import paths are the **target** paths once `omnibase_core >= 0.5.0` is available:
+
+```python
+# Base Classes (available in omnibase_core >= 0.5.0)
+from omnibase_core.nodes import NodeOrchestrator, NodeEffect, NodeReducer
+
+# Intent Models (available in omnibase_core >= 0.5.0)
+from omnibase_core.models.intent import ModelIntent
+from omnibase_core.models.intents import (
+    ModelConsulRegisterIntent,
+    ModelPostgresUpsertRegistrationIntent,
+)
+
+# Runtime (available in omnibase_core >= 0.5.0)
+from omnibase_core.runtime import NodeRuntime
+
+# Protocols (from SPI, available in omnibase_spi >= 0.4.0)
+from omnibase_spi.protocols import ProtocolIntentHandler, ProtocolNodeRuntime
+```
+
+> **Note**: In the current 0.4.x codebase, legacy node classes exist as `NodeEffectLegacy`,
+> `NodeReducerLegacy`, etc. These will be renamed/refactored in 0.5.x per
+> `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`. Do not build on the legacy classes.
+
+---
+
+## Appendix: Coding Conventions
+
+### Type Annotation Style
+
+Per CLAUDE.md conventions, use PEP 604 union syntax for nullable types:
+
+    Preferred:
+        - Use `X | None` over `Optional[X]`
+        - This applies to all model fields, function parameters, and return types
+
+    Examples:
+        # PREFERRED
+        def get_user(id: str) -> User | None: ...
+        deadline: datetime | None = None
+
+        # NOT PREFERRED
+        from typing import Optional
+        def get_user(id: str) -> Optional[User]: ...
+
+    Rationale:
+        - Visually clearer and more explicit
+        - Reduces import clutter
+        - Consistent with modern Python type annotation patterns
+
+### File and Class Naming
+
+See CLAUDE.md "File & Class Naming Conventions" for complete patterns:
+
+    Models:     model_<name>.py     -> Model<Name>
+    Enums:      enum_<name>.py      -> Enum<Name>
+    Protocols:  protocol_<name>.py  -> Protocol<Name>
+    Services:   service_<name>.py   -> Service<Name>
+    Nodes:      node.py             -> Node<Name><Type>
 
 ---
 

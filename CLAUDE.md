@@ -27,6 +27,29 @@
 - No deprecated code maintenance
 - Remove old patterns immediately
 
+## 🚫 CRITICAL POLICY: NO VERSIONED DIRECTORIES
+
+**Versioning is logical, not structural.**
+
+- **NEVER create** directories like `v1_0_0/`, `v2/`, `v1/`, etc.
+- **Version through contracts**: Use `contract_version` field in `contract.yaml`
+- **Semantic versioning**: Version is metadata, not file structure
+
+```yaml
+# CORRECT: Version in contract.yaml
+meta:
+  contract_version: "1.0.0"
+  node_version: "1.2.3"
+```
+
+```
+# WRONG: Versioned directories
+nodes/postgres_adapter/v1_0_0/  # DO NOT CREATE
+nodes/postgres_adapter/v2/      # DO NOT CREATE
+```
+
+**Legacy Exception**: Existing `v1_0_0/` directories (e.g., `nodes/<name>/v1_0_0/`) are legacy patterns from earlier architectural decisions. These will be migrated to the new flat structure per ticket H1 (Legacy Component Refactor Plan). See `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` for migration details.
+
 ## 🎯 Core ONEX Principles
 
 ### Strong Typing & Models
@@ -49,10 +72,11 @@
 
 ### Registry Naming Conventions
 
-**Node-Specific Registries** (`nodes/<name>/v<version>/registry/`):
+**Node-Specific Registries** (`nodes/<name>/registry/`):
 - File: `registry_infra_<node_name>.py`
 - Class: `RegistryInfra<NodeName>`
 - Examples: `registry_infra_postgres_adapter.py` → `RegistryInfraPostgresAdapter`
+- Note: Legacy paths `nodes/<name>/v1_0_0/registry/` will be migrated (see H1 ticket)
 
 **Standalone Registries** (in domain directories):
 - File: `registry_<purpose>.py`
@@ -812,16 +836,28 @@ Infrastructure tools follow ONEX 4-node architecture:
 
 ## 🚀 Node Structure Pattern
 
+**Canonical Structure** (NEW components):
 ```
-nodes/<adapter>/v1_0_0/
-├── contract.yaml          # ONEX contract definition
+nodes/<adapter>/
+├── contract.yaml          # ONEX contract definition (includes version)
 ├── node.py               # Node<Name><Type> implementation
 ├── models/               # Node-specific models
 └── registry/             # registry_infra_<name>.py
 ```
 
+**Legacy Structure** (existing components, will be migrated):
+```
+nodes/<adapter>/v1_0_0/   # LEGACY - do not create new directories like this
+├── contract.yaml
+├── node.py
+├── models/
+└── registry/
+```
+
+See "CRITICAL POLICY: NO VERSIONED DIRECTORIES" above for migration details.
+
 **Contract Requirements**:
-- Semantic versioning (`contract_version`, `node_version`)
+- Semantic versioning in contract (`contract_version`, `node_version` fields)
 - Node type (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR)
 - Strongly typed I/O (`input_model`, `output_model`)
 - Protocol-based dependencies
