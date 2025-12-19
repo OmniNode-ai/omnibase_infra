@@ -35,6 +35,20 @@ Execution Shape Rules (imported from execution_shape_validator):
     - REDUCER: Can return PROJECTIONs only, not EVENTs (deterministic state management)
     - ORCHESTRATOR: Can return COMMANDs and EVENTs, but not INTENTs or PROJECTIONs
 
+Thread Safety:
+    This module uses a module-level singleton validator (`_default_validator`) for
+    efficiency. The singleton is thread-safe because:
+
+    - The validator is stateless after initialization (only stores immutable rules)
+    - No per-validation state is stored in the validator instance
+    - Each validation creates fresh violation result objects (no shared mutable state)
+    - The singleton is created at module import time (before any threads)
+    - The @enforce_execution_shape decorator uses this singleton safely from any thread
+
+    For custom validation rules, create a new RuntimeShapeValidator instance with
+    a custom rules dictionary. For most use cases, the singleton provides optimal
+    performance without thread safety concerns.
+
 Security Design (Intentional Fail-Open Architecture):
     This validator uses a FAIL-OPEN design by default. This is an INTENTIONAL
     architectural decision, NOT a security vulnerability. Understanding the
@@ -140,6 +154,7 @@ import functools
 import inspect
 from collections.abc import Callable
 from typing import TypeVar
+from uuid import UUID
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
@@ -230,13 +245,29 @@ class ExecutionShapeViolationError(ModelOnexError):
         ... except ExecutionShapeViolationError as e:
         ...     print(f"Violation: {e.violation.violation_type}")
         ...     print(f"Message: {e.violation.message}")
+
+    Correlation ID Support:
+        When a correlation_id is provided, it is included in the error context
+        for distributed tracing. This enables tracking validation failures back
+        to specific requests in multi-service architectures::
+
+            >>> from uuid import uuid4
+            >>> correlation_id = uuid4()
+            >>> raise ExecutionShapeViolationError(violation, correlation_id=correlation_id)
     """
 
-    def __init__(self, violation: ModelExecutionShapeViolationResult) -> None:
+    def __init__(
+        self,
+        violation: ModelExecutionShapeViolationResult,
+        correlation_id: UUID | None = None,
+    ) -> None:
         """Initialize ExecutionShapeViolationError.
 
         Args:
             violation: The execution shape violation result with full context.
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, enables tracking this validation failure back
+                to specific requests across service boundaries.
         """
         self.violation = violation
         # handler_type may be None if the handler type couldn't be determined
@@ -246,6 +277,7 @@ class ExecutionShapeViolationError(ModelOnexError):
         super().__init__(
             message=violation.message,
             error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+            correlation_id=correlation_id,
             violation_type=violation.violation_type.value,
             handler_type=handler_type_value,
             severity=violation.severity,
@@ -338,6 +370,20 @@ class RuntimeShapeValidator:
 
     Attributes:
         rules: Dictionary mapping handler types to their execution shape rules.
+
+    Thread Safety:
+        RuntimeShapeValidator instances are stateless after initialization.
+        The rules dictionary is immutable and no per-validation state is stored.
+        Multiple threads can safely call validate_handler_output() or
+        validate_and_raise() on the same validator instance concurrently.
+
+    Performance:
+        For repeated validation (e.g., decorated handlers in hot paths), use the
+        module-level singleton via `enforce_execution_shape()` decorator or the
+        `_default_validator` instance for optimal performance.
+
+        Creating new validator instances is cheap but unnecessary in most cases.
+        Create a new instance only if you need custom rules or isolation.
 
     Example:
         >>> validator = RuntimeShapeValidator()
@@ -525,6 +571,7 @@ class RuntimeShapeValidator:
         output_category: EnumMessageCategory,
         file_path: str = "<runtime>",
         line_number: int = 0,
+        correlation_id: UUID | None = None,
     ) -> None:
         """Validate handler output and raise exception if invalid.
 
@@ -537,6 +584,9 @@ class RuntimeShapeValidator:
             output_category: The message category of the output.
             file_path: Optional file path for violation reporting.
             line_number: Optional line number for violation reporting.
+            correlation_id: Optional correlation ID for distributed tracing.
+                When provided, the exception includes this ID for tracking
+                validation failures across service boundaries.
 
         Raises:
             ExecutionShapeViolationError: If the output violates execution
@@ -550,7 +600,7 @@ class RuntimeShapeValidator:
             line_number=line_number,
         )
         if violation is not None:
-            raise ExecutionShapeViolationError(violation)
+            raise ExecutionShapeViolationError(violation, correlation_id=correlation_id)
 
 
 # ==============================================================================
@@ -564,14 +614,27 @@ class RuntimeShapeValidator:
 # Instead, we use a module-level singleton.
 #
 # Why a singleton is safe here:
-# - The validator only stores a reference to immutable EXECUTION_SHAPE_RULES
+# - The validator's rules dictionary is immutable after initialization
 # - No per-validation state is stored in the validator instance
 # - All validation methods are pure functions that produce new results
-# - Thread-safe: concurrent calls create independent violation results
+# - Each validation creates fresh ModelExecutionShapeViolationResult objects
 #
-# Performance Note for Callers:
-# If you need custom rules, instantiate your own RuntimeShapeValidator with
-# a custom rules dictionary. The singleton uses the default EXECUTION_SHAPE_RULES.
+# Thread Safety:
+# - The singleton is created at module import time (before any threads)
+# - All read operations on the rules dictionary are thread-safe
+# - Each validation creates fresh local state (violation results)
+# - No locks are needed because there's no shared mutable state
+# - The @enforce_execution_shape decorator uses this singleton safely from any thread
+# - Concurrent calls from multiple threads will each create independent violation
+#   results without interference
+#
+# When NOT to use the singleton:
+# - If you need custom execution shape rules (create your own instance)
+# - If you need to mock the validator in tests (inject or patch)
+# - If you're validating in a context that requires isolation
+#
+# For repeated validation (e.g., decorated handlers in hot paths), the singleton
+# pattern provides optimal performance without sacrificing thread safety.
 
 _default_validator = RuntimeShapeValidator()
 

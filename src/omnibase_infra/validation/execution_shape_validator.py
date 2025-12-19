@@ -285,20 +285,35 @@ class ExecutionShapeValidator:
 
         Returns:
             List of detected violations. Empty list if no violations found.
+            For syntax errors, returns a single SYNTAX_ERROR violation.
 
-        Raises:
-            SyntaxError: If the file contains invalid Python syntax.
-            FileNotFoundError: If the file does not exist.
+        Note:
+            Syntax errors are returned as violations rather than raised as exceptions.
+            This enables CI pipelines to collect all violations across files rather
+            than failing on the first unparseable file. The violation includes the
+            syntax error details for debugging.
         """
         source = file_path.read_text(encoding="utf-8")
         try:
             tree = ast.parse(source, filename=str(file_path))
         except SyntaxError as e:
+            # Syntax error is a file-level issue, not a handler-specific violation.
+            # Use SYNTAX_ERROR violation type for AST parse failures.
+            # handler_type is None because we can't analyze the code structure.
             logger.warning(
-                "Failed to parse file",
+                "Syntax error in file",
                 extra={"file": str(file_path), "error": str(e)},
             )
-            raise
+            return [
+                ModelExecutionShapeViolationResult(
+                    violation_type=EnumExecutionShapeViolation.SYNTAX_ERROR,
+                    handler_type=None,  # Cannot determine handler type from unparseable file
+                    file_path=str(file_path.resolve()),
+                    line_number=e.lineno or 1,
+                    message=f"Syntax error in file: {e.msg}",
+                    severity="error",
+                )
+            ]
 
         violations: list[ModelExecutionShapeViolationResult] = []
 
@@ -325,6 +340,12 @@ class ExecutionShapeValidator:
 
         Returns:
             List of all detected violations across all files.
+            Syntax errors in individual files are included as SYNTAX_ERROR violations
+            rather than causing the directory validation to fail.
+
+        Note:
+            Files starting with underscore (e.g., __init__.py) are skipped.
+            Non-Python files are ignored.
         """
         violations: list[ModelExecutionShapeViolationResult] = []
         pattern = "**/*.py" if recursive else "*.py"
@@ -334,10 +355,9 @@ class ExecutionShapeValidator:
                 try:
                     file_violations = self.validate_file(file_path)
                     violations.extend(file_violations)
-                except SyntaxError:
-                    # Already logged in validate_file
-                    continue
                 except Exception as e:
+                    # Unexpected errors (I/O errors, permission issues, etc.)
+                    # Log and continue to validate remaining files
                     logger.warning(
                         "Failed to validate file",
                         extra={

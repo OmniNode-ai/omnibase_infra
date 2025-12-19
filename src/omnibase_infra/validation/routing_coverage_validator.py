@@ -369,32 +369,43 @@ def discover_registered_routes(
 ) -> set[str]:
     """Discover routing registrations from registry or source code.
 
-    This function supports two discovery strategies with different semantics:
+    This function supports two discovery strategies that return DIFFERENT
+    types of identifiers. Understanding this distinction is critical for
+    correct usage.
 
-    **Strategy 1: Runtime Registry Inspection**
+    **Strategy 1: Runtime Registry Inspection** (returns HANDLER CATEGORIES)
         When `registry` is provided, inspects the ProtocolBindingRegistry
-        to find registered protocol handlers. This returns handler categories
-        (e.g., "http", "db", "kafka") representing the types of handlers
-        registered, NOT individual message type names.
+        to find registered protocol handlers.
 
-        This is useful for verifying that handler infrastructure is configured,
-        but does NOT provide message-level routing coverage.
+        Returns: Handler category strings (e.g., "http", "db", "kafka")
+        representing the types of protocol handlers registered in the system.
 
-    **Strategy 2: Static Source Analysis**
+        Use case: Infrastructure health checks - verifying handler infrastructure
+        is configured. NOT suitable for message-level routing coverage validation.
+
+        Example return: {"http", "kafka", "db", "grpc"}
+
+    **Strategy 2: Static Source Analysis** (returns MESSAGE TYPE NAMES)
         When `source_directory` is provided, scans source files for message
-        registration patterns using regex-based static analysis. This returns
-        message type class names (e.g., "OrderCreatedEvent", "CreateUserCommand").
+        registration patterns using regex-based static analysis.
 
-        This is the preferred approach for routing coverage validation because
-        it discovers which specific message types have handler registrations.
+        Returns: Message type class names (e.g., "OrderCreatedEvent",
+        "CreateUserCommand") found in registration patterns like
+        @route(MessageType) or registry.register(MessageType, handler).
 
-    **Important**: The two strategies return DIFFERENT types of identifiers:
-        - Registry: Handler categories (protocol types)
-        - Source analysis: Message type class names
+        Use case: Routing coverage validation - discovering which specific
+        message types have handler registrations. This is the PREFERRED
+        approach for coverage validation.
 
-    When both parameters are provided, results are combined. However, this
-    may produce inconsistent sets that shouldn't be directly compared.
-    For routing coverage validation, use source_directory alone.
+        Example return: {"OrderCreatedEvent", "UserRegisteredEvent", "PaymentCommand"}
+
+    **Critical Distinction**:
+        - Registry strategy: Returns protocol/transport categories (http, kafka)
+        - Source analysis: Returns message type class names (OrderCreatedEvent)
+
+        These are fundamentally different identifier spaces and should NOT
+        be mixed or compared. For routing coverage validation, always use
+        source_directory alone.
 
     Args:
         registry: Optional runtime registry instance to inspect. When used,
@@ -409,7 +420,7 @@ def discover_registered_routes(
         parameters were provided:
         - Registry only: Handler categories (http, db, kafka)
         - Source directory only: Message type class names (OrderEvent, etc.)
-        - Both: Combined set (not recommended for coverage validation)
+        - Both: Combined set (not recommended - produces mixed identifier types)
 
     Example:
         >>> # Runtime inspection - returns handler categories (infrastructure check)
