@@ -131,6 +131,14 @@ class ProtocolMessageDispatcher(Protocol):
             Empty set means dispatcher accepts all message types in its category.
         node_kind: The ONEX node kind this dispatcher represents.
 
+    Note:
+        Method bodies in this Protocol use ``...`` (Ellipsis) rather than
+        ``raise NotImplementedError()``. This is the standard Python convention
+        for ``typing.Protocol`` classes per PEP 544. Protocol classes define
+        structural subtyping (duck typing) interfaces, not inheritance-based
+        abstract base classes. Use ``raise NotImplementedError`` only for
+        ``abc.ABC`` abstract base classes, not for Protocol definitions.
+
     .. versionadded:: 0.4.0
     """
 

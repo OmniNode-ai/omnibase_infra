@@ -18,8 +18,8 @@ onex-runtime = "omnibase_infra.runtime.kernel:main"
 [tool.poetry.dependencies]
 python = "^3.12"
 
-# ONEX dependencies - git main branch for development
-omnibase-core = {git = "https://github.com/OmniNode-ai/omnibase_core.git", branch = "main"}
+# ONEX dependencies - pinned to specific commit for reproducible builds (OMN-934)
+omnibase-core = {git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "01027fab06e830b5b6575e4ecfe03311a2a4616e"}
 omnibase-spi = "^0.4.0"
 
 # Core dependencies

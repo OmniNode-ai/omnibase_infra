@@ -168,6 +168,13 @@ class MessageDispatchEngine:
         - Legacy dict metrics (get_metrics()) use simple increments and may be
           approximate under very high concurrency; prefer get_structured_metrics().
 
+        **METRICS CAVEAT**: While metrics updates are protected by a lock,
+        get_metrics() and get_structured_metrics() provide point-in-time
+        snapshots. Under high concurrent load, metrics may be approximate
+        between snapshot reads. For production monitoring, consider exporting
+        metrics to a dedicated metrics backend (Prometheus, StatsD, etc.) for
+        accurate aggregation across time windows.
+
     Logging Levels:
         - **INFO**: Dispatch start/complete with topic, category, dispatcher count
         - **DEBUG**: Dispatcher execution details, routing decisions
@@ -1103,6 +1110,26 @@ class MessageDispatchEngine:
         """
         Execute a dispatcher (sync or async).
 
+        Sync dispatchers are executed via ``loop.run_in_executor()`` using the
+        default ``ThreadPoolExecutor``. This allows sync code to run without
+        blocking the event loop, but has important implications:
+
+        Thread Pool Considerations:
+            - The default executor uses a limited thread pool (typically
+              ``min(32, os.cpu_count() + 4)`` threads in Python 3.8+)
+            - Each sync dispatcher execution consumes one thread until completion
+            - Blocking dispatchers can exhaust the thread pool, causing:
+              - Starvation of other sync dispatchers waiting for threads
+              - Delayed scheduling of new async tasks
+              - Potential deadlocks under high concurrent load
+              - Increased latency for all executor-based operations
+
+        Best Practices:
+            - Sync dispatchers SHOULD complete quickly (< 100ms recommended)
+            - For blocking I/O (network, database, file), use async dispatchers
+            - For CPU-bound work, consider using a dedicated ProcessPoolExecutor
+            - Monitor ``dispatcher_execution_count`` metrics for bottlenecks
+
         Args:
             entry: The dispatcher entry containing the callable
             envelope: The message envelope to process
@@ -1112,6 +1139,11 @@ class MessageDispatchEngine:
 
         Raises:
             Any exception raised by the dispatcher
+
+        Warning:
+            Sync dispatchers that block for extended periods (> 100ms) can
+            severely degrade dispatch engine throughput. Prefer async dispatchers
+            for any operation involving I/O or external service calls.
         """
         dispatcher = entry.dispatcher
 
@@ -1119,7 +1151,15 @@ class MessageDispatchEngine:
         if inspect.iscoroutinefunction(dispatcher):
             return await dispatcher(envelope)
         else:
-            # Sync dispatcher - run in executor to avoid blocking
+            # Sync dispatcher execution via ThreadPoolExecutor
+            # -----------------------------------------------
+            # WARNING: Sync dispatchers MUST be non-blocking (< 100ms execution).
+            # Blocking dispatchers can exhaust the thread pool, causing:
+            # - Starvation of other sync dispatchers
+            # - Delayed async dispatcher scheduling
+            # - Potential deadlocks under high load
+            #
+            # For blocking I/O operations, use async dispatchers instead.
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, dispatcher, envelope)
 

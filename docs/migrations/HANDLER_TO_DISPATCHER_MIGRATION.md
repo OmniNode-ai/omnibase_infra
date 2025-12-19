@@ -78,9 +78,9 @@ New model names in `omnibase_infra.models.dispatch`:
 }
 ```
 
-#### 4. New DispatcherRegistry and ProtocolMessageDispatcher
+#### 4. DispatcherRegistry and ProtocolMessageDispatcher (New Components)
 
-The rename introduces new infrastructure for class-based dispatchers:
+Version 0.4.0 introduces new infrastructure for class-based dispatchers. Note that `DispatcherRegistry` is a **new class** - there was no prior `HandlerRegistry` for message dispatching (the existing `ProtocolBindingRegistry` handles protocol handlers and remains unchanged):
 
 ```python
 from omnibase_infra.runtime import (
@@ -271,12 +271,21 @@ A migration script is provided to help update your codebase:
 # migrate_handler_to_dispatcher.sh
 # Run from project root
 
+# Detect OS for sed compatibility
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS requires '' after -i
+    SED_INPLACE="sed -i ''"
+else
+    # Linux/GNU sed
+    SED_INPLACE="sed -i"
+fi
+
 # Rename in Python files (excluding handlers/ directory and enum values)
 find . -name "*.py" \
     -not -path "*/handlers/*" \
     -not -path "*/.venv/*" \
     -not -path "*/node_modules/*" \
-    -exec sed -i '' \
+    -exec $SED_INPLACE \
         -e 's/handler_id/dispatcher_id/g' \
         -e 's/register_handler/register_dispatcher/g' \
         -e 's/get_handler_metrics/get_dispatcher_metrics/g' \
@@ -380,6 +389,52 @@ registry.freeze()
 dispatchers = registry.get_dispatchers(EnumMessageCategory.EVENT, "UserCreated")
 ```
 
+## Import Reference
+
+### Runtime Components
+
+```python
+# Primary imports for message dispatching
+from omnibase_infra.runtime import (
+    MessageDispatchEngine,      # Function-based message dispatch engine
+    DispatcherRegistry,         # Class-based dispatcher registry
+    ProtocolMessageDispatcher,  # Protocol for implementing dispatchers
+)
+```
+
+### Dispatch Models
+
+```python
+# Dispatch models
+from omnibase_infra.models.dispatch import (
+    ModelDispatchRoute,           # Route definition model
+    ModelDispatchResult,          # Dispatch result with status and metrics
+    ModelDispatcherRegistration,  # Dispatcher registration metadata
+    ModelDispatcherMetrics,       # Per-dispatcher metrics
+    ModelDispatchMetrics,         # Aggregate dispatch metrics
+    EnumDispatchStatus,           # Status enum (SUCCESS, NO_HANDLER, HANDLER_ERROR, etc.)
+)
+
+# Message category enum
+from omnibase_infra.enums import EnumMessageCategory
+```
+
+### Protocol Handlers (Unchanged)
+
+These components remain as "handlers" - they handle protocol-level concerns:
+
+```python
+# Protocol handler registry (unchanged)
+from omnibase_infra.runtime import (
+    ProtocolBindingRegistry,    # Registry for protocol handlers
+    HANDLER_TYPE_HTTP,          # Handler type constants
+    HANDLER_TYPE_DATABASE,
+    HANDLER_TYPE_KAFKA,
+    HANDLER_TYPE_VAULT,
+    HANDLER_TYPE_CONSUL,
+)
+```
+
 ## Related Documentation
 
 - [MessageDispatchEngine API](../architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md)
@@ -392,3 +447,4 @@ dispatchers = registry.get_dispatchers(EnumMessageCategory.EVENT, "UserCreated")
 | Date | Version | Description |
 |------|---------|-------------|
 | 2025-12-19 | 0.4.0 | Initial migration guide created |
+| 2025-12-19 | 0.4.0 | Enhanced: Added Import Reference section, fixed cross-platform script, clarified DispatcherRegistry is new (not a rename) |

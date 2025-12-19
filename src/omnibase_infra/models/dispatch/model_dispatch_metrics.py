@@ -205,17 +205,20 @@ class ModelDispatchMetrics(BaseModel):
     # ---- Per-Dispatcher Metrics ----
     dispatcher_metrics: dict[str, ModelDispatcherMetrics] = Field(
         default_factory=dict,
-        description="""Per-dispatcher metrics keyed by dispatcher_id.
-
-        Memory Bounds:
-            This dictionary is bounded by the number of registered dispatchers,
-            which is fixed after freeze(). The freeze-after-init pattern ensures
-            no new dispatchers can be added after initialization, making the
-            maximum size predictable and bounded.
-
-            For dynamic dispatcher scenarios (not currently supported), consider
-            implementing LRU eviction or periodic metrics export/reset.
-        """,
+        description=(
+            "Per-dispatcher metrics keyed by dispatcher_id. "
+            "Memory is bounded by freeze-after-init pattern: only dispatchers "
+            "registered before freeze() will have metrics entries, ensuring "
+            "no unbounded growth after initialization. The dictionary size equals "
+            "the number of registered dispatchers (typically 5-500 depending on "
+            "system scale). For long-running services, consider periodically "
+            "exporting metrics to an external system (Prometheus, StatsD) and "
+            "using reset_metrics() or create_empty() to prevent counter overflow "
+            "in extreme cases. Note: counter overflow is theoretical (requires "
+            ">9 quintillion dispatches for int64), but periodic metrics export "
+            "enables historical trend analysis and reduces memory pressure from "
+            "accumulated per-dispatcher statistics."
+        ),
     )
 
     # ---- Per-Category Metrics ----
@@ -397,6 +400,40 @@ class ModelDispatchMetrics(BaseModel):
             ModelDispatcherMetrics for the dispatcher, or None if not found.
         """
         return self.dispatcher_metrics.get(dispatcher_id)
+
+    def update_dispatcher_metrics(
+        self,
+        dispatcher_id: str,
+        metrics: ModelDispatcherMetrics,
+    ) -> "ModelDispatchMetrics":
+        """
+        Efficiently update a single dispatcher's metrics.
+
+        Uses model_copy() for efficient copy-on-write update instead of
+        reconstructing the entire object with all parameters. This is
+        significantly more efficient when only updating dispatcher metrics
+        without changing aggregate statistics.
+
+        Args:
+            dispatcher_id: The dispatcher ID to update metrics for.
+            metrics: The new metrics for the dispatcher.
+
+        Returns:
+            New ModelDispatchMetrics with updated dispatcher metrics.
+
+        Example:
+            >>> old_metrics = ModelDispatchMetrics()
+            >>> dispatcher_metrics = ModelDispatcherMetrics(
+            ...     dispatcher_id="my-dispatcher"
+            ... )
+            >>> new_metrics = old_metrics.update_dispatcher_metrics(
+            ...     "my-dispatcher",
+            ...     dispatcher_metrics
+            ... )
+        """
+        new_dict = dict(self.dispatcher_metrics)
+        new_dict[dispatcher_id] = metrics
+        return self.model_copy(update={"dispatcher_metrics": new_dict})
 
     def get_category_count(self, category: EnumMessageCategory) -> int:
         """

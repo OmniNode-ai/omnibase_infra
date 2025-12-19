@@ -323,6 +323,11 @@ class ModelTopicParser:
         See module-level docstring for complete topic taxonomy documentation,
         including format specifications, domain naming rules, and category-based
         routing semantics.
+
+        External Documentation:
+            - ONEX Topic Taxonomy: docs/architecture/TOPIC_TAXONOMY.md (TODO: create)
+            - Environment-Aware Topics: docs/patterns/ENVIRONMENT_TOPICS.md (TODO: create)
+            - Message Categories: EnumMessageCategory in omnibase_infra.enums
     """
 
     # ONEX Kafka format: onex.<domain>.<type>

@@ -3,13 +3,14 @@
 """Runtime module for omnibase_infra.
 
 Migration Note (OMN-934):
-    This module renames "Handler" terminology to "Dispatcher" throughout.
-    Legacy aliases are provided for backwards compatibility:
+    This module renames "Handler" terminology to "Dispatcher" for message routing.
+    Legacy aliases are provided for backwards compatibility in MessageDispatchEngine:
 
-    - HandlerRegistry -> DispatcherRegistry (alias provided)
-    - register_handler() -> register_dispatcher() (alias provided)
+    - register_handler() -> register_dispatcher() (method alias provided)
     - handler_count -> dispatcher_count (property alias provided)
-    - get_handler_metrics() -> get_dispatcher_metrics() (alias provided)
+    - get_handler_metrics() -> get_dispatcher_metrics() (method alias provided)
+
+    Note: DispatcherRegistry is a NEW class (no HandlerRegistry predecessor existed).
 
 This module provides the runtime infrastructure for the ONEX infrastructure layer,
 including three SINGLE SOURCE OF TRUTH registries and the runtime execution host.

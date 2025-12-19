@@ -72,12 +72,13 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #
 # See CLAUDE.md "Accepted Pattern Exceptions" section for full rationale.
 # Ticket: OMN-934 (message dispatch engine implementation)
+# Updated: PR #61 review feedback - added explicit threshold documentation
 #
 # DEFAULT_MAX_METHODS = 10     # Maximum methods per class
 # DEFAULT_MAX_INIT_PARAMS = 5  # Maximum __init__ parameters
 #
-# Infrastructure Pattern Exemptions:
-# ----------------------------------
+# Infrastructure Pattern Exemptions (OMN-934, PR #61):
+# ----------------------------------------------------
 # KafkaEventBus (14 methods, 10 __init__ params):
 #   - Event bus pattern requires: lifecycle (start/stop/health), pub/sub
 #     (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility
@@ -230,7 +231,7 @@ def validate_infra_patterns(
     # Filter known infrastructure pattern exemptions using regex-based matching
     # Patterns match class/method names and violation types without hardcoded line numbers
     exempted_patterns: list[ExemptionPattern] = [
-        # KafkaEventBus method count exemption (OMN-934)
+        # KafkaEventBus method count exemption (OMN-934, PR #61)
         # Threshold: 10 methods (default), KafkaEventBus has 14+ methods
         # Rationale: Event bus pattern requires lifecycle (start/stop/health),
         # pub/sub (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility
@@ -240,7 +241,7 @@ def validate_infra_patterns(
             "class_pattern": r"Class 'KafkaEventBus'",
             "violation_pattern": r"has \d+ methods",
         },
-        # KafkaEventBus __init__ parameter count exemption (OMN-934)
+        # KafkaEventBus __init__ parameter count exemption (OMN-934, PR #61)
         # Threshold: 5 params (default), KafkaEventBus has 10+ params
         # Rationale: Backwards compatibility during config migration from direct
         # parameters to ModelKafkaConfig object
