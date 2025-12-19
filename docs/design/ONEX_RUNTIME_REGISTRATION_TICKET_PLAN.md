@@ -2,9 +2,16 @@
 
     Status: Canonical
     Audience: Internal + Public
+    Document Version: 1.0.0
     Purpose:
         This ticket set defines the authoritative execution, orchestration, reducer, handler,
         projector, and effect model for ONEX. All future workflows MUST conform.
+
+    Versioning Policy:
+        This document follows semantic versioning (MAJOR.MINOR.PATCH):
+        - MAJOR: Breaking changes to ticket structure or global constraints
+        - MINOR: New tickets, additional acceptance criteria, or clarifications
+        - PATCH: Typo fixes, formatting, non-functional updates
 
 ---
 
@@ -69,6 +76,11 @@
 ---
 
 ## A. Foundation (P0)
+
+> **Execution Prerequisites**:
+> - Decision owners MUST be assigned to each ticket before Wave 1 execution begins
+> - Target dates for blocking decisions (A3, B6 configuration) SHOULD be set before execution
+> - All A-section tickets share a single decision owner for architectural consistency
 
 ### A1. Canonical Layering and Terminology
     Priority: P0
@@ -198,6 +210,7 @@
         - Unit tests reject missing or extra fields
         - Envelope structure is identical for commands, events, and intents
         - Per-plane usage documented and enforced by runtime
+        - Contract schema validation tests verify envelope field requirements
     Implementation Note:
         - Implementation sequencing: A2 and A2a can be built in parallel after A1
         - A2 enforcement can require envelope presence once A2a lands
@@ -275,6 +288,17 @@
         Domain ownership enforcement:
             - registration.* messages cannot be handled by non-registration handlers
             - cross-domain consumption requires explicit opt-in
+
+        Cross-domain subscription configuration:
+            - Default: handlers can only consume messages from their own domain
+            - Explicit opt-in required via configuration to consume cross-domain messages
+            - Configuration format (in handler registration):
+                allowed_cross_domain_sources:
+                    - discovery.*     # Allow consuming all discovery domain messages
+                    - health.events.* # Allow consuming health domain events only
+            - Runtime validates cross-domain configuration at startup
+            - Unauthorized cross-domain consumption is rejected with explicit error
+
             - Domain ownership is derived from:
                 - topic name (onex.<domain>.*) AND
                 - message type registry entry domain
@@ -338,6 +362,12 @@
                 2) intents
                 3) events
             - Within each category, preserve handler-returned order
+
+        Batching considerations:
+            - Runtime MAY batch multiple outputs for throughput optimization
+            - Batching MUST preserve ordering guarantees (projections before intents before events)
+            - Batch size is configurable per output type
+            - Transaction boundaries: projection persist + intent/event publish may be atomic
     Acceptance:
         - Runtime publishes all outputs
         - Handlers do not publish directly
@@ -869,6 +899,22 @@
             When reducer processes them in sequence,
             Then outputs (projections, intents) are byte-for-byte identical
 
+        - test_projection_output_precedes_intent_output:
+            Given a reducer processing NodeRegistrationAccepted,
+            When reducer returns output with both projections and intents,
+            Then output.projections list is ordered before output.intents
+            And runtime processes projections first per B2 ordering contract
+
+    Suggested Test Directory Structure:
+        tests/
+        └── domain/
+            └── registration/
+                └── reducer/
+                    ├── __init__.py
+                    ├── test_registration_reducer_determinism.py
+                    ├── test_registration_reducer_ordering.py
+                    └── test_registration_reducer_fsm.py
+
 ### G2. Orchestrator Tests
     Priority: P0
     Acceptance:
@@ -884,6 +930,24 @@
             And no I/O operations are performed (verified via mock)
             And all datetime comparisons use injected now, not system clock
 
+        - test_orchestrator_uses_injected_now_not_system_clock:
+            Given orchestrator handler with mocked projection reader,
+            And injected now = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC),
+            When processing RuntimeTick event,
+            Then all timeout calculations use injected now
+            And datetime.now() is never called (verified via mock.patch)
+            And context.now is the only time source used
+
+    Suggested Test Directory Structure:
+        tests/
+        └── domain/
+            └── registration/
+                └── orchestrator/
+                    ├── __init__.py
+                    ├── test_registration_orchestrator_events.py
+                    ├── test_registration_orchestrator_time.py
+                    └── test_registration_orchestrator_timeout.py
+
 ### G3. End-to-End Integration Tests
     Priority: P0
     Dependencies: G2, E1, F1
@@ -896,6 +960,29 @@
             - orchestrator crashes after emitting acceptance
             - reducer and effect restart independently
             - no duplicate activation occurs
+
+    Test Examples:
+        - test_full_registration_handshake_happy_path:
+            Given a new node emitting NodeIntrospected event,
+            When the full orchestrator -> reducer -> effect pipeline executes,
+            Then node transitions through states: PENDING -> ACCEPTED -> ACTIVE
+            And Consul registration is persisted
+            And PostgreSQL projection is updated
+
+        - test_restart_preserves_pending_deadlines:
+            Given a node in PENDING state with ack_deadline set,
+            When orchestrator restarts and RuntimeTick is emitted,
+            Then orchestrator reads deadline from projection
+            And emits NodeRegistrationAckTimedOut if deadline passed
+
+    Suggested Test Directory Structure:
+        tests/
+        └── integration/
+            └── registration/
+                ├── __init__.py
+                ├── test_registration_e2e_happy_path.py
+                ├── test_registration_e2e_restart.py
+                └── test_registration_e2e_duplicate_delivery.py
 
 ### G4. Effect Idempotency and Retry Tests
     Priority: P0
@@ -911,6 +998,13 @@
             Then no additional external I/O is performed
             And the effect returns success (idempotent response)
 
+        - test_natural_key_conflict_treated_as_duplicate:
+            Given an intent with intent_id="abc-123" previously executed,
+            When a new intent with intent_id="xyz-456" arrives,
+            And the natural key (entity_id, intent_type, registration_id) matches,
+            Then effect treats as duplicate (no additional I/O)
+            And returns idempotent success response
+
         - test_circuit_breaker_transitions_under_failure:
             Given effect with circuit breaker threshold=3,
             When 3 consecutive failures occur,
@@ -920,11 +1014,34 @@
             Then circuit breaker transitions to HALF_OPEN
             And next successful call transitions to CLOSED
 
+        - test_circuit_breaker_lock_held_during_state_check:
+            Given effect with MixinAsyncCircuitBreaker,
+            When _check_circuit_breaker is called,
+            Then _circuit_breaker_lock MUST be held by caller
+            And concurrent state modifications are prevented
+
         - test_backoff_policy_applied_on_transient_failure:
             Given effect with exponential backoff policy,
             When a transient failure occurs,
             Then retry is attempted after configured backoff delay
             And delay increases exponentially on subsequent failures
+
+        - test_error_context_includes_correlation_id:
+            Given effect processing an intent with correlation_id="corr-123",
+            When an InfraConnectionError is raised,
+            Then error context includes correlation_id="corr-123"
+            And error message is sanitized (no secrets/credentials)
+
+    Suggested Test Directory Structure:
+        tests/
+        └── domain/
+            └── registration/
+                └── effect/
+                    ├── __init__.py
+                    ├── test_effect_idempotency.py
+                    ├── test_effect_circuit_breaker.py
+                    ├── test_effect_retry_backoff.py
+                    └── test_effect_error_handling.py
 
 ### G5. Chaos and Replay Tests
     Priority: P2
@@ -970,6 +1087,28 @@
             - backwards compatibility shim period (if needed) with explicit end date
             - deprecation warnings added before removal
             - final removal milestone and verification criteria
+
+    Documentation Deliverables:
+        - Developer migration guide: `docs/guides/v1_0_0-migration-guide.md`
+            Content requirements:
+            - Import path changes (versioned to flat structure)
+            - Contract.yaml version field usage patterns
+            - Testing migration completeness checklist
+            - Common migration errors and solutions
+
+    Feature Flags and Rollback Strategy:
+        - Feature flag: `ONEX_LEGACY_IMPORT_PATHS_ENABLED` (default: true during migration)
+            - When true: both legacy and new import paths work
+            - When false: only new flat import paths work
+            - Deprecation warning logged when legacy paths used
+        - Rollback strategy:
+            - Set `ONEX_LEGACY_IMPORT_PATHS_ENABLED=true` to restore legacy behavior
+            - No data migration needed (import paths only)
+            - Documented in operator runbook: `docs/runbooks/registration-workflow.md`
+        - Canary deployment considerations:
+            - Deploy to staging with `ONEX_LEGACY_IMPORT_PATHS_ENABLED=false`
+            - Monitor for import errors in logs
+            - Promote to production only after 24h stability in staging
 
 ### H1a. Migration Validation Gate
     Priority: P1
@@ -1136,6 +1275,83 @@ graph TD
 
 ---
 
+## Parallel Execution Plan
+
+The following waves define parallelizable execution groups. Each wave can begin
+once all blocking dependencies from previous waves are complete.
+
+### Wave 1: Foundation (Days 1-3)
+    Parallel:
+        - A1 (Canonical Layering)
+    Then:
+        - A2 (Execution Shapes) + A2a (Message Envelope) - can run in parallel after A1
+
+### Wave 2: Taxonomy & Trigger (Days 3-5)
+    Sequential after A2a:
+        - A2b (Topic Taxonomy)
+        - A3 (Registration Trigger Decision)
+
+### Wave 3: Runtime Core (Days 5-10)
+    Parallel after A3:
+        - B1 (Dispatch Engine)
+        - B1a (Message Registry) - after B1
+        - B2 (Handler Output) - after B1a
+    Then:
+        - B3, B4, B5, B6 (sequential chain)
+
+### Wave 4: Domain Components (Days 10-15)
+    Parallel after B6:
+        - C0, C1, C2 (Orchestrator chain)
+        - D1, D2, D3 (Reducer chain)
+        - F0, F1 (Projection chain) - after B2, A2a
+
+### Wave 5: Effects & Testing (Days 15-20)
+    Parallel after Wave 4:
+        - E1 (Registry Effect)
+        - G1, G2 (Unit tests)
+    Then:
+        - G3 (E2E Integration) - after G2, E1, F1
+        - G4 (Effect Idempotency)
+        - E2, E3 (Compensation, DLQ)
+
+### Wave 6: Migration (Post-MVP)
+    Blocked by: OMN-959 (omnibase_core 0.5.x adoption)
+    Sequential:
+        - H1 (Legacy Component Refactor) - includes v1_0_0 directory migration
+        - H1a (Migration Validation Gate)
+        - H2 (Migration Checklist)
+
+    Note: Wave 6 cannot begin until OMN-959 is complete. This is a hard blocker.
+    All P0 tickets in Waves 1-5 should be complete before starting H1.
+
+---
+
+### Timeline Assumptions
+
+    The timelines in this plan assume:
+        - OMN-959 (omnibase_core 0.5.x) is resolved before P0 implementation begins
+        - No blocking architectural decisions are pending
+        - Team capacity is available for parallel execution where indicated
+        - CI/CD infrastructure supports the testing requirements
+
+    If blocking dependencies are NOT resolved, timelines will slip accordingly.
+    Track blockers in Linear and update this plan when resolution dates are known.
+
+### Visualization Notes
+
+    The mermaid diagram above should render correctly in:
+        - GitHub markdown preview
+        - Linear ticket descriptions
+        - VS Code with mermaid extension
+        - Most modern documentation systems
+
+    If the diagram does not render:
+        - Use the "Text Reference (canonical)" section below the diagram
+        - Report rendering issues to the documentation team
+        - Consider static image generation as fallback
+
+---
+
 ## Future Work Recommendations
 
 The following items are out of scope for this plan but should be tracked for future iterations.
@@ -1180,6 +1396,9 @@ for post-MVP iterations or as parallel workstreams.
 
 ## Target Import Paths
 
+> **Important**: These are POST-0.5.x target paths. They are NOT available in the current
+> 0.4.x codebase. See the migration path below for how to transition.
+
 The following import paths are the **target** paths once `omnibase_core >= 0.5.0` is available:
 
 ```python
@@ -1200,9 +1419,23 @@ from omnibase_core.runtime import NodeRuntime
 from omnibase_spi.protocols import ProtocolIntentHandler, ProtocolNodeRuntime
 ```
 
-> **Note**: In the current 0.4.x codebase, legacy node classes exist as `NodeEffectLegacy`,
-> `NodeReducerLegacy`, etc. These will be renamed/refactored in 0.5.x per
-> `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`. Do not build on the legacy classes.
+### Current 0.4.x Legacy Classes
+
+In the current 0.4.x codebase, legacy node classes exist with different names:
+
+    Legacy Classes (0.4.x):
+        - NodeEffectLegacy       -> becomes NodeEffect in 0.5.x
+        - NodeReducerLegacy      -> becomes NodeReducer in 0.5.x
+        - NodeOrchestratorLegacy -> becomes NodeOrchestrator in 0.5.x
+
+    Migration Path:
+        1. Do NOT build new components on legacy classes
+        2. Wait for omnibase_core 0.5.x release (tracked by OMN-959)
+        3. Update imports to target paths after 0.5.x is available
+        4. See docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md for full migration details
+
+> **Warning**: Building on `NodeEffectLegacy`, `NodeReducerLegacy`, or other legacy classes
+> will require migration when 0.5.x is released. Plan for this transition.
 
 ---
 
@@ -1240,6 +1473,29 @@ See CLAUDE.md "File & Class Naming Conventions" for complete patterns:
     Services:   service_<name>.py   -> Service<Name>
     Nodes:      node.py             -> Node<Name><Type>
 
+### Registry Naming Conventions
+
+Per CLAUDE.md "Registry Naming Conventions":
+
+    Node-Specific Registries (in nodes/<name>/registry/):
+        File:  registry_infra_<node_name>.py
+        Class: RegistryInfra<NodeName>
+
+        Examples:
+            - registry_infra_postgres_adapter.py -> RegistryInfraPostgresAdapter
+            - registry_infra_kafka_adapter.py   -> RegistryInfraKafkaAdapter
+
+        Note: Legacy paths nodes/<name>/v1_0_0/registry/ will be migrated per H1
+
+    Standalone Registries (in domain directories):
+        File:  registry_<purpose>.py
+        Class: Registry<Purpose>
+
+        Examples:
+            - registry_handler.py  -> RegistryHandler
+            - registry_policy.py   -> RegistryPolicy
+            - registry_compute.py  -> RegistryCompute
+
 ---
 
 ## Appendix: Why This Model
@@ -1268,3 +1524,64 @@ See CLAUDE.md "File & Class Naming Conventions" for complete patterns:
     not convenience under success.
 
     Convenience features must be layered without weakening invariants.
+
+---
+
+## Appendix: Documentation Deliverables
+
+The following documentation artifacts are required as part of this plan.
+
+### Architecture Decision Records (ADRs)
+
+Key architectural decisions require ADRs before implementation begins.
+
+| ADR | Ticket Reference | Description |
+|-----|------------------|-------------|
+| `docs/adr/ADR-XXX-command-source.md` | Section 9.1 of HANDOFF | Command Source decision (API/Introspection/Both) |
+| `docs/adr/ADR-XXX-intent-topic-naming.md` | A2b, Section 9.1 of HANDOFF | Intent topic naming convention |
+| `docs/adr/ADR-XXX-reducer-invocation-pattern.md` | Section 9.1 of HANDOFF | Reducer invocation (direct vs event-based) |
+
+> **Note**: ADR numbers (XXX) will be assigned during the pre-implementation meeting.
+> See `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` Section 9.1 for decision
+> requirements and RACI matrix.
+
+### Operational Documentation
+
+| Document | Status | Description |
+|----------|--------|-------------|
+| `docs/runbooks/registration-workflow.md` | To be created | Operator runbook for registration workflow |
+
+**Runbook content requirements**:
+    - Troubleshooting registration failures
+    - Circuit breaker state recovery procedures
+    - Kafka topic health verification
+    - Consul/PostgreSQL registration state inspection
+    - Common failure scenarios and resolution steps
+    - Monitoring dashboards and alert response
+    - Feature flag rollback procedures (H1)
+
+### Developer Documentation
+
+| Document | Status | Description |
+|----------|--------|-------------|
+| `docs/guides/v1_0_0-migration-guide.md` | To be created | Migration guide for v1_0_0 directory structure (H1) |
+| `docs/architecture/RUNTIME_EXECUTION_MODEL.md` | To be created | Runtime execution model documentation (B1, B2, F0) |
+| `docs/standards/onex_topic_taxonomy.md` | To be created | Topic naming standards (A2b) |
+
+### Cross-Reference Documents
+
+This plan references and should be read alongside:
+    - `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` - Implementation handoff
+    - `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md` - Node architecture
+    - `docs/architecture/CURRENT_NODE_ARCHITECTURE.md` - Current state reference
+    - `contracts/fsm/dual_registration_reducer_fsm.yaml` - FSM contract definition
+
+### Documentation Checklist
+
+- [ ] ADR: Command Source Decision
+- [ ] ADR: Intent Topic Naming
+- [ ] ADR: Reducer Invocation Pattern
+- [ ] Operator Runbook: Registration Workflow
+- [ ] Developer Guide: v1_0_0 Migration
+- [ ] Architecture Doc: Runtime Execution Model
+- [ ] Standards Doc: Topic Taxonomy

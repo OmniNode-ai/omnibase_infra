@@ -106,14 +106,20 @@ The `NodeDualRegistrationReducer` at `nodes/reducers/node_dual_registration_redu
 > (via `ProtocolProjectionReader`). Orchestrators NEVER scan topics for state - all state
 > decisions are projection-backed.
 
-> **CRITICAL Terminology - Projection "Publishing" vs Event Publishing**:
+> **CRITICAL Terminology - Projection "Persistence" vs Event Publishing**:
 > Projections are **PERSISTED to storage** (PostgreSQL), NOT **published to Kafka**.
 > This distinction is architecturally critical:
-> - **Projections**: Written synchronously to storage by the Projector before any Kafka publishing
-> - **Events/Intents**: Published to Kafka topics after projection persistence completes
+> - **Projections**: Written synchronously to storage by the Projector BEFORE any Kafka publishing
+> - **Events/Intents**: Published to Kafka topics AFTER projection persistence completes
+> - **Ordering Guarantee**: Runtime invokes Projector.persist() and waits for acknowledgment
+>   before publishing intents to Kafka (see F0 ↔ B2 interaction sequence diagram in design doc)
 >
 > See ticket F0 in `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` for the authoritative
-> definition of projection execution model and the sequence diagram showing this ordering.
+> definition of projection execution model and the F0 ↔ B2 interaction sequence diagram showing
+> the synchronization between Handler Output Model (B2) and Projector Execution (F0).
+>
+> See also ticket A2a in the design doc for canonical envelope usage patterns across all
+> architectural planes (Ingestion, Decision, State, Execution).
 
 ```
                     ┌─────────────────────────────────────────────────────────────┐
@@ -179,6 +185,17 @@ From `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`:
 4. **SPI only defines protocols, never implementations**
 5. **Infra owns all I/O and real system integrations** - Handlers live in infra
 6. **Contract-driven behavior** - YAML contracts define everything
+
+> **Terminology Note** (per Global Constraint #7 in design doc):
+> - **Node**: The deployable/addressable unit that hosts one or more handlers
+> - **Handler**: A pure function that processes a specific message type within a node
+> - **Runtime**: Infrastructure that dispatches messages to handlers and publishes outputs
+>
+> Usage rules:
+> - Use "handler" when referring to message processing logic
+> - Use "node" when referring to deployment, lifecycle, or identity
+> - **Never say "handler publishes"** - only runtime publishes
+> - **Never say "node processes messages"** - handlers process, nodes host
 
 ### 3.3 Intent-Based Communication
 
@@ -410,8 +427,14 @@ If `omnibase_core 0.5.x` is not available when Phase 1 is scheduled to begin:
    - `handle_postgres_upsert()`
    - `handle_deregister()` (if needed)
 3. Integrate with NodeRuntime for handler execution
-4. Keep circuit breaker as infrastructure concern
+4. Keep circuit breaker as infrastructure concern (see CLAUDE.md "Circuit Breaker Pattern" section)
 5. Update `contract.yaml` for intent consumption
+6. **Error Handling Requirements** (see CLAUDE.md "Error Sanitization Guidelines"):
+   - All errors MUST be sanitized before logging (no secrets, credentials, PII)
+   - Use transport-aware error codes from `EnumCoreErrorCode`
+   - Propagate `correlation_id` from intent envelope to all error contexts
+   - Safe to include: service names, operation names, correlation IDs, error codes
+   - NEVER include: passwords, API keys, tokens, connection strings with credentials
 
 ### Phase 3: Wire Integration (2 days)
 
@@ -559,16 +582,19 @@ These decisions block Phase 1 implementation and must be resolved first.
    - Option B: Introspection events auto-generate commands
    - Option C: Both (API for manual, introspection for automatic)
    - **Blocking**: Needed for orchestrator contract design
+   - **ADR**: Decision will be documented in `docs/adr/ADR-XXX-command-source.md`
 
 2. **[BLOCKING] Intent Topics**: Topic naming convention for intents?
    - Proposed: `dev.omnibase-infra.intent.<backend>.<operation>.v1`
-   - Example: `dev.omnibase-infra.intent.consul.register.v1`
+   - Example: `dev/omnibase-infra.intent.consul.register.v1`
    - **Blocking**: Needed for reducer integration
+   - **ADR**: Decision will be documented in `docs/adr/ADR-XXX-intent-topic-naming.md`
 
 3. **[BLOCKING] Reducer Invocation**: Does orchestrator call reducer directly or via event?
    - Direct call is simpler for MVP
    - Event-based is more decoupled
    - **Blocking**: Affects orchestrator implementation
+   - **ADR**: Decision will be documented in `docs/adr/ADR-XXX-reducer-invocation-pattern.md`
 
 #### Decision RACI Matrix
 
@@ -597,6 +623,10 @@ resolved by their target dates, follow this escalation path:
 - Command Source: Option C (Both API + Introspection)
 - Intent Topics: Use proposed naming (`dev.omnibase-infra.intent.<backend>.<operation>.v1`)
 - Reducer Invocation: Direct call for MVP, migrate to event-based post-MVP
+
+> **Note**: If default decisions are used due to escalation, ADRs should still be created
+> documenting the decision rationale as "escalation default - subject to review". This
+> ensures traceability and allows for future reconsideration if needed.
 
 **Wave 2 Impact**: If decisions block Wave 2 start by more than 1 week, Tech Lead
 should evaluate partial Wave 2 execution using default decisions with documented
@@ -684,9 +714,84 @@ These questions can be answered during implementation:
 
 **Do NOT merge PR #52** - it will create technical debt that requires immediate rework.
 
+### Stakeholder Communication
+
+When closing PR #52, include a clear explanation referencing this handoff document:
+
+**Suggested close comment**:
+> This PR is being closed because the implementation violates the ONEX 4-node architecture.
+> The current implementation combines orchestrator, reducer, and effect responsibilities
+> into a single monolithic file (3,065 lines), making it untestable and unmaintainable.
+>
+> **Architectural issues documented in**:
+> - `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` (Section 2: Current State Analysis)
+> - `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (canonical execution model)
+>
+> **Key violations**:
+> - Mixed I/O with business logic (violates Effect purity)
+> - Direct handler calls instead of intent-based communication
+> - No proper command/event separation
+> - Orchestration logic embedded in Effect node
+>
+> A new implementation following the correct architecture will be created in a separate branch.
+> See the handoff document for the target architecture and migration plan.
+
 ---
 
-## 12. Related Documents
+## 12. Documentation Deliverables
+
+The following documentation artifacts must be created as part of this refactoring effort.
+
+### Architecture Decision Records (ADRs)
+
+| ADR | Status | Description |
+|-----|--------|-------------|
+| `docs/adr/ADR-XXX-command-source.md` | Pending | Command Source decision (Option A/B/C) |
+| `docs/adr/ADR-XXX-intent-topic-naming.md` | Pending | Intent topic naming convention |
+| `docs/adr/ADR-XXX-reducer-invocation-pattern.md` | Pending | Reducer invocation (direct vs event-based) |
+
+> **Note**: ADR numbers (XXX) will be assigned during the pre-implementation meeting.
+> ADR template: `docs/adr/ADR-TEMPLATE.md` (if available) or follow standard ADR format.
+
+### Operational Documentation
+
+| Document | Status | Description |
+|----------|--------|-------------|
+| `docs/runbooks/registration-workflow.md` | To be created | Operator runbook for registration workflow |
+
+**Runbook content requirements**:
+- Troubleshooting registration failures
+- Circuit breaker state recovery procedures
+- Kafka topic health verification
+- Consul/PostgreSQL registration state inspection
+- Common failure scenarios and resolution steps
+- Monitoring dashboards and alert response
+
+### Developer Documentation
+
+| Document | Status | Description |
+|----------|--------|-------------|
+| `docs/guides/v1_0_0-migration-guide.md` | To be created | Migration guide for v1_0_0 directory structure |
+| `docs/architecture/RUNTIME_EXECUTION_MODEL.md` | To be created | Runtime execution model documentation |
+
+**Migration guide content requirements** (see H1 ticket):
+- Import path changes (versioned to flat structure)
+- Contract.yaml version field usage
+- Backwards compatibility shim removal timeline
+- Testing migration completeness
+
+### Documentation Checklist
+
+- [ ] ADR: Command Source Decision
+- [ ] ADR: Intent Topic Naming
+- [ ] ADR: Reducer Invocation Pattern
+- [ ] Operator Runbook: Registration Workflow
+- [ ] Developer Guide: v1_0_0 Migration
+- [ ] Architecture Doc: Runtime Execution Model
+
+---
+
+## 13. Related Documents
 
 - `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`
 - `docs/architecture/CURRENT_NODE_ARCHITECTURE.md`
@@ -695,7 +800,7 @@ These questions can be answered during implementation:
 
 ---
 
-## 13. Code References
+## 14. Code References
 
 ### Current Implementation (Wrong - LEGACY path)
 - `src/omnibase_infra/nodes/node_registry_effect/v1_0_0/node.py` - 3,065 lines
