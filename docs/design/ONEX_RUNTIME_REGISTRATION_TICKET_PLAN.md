@@ -13,6 +13,12 @@
         - MINOR: New tickets, additional acceptance criteria, or clarifications
         - PATCH: Typo fixes, formatting, non-functional updates
 
+        Version history should be tracked in git commit messages.
+        When making changes:
+        - Update Document Version field above
+        - Include version bump rationale in commit message
+        - Reference related ticket IDs (e.g., OMN-XXX) in changes
+
 ---
 
 > **BLOCKER**: This plan requires omnibase_core >= 0.5.0
@@ -164,6 +170,15 @@
             - The envelope is transport-agnostic and plane-agnostic
             - Payload differs by message type; envelope structure is invariant
 
+        Single envelope per architectural plane:
+            - Ingestion Plane: Uses ModelEnvelope for all incoming messages
+            - Decision Plane: Uses ModelEnvelope for orchestrator context propagation
+            - State Plane: Uses ModelEnvelope for reducer/projector message handling
+            - Execution Plane: Uses ModelEnvelope for effect intent processing
+
+            There is NO separate envelope type per plane. The same ModelEnvelope
+            structure is used everywhere; only the payload contents differ.
+
         Required fields:
             - message_id
             - correlation_id
@@ -211,6 +226,7 @@
         - Envelope structure is identical for commands, events, and intents
         - Per-plane usage documented and enforced by runtime
         - Contract schema validation tests verify envelope field requirements
+        - Document envelope usage rules and migration path for dict-based envelopes
     Implementation Note:
         - Implementation sequencing: A2 and A2a can be built in parallel after A1
         - A2 enforcement can require envelope presence once A2a lands
@@ -316,13 +332,20 @@
                 - registration.events.NodeRegistrationAccepted -> domain = "registration"
                 - registration.events.NodeRegistrationRejected -> domain = "registration"
                 - registration.commands.RegisterNodeRequested -> domain = "registration"
+                - registration.intents.ConsulRegisterIntent -> domain = "registration"
+                - registration.intents.PostgresUpsertRegistrationIntent -> domain = "registration"
                 - discovery.events.NodeDiscovered -> domain = "discovery"
                 - discovery.events.NodeLost -> domain = "discovery"
+                - discovery.intents.ScanNetworkIntent -> domain = "discovery"
                 - health.commands.CheckNodeHealth -> domain = "health"
                 - health.events.HealthCheckCompleted -> domain = "health"
+                - health.intents.PingNodeIntent -> domain = "health"
                 - provisioning.intents.ProvisionResourceIntent -> domain = "provisioning"
                 - provisioning.events.ResourceProvisioned -> domain = "provisioning"
+                - provisioning.commands.RequestResourceProvisioning -> domain = "provisioning"
                 - runtime.events.RuntimeTick -> domain = "runtime"
+                - runtime.events.RuntimeStarted -> domain = "runtime"
+                - runtime.events.RuntimeShutdown -> domain = "runtime"
 
             Invalid examples (rejected by validation):
                 - NodeRegistrationAccepted (missing domain and category prefix)
@@ -445,6 +468,17 @@
             - Runtime logs warning if interval < 100ms (clamped to 100ms)
             - Runtime logs warning if interval > 60000ms (clamped to 60000ms)
             - Invalid (non-numeric) values fall back to default with error log
+
+        RuntimeTick message structure:
+            - now: datetime (UTC, timezone-aware)
+            - tick_sequence: int (monotonically increasing per runtime instance)
+            - runtime_id: str (identifies the runtime instance emitting ticks)
+
+        Operational considerations:
+            - In multi-runtime deployments, each runtime emits its own ticks
+            - Orchestrators MUST handle tick deduplication or use a single tick source
+            - Tick emission is best-effort; clock skew between instances is expected
+            - For timeout precision, use tick_sequence rather than wall-clock comparison
     Dependencies: B4
     Acceptance:
         - RuntimeTick emitted on configurable interval
@@ -626,6 +660,11 @@
             - Configuration: threshold and reset_timeout tuned per external service
             - InfraUnavailableError raised when circuit is OPEN (fail-fast behavior)
             - Tests verify circuit breaker transitions under failure conditions
+
+        Cross-Reference:
+            - See CLAUDE.md "Error Sanitization Guidelines" for allowed/forbidden error content
+            - See CLAUDE.md "Correlation ID Assignment Rules" for propagation patterns
+            - See CLAUDE.md "Circuit Breaker Pattern (MixinAsyncCircuitBreaker)" for implementation
 
 ### E2. Compensation and Retry Policy
     Priority: P1
@@ -849,6 +888,18 @@
             - Intents: publish to Kafka intent topic
             - Events: publish to Kafka event topic
 
+        Terminology clarification (Persistence vs Publishing):
+            - Projection PERSISTENCE: Synchronous write to durable storage (PostgreSQL, Redis)
+              This is NOT publishing. Projections are never written to Kafka topics.
+              The Projector.persist() method writes to storage and returns an ack.
+
+            - Event/Intent PUBLISHING: Asynchronous write to Kafka topics for downstream
+              consumption. This happens AFTER projection persistence completes.
+              The Runtime.publish() method sends to Kafka and awaits broker ack.
+
+            This distinction is critical for understanding F0's ordering guarantees:
+            projections are PERSISTED (to storage) before events/intents are PUBLISHED (to Kafka).
+
         Ordering rules:
             - Per-entity monotonic application based on (partition, offset) or sequence
             - Reject stale updates
@@ -1062,8 +1113,18 @@
 ### H1. Legacy Component Refactor Plan
     Priority: P1
     Dependencies:
-        - OMN-959 (omnibase_core 0.5.x adoption) - BLOCKING
+        - OMN-959 (omnibase_core 0.5.x adoption) - BLOCKING DEPENDENCY
+          This ticket CANNOT begin until OMN-959 is complete. The new node base
+          classes (NodeOrchestrator, NodeReducer, NodeEffect) are required for
+          the refactor target architecture.
         - All P0 tickets in sections A-F must be complete
+    Cross-Reference:
+        - See `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` Section 6 for
+          detailed Phase 0-4 migration steps and contingency plans
+    Pre-Refactor Requirements:
+        - Baseline performance metrics captured before any refactoring begins
+        - Metrics include: latency p50/p95/p99, throughput (events/sec), error rates
+        - Baseline serves as regression detection reference during and after migration
     Description:
         Identify legacy code paths and refactor into:
             - orchestrator handlers
@@ -1257,7 +1318,7 @@ graph TD
         ↓
     F0 (depends on B2, A2a) -> F1 -> F2
         ↓
-    G1 -> G2 -> G3 (depends on G2, E1, F1) -> G4 -> G5
+    G1 -> G2 -> G3 (depends on G2, E1, F1) -> G4 -> G5 -> G5a
         ↓
     OMN-959 (omnibase_core 0.5.x) -> H1 -> H1a -> H2
 
@@ -1350,6 +1411,13 @@ once all blocking dependencies from previous waves are complete.
         - Report rendering issues to the documentation team
         - Consider static image generation as fallback
 
+    Dependency visualization tips:
+        - Critical path highlighted: A1 -> A2 -> ... -> H2
+        - Blocking dependency (OMN-959) shown in red
+        - Parallel execution opportunities visible at same vertical level
+        - Cross-section dependencies shown with dashed lines where applicable
+        - Use `graph TD` for top-down flow; `graph LR` for left-right if preferred
+
 ---
 
 ## Future Work Recommendations
@@ -1362,16 +1430,32 @@ All new contracts should use `agent-contract-driven-generator` per CLAUDE.md gui
 
 Recommended validation tasks:
     - Verify generator supports new envelope model (A2a)
+      Specific checks:
+        - Generator produces ModelEnvelope-compatible message types
+        - Generated code includes all required envelope fields (message_id, correlation_id, etc.)
+        - Dict-based legacy patterns are migrated to typed envelope
     - Ensure FSM contract generation compatibility (D2)
     - Validate projector contract patterns (F0, F1)
 
 ### Performance Benchmarking
 
 Recommended metrics to establish:
-    - Baseline performance metrics before H1 refactor
+    - Baseline performance metrics before H1 refactor (REQUIRED - see H1 Pre-Refactor Requirements)
     - Target latency for orchestrator -> reducer -> effect flow (<100ms p99)
     - Throughput requirements for event processing (events/second)
     - Projection write latency targets (F0 concern)
+
+Target Performance Requirements (recommended thresholds):
+    - End-to-end latency (orchestrator -> reducer -> effect): <100ms p99
+    - Orchestrator decision latency: <20ms p99
+    - Reducer fold latency: <10ms p99
+    - Effect execution latency: <50ms p99 (excluding external service time)
+    - Projection persistence latency: <30ms p99
+    - Event throughput: >1000 events/second per partition
+    - Intent throughput: >500 intents/second per effect handler
+
+    These targets apply to steady-state operation. Burst handling and backpressure
+    behavior should be characterized separately.
 
 ### Documentation Verification
 
@@ -1535,15 +1619,15 @@ The following documentation artifacts are required as part of this plan.
 
 Key architectural decisions require ADRs before implementation begins.
 
-| ADR | Ticket Reference | Description |
-|-----|------------------|-------------|
-| `docs/adr/ADR-XXX-command-source.md` | Section 9.1 of HANDOFF | Command Source decision (API/Introspection/Both) |
-| `docs/adr/ADR-XXX-intent-topic-naming.md` | A2b, Section 9.1 of HANDOFF | Intent topic naming convention |
-| `docs/adr/ADR-XXX-reducer-invocation-pattern.md` | Section 9.1 of HANDOFF | Reducer invocation (direct vs event-based) |
+| ADR | This Plan Reference | HANDOFF Reference | Description |
+|-----|---------------------|-------------------|-------------|
+| `docs/adr/ADR-XXX-command-source.md` | A3 (OMN-943) | Section 9.1 | Command Source decision (API/Introspection/Both) |
+| `docs/adr/ADR-XXX-intent-topic-naming.md` | A2b (OMN-939) | Section 9.1 | Intent topic naming convention |
+| `docs/adr/ADR-XXX-reducer-invocation-pattern.md` | D1 (OMN-889) | Section 9.1 | Reducer invocation (direct vs event-based) |
 
 > **Note**: ADR numbers (XXX) will be assigned during the pre-implementation meeting.
 > See `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` Section 9.1 for decision
-> requirements and RACI matrix.
+> requirements, RACI matrix, and escalation paths.
 
 ### Operational Documentation
 
@@ -1572,6 +1656,9 @@ Key architectural decisions require ADRs before implementation begins.
 
 This plan references and should be read alongside:
     - `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` - Implementation handoff
+      (Contains: Phase 0-4 migration steps, PR #52 disposition, stakeholder communication)
+    - `docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2) - Workflow patterns
+      (Contains: Logical planes, data flow, handler contracts, Linear ticket mapping)
     - `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md` - Node architecture
     - `docs/architecture/CURRENT_NODE_ARCHITECTURE.md` - Current state reference
     - `contracts/fsm/dual_registration_reducer_fsm.yaml` - FSM contract definition

@@ -8,22 +8,33 @@
 
 ---
 
-> **BLOCKER**: This refactor requires `omnibase_core >= 0.5.0` which is NOT YET RELEASED.
+> ## BLOCKER - READ THIS FIRST
 >
-> **Current Status**: `omnibase_core` 0.5.x release is pending (see [PR #216](https://github.com/OmniNode-ai/omnibase_core/pull/216)).
+> **This refactor CANNOT proceed until `omnibase_core >= 0.5.0` is released.**
 >
-> **What is BLOCKED**:
-> - Phase 1-4 implementation (requires `NodeOrchestrator`, `NodeEffect`, `NodeReducer` base classes)
+> | Aspect | Details |
+> |--------|---------|
+> | **Required Version** | `omnibase_core >= 0.5.0` |
+> | **Current Version** | `omnibase_core ^0.4.0` |
+> | **Release Status** | PENDING - see [PR #216](https://github.com/OmniNode-ai/omnibase_core/pull/216) |
+> | **Tracking Ticket** | OMN-959 |
+>
+> **What is BLOCKED** (requires 0.5.x base classes):
+> - Phase 1-4 implementation (`NodeOrchestrator`, `NodeEffect`, `NodeReducer` base classes)
 > - Integration with `NodeRuntime` for handler execution
 > - Container wiring with actual base classes
 >
-> **What CAN proceed** (see Phase 0 Contingency Plan):
+> **What CAN proceed** (see Phase 0 Contingency Plan in Section 6):
 > - Directory structure and contract.yaml creation
 > - Pydantic model definitions
 > - Unit tests with mocked base classes
 > - Documentation and ADRs
 >
-> See also: `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (OMN-959 tracks dependency update)
+> **Action Required**: Verify 0.5.x availability BEFORE starting Phase 1 (see Phase 0 Task 0 gate).
+>
+> See also:
+> - `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.0.0)
+> - `/workspace/omnibase_infra3/docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2)
 
 ---
 
@@ -47,14 +58,31 @@ The current `NodeRegistryEffect` implementation (3,065 lines) completely violate
 
 ---
 
+> ## ARCHITECTURAL DISTINCTION: Projection Persistence vs Event Publishing
+>
+> This document uses two distinct concepts that must not be confused:
+>
+> | Term | Target | Timing | Purpose |
+> |------|--------|--------|---------|
+> | **Projection Persistence** | PostgreSQL (storage) | SYNCHRONOUS - before Kafka publish | State materialization for queries |
+> | **Event/Intent Publishing** | Kafka (event bus) | AFTER projection persistence | Downstream workflow triggers |
+>
+> **Critical Invariant**: The Runtime ALWAYS persists projections to storage BEFORE publishing
+> events/intents to Kafka. This ordering guarantee is enforced by the F0 Projector execution model.
+>
+> See Section 3.1 for detailed architectural diagrams and ticket F0 in the design doc for
+> the authoritative projection execution model.
+
+---
+
 ## 2. Current State Analysis
 
 ### 2.1 What Exists Today
 
 > **Note on Directory Structure**: The existing `v1_0_0/` directories shown below are LEGACY patterns
 > from earlier architectural decisions. Per CLAUDE.md policy "NO VERSIONED DIRECTORIES", new
-> components use flat structure. See ticket H1 in `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`
-> for migration plan of existing versioned directories.
+> components use flat structure. See ticket H1 (OMN-956) in `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`
+> for migration plan of existing versioned directories. This aligns with Global Constraint #6 in the ticket plan.
 
 ```
 nodes/node_registry_effect/v1_0_0/    # LEGACY structure (will be migrated per H1)
@@ -105,6 +133,11 @@ The `NodeDualRegistrationReducer` at `nodes/reducers/node_dual_registration_redu
 > **State-Reading Invariant**: Orchestrators read current state using projections ONLY
 > (via `ProtocolProjectionReader`). Orchestrators NEVER scan topics for state - all state
 > decisions are projection-backed.
+>
+> **Implementation Note**: The orchestrator resolves `ProtocolProjectionReader` from the
+> container at initialization. State queries (e.g., "is this node already registered?")
+> are synchronous reads against the projection store (PostgreSQL), not Kafka topic scans.
+> See `omnibase_spi/protocols/protocol_projection_reader.py` for the protocol definition.
 
 > **CRITICAL Terminology - Projection "Persistence" vs Event Publishing**:
 > Projections are **PERSISTED to storage** (PostgreSQL), NOT **published to Kafka**.
@@ -114,7 +147,7 @@ The `NodeDualRegistrationReducer` at `nodes/reducers/node_dual_registration_redu
 > - **Ordering Guarantee**: Runtime invokes Projector.persist() and waits for acknowledgment
 >   before publishing intents to Kafka (see F0 ↔ B2 interaction sequence diagram in design doc)
 >
-> See ticket F0 in `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` for the authoritative
+> See ticket F0 in `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` for the authoritative
 > definition of projection execution model and the F0 ↔ B2 interaction sequence diagram showing
 > the synchronization between Handler Output Model (B2) and Projector Execution (F0).
 >
@@ -177,7 +210,7 @@ The `NodeDualRegistrationReducer` at `nodes/reducers/node_dual_registration_redu
 
 ### 3.2 Key Architectural Invariants
 
-From `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`:
+From `/workspace/omnibase_infra3/docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`:
 
 1. **NodeRuntime is the only executable event loop** - Effect nodes don't run their own loops
 2. **Node logic is pure: no I/O, no mixins, no inheritance** (except base classes)
@@ -186,7 +219,7 @@ From `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`:
 5. **Infra owns all I/O and real system integrations** - Handlers live in infra
 6. **Contract-driven behavior** - YAML contracts define everything
 
-> **Terminology Note** (per Global Constraint #7 in design doc):
+> **Terminology Note** (per Global Constraint #7 in `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`):
 > - **Node**: The deployable/addressable unit that hosts one or more handlers
 > - **Handler**: A pure function that processes a specific message type within a node
 > - **Runtime**: Infrastructure that dispatches messages to handlers and publishes outputs
@@ -246,7 +279,8 @@ Version is tracked via `contract_version` field in `contract.yaml`, not director
 
 > **IMPORTANT**: Per CLAUDE.md policy "NO VERSIONED DIRECTORIES", new components use FLAT structure.
 > Version is tracked via `contract_version` field in `contract.yaml`, not directory hierarchy.
-> See Global Constraint #6 in `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`.
+> See Global Constraint #6 in `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`.
+> Migration of existing versioned directories is tracked by ticket H1 (OMN-956).
 
 ```
 nodes/
@@ -403,12 +437,29 @@ If `omnibase_core 0.5.x` is not available when Phase 1 is scheduled to begin:
 
 ### Phase 1: Create Orchestrator (3-4 days)
 
-> **GATE**: Task 1 below is a BLOCKING gate. Do not proceed to Task 2+ until Task 1 passes.
+> **GATE TASKS**: Tasks 0 and 1 below are BLOCKING gates. Do not proceed to Task 2+ until both gates pass.
+> If either gate fails, Phase 1 is BLOCKED - see Phase 0 contingency plan.
 
-1. **[GATE] Verify omnibase_core 0.5.x availability and run integration tests**
-   - Confirm Phase 0 exit criteria met: imports resolve, tests pass, no breaking changes
-   - Run `poetry update omnibase-core && pytest tests/`
-   - If this task fails, Phase 1 is BLOCKED - see Phase 0 contingency plan
+0. **[GATE - DEPENDENCY] Verify omnibase_core 0.5.x is available and installable**
+   - Check that [PR #216](https://github.com/OmniNode-ai/omnibase_core/pull/216) is merged
+   - Verify 0.5.x version is published to PyPI or internal registry
+   - Update `pyproject.toml`: change `omnibase-core = "^0.4.0"` to `omnibase-core = "^0.5.0"`
+   - Run `poetry update omnibase-core` - must succeed without errors
+   - Validate imports:
+     ```python
+     from omnibase_core.nodes import NodeOrchestrator, NodeEffect, NodeReducer
+     from omnibase_core.runtime import NodeRuntime
+     ```
+   - **Exit Criteria**: Imports resolve, poetry install succeeds
+   - **If FAILED**: Phase 1 is BLOCKED - activate Phase 0 contingency plan
+
+1. **[GATE - VALIDATION] Run integration tests with new dependency**
+   - Run `pytest tests/` - all existing tests must pass
+   - Confirm no breaking changes from 0.4.x to 0.5.x
+   - Document any required migration steps
+   - **Exit Criteria**: All tests pass, no regressions detected
+   - **If FAILED**: Phase 1 is BLOCKED - coordinate with omnibase_core team
+
 2. Create `nodes/node_registration_orchestrator/` directory structure (FLAT, no v1_0_0)
 3. Implement `ModelRegisterNodeCommand` and workflow state models
 4. Implement orchestrator contract.yaml
@@ -418,6 +469,9 @@ If `omnibase_core 0.5.x` is not available when Phase 1 is scheduled to begin:
    - Intent publishing
    - Workflow state tracking
 6. Write unit tests for orchestrator (no I/O mocking needed - it's pure)
+
+> **Note**: Task numbering starts at 0 to emphasize the dependency verification gate.
+> Total Phase 1 tasks: 7 (Tasks 0-6).
 
 ### Phase 2: Rewrite Effect Node (2-3 days)
 
@@ -473,6 +527,23 @@ If `omnibase_core 0.5.x` is not available when Phase 1 is scheduled to begin:
 | `omnibase_core` | `>= 0.5.0` | `^0.4.0` | Update to `^0.5.0` when released |
 | `omnibase_spi` | `>= 0.4.0` | `^0.4.0` | Already compatible |
 
+### Base Class Version Requirements
+
+The following base classes are introduced in `omnibase_core >= 0.5.0` and are REQUIRED
+for this refactor. These classes do not exist in 0.4.x:
+
+| Base Class | Minimum Version | Purpose |
+|------------|-----------------|---------|
+| `NodeOrchestrator` | 0.5.0 | Base class for workflow coordination nodes |
+| `NodeEffect` | 0.5.0 | Base class for I/O execution nodes |
+| `NodeReducer` | 0.5.0 | Base class for pure transformation nodes |
+| `NodeRuntime` | 0.5.0 | Handler execution and lifecycle management |
+| `ModelIntent` | 0.5.0 | Base model for typed intent messages |
+
+> **Note**: The 0.4.x codebase contains `NodeEffectLegacy`, `NodeReducerLegacy` classes.
+> These are NOT compatible with this refactor and will be deprecated in 0.5.x.
+> Do not extend legacy classes.
+
 ### Required Before Starting
 
 | Dependency | Status | Notes |
@@ -508,7 +579,7 @@ from omnibase_spi.protocols import ProtocolIntentHandler, ProtocolNodeRuntime
 
 > **Note**: In the current 0.4.x codebase, legacy node classes exist as `NodeEffectLegacy`,
 > `NodeReducerLegacy`, etc. These will be renamed/refactored in 0.5.x per
-> `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`. Do not build on the legacy classes.
+> `/workspace/omnibase_infra3/docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`. Do not build on the legacy classes.
 
 ### Expected Method Signatures
 
@@ -570,6 +641,11 @@ async def handle(
 
 ### 9.1 Decisions Required Before Phase 1
 
+> **CRITICAL BLOCKERS**: The three decisions below are MANDATORY PREREQUISITES for Phase 1.
+> Phase 1 implementation MUST NOT begin until all three decisions are documented as ADRs.
+> These are not optional refinements - they are architectural decisions that fundamentally
+> shape the implementation. Proceeding without resolution will result in rework.
+
 These decisions block Phase 1 implementation and must be resolved first.
 
 #### Blocking Questions
@@ -598,26 +674,58 @@ These decisions block Phase 1 implementation and must be resolved first.
 
 #### Decision RACI Matrix
 
+> **ACTION REQUIRED**: The Tech Lead MUST populate the "Responsible", "Accountable", and
+> "Target Date" columns below BEFORE the pre-implementation meeting. Phase 1 cannot begin
+> until this matrix is complete with specific names and dates.
+
 | Decision | Responsible | Accountable | Consulted | Informed | Target Date |
 |----------|-------------|-------------|-----------|----------|-------------|
-| Command Source | [To be assigned by Tech Lead] | [To be assigned by Tech Lead] | Platform Team | All Devs | [To be assigned by Tech Lead] |
-| Intent Topics | [To be assigned by Tech Lead] | [To be assigned by Tech Lead] | Platform Team | All Devs | [To be assigned by Tech Lead] |
-| Reducer Invocation | [To be assigned by Tech Lead] | [To be assigned by Tech Lead] | Platform Team | All Devs | [To be assigned by Tech Lead] |
+| Command Source | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date] |
+| Intent Topics | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date] |
+| Reducer Invocation | [Tech Lead: Assign name] | [Tech Lead: Assign name] | Platform Team | All Devs | [Tech Lead: Assign date] |
+
+**RACI Matrix Completion Checklist**:
+- [ ] Tech Lead has assigned "Responsible" person for each decision
+- [ ] Tech Lead has assigned "Accountable" person for each decision
+- [ ] Tech Lead has set "Target Date" for each decision (before Phase 1 start)
+- [ ] All assigned persons have acknowledged their roles
 
 > **Note**: Specific names and dates must be assigned before Phase 1 starts. The Tech Lead
-> is responsible for populating the "Responsible", "Accountable", and "Target Date" columns
-> during the pre-implementation planning meeting.
+> is responsible for populating this matrix during the pre-implementation planning meeting.
+> Placeholder values `[Tech Lead: Assign ...]` indicate incomplete assignments.
 
 #### Escalation Path for Decision Blockers
 
 If blocking decisions (Command Source, Intent Topics, Reducer Invocation) are not
 resolved by their target dates, follow this escalation path:
 
-| Days Overdue | Action | Owner |
-|--------------|--------|-------|
-| 1-2 days | Daily standup reminder + async Slack ping | Lead Developer |
-| 3-4 days | Schedule dedicated decision meeting | Tech Lead |
-| 5+ days | Escalate to Engineering Manager, propose default decisions | Tech Lead |
+| Days Overdue | Action | Owner | Deliverable |
+|--------------|--------|-------|-------------|
+| 1-2 days | Daily standup reminder + async Slack ping | Lead Developer | Written status in standup notes |
+| 3-4 days | Schedule dedicated decision meeting (30-60 min) | Tech Lead | Meeting invite with agenda |
+| 5+ days | Escalate to Engineering Manager, propose default decisions | Tech Lead | Written escalation with options |
+| 7+ days | Emergency decision meeting with EM approval for defaults | Engineering Manager | Decision memo + ADR drafts |
+
+**Escalation Communication Templates**:
+
+*Day 3-4 Slack message (to decision owner)*:
+> Reminder: Decision for [Command Source/Intent Topics/Reducer Invocation] is now [X] days
+> overdue from target date [DATE]. This is blocking Phase 1 of the registration refactor.
+> Please confirm if you can provide a decision by EOD tomorrow, or let me know if you need
+> a synchronous meeting to discuss options.
+
+*Day 5+ escalation email (to Engineering Manager)*:
+> Subject: ESCALATION: Blocking decisions for OMN-889 Registration Refactor
+>
+> Three architectural decisions are blocking Phase 1 implementation:
+> 1. Command Source - [X] days overdue
+> 2. Intent Topics - [X] days overdue
+> 3. Reducer Invocation - [X] days overdue
+>
+> Proposed action: Apply default decisions (documented in handoff) and proceed.
+> This will allow Phase 1 to start while decisions are refined in parallel.
+>
+> Please confirm approval to use defaults, or schedule an emergency decision meeting.
 
 **Default Decisions** (if escalation reaches 5+ days):
 - Command Source: Option C (Both API + Introspection)
@@ -634,12 +742,16 @@ technical debt tickets for potential refactor.
 
 #### Pre-Implementation Meeting Requirements
 
-A decision-review meeting with Tech Lead and Platform Team MUST be scheduled BEFORE Phase 1 begins.
+> **MANDATORY**: A decision-review meeting MUST be scheduled and completed BEFORE Phase 1 begins.
+> This is not optional - Phase 1 kickoff is gated on meeting completion.
 
 **Meeting Scheduling**:
 - Schedule meeting at least 3 business days before planned Phase 1 start date
+- **Scheduling Owner**: Tech Lead is responsible for scheduling this meeting
+- **Calendar Invite**: Must include agenda and pre-read materials (this handoff document)
 - Attendees: Tech Lead (required), Platform Team representative (required), Lead Developer (required)
 - Duration: 1-2 hours
+- **Fallback**: If primary attendees unavailable, reschedule - do not proceed without meeting
 
 **Meeting Agenda**:
 1. Review all three BLOCKING questions (Command Source, Intent Topics, Reducer Invocation)
@@ -670,6 +782,10 @@ These questions can be answered during implementation:
 5. **Timeout Handling**: Where does timeout tracking live?
    - Current: Effect node has `_slow_operation_threshold_ms`
    - Proposed: Orchestrator tracks workflow-level timeouts
+   - **Note**: Detailed timeout handling patterns are documented in:
+     - `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (tickets B6, C2)
+     - `/workspace/omnibase_infra3/docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (section 8.2)
+     This handoff does not prescribe specific timeout values - those are implementation details.
 
 6. **Existing Tests**: What to do with `tests/unit/nodes/test_node_registry_effect.py`?
    - Rewrite for new architecture
@@ -724,8 +840,8 @@ When closing PR #52, include a clear explanation referencing this handoff docume
 > into a single monolithic file (3,065 lines), making it untestable and unmaintainable.
 >
 > **Architectural issues documented in**:
-> - `docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` (Section 2: Current State Analysis)
-> - `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (canonical execution model)
+> - `/workspace/omnibase_infra3/docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md` (Section 2: Current State Analysis)
+> - `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (canonical execution model)
 >
 > **Key violations**:
 > - Mixed I/O with business logic (violates Effect purity)
@@ -736,6 +852,42 @@ When closing PR #52, include a clear explanation referencing this handoff docume
 > A new implementation following the correct architecture will be created in a separate branch.
 > See the handoff document for the target architecture and migration plan.
 
+### Stakeholder Notification Plan
+
+**Stakeholders to Notify** (before closing PR #52):
+
+| Stakeholder | Role | Notification Method | Timing |
+|-------------|------|---------------------|--------|
+| PR Author | Original implementer | Direct message + PR comment | Before close |
+| Tech Lead | Architecture approval | Slack/Email | Before close |
+| Platform Team | Downstream consumers | Team channel | Day of close |
+| All Devs | Awareness | Engineering channel | After close |
+
+**Notification Template** (for direct message to PR author):
+
+> Hi [Author],
+>
+> I wanted to give you a heads-up that we'll be closing PR #52. This is NOT a reflection
+> on code quality - the implementation itself is solid. However, during architecture review,
+> we identified that the approach violates the ONEX 4-node pattern we need to follow.
+>
+> The key issue is that the current implementation mixes orchestrator, reducer, and effect
+> responsibilities in a single node. Our architecture requires these to be separate components
+> for testability and maintainability.
+>
+> Full details are in the handoff document:
+> `/workspace/omnibase_infra3/docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md`
+>
+> The work you did is valuable and will inform the new implementation. Would you like to
+> be involved in the refactored approach?
+>
+> Thanks for your understanding.
+
+**Post-Close Actions**:
+1. Link handoff document in PR close comment
+2. Create new tracking ticket for refactored implementation
+3. Archive (don't delete) PR #52 branch for reference
+
 ---
 
 ## 12. Documentation Deliverables
@@ -744,14 +896,15 @@ The following documentation artifacts must be created as part of this refactorin
 
 ### Architecture Decision Records (ADRs)
 
-| ADR | Status | Description |
-|-----|--------|-------------|
-| `docs/adr/ADR-XXX-command-source.md` | Pending | Command Source decision (Option A/B/C) |
-| `docs/adr/ADR-XXX-intent-topic-naming.md` | Pending | Intent topic naming convention |
-| `docs/adr/ADR-XXX-reducer-invocation-pattern.md` | Pending | Reducer invocation (direct vs event-based) |
+| ADR | Status | Description | Related Ticket Plan Reference |
+|-----|--------|-------------|-------------------------------|
+| `docs/adr/ADR-XXX-command-source.md` | Pending | Command Source decision (Option A/B/C) | A3 (OMN-943) |
+| `docs/adr/ADR-XXX-intent-topic-naming.md` | Pending | Intent topic naming convention | A2b (OMN-939) |
+| `docs/adr/ADR-XXX-reducer-invocation-pattern.md` | Pending | Reducer invocation (direct vs event-based) | D1 (OMN-889) |
 
 > **Note**: ADR numbers (XXX) will be assigned during the pre-implementation meeting.
 > ADR template: `docs/adr/ADR-TEMPLATE.md` (if available) or follow standard ADR format.
+> Related ticket references map to `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md`.
 
 ### Operational Documentation
 
@@ -793,10 +946,21 @@ The following documentation artifacts must be created as part of this refactorin
 
 ## 13. Related Documents
 
-- `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`
-- `docs/architecture/CURRENT_NODE_ARCHITECTURE.md`
+**Canonical References** (authoritative for this refactor):
+- `/workspace/omnibase_infra3/docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` (Document Version 1.0.0)
+  - Defines ticket structure, global constraints, and execution model
+- `/workspace/omnibase_infra3/docs/design/DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md` (Version 2.1.2)
+  - Defines workflow architecture patterns and terminology
+
+**Architecture References**:
+- `/workspace/omnibase_infra3/docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md`
+- `/workspace/omnibase_infra3/docs/architecture/CURRENT_NODE_ARCHITECTURE.md`
+
+**Contract References**:
 - `contracts/fsm/dual_registration_reducer_fsm.yaml`
-- `omnibase_core` documentation for NodeRuntime, NodeOrchestrator, NodeEffect
+
+**External Dependencies**:
+- `omnibase_core` documentation for NodeRuntime, NodeOrchestrator, NodeEffect (requires 0.5.x)
 
 ---
 

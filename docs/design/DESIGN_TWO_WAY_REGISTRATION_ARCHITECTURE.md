@@ -11,9 +11,19 @@
 
 ---
 
+## Related Documents
+
+    Canonical Plan:
+        - ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.0.0)
+          Authoritative ticket definitions, global constraints, and execution model
+
+    Implementation Handoff:
+        - docs/handoffs/HANDOFF_TWO_WAY_REGISTRATION_REFACTOR.md
+          Phase 0-4 migration steps, PR disposition, stakeholder communication
+
 ## Linear Ticket References
 
-    Canonical Plan: ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md
+    Canonical Plan: ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.0.0)
 
     Foundation:
         A1  Terminology & Layering      OMN-931
@@ -98,6 +108,9 @@
 
 ## 1. Terminology
 
+    Note: This terminology aligns with Global Constraint #7 in
+    ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (Document Version 1.0.0).
+
     Command:
         - A request directed to a decision-making component.
         - Requires authentication and authorization.
@@ -119,6 +132,11 @@
     Handler:
         - A runtime unit that processes a single message.
         - Returns outputs to be published by the runtime.
+        - Usage: Use "handler" when referring to message processing logic.
+
+    Node:
+        - The deployable/addressable unit that hosts one or more handlers.
+        - Usage: Use "node" when referring to deployment, lifecycle, or identity.
 
     Orchestrator:
         - A node responsible for coordinating workflows.
@@ -135,6 +153,10 @@
         - Persists reducer projection outputs to storage (PostgreSQL, Redis, etc.).
         - Does NOT publish to Kafka; projections go to storage only.
         - Tracks offsets and ensures idempotent writes.
+
+    Runtime:
+        - Infrastructure that dispatches messages to handlers and publishes outputs.
+        - Only the runtime publishes; handlers never publish directly.
 
 ---
 
