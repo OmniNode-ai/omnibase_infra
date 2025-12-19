@@ -582,6 +582,26 @@ These decisions block Phase 1 implementation and must be resolved first.
 > is responsible for populating the "Responsible", "Accountable", and "Target Date" columns
 > during the pre-implementation planning meeting.
 
+#### Escalation Path for Decision Blockers
+
+If blocking decisions (Command Source, Intent Topics, Reducer Invocation) are not
+resolved by their target dates, follow this escalation path:
+
+| Days Overdue | Action | Owner |
+|--------------|--------|-------|
+| 1-2 days | Daily standup reminder + async Slack ping | Lead Developer |
+| 3-4 days | Schedule dedicated decision meeting | Tech Lead |
+| 5+ days | Escalate to Engineering Manager, propose default decisions | Tech Lead |
+
+**Default Decisions** (if escalation reaches 5+ days):
+- Command Source: Option C (Both API + Introspection)
+- Intent Topics: Use proposed naming (`dev.omnibase-infra.intent.<backend>.<operation>.v1`)
+- Reducer Invocation: Direct call for MVP, migrate to event-based post-MVP
+
+**Wave 2 Impact**: If decisions block Wave 2 start by more than 1 week, Tech Lead
+should evaluate partial Wave 2 execution using default decisions with documented
+technical debt tickets for potential refactor.
+
 #### Pre-Implementation Meeting Requirements
 
 A decision-review meeting with Tech Lead and Platform Team MUST be scheduled BEFORE Phase 1 begins.
@@ -632,6 +652,9 @@ These questions can be answered during implementation:
 ---
 
 ## 10. Timeline Estimate
+
+> **Decision Escalation**: If blocking decisions are not resolved, see Section 9.1
+> "Escalation Path for Decision Blockers" for mitigation steps.
 
 | Phase | Duration | Dependencies |
 |-------|----------|--------------|

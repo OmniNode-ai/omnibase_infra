@@ -944,6 +944,9 @@
 
 ### H1. Legacy Component Refactor Plan
     Priority: P1
+    Dependencies:
+        - OMN-959 (omnibase_core 0.5.x adoption) - BLOCKING
+        - All P0 tickets in sections A-F must be complete
     Description:
         Identify legacy code paths and refactor into:
             - orchestrator handlers
@@ -968,6 +971,22 @@
             - deprecation warnings added before removal
             - final removal milestone and verification criteria
 
+### H1a. Migration Validation Gate
+    Priority: P1
+    Dependencies: H1
+    Description:
+        Validate that legacy v1_0_0 migration is complete and safe before proceeding.
+
+        Validation checklist:
+            - All legacy imports updated to flat structure
+            - No import errors in CI
+            - Integration tests pass with new structure
+            - Documentation updated with new paths
+    Acceptance:
+        - CI green with migrated paths
+        - No runtime import errors
+        - No deprecated path warnings in logs
+
 ### H2. Migration Checklist
     Priority: P1
     Acceptance:
@@ -977,6 +996,115 @@
 ---
 
 ## Dependency Order (Authoritative)
+
+```mermaid
+graph TD
+    subgraph "A. Foundation - P0"
+        A1["A1: Canonical Layering"]
+        A2["A2: Execution Shapes"]
+        A2a["A2a: Message Envelope"]
+        A2b["A2b: Topic Taxonomy"]
+        A3["A3: Registration Trigger"]
+
+        A1 --> A2
+        A2 --> A2a
+        A2a --> A2b
+        A2b --> A3
+    end
+
+    subgraph "B. Runtime - P0"
+        B1["B1: Dispatch Engine"]
+        B1a["B1a: Message Registry"]
+        B2["B2: Handler Output"]
+        B3["B3: Idempotency Guard"]
+        B4["B4: Handler Context"]
+        B5["B5: Correlation Propagation"]
+        B6["B6: Runtime Scheduler"]
+
+        B1 --> B1a
+        B1a --> B2
+        B2 --> B3
+        B3 --> B4
+        B4 --> B5
+        B5 --> B6
+    end
+
+    subgraph "C. Orchestrator - P0"
+        C0["C0: Projection Reader"]
+        C1["C1: Registration Orchestrator"]
+        C2["C2: Durable Timeout"]
+
+        C0 --> C1
+        C1 --> C2
+    end
+
+    subgraph "D. Reducer - P0"
+        D1["D1: Registration Reducer"]
+        D2["D2: FSM Contract"]
+        D3["D3: Reducer Test Suite"]
+
+        D1 --> D2
+        D2 --> D3
+    end
+
+    subgraph "E. Effects - P0/P1"
+        E1["E1: Registry Effect"]
+        E2["E2: Compensation/Retry"]
+        E3["E3: DLQ Handling"]
+
+        E1 --> E2
+        E2 --> E3
+    end
+
+    subgraph "F. Projection/Storage - P0"
+        F0["F0: Projector Execution"]
+        F1["F1: Registration Schema"]
+        F2["F2: Snapshot Publishing"]
+
+        F0 --> F1
+        F1 --> F2
+    end
+
+    subgraph "G. Testing - P0/P2"
+        G1["G1: Reducer Tests"]
+        G2["G2: Orchestrator Tests"]
+        G3["G3: E2E Integration"]
+        G4["G4: Effect Idempotency"]
+        G5["G5: Chaos/Replay"]
+        G5a["G5a: Property-Based"]
+
+        G1 --> G2
+        G2 --> G3
+        G3 --> G4
+        G4 --> G5
+        G5 --> G5a
+    end
+
+    subgraph "H. Migration - P1"
+        OMN959["OMN-959: omnibase_core 0.5.x"]
+        H1["H1: Legacy Refactor"]
+        H1a["H1a: Migration Validation"]
+        H2["H2: Migration Checklist"]
+
+        OMN959 --> H1
+        H1 --> H1a
+        H1a --> H2
+    end
+
+    %% Cross-section dependencies
+    A3 --> B1
+    B6 --> C1
+    B2 --> F0
+    A2a --> F0
+    G2 --> G3
+    E1 --> G3
+    F1 --> G3
+
+    %% Style for blocker
+    style OMN959 fill:#ff6b6b,stroke:#333,color:#fff
+```
+
+**Text Reference (canonical)**:
 
     A1 -> A2 -> A2a -> A2b -> A3
         ↓
@@ -992,7 +1120,12 @@
         ↓
     G1 -> G2 -> G3 (depends on G2, E1, F1) -> G4 -> G5
         ↓
-    H1 -> H2
+    OMN-959 (omnibase_core 0.5.x) -> H1 -> H1a -> H2
+
+    Migration dependency chain:
+        - H1 (Legacy Component Refactor) depends on OMN-959 (BLOCKING)
+        - H1a (Migration Validation Gate) depends on H1 completion
+        - H2 (Migration Checklist) depends on H1a validation passing
 
 ---
 
@@ -1000,6 +1133,48 @@
     do not introduce contradictory contracts or shared-interface churn.
 
     This document is the canonical baseline for all future workflows.
+
+---
+
+## Future Work Recommendations
+
+The following items are out of scope for this plan but should be tracked for future iterations.
+
+### Contract Generation Tooling
+
+All new contracts should use `agent-contract-driven-generator` per CLAUDE.md guidelines.
+
+Recommended validation tasks:
+    - Verify generator supports new envelope model (A2a)
+    - Ensure FSM contract generation compatibility (D2)
+    - Validate projector contract patterns (F0, F1)
+
+### Performance Benchmarking
+
+Recommended metrics to establish:
+    - Baseline performance metrics before H1 refactor
+    - Target latency for orchestrator -> reducer -> effect flow (<100ms p99)
+    - Throughput requirements for event processing (events/second)
+    - Projection write latency targets (F0 concern)
+
+### Documentation Verification
+
+Ensure documentation renders correctly:
+    - GitHub markdown preview (included in test plan)
+    - Linear ticket links (included in test plan)
+    - Mermaid diagrams (if added, verify rendering)
+
+### Additional Testing Patterns
+
+Consider adding:
+    - Chaos testing for runtime scheduler (B6)
+    - Load testing for high-volume event processing
+    - Fault injection for circuit breaker validation
+
+---
+
+These recommendations do not block the current plan but should be considered
+for post-MVP iterations or as parallel workstreams.
 
 ---
 
