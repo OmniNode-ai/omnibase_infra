@@ -44,6 +44,14 @@ class EnumExecutionShapeViolation(str, Enum):
     Topic Violations:
         TOPIC_CATEGORY_MISMATCH: Handler subscribed to wrong topic category.
             Event handlers should subscribe to event topics, etc.
+
+    Routing Violations:
+        UNMAPPED_MESSAGE_ROUTE: Message type is not registered in routing.
+            All message types must have explicit route registrations.
+
+    Syntax/Parse Violations:
+        SYNTAX_ERROR: File contains invalid Python syntax.
+            File could not be parsed for analysis due to syntax errors.
     """
 
     # Return type violations
@@ -59,6 +67,12 @@ class EnumExecutionShapeViolation(str, Enum):
 
     # Topic violations
     TOPIC_CATEGORY_MISMATCH = "topic_category_mismatch"
+
+    # Routing violations
+    UNMAPPED_MESSAGE_ROUTE = "unmapped_message_route"
+
+    # Syntax/parse violations
+    SYNTAX_ERROR = "syntax_error"
 
 
 __all__ = ["EnumExecutionShapeViolation"]

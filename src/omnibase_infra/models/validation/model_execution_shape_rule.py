@@ -41,16 +41,18 @@ class ModelExecutionShapeRule(BaseModel):
 
     Note:
         The validation logic uses both `allowed_return_types` and
-        `forbidden_return_types`:
+        `forbidden_return_types` together:
 
         - Categories in `forbidden_return_types` are always rejected.
         - If `allowed_return_types` is non-empty, categories must be in
-          that list to be allowed (allow-list mode).
+          that list AND not in `forbidden_return_types` to be allowed.
         - If `allowed_return_types` is empty, all non-forbidden categories
           are implicitly allowed (permissive mode).
 
-        This enables strict validation for most handlers while allowing
-        COMPUTE handlers to remain fully permissive.
+        In practice, most handler rules explicitly list their allowed
+        categories. For example, COMPUTE handlers list all 4 categories
+        to make their permissiveness explicit, while REDUCER only lists
+        PROJECTION.
     """
 
     handler_type: EnumHandlerType = Field(
@@ -59,7 +61,11 @@ class ModelExecutionShapeRule(BaseModel):
     )
     allowed_return_types: list[EnumMessageCategory] = Field(
         default_factory=list,
-        description="Message categories this handler type is explicitly allowed to return",
+        description=(
+            "Message categories this handler type is explicitly allowed to return. "
+            "If non-empty, acts as an allow-list: only listed categories pass validation. "
+            "If empty, all non-forbidden categories are implicitly allowed (permissive mode)."
+        ),
     )
     forbidden_return_types: list[EnumMessageCategory] = Field(
         default_factory=list,

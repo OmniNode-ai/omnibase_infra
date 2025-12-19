@@ -851,16 +851,21 @@ class TestValidHandlers:
         """Compute handler can return any message type."""
         validator = RuntimeShapeValidator()
 
-        for category in EnumMessageCategory:
+        # Test message class with configurable category attribute.
+        # Using a class factory pattern to avoid unconventional class
+        # redefinition inside the loop while maintaining test isolation.
+        def make_test_message(cat: EnumMessageCategory) -> object:
+            """Create a test message instance with the given category."""
 
             class TestMessage:
-                pass
+                category = cat
 
-            TestMessage.category = category  # type: ignore[attr-defined]
+            return TestMessage()
 
+        for category in EnumMessageCategory:
             violation = validator.validate_handler_output(
                 handler_type=EnumHandlerType.COMPUTE,
-                output=TestMessage(),
+                output=make_test_message(category),
                 output_category=category,
             )
 

@@ -14,6 +14,34 @@ Execution Shape Rules (from ONEX architecture):
 
 All handlers are forbidden from direct publish operations (.publish(), .send_event(), .emit()).
 
+Limitations:
+    This validator uses AST-based static analysis, which has inherent limitations:
+
+    **Detection Capabilities:**
+    - Handler type detection via class name suffix (e.g., `OrderEffectHandler`)
+    - Handler type detection via base class (e.g., `class X(EffectHandler)`)
+    - Handler type detection via decorator (e.g., `@effect_handler`)
+    - Return type analysis from annotations and return statements
+    - Direct publish method call detection (`.publish()`, `.emit()`, etc.)
+    - System time access detection (`time.time()`, `datetime.now()`, etc.)
+
+    **Known Limitations:**
+    - Cannot detect dynamically constructed type names or factory patterns
+    - Cannot follow imports to resolve types from other modules
+    - Cannot detect indirect calls (e.g., `getattr(self, "publish")()`)
+    - Substring matching may produce false positives (e.g., a class named
+      `EventProcessor` will be flagged as returning EVENT even if it doesn't)
+    - Handler type detection requires conventional naming or explicit markers
+    - Does not analyze runtime behavior or conditional paths
+
+    **False Positive Scenarios:**
+    - Variable names containing message category keywords (e.g., `event_count`)
+    - Classes with category-like suffixes that aren't message types
+    - Overridden methods that don't follow base class behavior
+
+    For runtime validation that handles dynamic cases, use
+    :class:`RuntimeShapeValidator` which validates actual return values.
+
 Usage:
     >>> from omnibase_infra.validation.execution_shape_validator import (
     ...     validate_execution_shapes,
@@ -57,28 +85,49 @@ _HANDLER_SUFFIX_MAP: dict[str, EnumHandlerType] = {
     "Compute": EnumHandlerType.COMPUTE,
 }
 
-# Patterns for detecting message category types in return annotations
+# Patterns for detecting message category types in return annotations.
+#
+# PATTERN MATCHING ORDER: More specific patterns (longer matches) are listed first
+# within each category to prevent false positives. For example, "ModelEventMessage"
+# should match "EventMessage" before "Event" to avoid partial matches.
+#
+# The patterns are checked using substring matching (`in` operator) in the order
+# defined below. The dictionary preserves insertion order (Python 3.7+), so:
+# 1. Compound patterns (e.g., "ModelEventMessage") - most specific
+# 2. Prefix patterns (e.g., "ModelEvent", "EventMessage") - medium specificity
+# 3. Simple patterns (e.g., "Event", "EVENT") - least specific, checked last
+#
+# KNOWN LIMITATIONS:
+# - Substring matching may produce false positives for non-message types that
+#   happen to contain these keywords (e.g., "PreventEventLoop", "CommandLineArgs").
+# - The fallback case-insensitive check in _detect_message_category() has the same
+#   limitation but is intentionally lenient to catch non-standard naming conventions.
+# - For strict validation, use the ONEX naming conventions (Model* prefix).
 _MESSAGE_CATEGORY_PATTERNS: dict[str, EnumMessageCategory] = {
-    # Event patterns
-    "Event": EnumMessageCategory.EVENT,
-    "EVENT": EnumMessageCategory.EVENT,
-    "ModelEvent": EnumMessageCategory.EVENT,
+    # Event patterns - ordered by specificity (most specific first)
+    "ModelEventMessage": EnumMessageCategory.EVENT,
     "EventMessage": EnumMessageCategory.EVENT,
-    # Command patterns
-    "Command": EnumMessageCategory.COMMAND,
-    "COMMAND": EnumMessageCategory.COMMAND,
-    "ModelCommand": EnumMessageCategory.COMMAND,
+    "ModelEvent": EnumMessageCategory.EVENT,
+    "EVENT": EnumMessageCategory.EVENT,
+    "Event": EnumMessageCategory.EVENT,
+    # Command patterns - ordered by specificity (most specific first)
+    "ModelCommandMessage": EnumMessageCategory.COMMAND,
     "CommandMessage": EnumMessageCategory.COMMAND,
-    # Intent patterns
-    "Intent": EnumMessageCategory.INTENT,
-    "INTENT": EnumMessageCategory.INTENT,
-    "ModelIntent": EnumMessageCategory.INTENT,
+    "ModelCommand": EnumMessageCategory.COMMAND,
+    "COMMAND": EnumMessageCategory.COMMAND,
+    "Command": EnumMessageCategory.COMMAND,
+    # Intent patterns - ordered by specificity (most specific first)
+    "ModelIntentMessage": EnumMessageCategory.INTENT,
     "IntentMessage": EnumMessageCategory.INTENT,
-    # Projection patterns
-    "Projection": EnumMessageCategory.PROJECTION,
-    "PROJECTION": EnumMessageCategory.PROJECTION,
-    "ModelProjection": EnumMessageCategory.PROJECTION,
+    "ModelIntent": EnumMessageCategory.INTENT,
+    "INTENT": EnumMessageCategory.INTENT,
+    "Intent": EnumMessageCategory.INTENT,
+    # Projection patterns - ordered by specificity (most specific first)
+    "ModelProjectionMessage": EnumMessageCategory.PROJECTION,
     "ProjectionMessage": EnumMessageCategory.PROJECTION,
+    "ModelProjection": EnumMessageCategory.PROJECTION,
+    "PROJECTION": EnumMessageCategory.PROJECTION,
+    "Projection": EnumMessageCategory.PROJECTION,
 }
 
 # Forbidden direct publish method names
@@ -374,16 +423,55 @@ class ExecutionShapeValidator:
                                 return handler_type
 
             # Check @effect_handler, @reducer_handler patterns
+            # Use suffix/prefix matching to reduce false positives from decorators
+            # that happen to contain handler type keywords (e.g., @side_effect)
             decorator_name = self._get_name_from_expr(decorator)
             if decorator_name is not None:
                 decorator_lower = decorator_name.lower()
-                if "effect" in decorator_lower:
+
+                # Check for specific handler decorator patterns:
+                # - Suffix: *_effect, *_reducer, *_orchestrator, *_compute
+                # - Prefix: effect_*, reducer_*, orchestrator_*, compute_*
+                # - Exact: effect, reducer, orchestrator, compute
+                #
+                # This avoids false positives like:
+                # - @side_effect (not an effect handler decorator)
+                # - @no_compute (not a compute handler decorator)
+
+                # Effect handler patterns
+                if (
+                    decorator_lower.endswith("_effect")
+                    or decorator_lower.startswith("effect_")
+                    or decorator_lower == "effect"
+                    or decorator_lower == "effect_handler"
+                ):
                     return EnumHandlerType.EFFECT
-                if "reducer" in decorator_lower:
+
+                # Reducer handler patterns
+                if (
+                    decorator_lower.endswith("_reducer")
+                    or decorator_lower.startswith("reducer_")
+                    or decorator_lower == "reducer"
+                    or decorator_lower == "reducer_handler"
+                ):
                     return EnumHandlerType.REDUCER
-                if "orchestrator" in decorator_lower:
+
+                # Orchestrator handler patterns
+                if (
+                    decorator_lower.endswith("_orchestrator")
+                    or decorator_lower.startswith("orchestrator_")
+                    or decorator_lower == "orchestrator"
+                    or decorator_lower == "orchestrator_handler"
+                ):
                     return EnumHandlerType.ORCHESTRATOR
-                if "compute" in decorator_lower:
+
+                # Compute handler patterns
+                if (
+                    decorator_lower.endswith("_compute")
+                    or decorator_lower.startswith("compute_")
+                    or decorator_lower == "compute"
+                    or decorator_lower == "compute_handler"
+                ):
                     return EnumHandlerType.COMPUTE
 
         return None
@@ -549,28 +637,91 @@ class ExecutionShapeValidator:
     def _detect_message_category(self, name: str) -> EnumMessageCategory | None:
         """Detect message category from a type or variable name.
 
+        Uses a two-phase detection strategy:
+        1. First, check for exact suffix matches (most reliable, fewest false positives)
+        2. Then, check for substring patterns (more lenient, catches non-standard names)
+
+        KNOWN LIMITATIONS:
+        - Substring matching in phase 2 may produce false positives for names that
+          contain message keywords but aren't message types (e.g., "PreventEvent",
+          "CommandLineParser", "UserIntent" as a business object).
+        - The suffix-based approach is preferred for ONEX-compliant code.
+
         Args:
-            name: The name to analyze.
+            name: The name to analyze (type name, class name, or variable name).
 
         Returns:
             The detected message category, or None if not a message type.
         """
-        # Check direct pattern matches
-        for pattern, category in _MESSAGE_CATEGORY_PATTERNS.items():
-            if pattern in name:
+        # Phase 1: Check suffix-based patterns (most reliable, fewest false positives)
+        # Suffix matching is more precise than substring matching because message
+        # types conventionally END with their category: OrderCreatedEvent, CreateOrderCommand
+        #
+        # Check longer suffixes first to avoid partial matches:
+        # "EventMessage" should match before "Event"
+        suffix_patterns = [
+            # Event suffixes - ordered by length (longest first)
+            ("EventMessage", EnumMessageCategory.EVENT),
+            ("Event", EnumMessageCategory.EVENT),
+            # Command suffixes - ordered by length (longest first)
+            ("CommandMessage", EnumMessageCategory.COMMAND),
+            ("Command", EnumMessageCategory.COMMAND),
+            # Intent suffixes - ordered by length (longest first)
+            ("IntentMessage", EnumMessageCategory.INTENT),
+            ("Intent", EnumMessageCategory.INTENT),
+            # Projection suffixes - ordered by length (longest first)
+            ("ProjectionMessage", EnumMessageCategory.PROJECTION),
+            ("Projection", EnumMessageCategory.PROJECTION),
+        ]
+
+        for suffix, category in suffix_patterns:
+            if name.endswith(suffix):
                 return category
 
-        # Check substring patterns for common naming conventions
-        # Note: Simple substring checks are sufficient and more efficient than regex
-        # for these literal string matches
+        # Phase 2: Check prefix patterns for Model* naming convention
+        # ONEX models use "Model" prefix: ModelEvent, ModelCommand, etc.
+        prefix_patterns = [
+            ("ModelEvent", EnumMessageCategory.EVENT),
+            ("ModelCommand", EnumMessageCategory.COMMAND),
+            ("ModelIntent", EnumMessageCategory.INTENT),
+            ("ModelProjection", EnumMessageCategory.PROJECTION),
+        ]
+
+        for prefix, category in prefix_patterns:
+            if name.startswith(prefix):
+                return category
+
+        # Phase 3: Check for exact uppercase enum-style names
+        # These are typically enum values like EVENT, COMMAND, etc.
+        uppercase_patterns = {
+            "EVENT": EnumMessageCategory.EVENT,
+            "COMMAND": EnumMessageCategory.COMMAND,
+            "INTENT": EnumMessageCategory.INTENT,
+            "PROJECTION": EnumMessageCategory.PROJECTION,
+        }
+
+        if name in uppercase_patterns:
+            return uppercase_patterns[name]
+
+        # Phase 4: Lenient substring matching for non-standard naming
+        # This is intentionally the last resort and may produce false positives.
+        # Examples of potential false positives:
+        # - "prevent_event" (utility function, not event type)
+        # - "command_line_args" (CLI argument, not command type)
+        # - "user_intent" (business concept, not intent message)
+        #
+        # We use case-insensitive matching here to catch various conventions.
         name_lower = name.lower()
-        if "event" in name_lower:
+
+        # Only match if the keyword appears as a word boundary (reduces false positives)
+        # Check for common patterns where the keyword is at the end or preceded by underscore
+        if name_lower.endswith("event") or "_event" in name_lower:
             return EnumMessageCategory.EVENT
-        if "command" in name_lower:
+        if name_lower.endswith("command") or "_command" in name_lower:
             return EnumMessageCategory.COMMAND
-        if "intent" in name_lower:
+        if name_lower.endswith("intent") or "_intent" in name_lower:
             return EnumMessageCategory.INTENT
-        if "projection" in name_lower:
+        if name_lower.endswith("projection") or "_projection" in name_lower:
             return EnumMessageCategory.PROJECTION
 
         return None

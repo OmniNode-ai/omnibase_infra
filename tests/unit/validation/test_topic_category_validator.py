@@ -324,18 +324,26 @@ class TestTopicCategoryASTVisitor:
     """Test TopicCategoryASTVisitor for static analysis."""
 
     def test_infers_handler_type_from_class_name(self) -> None:
-        """Verify handler type inference from class names."""
+        """Verify handler type inference from class names.
+
+        We verify handler type inference by testing that the inferred type
+        produces correct validation results when subscribing to topics.
+        An Effect handler subscribing to commands is valid, confirming
+        the handler type was correctly inferred as EFFECT.
+        """
         source = """
 class OrderEffect:
-    def handle(self):
-        pass
+    def setup(self, consumer):
+        consumer.subscribe("order.commands")  # Valid for Effect handler
 """
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
         visitor.visit(tree)
-        # After visiting, the handler type should have been inferred
-        # We can't directly check internal state, but we can verify no errors
+        # Effect handler subscribing to commands should be valid (no violations).
+        # This confirms the handler type was correctly inferred as EFFECT,
+        # since Reducers cannot subscribe to commands topics.
+        assert len(visitor.violations) == 0
 
     def test_detects_subscribe_call_with_wrong_topic(self) -> None:
         """Verify detection of subscribe with wrong topic for handler type."""
@@ -401,17 +409,30 @@ class TestValidateTopicCategoriesInFile:
         """Verify non-Python files are skipped."""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"not python")
-            violations = validate_topic_categories_in_file(Path(f.name))
-        assert len(violations) == 0
+            f.flush()
+            file_path = Path(f.name)
+
+        try:
+            violations = validate_topic_categories_in_file(file_path)
+            assert len(violations) == 0
+        finally:
+            file_path.unlink(missing_ok=True)
 
     def test_syntax_error_handling(self) -> None:
-        """Verify syntax error handling."""
+        """Verify syntax error handling uses correct violation type."""
         with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w") as f:
             f.write("def broken(:\n")  # Invalid syntax
             f.flush()
-            violations = validate_topic_categories_in_file(Path(f.name))
-        assert len(violations) == 1
-        assert "syntax error" in violations[0].message.lower()
+            file_path = Path(f.name)
+
+        try:
+            violations = validate_topic_categories_in_file(file_path)
+            assert len(violations) == 1
+            assert violations[0].violation_type == EnumExecutionShapeViolation.SYNTAX_ERROR
+            assert violations[0].handler_type is None  # Can't determine from unparseable file
+            assert "syntax error" in violations[0].message.lower()
+        finally:
+            file_path.unlink(missing_ok=True)
 
     def test_valid_python_file(self) -> None:
         """Verify valid Python file analysis."""
@@ -422,8 +443,13 @@ class OrderReducer:
         consumer.subscribe("order.events")
 """)
             f.flush()
-            violations = validate_topic_categories_in_file(Path(f.name))
-        assert len(violations) == 0
+            file_path = Path(f.name)
+
+        try:
+            violations = validate_topic_categories_in_file(file_path)
+            assert len(violations) == 0
+        finally:
+            file_path.unlink(missing_ok=True)
 
 
 class TestValidateMessageOnTopic:
@@ -548,11 +574,11 @@ class TestFStringTopicExtraction:
         When the domain is interpolated, we can only extract ".events" which
         is an incomplete fragment. This should be skipped to avoid false positives.
         """
-        source = '''
+        source = """
 class OrderEffect:
     def setup(self, consumer, domain):
         consumer.subscribe(f"{domain}.events")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
@@ -566,11 +592,11 @@ class OrderEffect:
         When the suffix is interpolated, we can only extract "order." which
         is an incomplete fragment. This should be skipped to avoid false negatives.
         """
-        source = '''
+        source = """
 class OrderEffect:
     def setup(self, consumer, suffix):
         consumer.subscribe(f"order.{suffix}")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
@@ -583,11 +609,11 @@ class OrderEffect:
 
         When both parts are interpolated, we have no static content to validate.
         """
-        source = '''
+        source = """
 class OrderEffect:
     def setup(self, consumer, prefix, suffix):
         consumer.subscribe(f"{prefix}.{suffix}")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
@@ -600,11 +626,11 @@ class OrderEffect:
 
         When the entire topic is a single expression, there's nothing to validate.
         """
-        source = '''
+        source = """
 class OrderEffect:
     def setup(self, consumer):
         consumer.subscribe(f"{self.get_topic()}")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
@@ -618,12 +644,12 @@ class OrderEffect:
         f-strings without interpolation (unusual but valid) should be validated
         just like regular string literals.
         """
-        source = '''
+        source = """
 class OrderReducer:
     def setup(self, consumer):
         # Unusual but valid: f-string with no interpolation
         consumer.subscribe(f"order.commands")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
@@ -637,11 +663,11 @@ class OrderReducer:
 
     def test_fstring_valid_static_no_violation(self) -> None:
         """Verify fully static f-strings with valid topics pass."""
-        source = '''
+        source = """
 class OrderReducer:
     def setup(self, consumer):
         consumer.subscribe(f"order.events")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
@@ -658,12 +684,12 @@ class OrderReducer:
         # This tests a rare case where static parts form a complete pattern
         # For example, an f-string with an empty string expression wouldn't
         # affect the final topic name
-        source = '''
+        source = """
 class OrderReducer:
     def setup(self, consumer):
         # Static parts form complete pattern (empty expression doesn't affect result)
         consumer.subscribe(f"order.events{''}")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
@@ -678,13 +704,13 @@ class OrderReducer:
         Previously, extracting only static parts could yield ".events" which
         might be incorrectly processed. This test ensures we skip such cases.
         """
-        source = '''
+        source = """
 class OrderReducer:
     def setup(self, consumer, domain):
         # This should NOT generate a warning about non-conforming topic name
         # because we can't reliably determine the full topic name
         consumer.subscribe(f"{domain}.events")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
@@ -698,18 +724,154 @@ class OrderReducer:
         Previously, extracting only static parts could yield "order." which
         might be incorrectly flagged as invalid. This test ensures we skip such cases.
         """
-        source = '''
+        source = """
 class OrderReducer:
     def setup(self, consumer, suffix):
         # This should NOT generate a warning about non-conforming topic name
         # because we can't reliably determine the full topic name
         consumer.subscribe(f"order.{suffix}")
-'''
+"""
         tree = ast.parse(source)
         validator = TopicCategoryValidator()
         visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
         visitor.visit(tree)
         # Should have no violations - incomplete f-string is skipped entirely
+        assert len(visitor.violations) == 0
+
+
+class TestStringConcatenationExtraction:
+    """Test string concatenation topic extraction in AST analysis.
+
+    These tests verify that the _extract_topic_from_binop method correctly
+    handles various string concatenation patterns to avoid false positives
+    and negatives when extracting topic names for validation.
+    """
+
+    def test_concat_fully_static_validated(self) -> None:
+        """Verify fully static concatenation is validated.
+
+        "order" + ".events" should be evaluated to "order.events" and validated.
+        """
+        source = """
+class OrderReducer:
+    def setup(self, consumer):
+        # Fully static concatenation - should be validated
+        consumer.subscribe("order" + ".commands")
+"""
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should detect the violation - reducer shouldn't subscribe to commands
+        assert len(visitor.violations) == 1
+        assert (
+            visitor.violations[0].violation_type
+            == EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH
+        )
+
+    def test_concat_fully_static_valid_no_violation(self) -> None:
+        """Verify fully static concatenation with valid topic passes."""
+        source = """
+class OrderReducer:
+    def setup(self, consumer):
+        # Fully static concatenation - valid for reducer
+        consumer.subscribe("order" + ".events")
+"""
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - valid static concatenation
+        assert len(visitor.violations) == 0
+
+    def test_concat_with_variable_prefix_skipped(self) -> None:
+        """Verify concatenation with variable prefix is skipped.
+
+        prefix + ".events" only yields ".events" which is incomplete.
+        """
+        source = """
+class OrderReducer:
+    def setup(self, consumer, prefix):
+        # Variable prefix - should be skipped
+        consumer.subscribe(prefix + ".events")
+"""
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - incomplete concatenation is skipped
+        assert len(visitor.violations) == 0
+
+    def test_concat_with_variable_suffix_skipped(self) -> None:
+        """Verify concatenation with variable suffix is skipped.
+
+        "order." + suffix only yields "order." which is incomplete.
+        """
+        source = """
+class OrderReducer:
+    def setup(self, consumer, suffix):
+        # Variable suffix - should be skipped
+        consumer.subscribe("order." + suffix)
+"""
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - incomplete concatenation is skipped
+        assert len(visitor.violations) == 0
+
+    def test_concat_fully_variable_skipped(self) -> None:
+        """Verify fully variable concatenation is skipped.
+
+        prefix + suffix has no static parts that form a valid pattern.
+        """
+        source = """
+class OrderReducer:
+    def setup(self, consumer, prefix, suffix):
+        # Fully variable - should be skipped
+        consumer.subscribe(prefix + suffix)
+"""
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - fully variable is skipped
+        assert len(visitor.violations) == 0
+
+    def test_concat_nested_static_validated(self) -> None:
+        """Verify nested static concatenation is validated.
+
+        "ord" + "er" + ".events" should be evaluated to "order.events".
+        """
+        source = """
+class OrderReducer:
+    def setup(self, consumer):
+        # Nested static concatenation - should be validated
+        consumer.subscribe("ord" + "er" + ".events")
+"""
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - valid nested static concatenation
+        assert len(visitor.violations) == 0
+
+    def test_concat_nested_with_variable_skipped(self) -> None:
+        """Verify nested concatenation with variable is skipped.
+
+        "order" + mid + ".events" has a variable in the middle.
+        """
+        source = """
+class OrderReducer:
+    def setup(self, consumer, mid):
+        # Nested with variable - should be skipped
+        consumer.subscribe("order" + mid + ".events")
+"""
+        tree = ast.parse(source)
+        validator = TopicCategoryValidator()
+        visitor = TopicCategoryASTVisitor(Path("test.py"), validator)
+        visitor.visit(tree)
+        # Should have no violations - has variable so skipped
         assert len(visitor.violations) == 0
 
 

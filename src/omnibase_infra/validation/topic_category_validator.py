@@ -465,6 +465,12 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
             #    skip validation for this f-string - we can't reliably validate it
             # 4. If no static parts exist, skip validation entirely
             topic_name = self._extract_topic_from_fstring(first_arg)
+        elif isinstance(first_arg, ast.BinOp) and isinstance(first_arg.op, ast.Add):
+            # String concatenation handling (e.g., "order" + ".events")
+            #
+            # LIMITATION: String concatenation with variables cannot be fully resolved
+            # at static analysis time. We use the same conservative approach as f-strings.
+            topic_name = self._extract_topic_from_binop(first_arg)
 
         if topic_name is None:
             return
@@ -566,10 +572,24 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
     ) -> EnumMessageCategory | None:
         """Attempt to infer message category from an expression.
 
-        Uses naming conventions to guess the message category:
-        - *Event, *Created, *Updated, *Deleted -> EVENT
-        - *Command, Create*, Update*, Delete* -> COMMAND
-        - *Intent -> INTENT
+        Uses naming conventions to guess the message category. Patterns are
+        checked in order of specificity to minimize false positives:
+
+        1. **Suffix patterns** (most reliable):
+           - ``*Event``, ``*Created``, ``*Updated``, ``*Deleted`` -> EVENT
+           - ``*Command`` -> COMMAND
+           - ``*Intent`` -> INTENT
+
+        2. **Prefix patterns** (for CQRS-style naming):
+           - ``Create*``, ``Update*``, ``Delete*``, ``Execute*`` -> COMMAND
+
+        Known Limitations:
+            - **False positives**: Names like ``EventEmitter`` or ``CommandLine``
+              may be incorrectly classified as message types.
+            - **Order dependence**: A name ending in both ``Created`` and
+              containing ``Command`` (e.g., ``CommandCreated``) will be
+              classified as EVENT (suffix match first).
+            - Substring matching on prefixes is less reliable than suffix matching.
 
         Args:
             node: The AST expression node.
@@ -590,24 +610,38 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         if name is None:
             return None
 
-        name_lower = name.lower()
+        # Phase 1: Check suffix patterns (most reliable, fewest false positives)
+        # Suffix matching is preferred because message types conventionally
+        # END with their category: OrderCreatedEvent, CreateOrderCommand
+        #
+        # Check longer suffixes first to avoid partial matches:
+        # "CreatedEvent" should match before "Event"
+        event_suffixes = ("Event", "Created", "Updated", "Deleted", "Occurred")
+        for suffix in event_suffixes:
+            if name.endswith(suffix):
+                return EnumMessageCategory.EVENT
 
-        # Event patterns: OrderCreated, UserUpdated, *Event
-        if any(
-            suffix in name_lower
-            for suffix in ("event", "created", "updated", "deleted", "occurred")
-        ):
-            return EnumMessageCategory.EVENT
-
-        # Command patterns: CreateOrder, *Command
-        if any(
-            pattern in name_lower
-            for pattern in ("command", "create", "update", "delete", "execute", "do")
-        ):
+        if name.endswith("Command"):
             return EnumMessageCategory.COMMAND
 
-        # Intent patterns: CheckoutIntent, *Intent
-        if "intent" in name_lower:
+        if name.endswith("Intent"):
+            return EnumMessageCategory.INTENT
+
+        # Phase 2: Check prefix patterns for CQRS-style command naming
+        # Commands often start with verbs: CreateOrder, UpdateUser, DeleteItem
+        # Note: This is less reliable as many non-message types start with verbs
+        command_prefixes = ("Create", "Update", "Delete", "Execute", "Do")
+        for prefix in command_prefixes:
+            if name.startswith(prefix):
+                return EnumMessageCategory.COMMAND
+
+        # Phase 3: Check for Model* prefix patterns (ONEX naming convention)
+        # ONEX models use "Model" prefix: ModelEvent, ModelCommand, etc.
+        if name.startswith("ModelEvent"):
+            return EnumMessageCategory.EVENT
+        if name.startswith("ModelCommand"):
+            return EnumMessageCategory.COMMAND
+        if name.startswith("ModelIntent"):
             return EnumMessageCategory.INTENT
 
         return None
@@ -690,6 +724,72 @@ class TopicCategoryASTVisitor(ast.NodeVisitor):
         # For example: f"order.events" (no interpolated values)
         return joined if joined else None
 
+    def _extract_topic_from_binop(
+        self,
+        node: ast.BinOp,
+    ) -> str | None:
+        """Safely extract a topic name from a string concatenation BinOp node.
+
+        String concatenation with variables (e.g., prefix + ".events") cannot be
+        fully resolved at static analysis time. This method extracts the static
+        string parts and applies the same conservative validation as f-strings.
+
+        Args:
+            node: The AST BinOp node representing string concatenation.
+
+        Returns:
+            The extracted topic name if it forms a complete valid pattern,
+            or None if the concatenation cannot be reliably validated.
+
+        Examples:
+            - "order" + ".events" -> "order.events" (fully static, valid)
+            - prefix + ".events" -> None (partial: ".events" is incomplete)
+            - "order." + suffix -> None (partial: "order." is incomplete)
+            - prefix + suffix -> None (no static parts that form valid pattern)
+        """
+        # Recursively extract static string parts from the binary operation
+        static_parts: list[str] = []
+        has_variable = False
+
+        def collect_static_parts(n: ast.expr) -> None:
+            nonlocal has_variable
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                static_parts.append(n.value)
+            elif isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add):
+                # Recursively handle nested concatenations
+                collect_static_parts(n.left)
+                collect_static_parts(n.right)
+            else:
+                # This is a variable or other non-constant expression
+                has_variable = True
+
+        collect_static_parts(node)
+
+        # If no static parts, we can't validate anything
+        if not static_parts:
+            return None
+
+        # Join the static parts to see what we have
+        joined = "".join(static_parts)
+
+        # If there are variables, apply the same conservative approach as f-strings
+        if has_variable:
+            # Skip validation for incomplete fragments
+            if joined.startswith(".") or joined.endswith("."):
+                return None
+
+            # Check if the joined result matches a complete topic pattern
+            for pattern in self.validator.patterns.values():
+                if pattern.match(joined):
+                    return joined
+
+            # Skip validation to avoid false positives/negatives
+            return None
+
+        # No variables - this is fully static concatenation
+        # (e.g., "order" + ".events")
+        return joined if joined else None
+
 
 def validate_topic_categories_in_file(
     file_path: Path,
@@ -737,10 +837,11 @@ def validate_topic_categories_in_file(
         tree = ast.parse(source, filename=str(file_path))
     except SyntaxError as e:
         # Syntax error is a file-level issue, not a handler-specific violation.
+        # Use SYNTAX_ERROR violation type for AST parse failures.
         # handler_type is None because we can't analyze the code structure.
         return [
             ModelExecutionShapeViolationResult(
-                violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
+                violation_type=EnumExecutionShapeViolation.SYNTAX_ERROR,
                 handler_type=None,  # Cannot determine handler type from unparseable file
                 file_path=str(file_path.absolute()),
                 line_number=e.lineno or 1,

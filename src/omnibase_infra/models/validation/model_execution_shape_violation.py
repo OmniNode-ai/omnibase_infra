@@ -102,14 +102,19 @@ class ModelExecutionShapeViolationResult(BaseModel):
 
         Returns:
             Formatted string in GitHub Actions annotation format.
+            Includes handler type when available for better diagnostics.
 
         Example:
-            ::error file=src/handler.py,line=42::REDUCER_RETURNS_EVENTS: Reducer...
+            ::error file=src/handler.py,line=42::[REDUCER] REDUCER_RETURNS_EVENTS: ...
+            ::error file=src/handler.py,line=42::UNMAPPED_MESSAGE_ROUTE: ...
         """
         annotation_type = "error" if self.is_blocking() else "warning"
+        handler_prefix = (
+            f"[{self.handler_type.value.upper()}] " if self.handler_type else ""
+        )
         return (
             f"::{annotation_type} file={self.file_path},line={self.line_number}::"
-            f"{self.violation_type.value}: {self.message}"
+            f"{handler_prefix}{self.violation_type.value}: {self.message}"
         )
 
 

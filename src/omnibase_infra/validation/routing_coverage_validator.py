@@ -43,12 +43,11 @@ import ast
 import re
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
-from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.validation.model_execution_shape_violation import (
@@ -350,27 +349,39 @@ def discover_registered_routes(
     registry: ProtocolBindingRegistry | None = None,
     source_directory: Path | None = None,
 ) -> set[str]:
-    """Discover all message types registered in routing.
+    """Discover routing registrations from registry or source code.
 
     This function can inspect:
     - A runtime ProtocolBindingRegistry instance if provided
     - Source code for static analysis of registration calls
 
+    Note:
+        The registry strategy returns handler categories (e.g., "http", "db",
+        "kafka") from protocol bindings, NOT individual message type names.
+        For full message-to-handler mapping, use the source_directory strategy
+        which discovers message types from registration patterns in code.
+
     Args:
-        registry: Optional runtime registry instance to inspect.
+        registry: Optional runtime registry instance to inspect. Returns
+            handler categories (protocol types), not message types.
         source_directory: Optional source directory for static analysis.
+            Returns message type names found in registration patterns.
 
     Returns:
-        Set of message type class names that have registered routes.
+        Set of discovered route identifiers. When using registry, these are
+        handler categories (http, db, kafka). When using source_directory,
+        these are message type class names.
 
     Example:
-        >>> # Runtime inspection
+        >>> # Runtime inspection - returns handler categories
         >>> routes = discover_registered_routes(registry=get_handler_registry())
+        >>> # Returns: {"http", "kafka", "db"}
 
-        >>> # Static analysis
+        >>> # Static analysis - returns message type names
         >>> routes = discover_registered_routes(
         ...     source_directory=Path("src/omnibase_infra")
         ... )
+        >>> # Returns: {"OrderCreated", "UserRegistered", ...}
     """
     registered_types: set[str] = set()
 
@@ -392,13 +403,32 @@ def discover_registered_routes(
 
 
 def _discover_routes_static(source_directory: Path) -> set[str]:
-    """Discover registered routes through static analysis.
+    """Discover registered routes through regex-based static analysis.
 
     Searches for patterns like:
     - registry.register(MessageType, handler)
     - @route(MessageType)
     - handler_map[MessageType] = ...
     - bind(MessageType, ...)
+    - subscribe(topic, MessageType)
+
+    Note:
+        This function uses regex patterns, not AST parsing, for discovery.
+        This approach is faster but has limitations:
+
+        **May produce false positives:**
+        - Code in comments or docstrings matching the patterns
+        - String literals that happen to match (e.g., error messages)
+        - Test fixtures or mocks that aren't real registrations
+
+        **May miss registrations:**
+        - Dynamically constructed registration calls
+        - Non-standard registration patterns
+        - Registrations via factory functions or metaclasses
+        - Registrations in configuration files (YAML, JSON)
+
+        For precise discovery, consider AST-based analysis or runtime
+        registry inspection.
 
     Args:
         source_directory: Root directory to scan.
@@ -408,25 +438,50 @@ def _discover_routes_static(source_directory: Path) -> set[str]:
     """
     registered_types: set[str] = set()
 
-    # Registration patterns to search for
+    # Registration patterns to search for.
+    # Each pattern captures the message type name as group 1.
+    #
+    # PATTERN ORDERING: Patterns are ordered by specificity/reliability:
+    # 1. Decorator patterns - most explicit routing declarations
+    # 2. Method call patterns - programmatic registration
+    # 3. Dictionary patterns - mapping-based registration
+    #
+    # Note: Order doesn't affect matching (all patterns run independently),
+    # but documents the relative reliability of each pattern type.
     registration_patterns = [
-        # registry.register("type", Handler)
-        r"\.register\s*\(\s*['\"]?(\w+)['\"]?\s*,",
-        # @route(MessageType) or @handle(MessageType)
+        # Decorator patterns (most explicit routing declarations)
+        # Matches: @route(OrderEvent), @handle("OrderEvent"), @handler(OrderEvent)
+        # False positive risk: Low - decorators are typically for routing
         r"@(?:route|handle|handler)\s*\(\s*['\"]?(\w+)['\"]?\s*\)",
-        # handler_map[MessageType] = ...
-        r"handler_map\s*\[\s*['\"]?(\w+)['\"]?\s*\]",
-        # bind(MessageType, handler)
+        # Method call patterns (programmatic registration)
+        # Matches: registry.register(OrderEvent, handler)
+        # False positive risk: Medium - .register() is a common method name
+        r"\.register\s*\(\s*['\"]?(\w+)['\"]?\s*,",
+        # Matches: event_bus.bind(OrderEvent, handler)
+        # False positive risk: Medium - .bind() could be used for other purposes
         r"\.bind\s*\(\s*['\"]?(\w+)['\"]?\s*,",
-        # subscribe(topic, MessageType)
+        # Matches: consumer.subscribe(topic, OrderEvent)
+        # False positive risk: Medium - second argument detection is heuristic
         r"\.subscribe\s*\([^,]+,\s*['\"]?(\w+)['\"]?\s*\)",
+        # Dictionary patterns (mapping-based registration)
+        # Matches: handler_map[OrderEvent] = ...
+        # False positive risk: Low - specific to handler_map convention
+        r"handler_map\s*\[\s*['\"]?(\w+)['\"]?\s*\]",
     ]
 
     compiled_patterns = [re.compile(p) for p in registration_patterns]
 
-    # Scan all Python files
+    # Scan all Python files, excluding test files to reduce false positives
     for file_path in source_directory.glob("**/*.py"):
-        if "__pycache__" in str(file_path):
+        path_str = str(file_path)
+        # Skip __pycache__ directories
+        if "__pycache__" in path_str:
+            continue
+        # Skip test files - they often contain mock registrations that
+        # would produce false positives (e.g., `registry.register(MockEvent, ...)`)
+        if file_path.name.startswith("test_") or file_path.name.endswith("_test.py"):
+            continue
+        if file_path.name == "conftest.py":
             continue
 
         try:
@@ -524,8 +579,10 @@ class RoutingCoverageValidator:
             # Routing coverage is a configuration issue, not specific to any handler type.
             # handler_type is None because this violation is about missing routing
             # registration, not about a specific handler's behavior.
+            # Use UNMAPPED_MESSAGE_ROUTE for semantic correctness - this is a routing
+            # configuration issue, not a topic/category mismatch.
             violation = ModelExecutionShapeViolationResult(
-                violation_type=EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH,
+                violation_type=EnumExecutionShapeViolation.UNMAPPED_MESSAGE_ROUTE,
                 handler_type=None,  # Routing coverage is not handler-specific
                 file_path=str(self.source_directory),
                 line_number=1,
