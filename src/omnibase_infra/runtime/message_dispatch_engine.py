@@ -316,6 +316,13 @@ class MessageDispatchEngine:
         metrics to a dedicated metrics backend (Prometheus, StatsD, etc.) for
         accurate aggregation across time windows.
 
+        **METRICS CAVEAT**: While metrics updates are protected by a lock,
+        get_metrics() and get_structured_metrics() provide point-in-time
+        snapshots. Under high concurrent load, metrics may be approximate
+        between snapshot reads. For production monitoring, consider exporting
+        metrics to a dedicated metrics backend (Prometheus, StatsD, etc.) for
+        accurate aggregation across time windows.
+
     Logging Levels:
         - **INFO**: Dispatch start/complete with topic, category, dispatcher count
         - **DEBUG**: Dispatcher execution details, routing decisions
