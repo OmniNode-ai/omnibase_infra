@@ -15,7 +15,9 @@ from omnibase_core.validation.circular_import_validator import CircularImportVal
 from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
 # AST-based execution shape validation for CI gate (OMN-958)
-# EXECUTION_SHAPE_RULES is the canonical single source of truth
+# NOTE: EXECUTION_SHAPE_RULES is defined ONLY in execution_shape_validator.py
+# (the canonical single source of truth). This import re-exports it for public API
+# convenience. See execution_shape_validator.py lines 112-149 for the definition.
 from omnibase_infra.validation.execution_shape_validator import (
     EXECUTION_SHAPE_RULES,
     ExecutionShapeValidator,
@@ -48,7 +50,8 @@ from omnibase_infra.validation.routing_coverage_validator import (
 )
 
 # Runtime shape validation for ONEX 4-node architecture
-# Note: EXECUTION_SHAPE_RULES is imported from execution_shape_validator above
+# NOTE: RuntimeShapeValidator uses EXECUTION_SHAPE_RULES from execution_shape_validator.py
+# (not a separate definition). See runtime_shape_validator.py lines 66-69 for the import.
 from omnibase_infra.validation.runtime_shape_validator import (
     ExecutionShapeViolationError,
     RuntimeShapeValidator,

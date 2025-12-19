@@ -76,7 +76,20 @@ F = TypeVar("F", bound=Callable[..., object])
 # Violation Type Mapping
 # ==============================================================================
 
-# Maps (handler_type, forbidden_category) to specific violation type
+# Maps (handler_type, forbidden_category) to specific violation type.
+#
+# This mapping covers explicitly forbidden return types from EXECUTION_SHAPE_RULES:
+#   - EFFECT: Cannot return PROJECTION (explicit forbidden)
+#   - REDUCER: Cannot return EVENT (explicit forbidden)
+#   - ORCHESTRATOR: Cannot return INTENT, PROJECTION (explicit forbidden)
+#
+# Note: Some categories are implicitly forbidden because they're not in the
+# allowed_return_types list (allow-list mode). For example:
+#   - REDUCER only allows PROJECTION, so COMMAND and INTENT are implicitly forbidden
+#   - EFFECT only allows EVENT and COMMAND, so INTENT is implicitly forbidden
+#
+# These implicit violations use FORBIDDEN_RETURN_TYPE as the fallback, which is
+# semantically correct: the handler is returning a type that's not in its allow-list.
 _VIOLATION_TYPE_MAP: dict[
     tuple[EnumHandlerType, EnumMessageCategory], EnumExecutionShapeViolation
 ] = {
@@ -332,21 +345,49 @@ class RuntimeShapeValidator:
         if self.is_output_allowed(handler_type, output_category):
             return None
 
-        # Determine specific violation type
+        # Determine specific violation type.
+        #
+        # The _VIOLATION_TYPE_MAP contains explicit mappings for known forbidden
+        # combinations (e.g., REDUCER returning EVENT). The fallback to
+        # FORBIDDEN_RETURN_TYPE is used for implicitly forbidden categories
+        # that aren't in the handler's allow-list but don't have a specific
+        # violation type. Examples:
+        #   - REDUCER returning COMMAND (not in allowed_return_types=[PROJECTION])
+        #   - EFFECT returning INTENT (not in allowed_return_types=[EVENT, COMMAND])
+        #
+        # The generic FORBIDDEN_RETURN_TYPE is semantically appropriate for these
+        # cases because they represent allow-list violations rather than explicit
+        # architectural constraint violations.
         violation_key = (handler_type, output_category)
         violation_type = _VIOLATION_TYPE_MAP.get(
             violation_key,
-            # Fallback to generic forbidden return type for unmapped violations
             EnumExecutionShapeViolation.FORBIDDEN_RETURN_TYPE,
         )
 
-        # Build descriptive message
+        # Build descriptive message with clear actionable guidance.
+        # The message distinguishes between explicit forbidden types (architectural
+        # constraint) and implicit forbidden types (not in allow-list).
         output_type_name = type(output).__name__
-        message = (
-            f"{handler_type.value.upper()} handler cannot return "
-            f"{output_category.value.upper()} type '{output_type_name}'. "
-            f"This violates ONEX 4-node architecture execution shape constraints."
-        )
+        handler_name = handler_type.value.upper()
+        category_name = output_category.value.upper()
+
+        # Provide context-specific guidance based on whether this is an explicit
+        # or implicit violation
+        if violation_type == EnumExecutionShapeViolation.FORBIDDEN_RETURN_TYPE:
+            # Implicit violation: category not in allow-list
+            message = (
+                f"{handler_name} handler cannot return {category_name} type "
+                f"'{output_type_name}'. {category_name} is not in the allowed "
+                f"return types for {handler_name} handlers. "
+                f"Check EXECUTION_SHAPE_RULES for allowed message categories."
+            )
+        else:
+            # Explicit violation: known architectural constraint
+            message = (
+                f"{handler_name} handler cannot return {category_name} type "
+                f"'{output_type_name}'. This violates ONEX 4-node architecture "
+                f"execution shape constraints ({violation_type.value})."
+            )
 
         return ModelExecutionShapeViolationResult(
             violation_type=violation_type,

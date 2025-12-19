@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import ast
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -99,6 +98,9 @@ _SYSTEM_TIME_PATTERNS: frozenset[str] = frozenset({
     "datetime.utcnow",
     "datetime.datetime.now",
     "datetime.datetime.utcnow",
+    # Django timezone support
+    "timezone.now",
+    "django.utils.timezone.now",
 })
 
 # Module-level time function patterns
@@ -558,15 +560,17 @@ class ExecutionShapeValidator:
             if pattern in name:
                 return category
 
-        # Check regex patterns for common naming conventions
+        # Check substring patterns for common naming conventions
+        # Note: Simple substring checks are sufficient and more efficient than regex
+        # for these literal string matches
         name_lower = name.lower()
-        if re.search(r"event", name_lower):
+        if "event" in name_lower:
             return EnumMessageCategory.EVENT
-        if re.search(r"command", name_lower):
+        if "command" in name_lower:
             return EnumMessageCategory.COMMAND
-        if re.search(r"intent", name_lower):
+        if "intent" in name_lower:
             return EnumMessageCategory.INTENT
-        if re.search(r"projection", name_lower):
+        if "projection" in name_lower:
             return EnumMessageCategory.PROJECTION
 
         return None
