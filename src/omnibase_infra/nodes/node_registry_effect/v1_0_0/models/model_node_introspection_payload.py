@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,7 +30,7 @@ class ModelNodeIntrospectionPayload(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    node_id: str = Field(..., description="Unique node identifier")
+    node_id: UUID = Field(..., description="Unique node identifier")
     node_type: Literal["effect", "compute", "reducer", "orchestrator"]
     node_version: str = Field(default="1.0.0", description="Node version")
     capabilities: ModelNodeCapabilitiesInfo = Field(
