@@ -162,6 +162,8 @@ class DispatchContextEnforcer:
             )
 
         if node_kind == EnumNodeKind.ORCHESTRATOR:
+            # Timestamp captured at context creation (dispatch time).
+            # Drift from actual handler execution is microseconds in practice.
             return ModelDispatchContext.for_orchestrator(
                 correlation_id=correlation_id,
                 trace_id=trace_id,

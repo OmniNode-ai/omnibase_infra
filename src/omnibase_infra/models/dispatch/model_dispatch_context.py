@@ -6,8 +6,8 @@ Dispatch Context Model for Time Injection Control.
 This module provides the dispatch context model that enforces ONEX architecture
 rules for time injection. In ONEX:
 
-- **Reducers** (pure state aggregators) must NEVER receive `now` - they must be deterministic
-- **Orchestrators** and **Effects** CAN receive `now` for time-dependent decisions
+- **Reducers** and **Compute** nodes (pure/deterministic) must NEVER receive `now`
+- **Orchestrators**, **Effects**, and **Runtime Hosts** CAN receive `now`
 
 The ModelDispatchContext provides factory methods that enforce these rules at
 dispatch time, preventing accidental time injection into reducers.
@@ -59,6 +59,7 @@ See Also:
 """
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
@@ -175,7 +176,7 @@ class ModelDispatchContext(BaseModel):
         """
         return self.now is not None
 
-    def validate_for_node_kind(self) -> bool:
+    def validate_for_node_kind(self) -> Literal[True]:
         """Validate that the context is appropriate for its node kind.
 
         This method provides explicit validation that can be called
@@ -184,8 +185,11 @@ class ModelDispatchContext(BaseModel):
         For reducers, this validates that `now` is None.
         For other node types, this always returns True.
 
+        The return type `Literal[True]` signals that this method either
+        returns True or raises an exception - it never returns False.
+
         Returns:
-            True if the context is valid for the node kind.
+            Literal[True]: Always returns True if validation passes.
 
         Raises:
             ValueError: If node_kind is REDUCER and now is not None.
