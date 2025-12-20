@@ -55,6 +55,7 @@ and configuring the handler and policy ecosystem.
 
 from __future__ import annotations
 
+from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatcher_registry import (
     DispatcherRegistry,
     ProtocolMessageDispatcher,
@@ -161,6 +162,8 @@ __all__: list[str] = [
     "MessageDispatchEngine",
     "DispatcherRegistry",
     "ProtocolMessageDispatcher",
+    # Context enforcement
+    "DispatchContextEnforcer",
     # Message type registry (OMN-937)
     "MessageTypeRegistry",
     "MessageTypeRegistryError",

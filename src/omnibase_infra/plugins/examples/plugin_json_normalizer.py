@@ -9,16 +9,13 @@ from typing import TypedDict, cast
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
 
+from omnibase_infra.models.types.json_types import JsonValue
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
 from omnibase_infra.protocols.protocol_plugin_compute import (
     PluginContext,
     PluginInputData,
     PluginOutputData,
 )
-
-# JSON-compatible type alias using forward reference for recursion
-# Note: This is the standard way to define recursive JSON types in Python
-JsonValue = dict[str, "JsonValue"] | list["JsonValue"] | str | int | float | bool | None
 
 
 class JsonNormalizerInput(TypedDict, total=False):
