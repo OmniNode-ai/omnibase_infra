@@ -31,6 +31,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 )
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.validation import (
     ExecutionShapeValidator,
     ExecutionShapeViolationError,
@@ -232,13 +233,13 @@ class TestOrchestratorPerformingIORejected:
         """Orchestrator returning Projection rejected by runtime validator."""
 
         class OrderProjection:
-            category = EnumMessageCategory.PROJECTION
+            category = EnumNodeOutputType.PROJECTION
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
             handler_type=EnumHandlerType.ORCHESTRATOR,
             output=OrderProjection(),
-            output_category=EnumMessageCategory.PROJECTION,
+            output_category=EnumNodeOutputType.PROJECTION,
         )
 
         assert violation is not None
@@ -269,7 +270,7 @@ class TestOrchestratorPerformingIORejected:
         """Orchestrator decorated function raises for Projection return."""
 
         class OrderProjection:
-            category = EnumMessageCategory.PROJECTION
+            category = EnumNodeOutputType.PROJECTION
 
         @enforce_execution_shape(EnumHandlerType.ORCHESTRATOR)
         def bad_orchestrator(data: dict) -> OrderProjection:
@@ -342,13 +343,13 @@ class TestEffectReturningProjectionsRejected:
         """Effect returning Projection rejected by runtime shape validator."""
 
         class UserProfileProjection:
-            category = EnumMessageCategory.PROJECTION
+            category = EnumNodeOutputType.PROJECTION
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
             handler_type=EnumHandlerType.EFFECT,
             output=UserProfileProjection(),
-            output_category=EnumMessageCategory.PROJECTION,
+            output_category=EnumNodeOutputType.PROJECTION,
         )
 
         assert violation is not None
@@ -363,7 +364,7 @@ class TestEffectReturningProjectionsRejected:
         """Effect decorated function raises ExecutionShapeViolationError for Projection."""
 
         class UserProfileProjection:
-            category = EnumMessageCategory.PROJECTION
+            category = EnumNodeOutputType.PROJECTION
 
         @enforce_execution_shape(EnumHandlerType.EFFECT)
         def bad_effect_handler(data: dict) -> UserProfileProjection:
@@ -688,13 +689,13 @@ class TestValidHandlers:
         """Reducer returning Projection is valid."""
 
         class OrderSummaryProjection:
-            category = EnumMessageCategory.PROJECTION
+            category = EnumNodeOutputType.PROJECTION
 
         validator = RuntimeShapeValidator()
         violation = validator.validate_handler_output(
             handler_type=EnumHandlerType.REDUCER,
             output=OrderSummaryProjection(),
-            output_category=EnumMessageCategory.PROJECTION,
+            output_category=EnumNodeOutputType.PROJECTION,
         )
 
         assert violation is None
@@ -770,23 +771,23 @@ class TestAllowedReturnTypesValidation:
         # Create a rule that only allows PROJECTION (like REDUCER)
         rule = ModelExecutionShapeRule(
             handler_type=EnumHandlerType.REDUCER,
-            allowed_return_types=[EnumMessageCategory.PROJECTION],
-            forbidden_return_types=[EnumMessageCategory.EVENT],
+            allowed_return_types=[EnumNodeOutputType.PROJECTION],
+            forbidden_return_types=[EnumNodeOutputType.EVENT],
             can_publish_directly=False,
             can_access_system_time=False,
         )
 
         # PROJECTION is allowed (in allowed list)
-        assert rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is True
+        assert rule.is_return_type_allowed(EnumNodeOutputType.PROJECTION) is True
 
         # EVENT is forbidden (in forbidden list)
-        assert rule.is_return_type_allowed(EnumMessageCategory.EVENT) is False
+        assert rule.is_return_type_allowed(EnumNodeOutputType.EVENT) is False
 
         # COMMAND is not allowed (not in allowed list)
-        assert rule.is_return_type_allowed(EnumMessageCategory.COMMAND) is False
+        assert rule.is_return_type_allowed(EnumNodeOutputType.COMMAND) is False
 
         # INTENT is not allowed (not in allowed list)
-        assert rule.is_return_type_allowed(EnumMessageCategory.INTENT) is False
+        assert rule.is_return_type_allowed(EnumNodeOutputType.INTENT) is False
 
     def test_empty_allowed_list_permits_non_forbidden(self) -> None:
         """When allowed_return_types is empty, all non-forbidden types are allowed."""
@@ -798,18 +799,18 @@ class TestAllowedReturnTypesValidation:
         rule = ModelExecutionShapeRule(
             handler_type=EnumHandlerType.EFFECT,
             allowed_return_types=[],  # Empty = permissive mode
-            forbidden_return_types=[EnumMessageCategory.PROJECTION],
+            forbidden_return_types=[EnumNodeOutputType.PROJECTION],
             can_publish_directly=False,
             can_access_system_time=True,
         )
 
         # PROJECTION is forbidden
-        assert rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is False
+        assert rule.is_return_type_allowed(EnumNodeOutputType.PROJECTION) is False
 
         # All others are allowed (empty allowed list = permissive)
-        assert rule.is_return_type_allowed(EnumMessageCategory.EVENT) is True
-        assert rule.is_return_type_allowed(EnumMessageCategory.COMMAND) is True
-        assert rule.is_return_type_allowed(EnumMessageCategory.INTENT) is True
+        assert rule.is_return_type_allowed(EnumNodeOutputType.EVENT) is True
+        assert rule.is_return_type_allowed(EnumNodeOutputType.COMMAND) is True
+        assert rule.is_return_type_allowed(EnumNodeOutputType.INTENT) is True
 
     def test_forbidden_takes_precedence_over_allowed(self) -> None:
         """If a type is in both allowed and forbidden, forbidden wins."""
@@ -821,19 +822,19 @@ class TestAllowedReturnTypesValidation:
         rule = ModelExecutionShapeRule(
             handler_type=EnumHandlerType.REDUCER,
             allowed_return_types=[
-                EnumMessageCategory.PROJECTION,
-                EnumMessageCategory.EVENT,  # Also in forbidden
+                EnumNodeOutputType.PROJECTION,
+                EnumNodeOutputType.EVENT,  # Also in forbidden
             ],
-            forbidden_return_types=[EnumMessageCategory.EVENT],
+            forbidden_return_types=[EnumNodeOutputType.EVENT],
             can_publish_directly=False,
             can_access_system_time=False,
         )
 
         # EVENT should be forbidden (forbidden takes precedence)
-        assert rule.is_return_type_allowed(EnumMessageCategory.EVENT) is False
+        assert rule.is_return_type_allowed(EnumNodeOutputType.EVENT) is False
 
         # PROJECTION should be allowed
-        assert rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is True
+        assert rule.is_return_type_allowed(EnumNodeOutputType.PROJECTION) is True
 
     def test_canonical_rules_use_allowed_return_types(self) -> None:
         """Verify canonical execution shape rules properly use allowed_return_types."""
@@ -843,35 +844,35 @@ class TestAllowedReturnTypesValidation:
 
         # EFFECT: allowed = [EVENT, COMMAND], forbidden = [PROJECTION]
         effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
-        assert effect_rule.is_return_type_allowed(EnumMessageCategory.EVENT) is True
-        assert effect_rule.is_return_type_allowed(EnumMessageCategory.COMMAND) is True
+        assert effect_rule.is_return_type_allowed(EnumNodeOutputType.EVENT) is True
+        assert effect_rule.is_return_type_allowed(EnumNodeOutputType.COMMAND) is True
         assert (
-            effect_rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is False
+            effect_rule.is_return_type_allowed(EnumNodeOutputType.PROJECTION) is False
         )
         # INTENT is not in allowed list, so should be False
-        assert effect_rule.is_return_type_allowed(EnumMessageCategory.INTENT) is False
+        assert effect_rule.is_return_type_allowed(EnumNodeOutputType.INTENT) is False
 
         # REDUCER: allowed = [PROJECTION], forbidden = [EVENT]
         reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
         assert (
-            reducer_rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is True
+            reducer_rule.is_return_type_allowed(EnumNodeOutputType.PROJECTION) is True
         )
-        assert reducer_rule.is_return_type_allowed(EnumMessageCategory.EVENT) is False
+        assert reducer_rule.is_return_type_allowed(EnumNodeOutputType.EVENT) is False
         # COMMAND is not in allowed list
-        assert reducer_rule.is_return_type_allowed(EnumMessageCategory.COMMAND) is False
+        assert reducer_rule.is_return_type_allowed(EnumNodeOutputType.COMMAND) is False
         # INTENT is not in allowed list
-        assert reducer_rule.is_return_type_allowed(EnumMessageCategory.INTENT) is False
+        assert reducer_rule.is_return_type_allowed(EnumNodeOutputType.INTENT) is False
 
         # ORCHESTRATOR: allowed = [COMMAND, EVENT], forbidden = [INTENT, PROJECTION]
         orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
-        assert orch_rule.is_return_type_allowed(EnumMessageCategory.COMMAND) is True
-        assert orch_rule.is_return_type_allowed(EnumMessageCategory.EVENT) is True
-        assert orch_rule.is_return_type_allowed(EnumMessageCategory.INTENT) is False
-        assert orch_rule.is_return_type_allowed(EnumMessageCategory.PROJECTION) is False
+        assert orch_rule.is_return_type_allowed(EnumNodeOutputType.COMMAND) is True
+        assert orch_rule.is_return_type_allowed(EnumNodeOutputType.EVENT) is True
+        assert orch_rule.is_return_type_allowed(EnumNodeOutputType.INTENT) is False
+        assert orch_rule.is_return_type_allowed(EnumNodeOutputType.PROJECTION) is False
 
-        # COMPUTE: allowed = [all 4 categories], forbidden = []
+        # COMPUTE: allowed = [all 4 output types], forbidden = []
         compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
-        for category in EnumMessageCategory:
-            assert compute_rule.is_return_type_allowed(category) is True, (
-                f"COMPUTE should allow {category.value}"
+        for output_type in EnumNodeOutputType:
+            assert compute_rule.is_return_type_allowed(output_type) is True, (
+                f"COMPUTE should allow {output_type.value}"
             )

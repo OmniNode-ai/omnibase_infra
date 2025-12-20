@@ -41,6 +41,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 )
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
@@ -78,16 +79,21 @@ TOPIC_CATEGORY_PATTERNS: dict[EnumMessageCategory, re.Pattern[str]] = {
 }
 
 # Topic suffix mapping for each message category
-TOPIC_SUFFIXES: dict[EnumMessageCategory, str] = {
+# Note: PROJECTION uses EnumNodeOutputType because it's a node output type, not a message category.
+# Projections are internal state outputs from REDUCER nodes, not routed messages on Kafka topics.
+TOPIC_SUFFIXES: dict[EnumMessageCategory | EnumNodeOutputType, str] = {
     EnumMessageCategory.EVENT: "events",
     EnumMessageCategory.COMMAND: "commands",
     EnumMessageCategory.INTENT: "intents",
-    EnumMessageCategory.PROJECTION: "",  # Projections have no suffix requirement
+    EnumNodeOutputType.PROJECTION: "",  # Projections have no suffix requirement
 }
 
 # Handler type to expected message categories mapping
 # Defines which message categories each handler type should consume
-HANDLER_EXPECTED_CATEGORIES: dict[EnumHandlerType, list[EnumMessageCategory]] = {
+# Note: REDUCER can consume EVENTs (message category) and produce PROJECTIONs (node output type)
+HANDLER_EXPECTED_CATEGORIES: dict[
+    EnumHandlerType, list[EnumMessageCategory | EnumNodeOutputType]
+] = {
     EnumHandlerType.EFFECT: [
         EnumMessageCategory.COMMAND,
         EnumMessageCategory.EVENT,
@@ -99,7 +105,7 @@ HANDLER_EXPECTED_CATEGORIES: dict[EnumHandlerType, list[EnumMessageCategory]] = 
     ],
     EnumHandlerType.REDUCER: [
         EnumMessageCategory.EVENT,
-        EnumMessageCategory.PROJECTION,
+        EnumNodeOutputType.PROJECTION,
     ],
     EnumHandlerType.ORCHESTRATOR: [
         EnumMessageCategory.EVENT,
@@ -148,7 +154,7 @@ class TopicCategoryValidator:
 
     def validate_message_topic(
         self,
-        message_category: EnumMessageCategory,
+        message_category: EnumMessageCategory | EnumNodeOutputType,
         topic_name: str,
     ) -> ModelExecutionShapeViolationResult | None:
         """Validate that a message category matches its topic pattern.
@@ -157,7 +163,9 @@ class TopicCategoryValidator:
         an appropriately named topic according to ONEX conventions.
 
         Args:
-            message_category: The category of the message (EVENT, COMMAND, etc.).
+            message_category: The category of the message (EVENT, COMMAND, etc.)
+                or node output type (PROJECTION). Projections have no topic
+                naming constraint and are always valid.
             topic_name: The Kafka topic name being used.
 
         Returns:
@@ -179,14 +187,23 @@ class TopicCategoryValidator:
             >>> assert result is not None
             >>> assert result.violation_type == EnumExecutionShapeViolation.TOPIC_CATEGORY_MISMATCH
         """
-        # Projections have no topic naming constraint
-        if message_category == EnumMessageCategory.PROJECTION:
+        # Projections have no topic naming constraint (they are node outputs, not routed messages)
+        if message_category == EnumNodeOutputType.PROJECTION:
             return None
 
         # Get the expected pattern for this category
-        expected_pattern = self.patterns.get(message_category)
+        # Note: patterns dict uses EnumMessageCategory keys. EnumNodeOutputType values
+        # won't match (different enum types even with same string values), so lookup
+        # will return None for any EnumNodeOutputType passed here. This is correct
+        # behavior - we only validate EnumMessageCategory values against topic patterns.
+        if isinstance(message_category, EnumMessageCategory):
+            expected_pattern = self.patterns.get(message_category)
+        else:
+            # EnumNodeOutputType values (other than PROJECTION which is handled above)
+            # don't have topic naming constraints
+            expected_pattern = None
         if expected_pattern is None:
-            # Unknown category - should not happen with the enum
+            # Unknown category or node output type - no topic constraint
             return None
 
         # Check if topic matches the expected pattern
@@ -211,7 +228,7 @@ class TopicCategoryValidator:
         self,
         handler_type: EnumHandlerType,
         subscribed_topics: list[str],
-        expected_categories: list[EnumMessageCategory],
+        expected_categories: list[EnumMessageCategory | EnumNodeOutputType],
     ) -> list[ModelExecutionShapeViolationResult]:
         """Validate that handler subscriptions match expected message types.
 
@@ -221,7 +238,8 @@ class TopicCategoryValidator:
         Args:
             handler_type: The type of handler (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR).
             subscribed_topics: List of Kafka topics the handler subscribes to.
-            expected_categories: List of message categories the handler should process.
+            expected_categories: List of message categories or node output types
+                the handler should process (e.g., EVENT, COMMAND, PROJECTION).
 
         Returns:
             List of violations for any topic that doesn't match expected categories.
@@ -232,7 +250,7 @@ class TopicCategoryValidator:
             >>> violations = validator.validate_subscription(
             ...     EnumHandlerType.REDUCER,
             ...     ["order.events", "order.commands"],  # commands not valid for reducer
-            ...     [EnumMessageCategory.EVENT, EnumMessageCategory.PROJECTION],
+            ...     [EnumMessageCategory.EVENT, EnumNodeOutputType.PROJECTION],
             ... )
             >>> assert len(violations) == 1
             >>> assert "order.commands" in violations[0].message
@@ -310,15 +328,16 @@ class TopicCategoryValidator:
 
     def get_expected_topic_suffix(
         self,
-        category: EnumMessageCategory,
+        category: EnumMessageCategory | EnumNodeOutputType,
     ) -> str:
-        """Get the expected topic suffix for a message category.
+        """Get the expected topic suffix for a message category or node output type.
 
         Returns the topic suffix that should be used for topics containing
-        messages of the specified category.
+        messages of the specified category or output type.
 
         Args:
-            category: The message category (EVENT, COMMAND, INTENT, PROJECTION).
+            category: The message category (EVENT, COMMAND, INTENT) or node
+                output type (PROJECTION). Projections have no suffix requirement.
 
         Returns:
             The expected topic suffix ('events', 'commands', 'intents', or ''
@@ -931,7 +950,7 @@ def validate_topic_categories_in_file(
 def validate_message_on_topic(
     message: object,
     topic: str,
-    message_category: EnumMessageCategory,
+    message_category: EnumMessageCategory | EnumNodeOutputType,
 ) -> ModelExecutionShapeViolationResult | None:
     """Runtime validation that message category matches topic.
 
@@ -946,7 +965,8 @@ def validate_message_on_topic(
     Args:
         message: The message object (used for context in error messages).
         topic: The Kafka topic name.
-        message_category: The declared category of the message.
+        message_category: The declared category of the message or node output type.
+            Projections (EnumNodeOutputType.PROJECTION) have no topic constraint.
 
     Returns:
         A ModelExecutionShapeViolationResult if there's a mismatch,

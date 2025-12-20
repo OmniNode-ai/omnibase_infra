@@ -10,13 +10,11 @@ Topic Naming Conventions:
     - EVENT: Read from `*.events` topics (e.g., `order.events`, `user.events`)
     - COMMAND: Read from `*.commands` topics (e.g., `order.commands`)
     - INTENT: Read from `*.intents` topics (e.g., `checkout.intents`)
-    - PROJECTION: State projections for read models
 
 Message Category Semantics:
     - EVENTs: Immutable facts about what has happened (past tense)
     - COMMANDs: Requests for action (imperative mood)
     - INTENTs: User intentions requiring validation (future-oriented)
-    - PROJECTIONs: Derived state for query optimization
 """
 
 from enum import Enum
@@ -39,15 +37,11 @@ class EnumMessageCategory(str, Enum):
         INTENT: User intents requiring validation before processing.
             Read from `*.intents` topics. Future-oriented naming.
             Example: CheckoutIntent, SubscriptionIntent, TransferIntent
-        PROJECTION: State projections for optimized read models.
-            Used by reducers for state consolidation.
-            Example: OrderSummaryProjection, UserProfileProjection
     """
 
     EVENT = "event"
     COMMAND = "command"
     INTENT = "intent"
-    PROJECTION = "projection"
 
 
 __all__ = ["EnumMessageCategory"]

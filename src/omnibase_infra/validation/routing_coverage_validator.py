@@ -50,6 +50,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
@@ -121,11 +122,12 @@ class RoutingCoverageError(RuntimeHostError):
 # =============================================================================
 
 # Suffix patterns for message type detection
-_MESSAGE_SUFFIX_PATTERNS: dict[str, EnumMessageCategory] = {
+# Note: PROJECTION uses EnumNodeOutputType as it's a node output, not a message category
+_MESSAGE_SUFFIX_PATTERNS: dict[str, EnumMessageCategory | EnumNodeOutputType] = {
     "Event": EnumMessageCategory.EVENT,
     "Command": EnumMessageCategory.COMMAND,
     "Intent": EnumMessageCategory.INTENT,
-    "Projection": EnumMessageCategory.PROJECTION,
+    "Projection": EnumNodeOutputType.PROJECTION,
 }
 
 # Decorator patterns that indicate a message type
@@ -158,14 +160,16 @@ _MESSAGE_BASE_PATTERNS: frozenset[str] = frozenset(
 )
 
 
-def _get_category_from_suffix(class_name: str) -> EnumMessageCategory | None:
-    """Determine message category from class name suffix.
+def _get_category_from_suffix(
+    class_name: str,
+) -> EnumMessageCategory | EnumNodeOutputType | None:
+    """Determine message category or node output type from class name suffix.
 
     Args:
         class_name: The class name to analyze.
 
     Returns:
-        EnumMessageCategory if suffix matches, None otherwise.
+        EnumMessageCategory or EnumNodeOutputType if suffix matches, None otherwise.
     """
     for suffix, category in _MESSAGE_SUFFIX_PATTERNS.items():
         if class_name.endswith(suffix):
@@ -173,14 +177,16 @@ def _get_category_from_suffix(class_name: str) -> EnumMessageCategory | None:
     return None
 
 
-def _get_category_from_base(base_name: str) -> EnumMessageCategory | None:
-    """Determine message category from base class name.
+def _get_category_from_base(
+    base_name: str,
+) -> EnumMessageCategory | EnumNodeOutputType | None:
+    """Determine message category or node output type from base class name.
 
     Args:
         base_name: The base class name to analyze.
 
     Returns:
-        EnumMessageCategory if base matches, None otherwise.
+        EnumMessageCategory or EnumNodeOutputType if base matches, None otherwise.
     """
     base_lower = base_name.lower()
     if "event" in base_lower:
@@ -190,13 +196,13 @@ def _get_category_from_base(base_name: str) -> EnumMessageCategory | None:
     if "intent" in base_lower:
         return EnumMessageCategory.INTENT
     if "projection" in base_lower:
-        return EnumMessageCategory.PROJECTION
+        return EnumNodeOutputType.PROJECTION
     return None
 
 
 def _has_message_decorator(
     node: ast.ClassDef,
-) -> tuple[bool, EnumMessageCategory | None]:
+) -> tuple[bool, EnumMessageCategory | EnumNodeOutputType | None]:
     """Check if class has a message type decorator.
 
     Args:
@@ -224,7 +230,7 @@ def _has_message_decorator(
             if "intent" in decorator_name.lower():
                 return True, EnumMessageCategory.INTENT
             if "projection" in decorator_name.lower():
-                return True, EnumMessageCategory.PROJECTION
+                return True, EnumNodeOutputType.PROJECTION
             # Generic message_type decorator
             return True, None
 
@@ -257,7 +263,7 @@ def _get_base_classes(node: ast.ClassDef) -> list[str]:
 def discover_message_types(
     source_directory: Path,
     exclude_patterns: list[str] | None = None,
-) -> dict[str, EnumMessageCategory]:
+) -> dict[str, EnumMessageCategory | EnumNodeOutputType]:
     """Discover all message types defined in source code.
 
     Scans Python files in the source directory for classes that match
@@ -271,7 +277,8 @@ def discover_message_types(
         exclude_patterns: Optional list of glob patterns to exclude.
 
     Returns:
-        Dictionary mapping message class names to their categories.
+        Dictionary mapping message class names to their categories
+        (EnumMessageCategory for EVENT/COMMAND/INTENT, EnumNodeOutputType for PROJECTION).
 
     Example:
         >>> types = discover_message_types(Path("src/omnibase_infra"))
@@ -290,7 +297,7 @@ def discover_message_types(
             "**/__pycache__/**",
         ]
 
-    discovered_types: dict[str, EnumMessageCategory] = {}
+    discovered_types: dict[str, EnumMessageCategory | EnumNodeOutputType] = {}
 
     # Collect all Python files
     python_files: list[Path] = []
@@ -338,7 +345,7 @@ def discover_message_types(
                 continue
 
             class_name = node.name
-            category: EnumMessageCategory | None = None
+            category: EnumMessageCategory | EnumNodeOutputType | None = None
 
             # Strategy 1: Check suffix pattern (most common)
             category = _get_category_from_suffix(class_name)
@@ -639,7 +646,9 @@ class RoutingCoverageValidator:
         self.source_directory = source_directory
         self.registry = registry
         self._lock = threading.Lock()
-        self._discovered_types: dict[str, EnumMessageCategory] | None = None
+        self._discovered_types: (
+            dict[str, EnumMessageCategory | EnumNodeOutputType] | None
+        ) = None
         self._registered_routes: set[str] | None = None
 
     def _ensure_discovery(self) -> None:
