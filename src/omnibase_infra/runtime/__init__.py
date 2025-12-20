@@ -61,15 +61,13 @@ and configuring the handler and policy ecosystem.
 
 from __future__ import annotations
 
-# NOTE: Import order matters here due to circular import issues in omnibase_core.
-# The validation module imports ModelEventEnvelope which triggers complex import chains.
-# Importing validation FIRST warms the module cache, allowing subsequent imports to work.
-# ruff: noqa: I001
-from omnibase_infra.validation.chain_propagation_validator import (
-    ChainPropagationValidator as _ChainPropagationValidator,  # Warm cache
+# Chain-aware dispatch (OMN-951)
+from omnibase_infra.runtime.chain_aware_dispatch import (
+    ChainAwareDispatcher,
+    propagate_chain_context,
+    validate_dispatch_chain,
 )
-
-# Now safe to import other modules that use ModelEventEnvelope
+from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatcher_registry import (
     DispatcherRegistry,
     ProtocolMessageDispatcher,
@@ -125,16 +123,6 @@ from omnibase_infra.runtime.wiring import (
     wire_handlers_from_contract,
 )
 
-# Chain-aware dispatch (imports ModelEventEnvelope - must come after cache is warmed)
-from omnibase_infra.runtime.chain_aware_dispatch import (
-    ChainAwareDispatcher,
-    propagate_chain_context,
-    validate_dispatch_chain,
-)
-
-# Clean up temporary import
-del _ChainPropagationValidator
-
 __all__: list[str] = [
     # Kernel entrypoint
     "kernel_bootstrap",
@@ -186,6 +174,8 @@ __all__: list[str] = [
     "MessageDispatchEngine",
     "DispatcherRegistry",
     "ProtocolMessageDispatcher",
+    # Context enforcement
+    "DispatchContextEnforcer",
     # Message type registry (OMN-937)
     "MessageTypeRegistry",
     "MessageTypeRegistryError",

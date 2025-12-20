@@ -52,11 +52,11 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.models.types import JsonPrimitive, JsonValue
 
 
 class ModelDispatchResult(BaseModel):
@@ -378,4 +378,4 @@ class ModelDispatchResult(BaseModel):
         )
 
 
-__all__ = ["ModelDispatchResult", "JsonPrimitive", "JsonValue"]
+__all__ = ["ModelDispatchResult"]
