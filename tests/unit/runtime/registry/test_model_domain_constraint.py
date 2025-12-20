@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Tests for ModelDomainConstraint."""
+
+import pytest
+
+from omnibase_infra.runtime.registry.model_domain_constraint import (
+    ModelDomainConstraint,
+)
+
+
+class TestModelDomainConstraint:
+    """Tests for ModelDomainConstraint."""
+
+    def test_can_consume_from_own_domain(self) -> None:
+        """Test that handler can always consume from own domain."""
+        constraint = ModelDomainConstraint(owning_domain="registration")
+        assert constraint.can_consume_from("registration") is True
+
+    def test_cannot_consume_from_other_domain_by_default(self) -> None:
+        """Test that handler cannot consume from other domains by default."""
+        constraint = ModelDomainConstraint(owning_domain="registration")
+        assert constraint.can_consume_from("user") is False
+        assert constraint.can_consume_from("order") is False
+
+    def test_can_consume_from_allowed_cross_domains(self) -> None:
+        """Test that handler can consume from explicitly allowed domains."""
+        constraint = ModelDomainConstraint(
+            owning_domain="notification",
+            allowed_cross_domains=frozenset({"user", "order"}),
+        )
+        assert constraint.can_consume_from("notification") is True
+        assert constraint.can_consume_from("user") is True
+        assert constraint.can_consume_from("order") is True
+        assert constraint.can_consume_from("billing") is False
+
+    def test_allow_all_domains(self) -> None:
+        """Test that allow_all_domains permits any domain."""
+        constraint = ModelDomainConstraint(
+            owning_domain="audit",
+            allow_all_domains=True,
+        )
+        assert constraint.can_consume_from("audit") is True
+        assert constraint.can_consume_from("user") is True
+        assert constraint.can_consume_from("order") is True
+        assert constraint.can_consume_from("any_domain") is True
+
+    def test_allow_all_domains_overrides_allowed_cross_domains(self) -> None:
+        """Test that allow_all_domains overrides the allowlist."""
+        constraint = ModelDomainConstraint(
+            owning_domain="audit",
+            allowed_cross_domains=frozenset({"user"}),  # Normally would block "order"
+            allow_all_domains=True,
+        )
+        # allow_all_domains=True means all domains are allowed
+        assert constraint.can_consume_from("order") is True
+
+    def test_validate_consumption_success(self) -> None:
+        """Test successful consumption validation."""
+        constraint = ModelDomainConstraint(owning_domain="user")
+        is_valid, error = constraint.validate_consumption("user", "UserCreated")
+        assert is_valid is True
+        assert error is None
+
+    def test_validate_consumption_failure_with_explicit_opt_in(self) -> None:
+        """Test consumption validation failure with explicit opt-in required."""
+        constraint = ModelDomainConstraint(
+            owning_domain="registration",
+            require_explicit_opt_in=True,
+        )
+        is_valid, error = constraint.validate_consumption("user", "UserCreated")
+        assert is_valid is False
+        assert error is not None
+        assert "Domain mismatch" in error
+        assert "registration" in error
+        assert "user" in error
+        assert "UserCreated" in error
+        assert "allowed_cross_domains" in error
+
+    def test_validate_consumption_failure_without_explicit_opt_in(self) -> None:
+        """Test consumption validation failure without explicit opt-in requirement."""
+        constraint = ModelDomainConstraint(
+            owning_domain="registration",
+            require_explicit_opt_in=False,
+        )
+        is_valid, error = constraint.validate_consumption("user", "UserCreated")
+        assert is_valid is False
+        assert error is not None
+        assert "Domain mismatch" in error
+        # Should not mention opt-in instructions when require_explicit_opt_in=False
+        assert "allowed_cross_domains" not in error
+
+    def test_validate_consumption_with_cross_domain_allowed(self) -> None:
+        """Test consumption validation with cross-domain allowed."""
+        constraint = ModelDomainConstraint(
+            owning_domain="notification",
+            allowed_cross_domains=frozenset({"user"}),
+        )
+        is_valid, error = constraint.validate_consumption("user", "UserCreated")
+        assert is_valid is True
+        assert error is None
+
+    def test_immutable(self) -> None:
+        """Test that ModelDomainConstraint is immutable."""
+        constraint = ModelDomainConstraint(owning_domain="user")
+        with pytest.raises(Exception):  # Pydantic raises ValidationError
+            constraint.owning_domain = "order"  # type: ignore[misc]
+
+    def test_owning_domain_required(self) -> None:
+        """Test that owning_domain is required."""
+        with pytest.raises(Exception):  # Pydantic validation error
+            ModelDomainConstraint()  # type: ignore[call-arg]
+
+    def test_owning_domain_min_length(self) -> None:
+        """Test owning_domain minimum length validation."""
+        with pytest.raises(Exception):
+            ModelDomainConstraint(owning_domain="")
+
+
+class TestModelDomainConstraintDefaults:
+    """Tests for default values."""
+
+    def test_defaults(self) -> None:
+        """Test default values are correct."""
+        constraint = ModelDomainConstraint(owning_domain="test")
+        assert constraint.allowed_cross_domains == frozenset()
+        assert constraint.allow_all_domains is False
+        assert constraint.require_explicit_opt_in is True
