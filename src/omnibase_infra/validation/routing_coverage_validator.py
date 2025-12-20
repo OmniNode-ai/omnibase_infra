@@ -646,16 +646,36 @@ class RoutingCoverageValidator:
         self.source_directory = source_directory
         self.registry = registry
         self._lock = threading.Lock()
+        # Explicit initialization flag - more robust than checking data fields
+        # See _ensure_discovery() docstring for thread safety rationale
+        self._initialized = False
         self._discovered_types: (
             dict[str, EnumMessageCategory | EnumNodeOutputType] | None
         ) = None
         self._registered_routes: set[str] | None = None
 
     def _ensure_discovery(self) -> None:
-        """Ensure discovery has been performed (lazy initialization)."""
-        if self._discovered_types is None:
+        """Ensure discovery has been performed (lazy initialization).
+
+        Thread Safety:
+            Uses double-checked locking with an explicit _initialized flag.
+
+            Why a separate flag instead of checking data fields?
+            - Eliminates ordering dependency between field assignments
+            - Future refactoring can't accidentally break the invariant
+            - The flag is only set True AFTER all fields are fully populated
+            - Any thread seeing _initialized=True is guaranteed to see
+              both _discovered_types and _registered_routes populated
+
+            The pattern:
+            1. Check _initialized without lock (fast path for already-initialized)
+            2. Acquire lock and re-check (prevents duplicate initialization)
+            3. Set all data fields first
+            4. Set _initialized=True last (makes state visible atomically)
+        """
+        if not self._initialized:
             with self._lock:
-                if self._discovered_types is None:
+                if not self._initialized:
                     self._discovered_types = discover_message_types(
                         self.source_directory
                     )
@@ -663,6 +683,9 @@ class RoutingCoverageValidator:
                         registry=self.registry,
                         source_directory=self.source_directory,
                     )
+                    # CRITICAL: Set _initialized LAST to ensure all fields
+                    # are visible to other threads before they skip the lock
+                    self._initialized = True
 
     def validate_coverage(self) -> list[ModelExecutionShapeViolationResult]:
         """Validate all message types are registered.
@@ -782,8 +805,15 @@ class RoutingCoverageValidator:
 
         Call this method if source files have changed and you need
         to re-discover message types and routes.
+
+        Thread Safety:
+            Clears _initialized FIRST to ensure any concurrent readers
+            see the invalidated state and wait for the lock.
         """
         with self._lock:
+            # CRITICAL: Clear _initialized FIRST to invalidate
+            # Any thread checking this will then acquire the lock
+            self._initialized = False
             self._discovered_types = None
             self._registered_routes = None
 
