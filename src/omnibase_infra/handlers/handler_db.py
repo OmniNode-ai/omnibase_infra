@@ -11,17 +11,13 @@ All queries MUST use parameterized statements for SQL injection protection.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import asyncpg
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
+from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import EnumInfraTransportType
-
-if TYPE_CHECKING:
-    from omnibase_core.types import JsonValue
-
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -35,6 +31,7 @@ from omnibase_infra.handlers.models import (
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
+from omnibase_infra.mixins import MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +39,14 @@ logger = logging.getLogger(__name__)
 # Note: Recommended range is 10-20 for production workloads.
 # Configurable pool size deferred to Beta release.
 _DEFAULT_POOL_SIZE: int = 5
+
+# Handler ID for ModelHandlerOutput
+HANDLER_ID_DB: str = "db-handler"
 _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 
-class DbAdapter:
+class DbAdapter(MixinEnvelopeExtraction):
     """PostgreSQL database adapter using asyncpg connection pool (MVP: query, execute only).
 
     Security Policy - DSN Handling:
@@ -180,7 +180,9 @@ class DbAdapter:
         self._initialized = False
         logger.info("DbAdapter shutdown complete")
 
-    async def execute(self, envelope: dict[str, JsonValue]) -> ModelDbQueryResponse:
+    async def execute(
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute database operation (db.query or db.execute) from envelope.
 
         Args:
@@ -188,12 +190,14 @@ class DbAdapter:
                 - operation: "db.query" or "db.execute"
                 - payload: dict with "sql" (required) and "parameters" (optional list)
                 - correlation_id: Optional correlation ID for tracing
+                - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelDbQueryResponse containing:
-                - status: "success"
-                - payload: ModelDbQueryPayload with rows and row_count
+            ModelHandlerOutput[ModelDbQueryResponse] containing:
+                - result: ModelDbQueryResponse with status, payload, and correlation_id
+                - input_envelope_id: UUID for causality tracking
                 - correlation_id: UUID for request/response correlation
+                - handler_id: "db-handler"
 
         Raises:
             RuntimeHostError: If adapter not initialized or invalid input.
@@ -201,6 +205,7 @@ class DbAdapter:
             InfraTimeoutError: If query times out.
         """
         correlation_id = self._extract_correlation_id(envelope)
+        input_envelope_id = self._extract_envelope_id(envelope)
 
         if not self._initialized or self._pool is None:
             ctx = ModelInfraErrorContext(
@@ -262,21 +267,13 @@ class DbAdapter:
         parameters = self._extract_parameters(payload, operation, correlation_id)
 
         if operation == "db.query":
-            return await self._execute_query(sql, parameters, correlation_id)
+            return await self._execute_query(
+                sql, parameters, correlation_id, input_envelope_id
+            )
         else:  # db.execute
-            return await self._execute_statement(sql, parameters, correlation_id)
-
-    def _extract_correlation_id(self, envelope: dict[str, JsonValue]) -> UUID:
-        """Extract or generate correlation ID from envelope."""
-        raw = envelope.get("correlation_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
+            return await self._execute_statement(
+                sql, parameters, correlation_id, input_envelope_id
+            )
 
     def _sanitize_dsn(self, dsn: str) -> str:
         """Sanitize DSN by removing password for safe logging.
@@ -309,7 +306,7 @@ class DbAdapter:
         return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
 
     def _extract_parameters(
-        self, payload: dict[str, JsonValue], operation: str, correlation_id: UUID
+        self, payload: dict[str, object], operation: str, correlation_id: UUID
     ) -> list[object]:
         """Extract and validate parameters from payload."""
         params_raw = payload.get("parameters")
@@ -332,7 +329,8 @@ class DbAdapter:
         sql: str,
         parameters: list[object],
         correlation_id: UUID,
-    ) -> ModelDbQueryResponse:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute SELECT query and return rows."""
         if self._pool is None:
             ctx = ModelInfraErrorContext(
@@ -356,7 +354,10 @@ class DbAdapter:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(sql, *parameters)
                 return self._build_response(
-                    [dict(row) for row in rows], len(rows), correlation_id
+                    [dict(row) for row in rows],
+                    len(rows),
+                    correlation_id,
+                    input_envelope_id,
                 )
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
@@ -384,7 +385,8 @@ class DbAdapter:
         sql: str,
         parameters: list[object],
         correlation_id: UUID,
-    ) -> ModelDbQueryResponse:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute INSERT/UPDATE/DELETE statement and return affected row count."""
         if self._pool is None:
             ctx = ModelInfraErrorContext(
@@ -409,7 +411,9 @@ class DbAdapter:
                 result = await conn.execute(sql, *parameters)
                 # asyncpg returns string like "INSERT 0 1" or "UPDATE 5"
                 row_count = self._parse_row_count(result)
-                return self._build_response([], row_count, correlation_id)
+                return self._build_response(
+                    [], row_count, correlation_id, input_envelope_id
+                )
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
                 f"Statement timed out after {self._timeout}s",
@@ -464,13 +468,23 @@ class DbAdapter:
         return 0
 
     def _build_response(
-        self, rows: list[dict[str, object]], row_count: int, correlation_id: UUID
-    ) -> ModelDbQueryResponse:
-        """Build response envelope from query/execute result."""
-        return ModelDbQueryResponse(
+        self,
+        rows: list[dict[str, object]],
+        row_count: int,
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelDbQueryResponse]:
+        """Build response wrapped in ModelHandlerOutput from query/execute result."""
+        result = ModelDbQueryResponse(
             status="success",
             payload=ModelDbQueryPayload(rows=rows, row_count=row_count),
             correlation_id=correlation_id,
+        )
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_DB,
+            result=result,
         )
 
     async def health_check(self) -> ModelDbHealthResponse:

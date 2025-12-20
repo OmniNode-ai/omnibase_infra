@@ -13,6 +13,7 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     CircuitState,
     MixinAsyncCircuitBreaker,
 )
+from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
 from omnibase_infra.mixins.mixin_node_introspection import (
     CapabilitiesDict,
     IntrospectionCacheDict,
@@ -28,6 +29,7 @@ __all__ = [
     "IntrospectionCacheDict",
     "IntrospectionPerformanceMetrics",
     "MixinAsyncCircuitBreaker",
+    "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
     "ModelIntrospectionConfig",
     "ProtocolEventBusLike",
