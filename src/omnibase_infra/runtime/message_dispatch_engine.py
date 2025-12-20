@@ -63,14 +63,34 @@ Thread Safety:
     After freeze(), the engine becomes read-only and can be safely shared
     across threads for concurrent dispatch operations.
 
-    **Metrics Thread Safety**:
-    Structured metrics updates are protected by ``_metrics_lock`` to prevent
-    race conditions during concurrent dispatch operations. All read-modify-write
-    operations on ``_structured_metrics`` are performed within a single lock
-    acquisition to prevent TOCTOU (time-of-check-to-time-of-use) race conditions.
-    The computations within the lock (``record_execution``, ``model_copy``) are
-    pure and fast, so holding the lock during these operations is acceptable.
-    The lock is never held during I/O operations (dispatcher execution).
+    **Metrics Thread Safety (TOCTOU Prevention)**:
+    A core design goal of the metrics system is preventing TOCTOU (time-of-check-
+    to-time-of-use) race conditions. Without proper synchronization, concurrent
+    dispatch operations could:
+
+    1. Read current metrics state (check)
+    2. Compute new values based on that state
+    3. Write updated values (use)
+
+    If another thread modifies the state between steps 1 and 3, the final write
+    would clobber that concurrent update, causing lost increments or corrupted
+    aggregations.
+
+    **Solution**: All read-modify-write operations on ``_structured_metrics`` are
+    performed atomically within a single ``_metrics_lock`` acquisition. This
+    ensures that the sequence (read → compute → write) completes without
+    interleaving from other threads.
+
+    **Why holding the lock during computation is acceptable**:
+    The computations within the lock (``record_execution()``, ``model_copy()``)
+    are:
+
+    - **Pure**: No I/O, no external calls, no blocking operations
+    - **Fast**: Simple arithmetic and Pydantic model copying (~microseconds)
+    - **Bounded**: Fixed computational complexity regardless of data size
+
+    The lock is NEVER held during I/O operations (dispatcher execution), ensuring
+    that slow dispatchers do not block metrics updates in other threads.
 
     Legacy dict-based metrics (``_metrics``) use simple atomic increments and
     may be approximate under very high concurrency. For production monitoring,
@@ -273,10 +293,21 @@ class MessageDispatchEngine:
         before calling freeze(). After freeze(), dispatch operations are
         thread-safe for concurrent access.
 
-        - Structured metrics updates are protected by ``_metrics_lock`` ensuring
-          atomic read-modify-write operations under concurrent dispatch.
-        - Legacy dict metrics (get_metrics()) use simple increments and may be
-          approximate under very high concurrency; prefer get_structured_metrics().
+        **TOCTOU Prevention** (core design goal):
+        Structured metrics use ``_metrics_lock`` to ensure atomic read-modify-write
+        operations. Without this, concurrent dispatches could lose updates:
+
+        - Thread A reads metrics, computes increment
+        - Thread B reads (stale) metrics, computes increment
+        - Thread A writes → Thread B writes → Thread A's update is lost
+
+        By holding the lock during the entire read→compute→write sequence, we
+        guarantee no interleaving occurs. The computations within the lock are
+        pure and fast (~microseconds), so lock contention is minimal.
+
+        - Structured metrics: Use ``_metrics_lock`` for atomic updates
+        - Legacy dict metrics: Simple increments, may be approximate under high load
+        - Prefer ``get_structured_metrics()`` for production monitoring
 
         **METRICS CAVEAT**: While metrics updates are protected by a lock,
         get_metrics() and get_structured_metrics() provide point-in-time
@@ -369,8 +400,13 @@ class MessageDispatchEngine:
         self._frozen: bool = False
         self._registration_lock: threading.Lock = threading.Lock()
 
-        # Metrics lock for thread-safe structured metrics updates
-        # Protects read-modify-write operations on _structured_metrics
+        # Metrics lock for TOCTOU-safe structured metrics updates
+        # This lock protects the entire read-modify-write sequence on _structured_metrics:
+        #   1. Read current metrics state
+        #   2. Compute new values (record_execution, model_copy)
+        #   3. Write updated metrics back
+        # Holding the lock during computation prevents lost updates from concurrent dispatches.
+        # The computations are pure and fast (~microseconds), minimizing lock contention.
         self._metrics_lock: threading.Lock = threading.Lock()
 
         # Structured metrics (Pydantic model)
@@ -914,11 +950,16 @@ class MessageDispatchEngine:
                 ) * 1000
                 executed_dispatcher_ids.append(dispatcher_entry.dispatcher_id)
 
-                # Update per-dispatcher metrics atomically (protected by lock)
-                # All read-modify-write operations are performed within a single
-                # lock acquisition to prevent TOCTOU race conditions. The computations
-                # (record_execution, model_copy) are pure and fast, so holding the
-                # lock during these operations is acceptable and ensures consistency.
+                # TOCTOU Prevention: Update per-dispatcher metrics atomically
+                # ---------------------------------------------------------
+                # The entire read-modify-write sequence below MUST execute within
+                # a single lock acquisition to prevent race conditions:
+                #   1. Read: Get existing dispatcher metrics (or create default)
+                #   2. Modify: Call record_execution() to compute new values
+                #   3. Write: Update _structured_metrics with new dispatcher entry
+                #
+                # These operations are pure (no I/O) and fast (~microseconds),
+                # so holding the lock during computation is acceptable.
                 with self._metrics_lock:
                     existing_dispatcher_metrics = (
                         self._structured_metrics.dispatcher_metrics.get(
@@ -989,11 +1030,16 @@ class MessageDispatchEngine:
                 )
                 dispatcher_errors.append(error_msg)
 
-                # Update per-dispatcher metrics with error atomically (protected by lock)
-                # All read-modify-write operations are performed within a single
-                # lock acquisition to prevent TOCTOU race conditions. The computations
-                # (record_execution, model_copy) are pure and fast, so holding the
-                # lock during these operations is acceptable and ensures consistency.
+                # TOCTOU Prevention: Update per-dispatcher error metrics atomically
+                # ----------------------------------------------------------------
+                # The entire read-modify-write sequence below MUST execute within
+                # a single lock acquisition to prevent race conditions:
+                #   1. Read: Get existing dispatcher metrics (or create default)
+                #   2. Modify: Call record_execution() to compute new error values
+                #   3. Write: Update _structured_metrics with new dispatcher entry
+                #
+                # These operations are pure (no I/O) and fast (~microseconds),
+                # so holding the lock during computation is acceptable.
                 with self._metrics_lock:
                     self._metrics["dispatcher_error_count"] += 1
                     existing_dispatcher_metrics = (
@@ -1332,8 +1378,9 @@ class MessageDispatchEngine:
 
         Thread Safety:
             This method acquires ``_metrics_lock`` to return a consistent snapshot.
-            The returned Pydantic model is immutable and safe to use after the
-            lock is released.
+            The same lock protects all metrics updates, ensuring TOCTOU-safe
+            read-modify-write operations during dispatch. The returned Pydantic
+            model is immutable and safe to use after the lock is released.
 
         Returns:
             ModelDispatchMetrics with all observability data

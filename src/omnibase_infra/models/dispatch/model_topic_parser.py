@@ -21,10 +21,20 @@ Design Pattern:
     without requiring dispatcher registration lookups.
 
 Thread Safety:
-    ModelTopicParser methods are pure functions for parsing operations,
-    making it safe for concurrent access. The internal pattern cache
-    uses dict operations which are atomic in CPython, so concurrent
-    pattern compilation is safe (though may result in duplicate work).
+    ModelTopicParser is safe for concurrent use across threads.
+
+    - **Module-level parse cache** (``@lru_cache`` on ``_parse_topic_cached``):
+      Thread-safe. Python's ``functools.lru_cache`` uses internal locking to
+      ensure atomic cache updates, making concurrent parsing of topics safe.
+
+    - **Instance-level pattern cache** (``_pattern_cache`` dict in ``__init__``):
+      Safe but not synchronized. Concurrent calls to ``matches_pattern()`` on
+      the same parser instance may compile the same regex pattern multiple times
+      (duplicate work), but dict assignment in CPython is atomic so there's no
+      risk of data corruption. For single-threaded use or when patterns are
+      pre-warmed, this is optimal. For high-concurrency pattern matching on
+      shared instances, consider using separate parser instances per thread or
+      pre-warming patterns during initialization.
 
 Example:
     >>> from omnibase_infra.models.dispatch import ModelTopicParser, ModelParsedTopic
@@ -197,11 +207,39 @@ def _parse_topic_cached(topic: str) -> ModelParsedTopic:
             is_valid=True,
         )
 
-    # Fallback: Try to extract category using existing EnumMessageCategory.from_topic
-    # This handles partial matches and legacy formats
+    # -------------------------------------------------------------------------
+    # FALLBACK PARSING LOGIC
+    # -------------------------------------------------------------------------
+    # Why this fallback exists:
+    # The primary patterns (ONEX Kafka and Environment-Aware) are strict and
+    # require exact format matches. However, in practice we may encounter:
+    #
+    # 1. **Legacy topic formats** from older systems that predate ONEX standards
+    #    (e.g., "myapp.orders.events" without the "onex." prefix)
+    #
+    # 2. **Partial matches** where the topic contains a valid category suffix
+    #    (events, commands, intents) but doesn't fully conform to either standard
+    #    (e.g., "custom-prefix.domain.events.extra-suffix")
+    #
+    # 3. **Custom deployments** with non-standard environment prefixes or
+    #    versioning schemes that still use ONEX-style category suffixes
+    #
+    # The fallback uses EnumMessageCategory.from_topic() which performs a more
+    # lenient suffix-based search to find category indicators anywhere in the
+    # topic string.
+    # -------------------------------------------------------------------------
     category = EnumMessageCategory.from_topic(topic)
     if category is not None:
-        # Extract domain by finding the category suffix position
+        # We found a valid category suffix in the topic. Now attempt to extract
+        # the domain by locating the category suffix position and taking the
+        # segment immediately before it.
+        #
+        # Domain extraction logic:
+        # Given topic "some.prefix.mydomain.events.extra", we:
+        # 1. Find ".events" at position X
+        # 2. Take everything before that: "some.prefix.mydomain"
+        # 3. Split by "." and take the last segment: "mydomain"
+        # 4. If there are multiple prefix segments, assume first is environment
         topic_lower = topic.lower()
         category_suffix = f".{category.topic_suffix}"
         if category_suffix in topic_lower:
@@ -213,6 +251,23 @@ def _parse_topic_cached(topic: str) -> ModelParsedTopic:
             domain = parts[-1] if parts else None
             env = parts[0] if len(parts) > 1 else None
 
+            # -------------------------------------------------------------------------
+            # is_valid=True semantics for UNKNOWN-standard topics:
+            # -------------------------------------------------------------------------
+            # A topic parsed with EnumTopicStandard.UNKNOWN and is_valid=True means:
+            # - The topic does NOT conform to any recognized naming standard
+            # - BUT we successfully extracted a message category (EVENT/COMMAND/INTENT)
+            # - This makes the topic "partially valid" for routing purposes
+            #
+            # The dispatch engine can still route these messages because the category
+            # is the primary routing key. However, consumers should be aware that:
+            # - Domain extraction is best-effort and may be incorrect
+            # - Environment/version fields may be absent or inferred incorrectly
+            # - The topic naming doesn't follow ONEX best practices
+            #
+            # In contrast, is_valid=False (below) means we couldn't extract ANY
+            # useful routing information from the topic.
+            # -------------------------------------------------------------------------
             return ModelParsedTopic(
                 raw_topic=topic,
                 standard=EnumTopicStandard.UNKNOWN,

@@ -838,8 +838,6 @@ if is_open:
 
 **Dispatcher Implementation Pattern**:
 ```python
-from typing import Any
-
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.enums import EnumInfraTransportType
@@ -858,10 +856,10 @@ class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
             transport_type=config.transport_type,
         )
 
-    # NOTE: ModelEventEnvelope[Any] is an intentional exception to the "no Any types"
-    # rule. Dispatchers must accept envelopes with any payload type since the dispatch
-    # engine routes based on topic/category, not payload shape.
-    async def handle(self, envelope: ModelEventEnvelope[Any]) -> ModelDispatchResult:
+    # NOTE: ModelEventEnvelope[object] matches the DispatcherFunc signature.
+    # Using `object` provides type flexibility for dispatchers that handle
+    # envelopes with varying payload types based on topic/category routing.
+    async def handle(self, envelope: ModelEventEnvelope[object]) -> ModelDispatchResult:
         """Handle message with circuit breaker protection."""
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("handle", envelope.correlation_id)
