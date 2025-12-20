@@ -156,12 +156,9 @@ class DispatchContextEnforcer:
             )
 
         if node_kind == EnumNodeKind.COMPUTE:
-            # Compute nodes are pure transformations - no time injection
-            return ModelDispatchContext(
+            return ModelDispatchContext.for_compute(
                 correlation_id=correlation_id,
                 trace_id=trace_id,
-                now=None,
-                node_kind=EnumNodeKind.COMPUTE,
             )
 
         if node_kind == EnumNodeKind.ORCHESTRATOR:
@@ -179,12 +176,10 @@ class DispatchContextEnforcer:
             )
 
         if node_kind == EnumNodeKind.RUNTIME_HOST:
-            # Runtime hosts are infrastructure - treat like orchestrators
-            return ModelDispatchContext(
+            return ModelDispatchContext.for_runtime_host(
                 correlation_id=correlation_id,
                 trace_id=trace_id,
                 now=datetime.now(UTC),
-                node_kind=EnumNodeKind.RUNTIME_HOST,
             )
 
         # Unknown node kind - should not happen with valid EnumNodeKind

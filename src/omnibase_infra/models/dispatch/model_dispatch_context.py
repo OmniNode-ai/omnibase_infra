@@ -22,8 +22,10 @@ Design Pattern:
 
     Factory methods enforce time injection rules at construction time:
     - for_reducer() - Creates context WITHOUT time injection
+    - for_compute() - Creates context WITHOUT time injection
     - for_orchestrator() - Creates context WITH time injection
     - for_effect() - Creates context WITH time injection
+    - for_runtime_host() - Creates context WITH time injection
 
 Thread Safety:
     ModelDispatchContext is immutable (frozen=True) after creation,
@@ -71,8 +73,9 @@ class ModelDispatchContext(BaseModel):
     - Reducers must NEVER receive `now` (deterministic execution)
     - Orchestrators and Effects CAN receive `now` (time-dependent decisions)
 
-    Use factory methods (for_reducer, for_orchestrator, for_effect) to ensure
-    proper time injection rules are enforced at construction time.
+    Use factory methods (for_reducer, for_compute, for_orchestrator, for_effect,
+    for_runtime_host) to ensure proper time injection rules are enforced at
+    construction time.
 
     Attributes:
         correlation_id: Unique identifier for request tracing across services.
@@ -318,6 +321,85 @@ class ModelDispatchContext(BaseModel):
             trace_id=trace_id,
             now=now,
             node_kind=EnumNodeKind.EFFECT,
+            metadata=metadata,
+        )
+
+    @classmethod
+    def for_compute(
+        cls,
+        correlation_id: UUID,
+        trace_id: UUID | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> "ModelDispatchContext":
+        """Create dispatch context for a COMPUTE node.
+
+        Compute nodes are pure transformations that must be deterministic.
+        Like reducers, this factory method enforces that NO time injection
+        is provided.
+
+        Args:
+            correlation_id: Unique identifier for request tracing.
+            trace_id: Optional trace identifier for distributed tracing.
+            metadata: Optional additional metadata.
+
+        Returns:
+            ModelDispatchContext configured for COMPUTE execution.
+
+        Example:
+            >>> ctx = ModelDispatchContext.for_compute(
+            ...     correlation_id=uuid4(),
+            ...     trace_id=uuid4(),
+            ...     metadata={"algorithm": "sha256"},
+            ... )
+            >>> assert ctx.now is None
+            >>> assert ctx.node_kind == EnumNodeKind.COMPUTE
+        """
+        return cls(
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            now=None,
+            node_kind=EnumNodeKind.COMPUTE,
+            metadata=metadata,
+        )
+
+    @classmethod
+    def for_runtime_host(
+        cls,
+        correlation_id: UUID,
+        now: datetime,
+        trace_id: UUID | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> "ModelDispatchContext":
+        """Create dispatch context for a RUNTIME_HOST node.
+
+        Runtime hosts are infrastructure components that require time injection
+        for operational decisions (e.g., health checks, monitoring, scheduling).
+        This factory method includes time injection.
+
+        Args:
+            correlation_id: Unique identifier for request tracing.
+            now: Current time for infrastructure operations.
+            trace_id: Optional trace identifier for distributed tracing.
+            metadata: Optional additional metadata.
+
+        Returns:
+            ModelDispatchContext configured for RUNTIME_HOST execution.
+
+        Example:
+            >>> from datetime import datetime, UTC
+            >>> ctx = ModelDispatchContext.for_runtime_host(
+            ...     correlation_id=uuid4(),
+            ...     now=datetime.now(UTC),
+            ...     metadata={"host": "infra-hub-1"},
+            ... )
+            >>> assert ctx.now is not None
+            >>> assert ctx.node_kind == EnumNodeKind.RUNTIME_HOST
+        """
+        return cls(
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            now=now,
+            node_kind=EnumNodeKind.RUNTIME_HOST,
             metadata=metadata,
         )
 

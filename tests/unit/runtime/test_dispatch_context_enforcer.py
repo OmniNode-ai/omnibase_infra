@@ -807,6 +807,107 @@ class TestOMN973ComputeNodeDeterminism:
         assert context.node_kind == EnumNodeKind.COMPUTE
 
 
+class TestFactoryMethodForCompute:
+    """Tests for ModelDispatchContext.for_compute() factory method."""
+
+    def test_for_compute_creates_context_without_time(self) -> None:
+        """for_compute() should create context with now=None."""
+        ctx = ModelDispatchContext.for_compute(correlation_id=uuid4())
+        assert ctx.now is None
+
+    def test_for_compute_sets_correct_node_kind(self) -> None:
+        """for_compute() should set node_kind to COMPUTE."""
+        ctx = ModelDispatchContext.for_compute(correlation_id=uuid4())
+        assert ctx.node_kind == EnumNodeKind.COMPUTE
+
+    def test_for_compute_preserves_correlation_id(self) -> None:
+        """for_compute() should preserve the provided correlation_id."""
+        correlation_id = uuid4()
+        ctx = ModelDispatchContext.for_compute(correlation_id=correlation_id)
+        assert ctx.correlation_id == correlation_id
+
+    def test_for_compute_preserves_trace_id(self) -> None:
+        """for_compute() should preserve the provided trace_id."""
+        trace_id = uuid4()
+        ctx = ModelDispatchContext.for_compute(
+            correlation_id=uuid4(),
+            trace_id=trace_id,
+        )
+        assert ctx.trace_id == trace_id
+
+    def test_for_compute_preserves_metadata(self) -> None:
+        """for_compute() should preserve the provided metadata."""
+        metadata = {"algorithm": "sha256"}
+        ctx = ModelDispatchContext.for_compute(
+            correlation_id=uuid4(),
+            metadata=metadata,
+        )
+        assert ctx.metadata == metadata
+
+    def test_for_compute_has_time_injection_is_false(self) -> None:
+        """for_compute() context should have has_time_injection=False."""
+        ctx = ModelDispatchContext.for_compute(correlation_id=uuid4())
+        assert ctx.has_time_injection is False
+
+
+class TestFactoryMethodForRuntimeHost:
+    """Tests for ModelDispatchContext.for_runtime_host() factory method."""
+
+    def test_for_runtime_host_creates_context_with_time(self) -> None:
+        """for_runtime_host() should create context with now set."""
+        now = datetime.now(UTC)
+        ctx = ModelDispatchContext.for_runtime_host(
+            correlation_id=uuid4(),
+            now=now,
+        )
+        assert ctx.now == now
+
+    def test_for_runtime_host_sets_correct_node_kind(self) -> None:
+        """for_runtime_host() should set node_kind to RUNTIME_HOST."""
+        ctx = ModelDispatchContext.for_runtime_host(
+            correlation_id=uuid4(),
+            now=datetime.now(UTC),
+        )
+        assert ctx.node_kind == EnumNodeKind.RUNTIME_HOST
+
+    def test_for_runtime_host_preserves_correlation_id(self) -> None:
+        """for_runtime_host() should preserve the provided correlation_id."""
+        correlation_id = uuid4()
+        ctx = ModelDispatchContext.for_runtime_host(
+            correlation_id=correlation_id,
+            now=datetime.now(UTC),
+        )
+        assert ctx.correlation_id == correlation_id
+
+    def test_for_runtime_host_preserves_trace_id(self) -> None:
+        """for_runtime_host() should preserve the provided trace_id."""
+        trace_id = uuid4()
+        ctx = ModelDispatchContext.for_runtime_host(
+            correlation_id=uuid4(),
+            now=datetime.now(UTC),
+            trace_id=trace_id,
+        )
+        assert ctx.trace_id == trace_id
+
+    def test_for_runtime_host_preserves_metadata(self) -> None:
+        """for_runtime_host() should preserve the provided metadata."""
+        metadata = {"host": "infra-hub-1"}
+        ctx = ModelDispatchContext.for_runtime_host(
+            correlation_id=uuid4(),
+            now=datetime.now(UTC),
+            metadata=metadata,
+        )
+        assert ctx.metadata == metadata
+
+    def test_for_runtime_host_has_time_injection_is_true(self) -> None:
+        """for_runtime_host() context should have has_time_injection=True."""
+        ctx = ModelDispatchContext.for_runtime_host(
+            correlation_id=uuid4(),
+            now=datetime.now(UTC),
+        )
+        assert ctx.has_time_injection is True
+
+
 class TestOMN973ArchitecturalRationale:
     """
     Tests that document WHY these time injection rules exist.
