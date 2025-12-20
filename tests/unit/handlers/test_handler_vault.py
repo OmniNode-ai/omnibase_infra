@@ -215,16 +215,19 @@ class TestVaultAdapterOperations:
 
             await handler.initialize(vault_config)
 
+            correlation_id = uuid4()
             envelope = {
                 "operation": "vault.read_secret",
                 "payload": {"path": "myapp/config", "mount_point": "secret"},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
+            payload = result["payload"]
             assert isinstance(payload, dict)
             assert payload["data"] == {
                 "password": "secret123",
@@ -254,6 +257,7 @@ class TestVaultAdapterOperations:
 
             await handler.initialize(vault_config)
 
+            correlation_id = uuid4()
             envelope = {
                 "operation": "vault.write_secret",
                 "payload": {
@@ -261,13 +265,15 @@ class TestVaultAdapterOperations:
                     "data": {"password": "newsecret", "username": "admin"},
                     "mount_point": "secret",
                 },
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
+            payload = result["payload"]
             assert isinstance(payload, dict)
             assert payload["version"] == 2
             mock_hvac_client.secrets.kv.v2.create_or_update_secret.assert_called_once()
@@ -286,16 +292,19 @@ class TestVaultAdapterOperations:
 
             await handler.initialize(vault_config)
 
+            correlation_id = uuid4()
             envelope = {
                 "operation": "vault.delete_secret",
                 "payload": {"path": "myapp/config", "mount_point": "secret"},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
+            payload = result["payload"]
             assert isinstance(payload, dict)
             assert payload["deleted"] is True
             mock_hvac_client.secrets.kv.v2.delete_latest_version_of_secret.assert_called_once()
@@ -319,16 +328,19 @@ class TestVaultAdapterOperations:
 
             await handler.initialize(vault_config)
 
+            correlation_id = uuid4()
             envelope = {
                 "operation": "vault.list_secrets",
                 "payload": {"path": "myapp/", "mount_point": "secret"},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
+            payload = result["payload"]
             assert isinstance(payload, dict)
             assert payload["keys"] == ["config1", "config2", "config3/"]
             mock_hvac_client.secrets.kv.v2.list_secrets.assert_called_once()
@@ -412,16 +424,19 @@ class TestVaultAdapterTokenRenewal:
 
             await handler.initialize(vault_config)
 
+            correlation_id = uuid4()
             envelope = {
                 "operation": "vault.renew_token",
                 "payload": {},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
+            payload = result["payload"]
             assert isinstance(payload, dict)
             assert payload["renewable"] is True
             assert payload["lease_duration"] == 3600
@@ -478,16 +493,19 @@ class TestVaultAdapterTokenRenewal:
                 "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
             }
 
+            correlation_id = uuid4()
             envelope: dict[str, str | UUID | dict[str, str]] = {
                 "operation": "vault.read_secret",
                 "payload": {"path": "myapp/config"},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
             # Execute should NOT trigger renewal when above threshold
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
             # Verify renewal was NOT called (above threshold)
             mock_hvac_client.auth.token.renew_self.assert_not_called()
 
@@ -526,16 +544,19 @@ class TestVaultAdapterTokenRenewal:
                 "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
             }
 
+            correlation_id = uuid4()
             envelope: dict[str, str | UUID | dict[str, str]] = {
                 "operation": "vault.read_secret",
                 "payload": {"path": "myapp/config"},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
             # Execute should trigger renewal when below threshold
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
             # Verify renewal WAS called (below threshold)
             mock_hvac_client.auth.token.renew_self.assert_called_once()
 
@@ -574,16 +595,19 @@ class TestVaultAdapterTokenRenewal:
                 "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
             }
 
+            correlation_id = uuid4()
             envelope: dict[str, str | UUID | dict[str, str]] = {
                 "operation": "vault.read_secret",
                 "payload": {"path": "myapp/config"},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
             # Execute should NOT trigger renewal when above threshold
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
             # Verify renewal was NOT called (above threshold)
             mock_hvac_client.auth.token.renew_self.assert_not_called()
 
@@ -616,16 +640,19 @@ class TestVaultAdapterRetryLogic:
 
             await handler.initialize(vault_config)
 
+            correlation_id = uuid4()
             envelope = {
                 "operation": "vault.read_secret",
                 "payload": {"path": "myapp/config"},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
             # Should succeed on retry
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
             assert mock_hvac_client.secrets.kv.v2.read_secret_version.call_count == 2
 
     @pytest.mark.asyncio
@@ -861,16 +888,19 @@ class TestVaultAdapterHealthCheck:
 
             await handler.initialize(vault_config)
 
+            correlation_id = uuid4()
             envelope = {
                 "operation": "vault.health_check",
                 "payload": {},
-                "correlation_id": uuid4(),
+                "correlation_id": correlation_id,
             }
 
-            response = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            assert response["status"] == "success"
-            payload = response["payload"]
+            assert result["status"] == "success"
+            assert result["correlation_id"] == str(correlation_id)
+            payload = result["payload"]
             assert isinstance(payload, dict)
             assert payload["healthy"] is True
 
@@ -1207,9 +1237,10 @@ class TestVaultAdapterCircuitBreaker:
                 }
 
                 # Next request should transition to HALF_OPEN then succeed
-                response = await handler.execute(envelope)
+                output = await handler.execute(envelope)
+                result = output.result
 
-                assert response["status"] == "success"
+                assert result["status"] == "success"
                 # Circuit should now be CLOSED (recovered, using mixin attribute)
                 assert handler._circuit_breaker_open is False
 
@@ -1265,9 +1296,10 @@ class TestVaultAdapterCircuitBreaker:
                     "data": {"data": {"key": "value"}, "metadata": {"version": 1}}
                 }
 
-                response = await handler.execute(envelope)
+                output = await handler.execute(envelope)
+                result = output.result
 
-                assert response["status"] == "success"
+                assert result["status"] == "success"
                 # Circuit should now be CLOSED (using mixin attributes)
                 assert handler._circuit_breaker_open is False
                 assert handler._circuit_breaker_failures == 0
