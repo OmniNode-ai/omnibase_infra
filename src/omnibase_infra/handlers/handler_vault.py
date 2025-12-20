@@ -53,6 +53,9 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 logger = logging.getLogger(__name__)
 
+# Handler ID for ModelHandlerOutput
+HANDLER_ID_VAULT: str = "vault-handler"
+
 DEFAULT_MOUNT_POINT: str = "secret"
 SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
     {
@@ -846,7 +849,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
-            handler_id="vault-handler",
+            handler_id=HANDLER_ID_VAULT,
             result={
                 "status": "success",
                 "payload": {
@@ -935,7 +938,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
-            handler_id="vault-handler",
+            handler_id=HANDLER_ID_VAULT,
             result={
                 "status": "success",
                 "payload": {
@@ -1002,7 +1005,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
-            handler_id="vault-handler",
+            handler_id=HANDLER_ID_VAULT,
             result={
                 "status": "success",
                 "payload": {"deleted": True},
@@ -1071,7 +1074,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
-            handler_id="vault-handler",
+            handler_id=HANDLER_ID_VAULT,
             result={
                 "status": "success",
                 "payload": {"keys": keys if isinstance(keys, list) else []},
@@ -1219,7 +1222,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
-            handler_id="vault-handler",
+            handler_id=HANDLER_ID_VAULT,
             result={
                 "status": "success",
                 "payload": {
@@ -1332,7 +1335,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
-            handler_id="vault-handler",
+            handler_id=HANDLER_ID_VAULT,
             result={
                 "status": "success",
                 "payload": health_status,

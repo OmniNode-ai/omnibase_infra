@@ -35,6 +35,9 @@ _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
 
+# Handler ID for ModelHandlerOutput
+HANDLER_ID_HTTP: str = "http-handler"
+
 # Size category thresholds for sanitized logging
 _SIZE_THRESHOLD_KB: int = 1024  # 1 KB
 _SIZE_THRESHOLD_MB: int = 1024 * 1024  # 1 MB
@@ -709,7 +712,7 @@ class HttpRestAdapter:
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
-            handler_id="http-handler",
+            handler_id=HANDLER_ID_HTTP,
             result={
                 "status": "success",
                 "payload": {

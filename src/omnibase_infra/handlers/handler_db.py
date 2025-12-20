@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 # Note: Recommended range is 10-20 for production workloads.
 # Configurable pool size deferred to Beta release.
 _DEFAULT_POOL_SIZE: int = 5
+
+# Handler ID for ModelHandlerOutput
+HANDLER_ID_DB: str = "db-handler"
 _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
@@ -503,7 +506,7 @@ class DbAdapter:
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
             correlation_id=correlation_id,
-            handler_id="db-handler",
+            handler_id=HANDLER_ID_DB,
             result=result,
         )
 
