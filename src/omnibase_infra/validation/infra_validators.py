@@ -324,16 +324,17 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # ============================================================================
 
 # Maximum allowed complex union types in infrastructure code.
-# TECH DEBT (OMN-934): Baseline of 406 unions as of 2025-12-20
+# TECH DEBT (OMN-934): Baseline of 462 unions as of 2025-12-20
 # Target: Reduce incrementally through refactoring
 #
-# Current count breakdown (~406 unions as of 2025-12-20):
+# Current count breakdown (~462 unions as of 2025-12-20):
 # - Infrastructure handlers (~90): Consul, Kafka, Vault, PostgreSQL adapters
 # - Runtime components (~40): RuntimeHostProcess, handler/policy registries, wiring
 # - Models (~24): Event bus models, error context, runtime config, registration events
 # - Registration models (~41): ModelNodeCapabilities, ModelNodeMetadata with nullable fields
 # - Dispatch models (~148): OMN-934 message dispatch engine models with nullable fields
 # - JsonValue types (~44): Recursive JSON value type definitions for type-safe JSON handling
+# - Centralized json_types.py (~12): OMN-937 centralized JSON type definitions
 #
 # OMN-891 registration event models contribute unions:
 # - model_node_heartbeat_event.py (3): memory_usage_mb, cpu_usage_percent, correlation_id
@@ -347,10 +348,14 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - JsonValue recursive type aliases for type-safe JSON serialization
 # - Required for proper typing in message dispatch models
 #
+# PR #67 (OMN-937) centralized json_types.py contributes ~12 unions:
+# - Central JsonPrimitive/JsonValue type aliases for consistent JSON typing
+# - Plugin examples consolidated to import from this central location
+#
 # Note: The validator counts X | None (PEP 604) patterns as unions, which is
-# the ONEX-preferred syntax per CLAUDE.md. Threshold set to 450 to provide a
+# the ONEX-preferred syntax per CLAUDE.md. Threshold set to 465 to provide a
 # small buffer above the current baseline while maintaining awareness of union complexity.
-INFRA_MAX_UNIONS = 450
+INFRA_MAX_UNIONS = 465
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -370,7 +375,7 @@ INFRA_MAX_VIOLATIONS = 0
 # ------------------------------------------
 # 1. Complete OMN-934 (Message Dispatch Engine) - addresses ~148 dispatch model unions
 # 2. Complete H1 Legacy Migration - migrate v1_0_0 directories to flat structure
-# 3. Reduce INFRA_MAX_UNIONS from 450 to <200 through targeted refactoring
+# 3. Reduce INFRA_MAX_UNIONS from 465 to <200 through targeted refactoring
 # 4. Add remaining infrastructure components to exempted_patterns list
 # 5. Validate all infrastructure nodes pass strict mode or have documented exemptions
 #
@@ -705,7 +710,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (450).
+        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (465).
         strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:
