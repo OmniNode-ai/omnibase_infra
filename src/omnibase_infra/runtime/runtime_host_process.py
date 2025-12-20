@@ -61,8 +61,12 @@ from omnibase_infra.runtime.wiring import wire_default_handlers
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
+    from omnibase_spi.protocols.storage.protocol_idempotency_store import (
+        ProtocolIdempotencyStore,
+    )
 
     from omnibase_infra.event_bus.models import ModelEventMessage
+    from omnibase_infra.idempotency import ModelIdempotencyGuardConfig
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.runtime_host_process.wire_handlers"
@@ -321,6 +325,11 @@ class RuntimeHostProcess:
         # True when stop() has been called and we're waiting for messages to drain
         self._is_draining: bool = False
 
+        # Idempotency guard for duplicate message detection (OMN-945)
+        # None = disabled, otherwise points to configured store
+        self._idempotency_store: ProtocolIdempotencyStore | None = None
+        self._idempotency_config: ModelIdempotencyGuardConfig | None = None
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
@@ -500,6 +509,9 @@ class RuntimeHostProcess:
         # - Store the handler instance in self._handlers for routing
         await self._populate_handlers_from_registry()
 
+        # Step 3.5: Initialize idempotency store if configured (OMN-945)
+        await self._initialize_idempotency_store()
+
         # Step 4: Subscribe to input topic
         self._subscription = await self._event_bus.subscribe(
             topic=self._input_topic,
@@ -660,6 +672,9 @@ class RuntimeHostProcess:
                     "failure_count": len(all_failed),
                 },
             )
+
+        # Step 2.5: Cleanup idempotency store if initialized (OMN-945)
+        await self._cleanup_idempotency_store()
 
         # Step 3: Close event bus
         await self._event_bus.close()
@@ -912,6 +927,12 @@ class RuntimeHostProcess:
         correlation_id = envelope.get("correlation_id")
         if not isinstance(correlation_id, UUID):
             correlation_id = pre_validation_correlation_id
+
+        # Step 2: Check idempotency before handler dispatch (OMN-945)
+        # This prevents duplicate processing under at-least-once delivery
+        if not await self._check_idempotency(envelope, correlation_id):
+            # Duplicate detected - response already published, return early
+            return
 
         # Extract operation (validated to exist and be a string)
         operation = str(envelope.get("operation"))
@@ -1232,6 +1253,320 @@ class RuntimeHostProcess:
             Handler instance if registered, None otherwise.
         """
         return self._handlers.get(handler_type)
+
+    # =========================================================================
+    # Idempotency Guard Methods (OMN-945)
+    # =========================================================================
+
+    async def _initialize_idempotency_store(self) -> None:
+        """Initialize idempotency store from configuration.
+
+        Reads idempotency configuration from the runtime config and wires
+        the appropriate store implementation. If not configured or disabled,
+        idempotency checking is skipped.
+
+        Supported store types:
+            - "postgres": PostgreSQL-backed durable store (production)
+            - "memory": In-memory store (testing only)
+
+        Configuration keys:
+            - idempotency.enabled: bool (default: False)
+            - idempotency.store_type: "postgres" | "memory" (default: "postgres")
+            - idempotency.domain_from_operation: bool (default: True)
+            - idempotency.skip_operations: list[str] (default: [])
+            - idempotency_database: dict (PostgreSQL connection config)
+        """
+        # Check if config has idempotency section
+        idempotency_raw = self._config.get("idempotency")
+        if idempotency_raw is None:
+            logger.debug("Idempotency guard not configured, skipping")
+            return
+
+        try:
+            from omnibase_infra.idempotency import ModelIdempotencyGuardConfig
+
+            if isinstance(idempotency_raw, dict):
+                self._idempotency_config = ModelIdempotencyGuardConfig.model_validate(
+                    idempotency_raw
+                )
+            elif isinstance(idempotency_raw, ModelIdempotencyGuardConfig):
+                self._idempotency_config = idempotency_raw
+            else:
+                logger.warning(
+                    "Invalid idempotency config type",
+                    extra={"type": type(idempotency_raw).__name__},
+                )
+                return
+
+            if not self._idempotency_config.enabled:
+                logger.debug("Idempotency guard disabled in config")
+                return
+
+            # Create store based on store_type
+            if self._idempotency_config.store_type == "postgres":
+                from omnibase_infra.idempotency import (
+                    ModelPostgresIdempotencyStoreConfig,
+                    PostgresIdempotencyStore,
+                )
+
+                # Get database config from container or config
+                db_config_raw = self._config.get("idempotency_database", {})
+                if isinstance(db_config_raw, dict):
+                    db_config = ModelPostgresIdempotencyStoreConfig.model_validate(
+                        db_config_raw
+                    )
+                elif isinstance(db_config_raw, ModelPostgresIdempotencyStoreConfig):
+                    db_config = db_config_raw
+                else:
+                    logger.warning(
+                        "Invalid idempotency_database config type",
+                        extra={"type": type(db_config_raw).__name__},
+                    )
+                    return
+
+                self._idempotency_store = PostgresIdempotencyStore(config=db_config)
+                await self._idempotency_store.initialize()
+
+            elif self._idempotency_config.store_type == "memory":
+                from omnibase_infra.idempotency import InMemoryIdempotencyStore
+
+                self._idempotency_store = InMemoryIdempotencyStore()
+
+            else:
+                logger.warning(
+                    "Unknown idempotency store type",
+                    extra={"store_type": self._idempotency_config.store_type},
+                )
+                return
+
+            logger.info(
+                "Idempotency guard initialized",
+                extra={
+                    "store_type": self._idempotency_config.store_type,
+                    "domain_from_operation": self._idempotency_config.domain_from_operation,
+                    "skip_operations": self._idempotency_config.skip_operations,
+                },
+            )
+
+        except Exception as e:
+            logger.warning(
+                "Failed to initialize idempotency store, proceeding without",
+                extra={"error": str(e)},
+            )
+            self._idempotency_store = None
+            self._idempotency_config = None
+
+    async def _check_idempotency(
+        self,
+        envelope: dict[str, object],
+        correlation_id: UUID,
+    ) -> bool:
+        """Check if envelope should be processed (idempotency guard).
+
+        Extracts message_id from envelope headers and checks against the
+        idempotency store. If duplicate detected, publishes a duplicate
+        response and returns False.
+
+        Fail-Open Behavior:
+            If the idempotency store is unavailable or throws an error,
+            the message is allowed through (logged with warning). This
+            prioritizes availability over exactly-once semantics.
+
+        Args:
+            envelope: Validated envelope dict.
+            correlation_id: Normalized correlation ID (UUID).
+
+        Returns:
+            True if message should be processed (new message).
+            False if message is duplicate (skip processing).
+        """
+        # Skip check if idempotency not configured
+        if self._idempotency_store is None or self._idempotency_config is None:
+            return True
+
+        if not self._idempotency_config.enabled:
+            return True
+
+        # Check if operation is in skip list
+        operation = envelope.get("operation")
+        if isinstance(operation, str):
+            if not self._idempotency_config.should_check_idempotency(operation):
+                logger.debug(
+                    "Skipping idempotency check for operation",
+                    extra={
+                        "operation": operation,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return True
+
+        # Extract message_id from envelope
+        message_id = self._extract_message_id(envelope, correlation_id)
+
+        # Extract domain from operation if configured
+        domain = self._extract_idempotency_domain(envelope)
+
+        # Check and record in store
+        try:
+            is_new = await self._idempotency_store.check_and_record(
+                message_id=message_id,
+                domain=domain,
+                correlation_id=correlation_id,
+            )
+
+            if not is_new:
+                # Duplicate detected - publish duplicate response (NOT an error)
+                logger.info(
+                    "Duplicate message detected, skipping processing",
+                    extra={
+                        "message_id": str(message_id),
+                        "domain": domain,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+                duplicate_response = self._create_duplicate_response(
+                    message_id=message_id,
+                    correlation_id=correlation_id,
+                )
+                await self._publish_envelope_safe(duplicate_response, self._output_topic)
+                return False
+
+            return True
+
+        except Exception as e:
+            # Idempotency check failure - log and allow processing
+            # (fail-open for availability, may result in duplicate processing)
+            logger.warning(
+                "Idempotency check failed, allowing message through",
+                extra={
+                    "error": str(e),
+                    "message_id": str(message_id),
+                    "domain": domain,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return True
+
+    def _extract_message_id(
+        self,
+        envelope: dict[str, object],
+        correlation_id: UUID,
+    ) -> UUID:
+        """Extract message_id from envelope, falling back to correlation_id.
+
+        Priority:
+            1. envelope["headers"]["message_id"]
+            2. envelope["message_id"]
+            3. Use correlation_id as message_id (fallback)
+
+        Args:
+            envelope: Envelope dict to extract message_id from.
+            correlation_id: Fallback UUID if message_id not found.
+
+        Returns:
+            UUID representing the message_id.
+        """
+        # Try headers first
+        headers = envelope.get("headers")
+        if isinstance(headers, dict):
+            header_msg_id = headers.get("message_id")
+            if header_msg_id is not None:
+                if isinstance(header_msg_id, UUID):
+                    return header_msg_id
+                if isinstance(header_msg_id, str):
+                    try:
+                        return UUID(header_msg_id)
+                    except ValueError:
+                        pass
+
+        # Try top-level message_id
+        top_level_msg_id = envelope.get("message_id")
+        if top_level_msg_id is not None:
+            if isinstance(top_level_msg_id, UUID):
+                return top_level_msg_id
+            if isinstance(top_level_msg_id, str):
+                try:
+                    return UUID(top_level_msg_id)
+                except ValueError:
+                    pass
+
+        # Fallback: use correlation_id as message_id
+        return correlation_id
+
+    def _extract_idempotency_domain(
+        self,
+        envelope: dict[str, object],
+    ) -> str | None:
+        """Extract domain for idempotency key from envelope.
+
+        If domain_from_operation is enabled in config, extracts domain
+        from the operation prefix (e.g., "db.query" -> "db").
+
+        Args:
+            envelope: Envelope dict to extract domain from.
+
+        Returns:
+            Domain string if found and configured, None otherwise.
+        """
+        if self._idempotency_config is None:
+            return None
+
+        if not self._idempotency_config.domain_from_operation:
+            return None
+
+        operation = envelope.get("operation")
+        if isinstance(operation, str):
+            return self._idempotency_config.extract_domain(operation)
+
+        return None
+
+    def _create_duplicate_response(
+        self,
+        message_id: UUID,
+        correlation_id: UUID,
+    ) -> dict[str, object]:
+        """Create response for duplicate message detection.
+
+        This is NOT an error response - duplicates are expected under
+        at-least-once delivery. The response indicates successful
+        deduplication.
+
+        Args:
+            message_id: UUID of the duplicate message.
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Response dict indicating duplicate detection.
+        """
+        return {
+            "success": True,  # Deduplication is successful behavior
+            "status": "duplicate",
+            "message": "Message already processed",
+            "message_id": message_id,
+            "correlation_id": correlation_id,
+        }
+
+    async def _cleanup_idempotency_store(self) -> None:
+        """Cleanup idempotency store during shutdown.
+
+        Closes the idempotency store connection if initialized.
+        Called during stop() to release resources.
+        """
+        if self._idempotency_store is None:
+            return
+
+        try:
+            if hasattr(self._idempotency_store, "close"):
+                await self._idempotency_store.close()
+            logger.debug("Idempotency store closed")
+        except Exception as e:
+            logger.warning(
+                "Failed to close idempotency store",
+                extra={"error": str(e)},
+            )
+        finally:
+            self._idempotency_store = None
 
 
 __all__: list[str] = [

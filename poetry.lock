@@ -3321,7 +3321,7 @@ resolved_reference = "01027fab06e830b5b6575e4ecfe03311a2a4616e"
 
 [[package]]
 name = "omnibase-spi"
-version = "0.4.0"
+version = "0.4.1"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
 python-versions = "^3.12"
@@ -3337,8 +3337,8 @@ typing-extensions = ">=4.5.0"
 [package.source]
 type = "git"
 url = "https://github.com/OmniNode-ai/omnibase_spi.git"
-reference = "65a2ec579661456325d7c6c4e522d91c33462b35"
-resolved_reference = "65a2ec579661456325d7c6c4e522d91c33462b35"
+reference = "v0.4.1"
+resolved_reference = "d07e186f502b7e471c94b8770d0c69d2712373ab"
 
 [[package]]
 name = "openai"
@@ -6170,4 +6170,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "2892c8f8621bc094557e5b32bc65647860315f81e274fe000f6369f131248979"
+content-hash = "bf3e3f2d7671695a0b278fee0d6fa15d4f33ff983431d50e16754653092805a3"
