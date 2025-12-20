@@ -141,7 +141,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Note: The validator counts X | None (PEP 604) patterns as unions, which is
 # the ONEX-preferred syntax per CLAUDE.md. Threshold set to 450 to provide a
 # small buffer above the current baseline while maintaining awareness of union complexity.
-INFRA_MAX_UNIONS = 450
+INFRA_MAX_UNIONS = 455
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

@@ -123,16 +123,23 @@ class MessageTypeRegistryError(RuntimeHostError):
 # Topic Domain Extraction
 # =============================================================================
 
-# Pattern for extracting domain from topics
-# Handles both ONEX format (onex.<domain>.<type>) and environment-aware format
-# (<env>.<domain>.<category>.<version>)
-_DOMAIN_PATTERN = re.compile(
-    r"^(?:onex\.)?(?P<env>[a-zA-Z0-9_-]+)\.(?P<domain>[a-zA-Z0-9_-]+)\.",
+# Pattern for ONEX format: onex.<domain>.<type>
+# Example: onex.registration.events -> domain = "registration"
+_ONEX_TOPIC_PATTERN = re.compile(
+    r"^onex\.(?P<domain>[a-zA-Z0-9_-]+)\.",
+    re.IGNORECASE,
+)
+
+# Pattern for environment-aware format: <env>.<domain>.<category>.<version>
+# Example: dev.user.events.v1 -> domain = "user"
+# Requires at least 3 segments (env.domain.rest) with trailing content
+_ENV_TOPIC_PATTERN = re.compile(
+    r"^(?P<env>[a-zA-Z0-9_-]+)\.(?P<domain>[a-zA-Z0-9_-]+)\.",
     re.IGNORECASE,
 )
 
 
-def extract_domain_from_topic(topic: str) -> str | None:
+def extract_domain_from_topic(topic: str | None) -> str | None:
     """
     Extract the domain from a topic string.
 
@@ -141,10 +148,15 @@ def extract_domain_from_topic(topic: str) -> str | None:
     - Environment-aware format: "<env>.<domain>.<category>.<version>" -> domain
 
     Args:
-        topic: The topic string to extract domain from.
+        topic: The topic string to extract domain from. May be None, empty,
+            or whitespace-only.
 
     Returns:
-        The extracted domain string, or None if extraction fails.
+        The extracted domain string, or None if:
+        - topic is None
+        - topic is empty string
+        - topic is whitespace-only
+        - topic format is not recognized (no domain extractable)
 
     Examples:
         >>> extract_domain_from_topic("onex.registration.events")
@@ -155,33 +167,40 @@ def extract_domain_from_topic(topic: str) -> str | None:
         'order'
         >>> extract_domain_from_topic("invalid")
         None
+        >>> extract_domain_from_topic(None)
+        None
+        >>> extract_domain_from_topic("")
+        None
+        >>> extract_domain_from_topic("   ")
+        None
 
     .. versionadded:: 0.5.0
     """
-    if not topic:
+    # Handle None, empty string, and whitespace-only inputs
+    if topic is None or not topic.strip():
         return None
 
-    # Try to match the pattern
-    match = _DOMAIN_PATTERN.match(topic)
-    if not match:
-        # Fallback: try simple split on dots and take second segment
-        parts = topic.split(".")
-        if len(parts) >= 2:
-            return parts[1]
-        return None
+    # Strip whitespace for consistent matching
+    topic = topic.strip()
 
-    # For "onex.<domain>.*" format, the domain is the first captured group
-    # For "<env>.<domain>.*" format, the domain is the second captured group
-    groups = match.groupdict()
-    env_or_domain = groups.get("env", "")
-    domain = groups.get("domain", "")
+    # Try ONEX format first: onex.<domain>.<type>
+    # This must be checked first since "onex" could look like an environment
+    match = _ONEX_TOPIC_PATTERN.match(topic)
+    if match:
+        return match.group("domain")
 
-    # If first segment is "onex", return second segment
-    if env_or_domain.lower() == "onex":
-        return domain
+    # Try environment-aware format: <env>.<domain>.<category>.<version>
+    match = _ENV_TOPIC_PATTERN.match(topic)
+    if match:
+        return match.group("domain")
 
-    # For environment-aware format, second segment is the domain
-    return domain
+    # Fallback: try simple split on dots and take second segment
+    # This handles edge cases like "a.b" (no trailing segment)
+    parts = topic.split(".")
+    if len(parts) >= 2:
+        return parts[1]
+
+    return None
 
 
 # =============================================================================

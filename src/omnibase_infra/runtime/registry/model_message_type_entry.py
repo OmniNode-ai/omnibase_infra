@@ -22,7 +22,7 @@ Related:
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.runtime.registry.model_domain_constraint import (
@@ -106,6 +106,34 @@ class ModelMessageTypeEntry(BaseModel):
             "Message categories where this type can appear. Frozenset for immutability."
         ),
     )
+
+    @field_validator("allowed_categories")
+    @classmethod
+    def validate_allowed_categories_not_empty(
+        cls, value: frozenset[EnumMessageCategory]
+    ) -> frozenset[EnumMessageCategory]:
+        """Validate that allowed_categories contains at least one category.
+
+        A message type with no allowed categories is invalid because it can
+        never be routed - there is no valid topic category where it could appear.
+
+        Args:
+            value: The frozenset of allowed categories.
+
+        Returns:
+            The validated frozenset.
+
+        Raises:
+            ValueError: If the frozenset is empty.
+        """
+        if not value:
+            msg = (
+                "allowed_categories cannot be empty. "
+                "A message type must be allowed in at least one category "
+                "(EVENT, COMMAND, or INTENT) to be routable."
+            )
+            raise ValueError(msg)
+        return value
 
     # ---- Domain Constraints ----
     domain_constraint: ModelDomainConstraint = Field(

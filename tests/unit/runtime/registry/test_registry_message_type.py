@@ -44,6 +44,45 @@ class TestExtractDomainFromTopic:
         # Single segment - not enough to extract domain
         assert extract_domain_from_topic("registration") is None
 
+    def test_whitespace_only_topic(self) -> None:
+        """Test whitespace-only topic returns None."""
+        assert extract_domain_from_topic("   ") is None
+        assert extract_domain_from_topic("\t") is None
+        assert extract_domain_from_topic("\n") is None
+        assert extract_domain_from_topic("  \t\n  ") is None
+
+    def test_topic_with_leading_trailing_whitespace(self) -> None:
+        """Test topic with leading/trailing whitespace is trimmed."""
+        # Leading/trailing whitespace should be stripped before parsing
+        assert extract_domain_from_topic("  dev.user.events.v1  ") == "user"
+        assert extract_domain_from_topic("\tonex.order.commands\t") == "order"
+
+    def test_extra_segments(self) -> None:
+        """Test topics with extra segments are handled correctly."""
+        # Extra segments after the domain should not affect extraction
+        assert extract_domain_from_topic("dev.user.events.v1.extra.segments") == "user"
+        assert extract_domain_from_topic("onex.billing.commands.v2.more") == "billing"
+
+    def test_special_characters_in_domain(self) -> None:
+        """Test domain names with allowed special characters."""
+        # Underscores and hyphens are allowed in domain names
+        assert extract_domain_from_topic("dev.user_service.events.v1") == "user_service"
+        assert extract_domain_from_topic("prod.order-mgmt.commands.v1") == "order-mgmt"
+        assert extract_domain_from_topic("onex.my_domain.events") == "my_domain"
+        assert extract_domain_from_topic("onex.api-gateway.intents") == "api-gateway"
+
+    def test_case_insensitive_onex_prefix(self) -> None:
+        """Test that ONEX prefix matching is case-insensitive."""
+        assert extract_domain_from_topic("ONEX.user.events") == "user"
+        assert extract_domain_from_topic("Onex.order.commands") == "order"
+        assert extract_domain_from_topic("OnEx.billing.intents") == "billing"
+
+    def test_two_segment_topic(self) -> None:
+        """Test topic with exactly two segments (fallback case)."""
+        # Two segments: uses fallback to return second segment
+        assert extract_domain_from_topic("env.domain") == "domain"
+        assert extract_domain_from_topic("onex.user") == "user"
+
 
 class TestMessageTypeRegistryRegistration:
     """Tests for registration functionality."""

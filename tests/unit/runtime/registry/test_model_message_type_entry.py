@@ -238,3 +238,24 @@ class TestModelMessageTypeEntryValidation:
                 allowed_categories=frozenset([EnumMessageCategory.EVENT]),
                 domain_constraint=ModelDomainConstraint(owning_domain="user"),
             )
+
+    def test_allowed_categories_empty_raises_validation_error(self) -> None:
+        """Test that empty allowed_categories raises ValidationError.
+
+        A message type with no allowed categories is invalid because it can
+        never be routed - there is no valid topic category where it could appear.
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelMessageTypeEntry(
+                message_type="InvalidType",
+                handler_ids=("handler",),
+                allowed_categories=frozenset(),  # Empty frozenset - INVALID
+                domain_constraint=ModelDomainConstraint(owning_domain="user"),
+            )
+
+        # Verify the error message is clear and actionable
+        error_str = str(exc_info.value)
+        assert "allowed_categories" in error_str
+        assert "empty" in error_str.lower() or "cannot be empty" in error_str.lower()
