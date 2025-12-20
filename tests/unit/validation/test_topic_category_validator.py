@@ -21,6 +21,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 )
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.validation.topic_category_validator import (
     HANDLER_EXPECTED_CATEGORIES,
     TOPIC_CATEGORY_PATTERNS,
@@ -97,8 +98,12 @@ class TestTopicSuffixes:
         assert TOPIC_SUFFIXES[EnumMessageCategory.INTENT] == "intents"
 
     def test_projection_has_no_suffix_requirement(self) -> None:
-        """Verify projection category has empty suffix (no naming constraint)."""
-        assert TOPIC_SUFFIXES[EnumMessageCategory.PROJECTION] == ""
+        """Verify projection output type has empty suffix (no naming constraint).
+
+        Note: PROJECTION is now in EnumNodeOutputType, not EnumMessageCategory,
+        because projections are node outputs (REDUCER output), not routed messages.
+        """
+        assert TOPIC_SUFFIXES[EnumNodeOutputType.PROJECTION] == ""
 
 
 class TestHandlerExpectedCategories:
@@ -109,7 +114,7 @@ class TestHandlerExpectedCategories:
         categories = HANDLER_EXPECTED_CATEGORIES[EnumHandlerType.EFFECT]
         assert EnumMessageCategory.COMMAND in categories
         assert EnumMessageCategory.EVENT in categories
-        assert EnumMessageCategory.PROJECTION not in categories
+        assert EnumNodeOutputType.PROJECTION not in categories
 
     def test_compute_handler_categories(self) -> None:
         """Verify compute handlers can process all message types except projections."""
@@ -119,10 +124,14 @@ class TestHandlerExpectedCategories:
         assert EnumMessageCategory.INTENT in categories
 
     def test_reducer_handler_categories(self) -> None:
-        """Verify reducer handlers can process events and projections."""
+        """Verify reducer handlers can process events and output projections.
+
+        Note: PROJECTION is in EnumNodeOutputType because it's a node output type
+        (REDUCERs produce projections), not a message category for routing.
+        """
         categories = HANDLER_EXPECTED_CATEGORIES[EnumHandlerType.REDUCER]
         assert EnumMessageCategory.EVENT in categories
-        assert EnumMessageCategory.PROJECTION in categories
+        assert EnumNodeOutputType.PROJECTION in categories
         assert EnumMessageCategory.COMMAND not in categories
 
     def test_orchestrator_handler_categories(self) -> None:
@@ -161,24 +170,27 @@ class TestTopicCategoryValidatorValidateMessageTopic:
         assert result is None
 
     def test_projection_on_any_topic(self) -> None:
-        """Verify projection on any topic returns no violation."""
+        """Verify projection on any topic returns no violation.
+
+        Note: PROJECTION is now in EnumNodeOutputType because it's a node output
+        type (not a routed message category). Projections have no topic naming
+        constraint because they are internal state outputs from REDUCER nodes.
+        """
         validator = TopicCategoryValidator()
         # Projections have no topic naming constraint
         assert (
             validator.validate_message_topic(
-                EnumMessageCategory.PROJECTION, "order.events"
+                EnumNodeOutputType.PROJECTION, "order.events"
             )
             is None
         )
         assert (
-            validator.validate_message_topic(
-                EnumMessageCategory.PROJECTION, "any.topic"
-            )
+            validator.validate_message_topic(EnumNodeOutputType.PROJECTION, "any.topic")
             is None
         )
         assert (
             validator.validate_message_topic(
-                EnumMessageCategory.PROJECTION, "state.projections"
+                EnumNodeOutputType.PROJECTION, "state.projections"
             )
             is None
         )
@@ -232,22 +244,28 @@ class TestTopicCategoryValidatorValidateSubscription:
     """Test TopicCategoryValidator.validate_subscription method."""
 
     def test_valid_reducer_subscription(self) -> None:
-        """Verify valid reducer subscription to events topic."""
+        """Verify valid reducer subscription to events topic.
+
+        Note: PROJECTION is in EnumNodeOutputType because it's a node output type.
+        """
         validator = TopicCategoryValidator()
         violations = validator.validate_subscription(
             EnumHandlerType.REDUCER,
             ["order.events"],
-            [EnumMessageCategory.EVENT, EnumMessageCategory.PROJECTION],
+            [EnumMessageCategory.EVENT, EnumNodeOutputType.PROJECTION],
         )
         assert len(violations) == 0
 
     def test_invalid_reducer_subscription_to_commands(self) -> None:
-        """Verify reducer subscription to commands topic is a violation."""
+        """Verify reducer subscription to commands topic is a violation.
+
+        Note: PROJECTION is in EnumNodeOutputType because it's a node output type.
+        """
         validator = TopicCategoryValidator()
         violations = validator.validate_subscription(
             EnumHandlerType.REDUCER,
             ["order.commands"],
-            [EnumMessageCategory.EVENT, EnumMessageCategory.PROJECTION],
+            [EnumMessageCategory.EVENT, EnumNodeOutputType.PROJECTION],
         )
         assert len(violations) == 1
         assert (
@@ -257,12 +275,15 @@ class TestTopicCategoryValidatorValidateSubscription:
         assert violations[0].handler_type == EnumHandlerType.REDUCER
 
     def test_multiple_subscriptions_mixed_validity(self) -> None:
-        """Verify multiple subscriptions with mixed validity."""
+        """Verify multiple subscriptions with mixed validity.
+
+        Note: PROJECTION is in EnumNodeOutputType because it's a node output type.
+        """
         validator = TopicCategoryValidator()
         violations = validator.validate_subscription(
             EnumHandlerType.REDUCER,
             ["order.events", "order.commands"],
-            [EnumMessageCategory.EVENT, EnumMessageCategory.PROJECTION],
+            [EnumMessageCategory.EVENT, EnumNodeOutputType.PROJECTION],
         )
         # commands topic should cause one violation
         assert len(violations) == 1
@@ -326,7 +347,8 @@ class TestTopicCategoryValidatorGetExpectedSuffix:
         assert (
             validator.get_expected_topic_suffix(EnumMessageCategory.INTENT) == "intents"
         )
-        assert validator.get_expected_topic_suffix(EnumMessageCategory.PROJECTION) == ""
+        # PROJECTION is now in EnumNodeOutputType (node output, not routed message)
+        assert validator.get_expected_topic_suffix(EnumNodeOutputType.PROJECTION) == ""
 
 
 class TestTopicCategoryASTVisitor:
@@ -497,7 +519,11 @@ class TestValidateMessageOnTopic:
         assert "order.commands" in result.message
 
     def test_projection_on_any_topic(self) -> None:
-        """Verify projections can be on any topic."""
+        """Verify projections can be on any topic.
+
+        Note: PROJECTION is in EnumNodeOutputType because it's a node output type
+        (not a routed message category).
+        """
 
         class OrderProjection:
             pass
@@ -505,7 +531,7 @@ class TestValidateMessageOnTopic:
         result = validate_message_on_topic(
             message=OrderProjection(),
             topic="any.topic",
-            message_category=EnumMessageCategory.PROJECTION,
+            message_category=EnumNodeOutputType.PROJECTION,
         )
         assert result is None
 

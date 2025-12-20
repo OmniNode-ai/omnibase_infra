@@ -3315,7 +3315,7 @@ full = ["psutil"]
 [package.source]
 type = "git"
 url = "https://github.com/OmniNode-ai/omnibase_core.git"
-reference = "v0.5.4"
+reference = "main"
 resolved_reference = "006c4592066d9b186c55b697f4e394ad87b32771"
 
 [[package]]
@@ -6169,4 +6169,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "b79ff2ccfae541967d7e602dff2e6941e590d809ff8df44384816b406c7ec087"
+content-hash = "2892c8f8621bc094557e5b32bc65647860315f81e274fe000f6369f131248979"
