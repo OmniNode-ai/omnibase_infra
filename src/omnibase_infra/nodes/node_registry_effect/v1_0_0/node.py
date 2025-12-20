@@ -55,8 +55,11 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -1102,10 +1105,6 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
             exceptions. If an object cannot be converted, it returns a string
             representation with a warning indicator.
         """
-        from enum import Enum
-
-        from pydantic import BaseModel
-
         # datetime types
         if isinstance(obj, datetime):
             return obj.isoformat()

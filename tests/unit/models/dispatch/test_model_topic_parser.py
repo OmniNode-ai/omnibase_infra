@@ -107,16 +107,309 @@ class TestModelParsedTopic:
 
         assert parsed.is_routable() is False
 
-    def test_parsed_topic_immutable(self) -> None:
-        """Test that ModelParsedTopic is immutable (frozen)."""
+
+@pytest.mark.unit
+class TestModelParsedTopicCanonicalBehaviors:
+    """Tests for canonical Pydantic model behaviors of ModelParsedTopic.
+
+    These tests verify that the frozen Pydantic model correctly implements:
+    - Immutability (frozen=True)
+    - Serialization (model_dump)
+    - Deserialization (model_validate)
+    - Copying (model_copy)
+    - Extra field rejection (extra='forbid')
+    - Field validation (min_length constraints)
+    - Hashability (frozen models are hashable)
+    - Equality comparison
+    """
+
+    def test_immutability_frozen_model(self) -> None:
+        """Test that ModelParsedTopic is immutable (frozen=True)."""
+        from pydantic import ValidationError
+
         parsed = ModelParsedTopic(
             raw_topic="onex.user.events",
             standard=EnumTopicStandard.ONEX_KAFKA,
             is_valid=True,
         )
 
-        with pytest.raises(Exception):  # ValidationError for frozen model
+        # Attempting to modify any field should raise ValidationError
+        with pytest.raises(ValidationError):
             parsed.domain = "changed"  # type: ignore[misc]
+
+        with pytest.raises(ValidationError):
+            parsed.raw_topic = "different"  # type: ignore[misc]
+
+        with pytest.raises(ValidationError):
+            parsed.is_valid = False  # type: ignore[misc]
+
+    def test_model_dump_all_fields(self) -> None:
+        """Test model_dump() returns all fields correctly."""
+        parsed = ModelParsedTopic(
+            raw_topic="onex.registration.events",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            domain="registration",
+            category=EnumMessageCategory.EVENT,
+            topic_type=EnumTopicType.EVENTS,
+            environment=None,
+            version=None,
+            is_valid=True,
+            validation_error=None,
+        )
+
+        data = parsed.model_dump()
+
+        assert data["raw_topic"] == "onex.registration.events"
+        assert data["standard"] == EnumTopicStandard.ONEX_KAFKA
+        assert data["domain"] == "registration"
+        assert data["category"] == EnumMessageCategory.EVENT
+        assert data["topic_type"] == EnumTopicType.EVENTS
+        assert data["environment"] is None
+        assert data["version"] is None
+        assert data["is_valid"] is True
+        assert data["validation_error"] is None
+
+    def test_model_dump_exclude_none(self) -> None:
+        """Test model_dump(exclude_none=True) excludes None fields."""
+        parsed = ModelParsedTopic(
+            raw_topic="onex.user.events",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            is_valid=True,
+        )
+
+        data = parsed.model_dump(exclude_none=True)
+
+        assert "raw_topic" in data
+        assert "standard" in data
+        assert "is_valid" in data
+        # None fields should be excluded
+        assert "domain" not in data
+        assert "category" not in data
+        assert "environment" not in data
+
+    def test_model_validate_from_dict(self) -> None:
+        """Test model_validate() creates model from dictionary."""
+        data = {
+            "raw_topic": "dev.user.events.v1",
+            "standard": EnumTopicStandard.ENVIRONMENT_AWARE,
+            "domain": "user",
+            "category": EnumMessageCategory.EVENT,
+            "environment": "dev",
+            "version": "v1",
+            "is_valid": True,
+        }
+
+        parsed = ModelParsedTopic.model_validate(data)
+
+        assert parsed.raw_topic == "dev.user.events.v1"
+        assert parsed.standard == EnumTopicStandard.ENVIRONMENT_AWARE
+        assert parsed.domain == "user"
+        assert parsed.category == EnumMessageCategory.EVENT
+        assert parsed.environment == "dev"
+        assert parsed.version == "v1"
+        assert parsed.is_valid is True
+
+    def test_model_validate_roundtrip(self) -> None:
+        """Test model_dump() -> model_validate() roundtrip preserves data."""
+        original = ModelParsedTopic(
+            raw_topic="onex.workflow.intents",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            domain="workflow",
+            category=EnumMessageCategory.INTENT,
+            topic_type=EnumTopicType.INTENTS,
+            is_valid=True,
+        )
+
+        # Serialize and deserialize
+        data = original.model_dump()
+        restored = ModelParsedTopic.model_validate(data)
+
+        # Verify all fields match
+        assert restored.raw_topic == original.raw_topic
+        assert restored.standard == original.standard
+        assert restored.domain == original.domain
+        assert restored.category == original.category
+        assert restored.topic_type == original.topic_type
+        assert restored.is_valid == original.is_valid
+
+    def test_model_copy_creates_new_instance(self) -> None:
+        """Test model_copy() creates a new independent instance."""
+        original = ModelParsedTopic(
+            raw_topic="onex.user.events",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            domain="user",
+            category=EnumMessageCategory.EVENT,
+            is_valid=True,
+        )
+
+        # Create a copy with modified field
+        copied = original.model_copy(update={"domain": "order"})
+
+        # Verify copy has updated value
+        assert copied.domain == "order"
+
+        # Verify original is unchanged
+        assert original.domain == "user"
+
+        # Verify they are different objects
+        assert copied is not original
+
+        # Other fields should be preserved
+        assert copied.raw_topic == original.raw_topic
+        assert copied.standard == original.standard
+        assert copied.category == original.category
+        assert copied.is_valid == original.is_valid
+
+    def test_model_copy_deep(self) -> None:
+        """Test model_copy(deep=True) creates deep copy."""
+        original = ModelParsedTopic(
+            raw_topic="onex.user.events",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            is_valid=True,
+        )
+
+        copied = original.model_copy(deep=True)
+
+        # Should be equal but not the same object
+        assert copied == original
+        assert copied is not original
+
+    def test_extra_fields_forbidden(self) -> None:
+        """Test that extra fields are rejected (extra='forbid')."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelParsedTopic(
+                raw_topic="onex.user.events",
+                standard=EnumTopicStandard.ONEX_KAFKA,
+                is_valid=True,
+                unexpected_field="should_fail",  # type: ignore[call-arg]
+            )
+
+        # Verify error mentions extra field
+        assert "unexpected_field" in str(exc_info.value)
+
+    def test_raw_topic_min_length_validation(self) -> None:
+        """Test that raw_topic enforces min_length=1."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelParsedTopic(
+                raw_topic="",  # Empty string should fail
+                standard=EnumTopicStandard.UNKNOWN,
+                is_valid=False,
+            )
+
+        # Verify error mentions the constraint
+        error_str = str(exc_info.value)
+        assert "raw_topic" in error_str
+
+    def test_hashability(self) -> None:
+        """Test that frozen model is hashable and can be used in sets/dicts."""
+        parsed1 = ModelParsedTopic(
+            raw_topic="onex.user.events",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            category=EnumMessageCategory.EVENT,
+            is_valid=True,
+        )
+
+        parsed2 = ModelParsedTopic(
+            raw_topic="onex.order.events",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            category=EnumMessageCategory.EVENT,
+            is_valid=True,
+        )
+
+        parsed3 = ModelParsedTopic(
+            raw_topic="onex.user.events",  # Same as parsed1
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            category=EnumMessageCategory.EVENT,
+            is_valid=True,
+        )
+
+        # Should be hashable
+        hash1 = hash(parsed1)
+        hash2 = hash(parsed2)
+        hash3 = hash(parsed3)
+
+        # Hashes should be consistent
+        assert hash(parsed1) == hash1
+
+        # Equal objects should have same hash
+        assert hash1 == hash3
+
+        # Different objects likely have different hashes
+        assert hash1 != hash2
+
+        # Can be used in set
+        topic_set = {parsed1, parsed2, parsed3}
+        assert len(topic_set) == 2  # parsed1 and parsed3 are equal
+
+        # Can be used as dict key
+        topic_dict = {parsed1: "first", parsed2: "second"}
+        assert topic_dict[parsed3] == "first"  # parsed3 equals parsed1
+
+    def test_equality_comparison(self) -> None:
+        """Test equality comparison between ModelParsedTopic instances."""
+        parsed1 = ModelParsedTopic(
+            raw_topic="onex.user.events",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            domain="user",
+            category=EnumMessageCategory.EVENT,
+            is_valid=True,
+        )
+
+        parsed2 = ModelParsedTopic(
+            raw_topic="onex.user.events",
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            domain="user",
+            category=EnumMessageCategory.EVENT,
+            is_valid=True,
+        )
+
+        parsed3 = ModelParsedTopic(
+            raw_topic="onex.order.events",  # Different topic
+            standard=EnumTopicStandard.ONEX_KAFKA,
+            domain="order",
+            category=EnumMessageCategory.EVENT,
+            is_valid=True,
+        )
+
+        # Equal instances
+        assert parsed1 == parsed2
+
+        # Different instances
+        assert parsed1 != parsed3
+
+        # Not equal to different types
+        assert parsed1 != "onex.user.events"
+        assert parsed1 != {"raw_topic": "onex.user.events"}
+
+    def test_from_attributes_config(self) -> None:
+        """Test from_attributes=True allows creation from objects with attributes."""
+
+        class TopicData:
+            """Simple class with matching attributes."""
+
+            def __init__(self) -> None:
+                self.raw_topic = "onex.user.events"
+                self.standard = EnumTopicStandard.ONEX_KAFKA
+                self.domain = "user"
+                self.category = EnumMessageCategory.EVENT
+                self.topic_type = EnumTopicType.EVENTS
+                self.environment = None
+                self.version = None
+                self.is_valid = True
+                self.validation_error = None
+
+        source = TopicData()
+        parsed = ModelParsedTopic.model_validate(source)
+
+        assert parsed.raw_topic == "onex.user.events"
+        assert parsed.standard == EnumTopicStandard.ONEX_KAFKA
+        assert parsed.domain == "user"
+        assert parsed.category == EnumMessageCategory.EVENT
+        assert parsed.is_valid is True
 
 
 # ============================================================================
@@ -285,6 +578,7 @@ class TestInvalidFormats:
         result = parser.parse("   ")
 
         assert result.is_valid is False
+        assert result.validation_error is not None
         assert (
             "empty" in result.validation_error.lower()
             or "whitespace" in result.validation_error.lower()

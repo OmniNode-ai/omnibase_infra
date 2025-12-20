@@ -102,6 +102,13 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
+from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
+from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
+    ModelDispatcherMetrics,
+)
 
 # Type alias for dispatcher output topics
 # Dispatchers can return:
@@ -183,14 +190,6 @@ def _sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
 
     return f"{exception_type}: {exception_str}"
 
-
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
-from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
-from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
-from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
-    ModelDispatcherMetrics,
-)
 
 # Module-level logger for fallback when no custom logger is provided
 _module_logger = logging.getLogger(__name__)

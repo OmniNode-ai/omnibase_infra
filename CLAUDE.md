@@ -473,17 +473,34 @@ Use graceful degradation for `InfraTimeoutError` to maintain service availabilit
 
 ```python
 from collections.abc import Callable
+from types import FrameType
+from typing import TypeVar
 from uuid import UUID
+
+from pydantic import BaseModel
 
 from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
 from omnibase_infra.enums import EnumInfraTransportType
 
+# TypeVar for generic data types in fetch operations
+T = TypeVar("T", bound=BaseModel)
+
+
+class ModelFetchResult(BaseModel):
+    """Result model for fetch operations with graceful degradation."""
+
+    data: BaseModel
+    source: str  # "primary" or "fallback"
+    degraded: bool
+    warning: str | None = None
+
+
 def fetch_with_timeout_fallback(
-    primary_func: Callable[[], object],
-    fallback_func: Callable[[], object],
+    primary_func: Callable[[], T],
+    fallback_func: Callable[[], T],
     timeout_seconds: float = 5.0,
     correlation_id: UUID | None = None,
-) -> dict[str, object]:
+) -> ModelFetchResult:
     """Fetch from primary source with graceful degradation to fallback."""
     import signal
 
@@ -494,7 +511,7 @@ def fetch_with_timeout_fallback(
         correlation_id=correlation_id,
     )
 
-    def timeout_handler(signum, frame):
+    def timeout_handler(signum: int, frame: FrameType | None) -> None:
         raise TimeoutError("Operation exceeded timeout")
 
     # Set timeout handler
@@ -503,9 +520,13 @@ def fetch_with_timeout_fallback(
 
     try:
         # Try primary data source
-        return {"data": primary_func(), "source": "primary", "degraded": False}
+        return ModelFetchResult(
+            data=primary_func(),
+            source="primary",
+            degraded=False,
+        )
 
-    except TimeoutError as e:
+    except TimeoutError:
         # Log timeout but continue with fallback
         context_with_fallback = ModelInfraErrorContext(
             transport_type=context.transport_type,
@@ -516,12 +537,12 @@ def fetch_with_timeout_fallback(
 
         try:
             # Use fallback source (cache, secondary database, etc.)
-            return {
-                "data": fallback_func(),
-                "source": "fallback",
-                "degraded": True,
-                "warning": f"Primary source timed out, using fallback data",
-            }
+            return ModelFetchResult(
+                data=fallback_func(),
+                source="fallback",
+                degraded=True,
+                warning="Primary source timed out, using fallback data",
+            )
 
         except Exception as fallback_error:
             raise InfraTimeoutError(

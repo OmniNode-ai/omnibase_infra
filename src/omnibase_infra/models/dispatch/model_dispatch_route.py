@@ -239,7 +239,7 @@ class ModelDispatchRoute(BaseModel):
         Check if this route matches the given topic, category, and message type.
 
         A route matches if:
-        1. The route is enabled
+        1. The route is enabled (checked by matches_topic)
         2. The topic matches the pattern
         3. The category matches
         4. Either this route has no message_type filter, or the message types match
@@ -265,8 +265,7 @@ class ModelDispatchRoute(BaseModel):
             >>> route.matches("dev.user.events.v1", EnumMessageCategory.COMMAND, "UserCreatedEvent")
             False
         """
-        if not self.enabled:
-            return False
+        # matches_topic already checks self.enabled
         if not self.matches_topic(topic):
             return False
         if self.message_category != category:

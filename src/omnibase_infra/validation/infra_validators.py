@@ -189,9 +189,29 @@ INFRA_MAX_VIOLATIONS = 0
 # ============================================================================
 INFRA_PATTERNS_STRICT = False
 
+# ============================================================================
+# TECH DEBT: Strict Union Validation Disabled
+# ============================================================================
+# Status: DISABLED (False)
+# Created: 2025-12-20
+# Target Re-enable Date: 2026-03-01 (Q1 2026)
+# Tracking Ticket: OMN-1002 (to be created)
+#
 # Strict mode for union usage validation in infrastructure code.
 # Set to False to allow necessary unions for protocol implementations and service adapters
 # while still preventing overly complex union types via INFRA_MAX_UNIONS limit.
+#
+# Prerequisites for Re-enabling Strict Mode:
+# ------------------------------------------
+# 1. Complete OMN-934 (Message Dispatch Engine) - addresses dispatch model unions
+# 2. Reduce INFRA_MAX_UNIONS from 450 to <200 through targeted refactoring
+# 3. Document remaining necessary unions in exempted_patterns
+# 4. Coordinate with INFRA_PATTERNS_STRICT re-enablement (OMN-1001)
+#
+# Review Cadence: Monthly review until re-enabled
+# Last Review: 2025-12-20
+# Next Review: 2026-01-20
+# ============================================================================
 INFRA_UNIONS_STRICT = False
 
 

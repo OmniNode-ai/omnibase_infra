@@ -365,24 +365,28 @@ class ModelDispatchMetrics(BaseModel):
                 error_message=error_message,
             )
 
-        return ModelDispatchMetrics(
-            total_dispatches=self.total_dispatches + 1,
-            successful_dispatches=self.successful_dispatches + (1 if success else 0),
-            failed_dispatches=self.failed_dispatches + (0 if success else 1),
-            no_handler_count=self.no_handler_count + (1 if no_handler else 0),
-            category_mismatch_count=self.category_mismatch_count
-            + (1 if category_mismatch else 0),
-            dispatcher_execution_count=self.dispatcher_execution_count
-            + (1 if dispatcher_id else 0),
-            dispatcher_error_count=self.dispatcher_error_count
-            + (1 if handler_error else 0),
-            routes_matched_count=self.routes_matched_count + routes_matched,
-            total_latency_ms=self.total_latency_ms + duration_ms,
-            min_latency_ms=new_min,
-            max_latency_ms=new_max,
-            latency_histogram=new_histogram,
-            dispatcher_metrics=new_dispatcher_metrics,
-            category_metrics=new_category_metrics,
+        # Use model_copy to prevent field drift when new fields are added
+        return self.model_copy(
+            update={
+                "total_dispatches": self.total_dispatches + 1,
+                "successful_dispatches": self.successful_dispatches
+                + (1 if success else 0),
+                "failed_dispatches": self.failed_dispatches + (0 if success else 1),
+                "no_handler_count": self.no_handler_count + (1 if no_handler else 0),
+                "category_mismatch_count": self.category_mismatch_count
+                + (1 if category_mismatch else 0),
+                "dispatcher_execution_count": self.dispatcher_execution_count
+                + (1 if dispatcher_id else 0),
+                "dispatcher_error_count": self.dispatcher_error_count
+                + (1 if handler_error else 0),
+                "routes_matched_count": self.routes_matched_count + routes_matched,
+                "total_latency_ms": self.total_latency_ms + duration_ms,
+                "min_latency_ms": new_min,
+                "max_latency_ms": new_max,
+                "latency_histogram": new_histogram,
+                "dispatcher_metrics": new_dispatcher_metrics,
+                "category_metrics": new_category_metrics,
+            }
         )
 
     def get_dispatcher_metrics(
