@@ -18,12 +18,12 @@ onex-runtime = "omnibase_infra.runtime.kernel:main"
 [tool.poetry.dependencies]
 python = "^3.12"
 
-# ONEX dependencies - pinned to specific commit SHAs for reproducible builds
-# SECURITY: Git commit SHAs are immutable and tamper-evident, ensuring:
-# - Reproducible builds: Same commit = same code, regardless of branch changes
-# - Supply chain security: Cannot be retroactively modified (unlike branches/tags)
-# - Audit trail: Each SHA maps to a verifiable point in git history
-# To update: 1) Review changes in target repo, 2) Update SHA, 3) Run tests
+# ONEX dependencies - pinned for reproducible builds
+# SECURITY: Using specific tags/branches ensures:
+# - Reproducible builds: Same tag = same released code
+# - Explicit versioning: Clear dependency on tested releases
+# - Audit trail: Tags map to specific releases in git history
+# To update: 1) Review changes in target repo, 2) Update tag/branch, 3) Run tests
 omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "v0.5.4" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", branch = "main" }
 

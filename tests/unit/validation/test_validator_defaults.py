@@ -45,10 +45,11 @@ class TestInfraValidatorConstants:
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold set to 400 to provide headroom above baseline.
+        Threshold set to 360 - tight buffer above current baseline.
+        Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 400, (
-            "INFRA_MAX_UNIONS should be 400 (strict mode per OMN-983)"
+        assert INFRA_MAX_UNIONS == 360, (
+            "INFRA_MAX_UNIONS should be 360 (tight threshold per OMN-983)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

@@ -24,13 +24,17 @@ import asyncio
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
 import consul
 from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
+
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -403,7 +407,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             },
         )
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+    async def execute(self, envelope: dict[str, JsonValue]) -> dict[str, JsonValue]:
         """Execute Consul operation from envelope.
 
         Args:
@@ -486,7 +490,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
         else:  # consul.health_check
             return await self._health_check_operation(correlation_id)
 
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
+    def _extract_correlation_id(self, envelope: dict[str, JsonValue]) -> UUID:
         """Extract or generate correlation ID from envelope."""
         raw = envelope.get("correlation_id")
         if isinstance(raw, UUID):
@@ -696,9 +700,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
     async def _kv_get(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Get value from Consul KV store.
 
         Args:
@@ -801,9 +805,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
     async def _kv_put(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Put value to Consul KV store.
 
         Args:
@@ -874,9 +878,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
     async def _register_service(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Register service with Consul agent.
 
         Args:
@@ -957,9 +961,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
     async def _deregister_service(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Deregister service from Consul agent.
 
         Args:
@@ -1006,7 +1010,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             "correlation_id": correlation_id,
         }
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(self) -> dict[str, JsonValue]:
         """Return handler health status with operational metrics.
 
         Uses thread pool executor and retry logic for consistency with other operations.
@@ -1082,7 +1086,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
     async def _health_check_operation(
         self,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Execute health check operation from envelope.
 
         Args:
@@ -1099,7 +1103,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             "correlation_id": correlation_id,
         }
 
-    def describe(self) -> dict[str, object]:
+    def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities.
 
         Returns:

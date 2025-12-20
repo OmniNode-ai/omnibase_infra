@@ -21,7 +21,7 @@ import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
 T = TypeVar("T")
@@ -31,6 +31,10 @@ from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
+
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -391,7 +395,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         self._circuit_breaker_initialized = False
         logger.info("VaultAdapter shutdown complete")
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+    async def execute(self, envelope: dict[str, JsonValue]) -> dict[str, JsonValue]:
         """Execute Vault operation from envelope.
 
         Args:
@@ -483,7 +487,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         else:  # vault.health_check
             return await self._health_check_operation(correlation_id)
 
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
+    def _extract_correlation_id(self, envelope: dict[str, JsonValue]) -> UUID:
         """Extract or generate correlation ID from envelope."""
         raw = envelope.get("correlation_id")
         if isinstance(raw, UUID):
@@ -761,9 +765,9 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
 
     async def _read_secret(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Read secret from Vault KV v2 secrets engine.
 
         Args:
@@ -827,9 +831,9 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
 
     async def _write_secret(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Write secret to Vault KV v2 secrets engine.
 
         Args:
@@ -909,9 +913,9 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
 
     async def _delete_secret(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Delete secret from Vault KV v2 secrets engine.
 
         Args:
@@ -966,9 +970,9 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
 
     async def _list_secrets(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """List secrets at path in Vault KV v2 secrets engine.
 
         Args:
@@ -1026,7 +1030,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             "correlation_id": correlation_id,
         }
 
-    async def renew_token(self) -> dict[str, object]:
+    async def renew_token(self) -> dict[str, JsonValue]:
         """Renew Vault authentication token.
 
         Token TTL Extraction Logic:
@@ -1147,7 +1151,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
     async def _renew_token_operation(
         self,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Execute token renewal operation from envelope.
 
         Args:
@@ -1171,7 +1175,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             "correlation_id": correlation_id,
         }
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(self) -> dict[str, JsonValue]:
         """Return handler health status with operational metrics.
 
         Uses thread pool executor and retry logic for consistency with other operations.
@@ -1258,7 +1262,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
     async def _health_check_operation(
         self,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Execute health check operation from envelope.
 
         Args:
@@ -1275,7 +1279,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             "correlation_id": correlation_id,
         }
 
-    def describe(self) -> dict[str, object]:
+    def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities.
 
         Returns:

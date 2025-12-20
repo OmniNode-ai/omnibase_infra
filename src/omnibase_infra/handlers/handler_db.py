@@ -11,12 +11,17 @@ All queries MUST use parameterized statements for SQL injection protection.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import asyncpg
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
+
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -175,7 +180,7 @@ class DbAdapter:
         self._initialized = False
         logger.info("DbAdapter shutdown complete")
 
-    async def execute(self, envelope: dict[str, object]) -> ModelDbQueryResponse:
+    async def execute(self, envelope: dict[str, JsonValue]) -> ModelDbQueryResponse:
         """Execute database operation (db.query or db.execute) from envelope.
 
         Args:
@@ -261,7 +266,7 @@ class DbAdapter:
         else:  # db.execute
             return await self._execute_statement(sql, parameters, correlation_id)
 
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
+    def _extract_correlation_id(self, envelope: dict[str, JsonValue]) -> UUID:
         """Extract or generate correlation ID from envelope."""
         raw = envelope.get("correlation_id")
         if isinstance(raw, UUID):
@@ -304,7 +309,7 @@ class DbAdapter:
         return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
 
     def _extract_parameters(
-        self, payload: dict[str, object], operation: str, correlation_id: UUID
+        self, payload: dict[str, JsonValue], operation: str, correlation_id: UUID
     ) -> list[object]:
         """Extract and validate parameters from payload."""
         params_raw = payload.get("parameters")

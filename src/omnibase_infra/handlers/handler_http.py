@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
+
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -184,7 +189,7 @@ class HttpRestAdapter:
         self._initialized = False
         logger.info("HttpRestAdapter shutdown complete")
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+    async def execute(self, envelope: dict[str, JsonValue]) -> dict[str, JsonValue]:
         """Execute HTTP operation (http.get or http.post) from envelope."""
         correlation_id = self._extract_correlation_id(envelope)
 
@@ -263,7 +268,7 @@ class HttpRestAdapter:
                 "POST", url, headers, body, correlation_id, pre_serialized
             )
 
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
+    def _extract_correlation_id(self, envelope: dict[str, JsonValue]) -> UUID:
         """Extract or generate correlation ID from envelope."""
         raw = envelope.get("correlation_id")
         if isinstance(raw, UUID):
@@ -276,7 +281,11 @@ class HttpRestAdapter:
         return uuid4()
 
     def _extract_headers(
-        self, payload: dict[str, object], operation: str, url: str, correlation_id: UUID
+        self,
+        payload: dict[str, JsonValue],
+        operation: str,
+        url: str,
+        correlation_id: UUID,
     ) -> dict[str, str]:
         """Extract and validate headers from payload."""
         headers_raw = payload.get("headers")
@@ -505,10 +514,10 @@ class HttpRestAdapter:
         method: str,
         url: str,
         headers: dict[str, str],
-        body: object,
+        body: JsonValue,
         correlation_id: UUID,
         pre_serialized: bytes | None = None,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Execute HTTP request with pre-read response size validation.
 
         Uses httpx streaming to validate Content-Length header BEFORE reading
@@ -614,7 +623,7 @@ class HttpRestAdapter:
         response: httpx.Response,
         body_bytes: bytes,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Build response envelope from httpx Response and pre-read body bytes.
 
         This method is used with streaming responses where the body has already
@@ -678,7 +687,7 @@ class HttpRestAdapter:
             "correlation_id": correlation_id,
         }
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(self) -> dict[str, JsonValue]:
         """Return adapter health status."""
         return {
             "healthy": self._initialized and self._client is not None,
@@ -689,7 +698,7 @@ class HttpRestAdapter:
             "max_response_size": self._max_response_size,
         }
 
-    def describe(self) -> dict[str, object]:
+    def describe(self) -> dict[str, JsonValue]:
         """Return adapter metadata and capabilities."""
         return {
             "adapter_type": self.handler_type.value,
