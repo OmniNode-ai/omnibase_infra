@@ -111,7 +111,7 @@ Category Support:
     which require *.events, *.commands, *.intents suffixes). Projections are
     typically internal state representations consumed by reducers.
 
-    TODO(OMN-977): Add integration tests for PROJECTION category dispatch.
+    TODO(OMN-985): Add integration tests for PROJECTION category dispatch.
     Current test coverage focuses on EVENT/COMMAND/INTENT routing.
 
 .. versionadded:: 0.4.0
@@ -323,13 +323,6 @@ class MessageDispatchEngine:
         - Structured metrics: Use ``_metrics_lock`` for atomic updates
         - Legacy dict metrics: Simple increments, may be approximate under high load
         - Prefer ``get_structured_metrics()`` for production monitoring
-
-        **METRICS CAVEAT**: While metrics updates are protected by a lock,
-        get_metrics() and get_structured_metrics() provide point-in-time
-        snapshots. Under high concurrent load, metrics may be approximate
-        between snapshot reads. For production monitoring, consider exporting
-        metrics to a dedicated metrics backend (Prometheus, StatsD, etc.) for
-        accurate aggregation across time windows.
 
         **METRICS CAVEAT**: While metrics updates are protected by a lock,
         get_metrics() and get_structured_metrics() provide point-in-time
@@ -814,7 +807,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     success=False,
                     category=None,
-                    no_handler=False,
+                    no_dispatcher=False,
                     category_mismatch=False,
                     topic=topic,
                 )
@@ -905,7 +898,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     success=False,
                     category=topic_category,
-                    no_handler=True,
+                    no_dispatcher=True,
                     topic=topic,
                 )
 
@@ -928,7 +921,7 @@ class MessageDispatchEngine:
 
             return ModelDispatchResult(
                 dispatch_id=dispatch_id,
-                status=EnumDispatchStatus.NO_HANDLER,
+                status=EnumDispatchStatus.NO_DISPATCHER,
                 topic=topic,
                 message_category=topic_category,
                 message_type=message_type,

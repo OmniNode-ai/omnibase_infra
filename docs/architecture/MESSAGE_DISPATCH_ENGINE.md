@@ -502,7 +502,7 @@ class EnumDispatchStatus(str, Enum):
     NO_DISPATCHER = "no_dispatcher"
     """No dispatcher was registered for the message type/topic."""
 
-    DISPATCHER_ERROR = "dispatcher_error"
+    HANDLER_ERROR = "handler_error"
     """Dispatcher execution failed with an exception."""
 
     TIMEOUT = "timeout"
@@ -521,5 +521,5 @@ class EnumDispatchStatus(str, Enum):
 The enum also provides helper methods:
 - `is_terminal()` - Returns `True` for all statuses except `ROUTED`
 - `is_successful()` - Returns `True` only for `SUCCESS`
-- `is_error()` - Returns `True` for `NO_DISPATCHER`, `DISPATCHER_ERROR`, `TIMEOUT`, `INVALID_MESSAGE`, `PUBLISH_FAILED`
+- `is_error()` - Returns `True` for `NO_DISPATCHER`, `HANDLER_ERROR`, `TIMEOUT`, `INVALID_MESSAGE`, `PUBLISH_FAILED`
 - `requires_retry()` - Returns `True` for transient failures: `TIMEOUT`, `PUBLISH_FAILED`

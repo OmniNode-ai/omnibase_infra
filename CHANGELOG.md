@@ -76,7 +76,8 @@ The codebase has migrated from "handler" to "dispatcher" terminology for message
 - **Protocol Rename**: `ProtocolHandler` → `ProtocolMessageDispatcher`
 - **Class Naming**: Handler implementations renamed to Dispatcher (e.g., `UserEventHandler` → `UserEventDispatcher`)
 - **ID Convention**: `dispatcher_id` values now use `-dispatcher` suffix instead of `-handler`
-- **Enum Stability**: `EnumDispatchStatus.NO_HANDLER` and `HANDLER_ERROR` values remain **unchanged** for backwards compatibility with existing metrics, logs, and monitoring systems
+- **Enum Rename**: `EnumDispatchStatus.NO_HANDLER` renamed to `NO_DISPATCHER` with new value `no_dispatcher` for consistency with dispatcher terminology
+- **Enum Stability**: `EnumDispatchStatus.HANDLER_ERROR` value remains **unchanged** for backwards compatibility with existing metrics, logs, and monitoring systems
 - **Full Migration Guide**: See `docs/migrations/HANDLER_TO_DISPATCHER_MIGRATION.md` for complete migration details and code examples
 
 #### CI/CD

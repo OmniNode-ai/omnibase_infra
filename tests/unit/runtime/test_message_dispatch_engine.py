@@ -867,17 +867,17 @@ class TestDispatchErrors:
         assert exc_info.value.error_code == EnumCoreErrorCode.INVALID_PARAMETER
 
     @pytest.mark.asyncio
-    async def test_dispatch_no_handlers_returns_no_handler_status(
+    async def test_dispatch_no_handlers_returns_no_dispatcher_status(
         self,
         dispatch_engine: MessageDispatchEngine,
         event_envelope: ModelEventEnvelope[UserCreatedEvent],
     ) -> None:
-        """Test dispatch with no matching handlers returns NO_HANDLER status."""
+        """Test dispatch with no matching handlers returns NO_DISPATCHER status."""
         dispatch_engine.freeze()
 
         result = await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
 
-        assert result.status == EnumDispatchStatus.NO_HANDLER
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
         assert result.error_message is not None
         assert "No dispatcher" in result.error_message
 
@@ -1040,22 +1040,22 @@ class TestDispatchErrors:
         result = await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
 
         # No handlers should match due to disabled route
-        assert result.status == EnumDispatchStatus.NO_HANDLER
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
 
     # ---- Correlation ID Propagation in Error Results ----
 
     @pytest.mark.asyncio
-    async def test_dispatch_no_handler_preserves_correlation_id(
+    async def test_dispatch_no_dispatcher_preserves_correlation_id(
         self,
         dispatch_engine: MessageDispatchEngine,
         event_envelope: ModelEventEnvelope[UserCreatedEvent],
     ) -> None:
-        """Test that NO_HANDLER error result preserves envelope correlation_id."""
+        """Test that NO_DISPATCHER error result preserves envelope correlation_id."""
         dispatch_engine.freeze()
 
         result = await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
 
-        assert result.status == EnumDispatchStatus.NO_HANDLER
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
         assert result.correlation_id == event_envelope.correlation_id
 
     @pytest.mark.asyncio
@@ -1294,12 +1294,12 @@ class TestMetrics:
         assert metrics["dispatcher_error_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_metrics_updated_on_no_handler(
+    async def test_metrics_updated_on_no_dispatcher(
         self,
         dispatch_engine: MessageDispatchEngine,
         event_envelope: ModelEventEnvelope[UserCreatedEvent],
     ) -> None:
-        """Test metrics are updated when no handler is found."""
+        """Test metrics are updated when no dispatcher is found."""
         dispatch_engine.freeze()
 
         await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
@@ -1699,7 +1699,7 @@ class TestDispatchResultRetryScenarios:
     - PUBLISH_FAILED: Transient failure, should retry
     - SUCCESS: Not an error, should NOT retry
     - HANDLER_ERROR: Permanent failure, should NOT retry
-    - NO_HANDLER: Configuration error, should NOT retry
+    - NO_DISPATCHER: Configuration error, should NOT retry
     - INVALID_MESSAGE: Validation error, should NOT retry
     - SKIPPED: Intentional skip, should NOT retry
     - ROUTED: Intermediate state, should NOT retry
@@ -1753,10 +1753,10 @@ class TestDispatchResultRetryScenarios:
         assert result.is_error() is True
         assert result.is_successful() is False
 
-    def test_no_handler_does_not_require_retry(self) -> None:
-        """Test that NO_HANDLER status does NOT require retry (configuration error)."""
+    def test_no_dispatcher_does_not_require_retry(self) -> None:
+        """Test that NO_DISPATCHER status does NOT require retry (configuration error)."""
         result = ModelDispatchResult(
-            status=EnumDispatchStatus.NO_HANDLER,
+            status=EnumDispatchStatus.NO_DISPATCHER,
             topic="dev.unknown.events.v1",
             error_message="No dispatcher registered for topic",
         )
