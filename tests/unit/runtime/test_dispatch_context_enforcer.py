@@ -635,9 +635,7 @@ class TestOMN973ReducerCannotAccessNow:
             )
 
         error_message = str(exc_info.value).lower()
-        assert "reducer" in error_message, (
-            "Error should mention reducer violation"
-        )
+        assert "reducer" in error_message, "Error should mention reducer violation"
 
     def test_reducer_factory_enforces_no_time(self) -> None:
         """
@@ -648,9 +646,7 @@ class TestOMN973ReducerCannotAccessNow:
         """
         context = ModelDispatchContext.for_reducer(correlation_id=uuid4())
 
-        assert context.now is None, (
-            "for_reducer() created context with time injection"
-        )
+        assert context.now is None, "for_reducer() created context with time injection"
         assert context.has_time_injection is False
         assert context.node_kind == EnumNodeKind.REDUCER
 
@@ -764,9 +760,7 @@ class TestOMN973ContextPreservesTracingInfo:
         correlation_id = uuid4()
         envelope = MockEnvelope(correlation_id=correlation_id)
 
-        context = enforcer.create_context_for_dispatcher(
-            reducer_dispatcher, envelope
-        )
+        context = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
 
         assert context.correlation_id == correlation_id
 

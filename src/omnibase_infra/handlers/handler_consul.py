@@ -488,9 +488,13 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         elif operation == "consul.kv_put":
             return await self._kv_put(payload, correlation_id, input_envelope_id)
         elif operation == "consul.register":
-            return await self._register_service(payload, correlation_id, input_envelope_id)
+            return await self._register_service(
+                payload, correlation_id, input_envelope_id
+            )
         elif operation == "consul.deregister":
-            return await self._deregister_service(payload, correlation_id, input_envelope_id)
+            return await self._deregister_service(
+                payload, correlation_id, input_envelope_id
+            )
         else:  # consul.health_check
             return await self._health_check_operation(correlation_id, input_envelope_id)
 
