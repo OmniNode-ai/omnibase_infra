@@ -82,6 +82,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 )
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
 )
@@ -116,6 +117,10 @@ _HANDLER_SUFFIX_MAP: dict[str, EnumHandlerType] = {
 # 2. Prefix patterns (e.g., "ModelEvent", "EventMessage") - medium specificity
 # 3. Simple patterns (e.g., "Event", "EVENT") - least specific, checked last
 #
+# NOTE: PROJECTION patterns use EnumNodeOutputType because PROJECTION is a node
+# output type, not a message category for routing. Projections are produced by
+# REDUCER nodes but are not routed via Kafka topics like EVENTs/COMMANDs/INTENTs.
+#
 # KNOWN LIMITATIONS:
 # - Substring matching may produce false positives for non-message types that
 #   happen to contain these keywords (e.g., "PreventEventLoop", "CommandLineArgs").
@@ -141,12 +146,6 @@ _MESSAGE_CATEGORY_PATTERNS: dict[str, EnumMessageCategory] = {
     "ModelIntent": EnumMessageCategory.INTENT,
     "INTENT": EnumMessageCategory.INTENT,
     "Intent": EnumMessageCategory.INTENT,
-    # Projection patterns - ordered by specificity (most specific first)
-    "ModelProjectionMessage": EnumMessageCategory.PROJECTION,
-    "ProjectionMessage": EnumMessageCategory.PROJECTION,
-    "ModelProjection": EnumMessageCategory.PROJECTION,
-    "PROJECTION": EnumMessageCategory.PROJECTION,
-    "Projection": EnumMessageCategory.PROJECTION,
 }
 
 # Forbidden direct publish method names
@@ -184,22 +183,46 @@ _TIME_FUNCTION_NAMES: frozenset[str] = frozenset(
     }
 )
 
-# Canonical execution shape rules for each handler type
+# Mapping from EnumMessageCategory to EnumNodeOutputType for type normalization.
+#
+# Used by _is_return_type_allowed() to convert message categories to their
+# corresponding node output types during execution shape validation. The rules
+# use EnumNodeOutputType consistently, but message category detection may return
+# EnumMessageCategory values that need conversion.
+#
+# FORWARD COMPATIBILITY NOTE:
+# If new values are added to EnumMessageCategory in the future, this mapping
+# must be updated. The .get() usage in _is_return_type_allowed() ensures
+# graceful handling - unknown categories are disallowed by default rather
+# than causing a runtime error.
+#
+# Both enums share EVENT, COMMAND, INTENT with same string values, so this
+# mapping provides a clean bridge between the two type systems.
+_MESSAGE_CATEGORY_TO_OUTPUT_TYPE: dict[EnumMessageCategory, EnumNodeOutputType] = {
+    EnumMessageCategory.EVENT: EnumNodeOutputType.EVENT,
+    EnumMessageCategory.COMMAND: EnumNodeOutputType.COMMAND,
+    EnumMessageCategory.INTENT: EnumNodeOutputType.INTENT,
+}
+
+# Canonical execution shape rules for each handler type.
+# All output types use EnumNodeOutputType consistently (EVENT, COMMAND, INTENT, PROJECTION).
+# EnumMessageCategory (EVENT, COMMAND, INTENT) is used for message routing topics,
+# while EnumNodeOutputType is used for execution shape validation.
 EXECUTION_SHAPE_RULES: dict[EnumHandlerType, ModelExecutionShapeRule] = {
     EnumHandlerType.EFFECT: ModelExecutionShapeRule(
         handler_type=EnumHandlerType.EFFECT,
-        allowed_return_types=[EnumMessageCategory.EVENT, EnumMessageCategory.COMMAND],
-        forbidden_return_types=[EnumMessageCategory.PROJECTION],
+        allowed_return_types=[EnumNodeOutputType.EVENT, EnumNodeOutputType.COMMAND],
+        forbidden_return_types=[EnumNodeOutputType.PROJECTION],
         can_publish_directly=False,
         can_access_system_time=True,
     ),
     EnumHandlerType.COMPUTE: ModelExecutionShapeRule(
         handler_type=EnumHandlerType.COMPUTE,
         allowed_return_types=[
-            EnumMessageCategory.EVENT,
-            EnumMessageCategory.COMMAND,
-            EnumMessageCategory.INTENT,
-            EnumMessageCategory.PROJECTION,
+            EnumNodeOutputType.EVENT,
+            EnumNodeOutputType.COMMAND,
+            EnumNodeOutputType.INTENT,
+            EnumNodeOutputType.PROJECTION,
         ],
         forbidden_return_types=[],
         can_publish_directly=False,
@@ -207,17 +230,17 @@ EXECUTION_SHAPE_RULES: dict[EnumHandlerType, ModelExecutionShapeRule] = {
     ),
     EnumHandlerType.REDUCER: ModelExecutionShapeRule(
         handler_type=EnumHandlerType.REDUCER,
-        allowed_return_types=[EnumMessageCategory.PROJECTION],
-        forbidden_return_types=[EnumMessageCategory.EVENT],
+        allowed_return_types=[EnumNodeOutputType.PROJECTION],
+        forbidden_return_types=[EnumNodeOutputType.EVENT],
         can_publish_directly=False,
         can_access_system_time=False,
     ),
     EnumHandlerType.ORCHESTRATOR: ModelExecutionShapeRule(
         handler_type=EnumHandlerType.ORCHESTRATOR,
-        allowed_return_types=[EnumMessageCategory.COMMAND, EnumMessageCategory.EVENT],
+        allowed_return_types=[EnumNodeOutputType.COMMAND, EnumNodeOutputType.EVENT],
         forbidden_return_types=[
-            EnumMessageCategory.INTENT,
-            EnumMessageCategory.PROJECTION,
+            EnumNodeOutputType.INTENT,
+            EnumNodeOutputType.PROJECTION,
         ],
         can_publish_directly=False,
         can_access_system_time=True,
@@ -263,6 +286,15 @@ class ExecutionShapeValidator:
         The rules dictionary is immutable and no per-validation state is stored.
         Multiple threads can safely call validate_file() or validate_directory()
         on the same validator instance concurrently.
+
+        **Why no locks are needed** (unlike RoutingCoverageValidator):
+        - No lazy initialization: Rules are assigned in __init__, not deferred
+        - No mutable state: The rules dict reference never changes after __init__
+        - No caching: Each validation creates fresh local variables (handlers, violations)
+        - Module-level singleton created at import time (before any threads)
+
+        This is fundamentally different from RoutingCoverageValidator which uses
+        double-checked locking because it has lazy initialization with cached state.
 
     Performance:
         For repeated validation (e.g., CI pipelines), use the module-level
@@ -636,7 +668,9 @@ class ExecutionShapeValidator:
             annotation_str = self._get_name_from_expr(method.returns)
             if annotation_str is not None:
                 category = self._detect_message_category(annotation_str)
-                if category is not None and not rule.is_return_type_allowed(category):
+                if category is not None and not self._is_return_type_allowed(
+                    category, handler.handler_type, rule
+                ):
                     violation = self._create_return_type_violation(
                         handler, method.lineno, category, annotation_str
                     )
@@ -650,6 +684,49 @@ class ExecutionShapeValidator:
                 violations.extend(return_violations)
 
         return violations
+
+    def _is_return_type_allowed(
+        self,
+        category: EnumMessageCategory | EnumNodeOutputType,
+        handler_type: EnumHandlerType,
+        rule: ModelExecutionShapeRule,
+    ) -> bool:
+        """Check if a return type is allowed for a handler.
+
+        Handles both EnumMessageCategory (EVENT, COMMAND, INTENT) and
+        EnumNodeOutputType (PROJECTION) appropriately by converting
+        message categories to their corresponding node output types.
+
+        Uses the module-level _MESSAGE_CATEGORY_TO_OUTPUT_TYPE mapping for
+        type conversion. See that constant's docstring for forward
+        compatibility notes.
+
+        Args:
+            category: The detected message category or node output type.
+            handler_type: The handler type to check against.
+            rule: The execution shape rule (uses EnumNodeOutputType).
+
+        Returns:
+            True if the return type is allowed, False otherwise.
+        """
+        # Convert EnumMessageCategory to EnumNodeOutputType for validation
+        # since the rules use EnumNodeOutputType consistently
+        output_type: EnumNodeOutputType
+        if isinstance(category, EnumNodeOutputType):
+            output_type = category
+        elif isinstance(category, EnumMessageCategory):
+            # Use module-level mapping constant for type conversion
+            mapped_type = _MESSAGE_CATEGORY_TO_OUTPUT_TYPE.get(category)
+            if mapped_type is None:
+                # Forward compatibility: Unknown/new message category - disallow
+                # by default until explicitly added to the module-level mapping.
+                return False
+            output_type = mapped_type
+        else:
+            # Unknown category type - disallow by default
+            return False
+
+        return rule.is_return_type_allowed(output_type)
 
     def _analyze_return_value(
         self,
@@ -677,7 +754,9 @@ class ExecutionShapeValidator:
             func_name = self._get_name_from_expr(return_node.value.func)
             if func_name is not None:
                 category = self._detect_message_category(func_name)
-                if category is not None and not rule.is_return_type_allowed(category):
+                if category is not None and not self._is_return_type_allowed(
+                    category, handler.handler_type, rule
+                ):
                     violation = self._create_return_type_violation(
                         handler, return_node.lineno, category, func_name
                     )
@@ -688,7 +767,9 @@ class ExecutionShapeValidator:
         if isinstance(return_node.value, ast.Name):
             var_name = return_node.value.id
             category = self._detect_message_category(var_name)
-            if category is not None and not rule.is_return_type_allowed(category):
+            if category is not None and not self._is_return_type_allowed(
+                category, handler.handler_type, rule
+            ):
                 violation = self._create_return_type_violation(
                     handler, return_node.lineno, category, var_name
                 )
@@ -697,15 +778,24 @@ class ExecutionShapeValidator:
 
         return violations
 
-    def _detect_message_category(self, name: str) -> EnumMessageCategory | None:
-        """Detect message category from a type or variable name.
+    def _detect_message_category(
+        self, name: str
+    ) -> EnumMessageCategory | EnumNodeOutputType | None:
+        """Detect message category or node output type from a type or variable name.
 
-        Uses a two-phase detection strategy:
+        Uses a multi-phase detection strategy:
         1. First, check for exact suffix matches (most reliable, fewest false positives)
-        2. Then, check for substring patterns (more lenient, catches non-standard names)
+        2. Then, check for prefix patterns (Model* naming convention)
+        3. Check for exact uppercase enum-style names
+        4. Finally, lenient substring matching (catches non-standard names)
+
+        Note:
+            PROJECTION returns EnumNodeOutputType.PROJECTION because projections
+            are node output types, not message categories for routing. Projections
+            are produced by REDUCER nodes but are not routed via Kafka topics.
 
         KNOWN LIMITATIONS:
-        - Substring matching in phase 2 may produce false positives for names that
+        - Substring matching in phase 4 may produce false positives for names that
           contain message keywords but aren't message types (e.g., "PreventEvent",
           "CommandLineParser", "UserIntent" as a business object).
         - The suffix-based approach is preferred for ONEX-compliant code.
@@ -714,7 +804,8 @@ class ExecutionShapeValidator:
             name: The name to analyze (type name, class name, or variable name).
 
         Returns:
-            The detected message category, or None if not a message type.
+            The detected message category (EnumMessageCategory) for EVENT/COMMAND/INTENT,
+            EnumNodeOutputType.PROJECTION for projections, or None if not a message type.
         """
         # Phase 1: Check suffix-based patterns (most reliable, fewest false positives)
         # Suffix matching is more precise than substring matching because message
@@ -722,7 +813,7 @@ class ExecutionShapeValidator:
         #
         # Check longer suffixes first to avoid partial matches:
         # "EventMessage" should match before "Event"
-        suffix_patterns = [
+        suffix_patterns: list[tuple[str, EnumMessageCategory | EnumNodeOutputType]] = [
             # Event suffixes - ordered by length (longest first)
             ("EventMessage", EnumMessageCategory.EVENT),
             ("Event", EnumMessageCategory.EVENT),
@@ -732,9 +823,9 @@ class ExecutionShapeValidator:
             # Intent suffixes - ordered by length (longest first)
             ("IntentMessage", EnumMessageCategory.INTENT),
             ("Intent", EnumMessageCategory.INTENT),
-            # Projection suffixes - ordered by length (longest first)
-            ("ProjectionMessage", EnumMessageCategory.PROJECTION),
-            ("Projection", EnumMessageCategory.PROJECTION),
+            # Projection suffixes - use EnumNodeOutputType (not a message category)
+            ("ProjectionMessage", EnumNodeOutputType.PROJECTION),
+            ("Projection", EnumNodeOutputType.PROJECTION),
         ]
 
         for suffix, category in suffix_patterns:
@@ -743,11 +834,11 @@ class ExecutionShapeValidator:
 
         # Phase 2: Check prefix patterns for Model* naming convention
         # ONEX models use "Model" prefix: ModelEvent, ModelCommand, etc.
-        prefix_patterns = [
+        prefix_patterns: list[tuple[str, EnumMessageCategory | EnumNodeOutputType]] = [
             ("ModelEvent", EnumMessageCategory.EVENT),
             ("ModelCommand", EnumMessageCategory.COMMAND),
             ("ModelIntent", EnumMessageCategory.INTENT),
-            ("ModelProjection", EnumMessageCategory.PROJECTION),
+            ("ModelProjection", EnumNodeOutputType.PROJECTION),
         ]
 
         for prefix, category in prefix_patterns:
@@ -756,11 +847,11 @@ class ExecutionShapeValidator:
 
         # Phase 3: Check for exact uppercase enum-style names
         # These are typically enum values like EVENT, COMMAND, etc.
-        uppercase_patterns = {
+        uppercase_patterns: dict[str, EnumMessageCategory | EnumNodeOutputType] = {
             "EVENT": EnumMessageCategory.EVENT,
             "COMMAND": EnumMessageCategory.COMMAND,
             "INTENT": EnumMessageCategory.INTENT,
-            "PROJECTION": EnumMessageCategory.PROJECTION,
+            "PROJECTION": EnumNodeOutputType.PROJECTION,
         }
 
         if name in uppercase_patterns:
@@ -785,7 +876,7 @@ class ExecutionShapeValidator:
         if name_lower.endswith("intent") or "_intent" in name_lower:
             return EnumMessageCategory.INTENT
         if name_lower.endswith("projection") or "_projection" in name_lower:
-            return EnumMessageCategory.PROJECTION
+            return EnumNodeOutputType.PROJECTION
 
         return None
 
@@ -793,7 +884,7 @@ class ExecutionShapeValidator:
         self,
         handler: HandlerInfo,
         line_number: int,
-        category: EnumMessageCategory,
+        category: EnumMessageCategory | EnumNodeOutputType,
         type_name: str,
     ) -> ModelExecutionShapeViolationResult | None:
         """Create a return type violation result.
@@ -801,7 +892,7 @@ class ExecutionShapeValidator:
         Args:
             handler: The handler information.
             line_number: Line number of the violation.
-            category: The forbidden message category.
+            category: The forbidden message category or node output type.
             type_name: The actual type name in code.
 
         Returns:
@@ -810,15 +901,27 @@ class ExecutionShapeValidator:
         violation_type: EnumExecutionShapeViolation | None = None
         message = ""
 
+        # Helper to check if category matches EVENT (from either enum)
+        def is_event(cat: EnumMessageCategory | EnumNodeOutputType) -> bool:
+            return cat == EnumMessageCategory.EVENT or cat == EnumNodeOutputType.EVENT
+
+        # Helper to check if category matches INTENT (from either enum)
+        def is_intent(cat: EnumMessageCategory | EnumNodeOutputType) -> bool:
+            return cat == EnumMessageCategory.INTENT or cat == EnumNodeOutputType.INTENT
+
+        # Helper to check if category matches PROJECTION
+        def is_projection(cat: EnumMessageCategory | EnumNodeOutputType) -> bool:
+            return cat == EnumNodeOutputType.PROJECTION
+
         if handler.handler_type == EnumHandlerType.REDUCER:
-            if category == EnumMessageCategory.EVENT:
+            if is_event(category):
                 violation_type = EnumExecutionShapeViolation.REDUCER_RETURNS_EVENTS
                 message = (
                     f"Reducer '{handler.name}' returns EVENT type '{type_name}'. "
                     "Reducers cannot emit events; event emission is an effect operation."
                 )
         elif handler.handler_type == EnumHandlerType.ORCHESTRATOR:
-            if category == EnumMessageCategory.INTENT:
+            if is_intent(category):
                 violation_type = (
                     EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS
                 )
@@ -826,20 +929,26 @@ class ExecutionShapeValidator:
                     f"Orchestrator '{handler.name}' returns INTENT type '{type_name}'. "
                     "Intents originate from external systems, not orchestration."
                 )
-            elif category == EnumMessageCategory.PROJECTION:
+            elif is_projection(category):
                 violation_type = (
                     EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_PROJECTIONS
                 )
                 message = (
                     f"Orchestrator '{handler.name}' returns PROJECTION type '{type_name}'. "
-                    "Projections are the domain of reducers for state management."
+                    "PROJECTION is a node output type (EnumNodeOutputType), not a message "
+                    "routing category (EnumMessageCategory). Projections represent aggregated "
+                    "state and are only valid for REDUCER node output types. Orchestrators "
+                    "coordinate workflows and should return COMMANDs or EVENTs instead."
                 )
         elif handler.handler_type == EnumHandlerType.EFFECT:
-            if category == EnumMessageCategory.PROJECTION:
+            if is_projection(category):
                 violation_type = EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
                 message = (
                     f"Effect handler '{handler.name}' returns PROJECTION type '{type_name}'. "
-                    "Projections are derived state, managed by reducers."
+                    "PROJECTION is a node output type (EnumNodeOutputType), not a message "
+                    "routing category (EnumMessageCategory). Projections represent aggregated "
+                    "state and are only valid for REDUCER node output types. Effect handlers "
+                    "interact with external systems and should return EVENTs or COMMANDs instead."
                 )
 
         if violation_type is None:
@@ -1068,6 +1177,20 @@ def get_execution_shape_rules() -> dict[EnumHandlerType, ModelExecutionShapeRule
 # - All read operations on the rules dictionary are thread-safe
 # - Each validation creates fresh local state (handlers, violations lists)
 # - No locks are needed because there's no shared mutable state
+#
+# Contrast with RoutingCoverageValidator:
+#   RoutingCoverageValidator uses double-checked locking with threading.Lock
+#   because it has LAZY initialization (discovery happens on first use) and
+#   CACHED STATE (discovered types and routes are stored). The lock prevents
+#   race conditions where two threads might both trigger discovery.
+#
+#   ExecutionShapeValidator needs no locks because:
+#   1. Initialization is EAGER (rules assigned in __init__ at module load)
+#   2. State is IMMUTABLE (rules dict never changes after construction)
+#   3. No caching - each validate_file() call does fresh AST parsing
+#
+#   This is a key architectural distinction: stateless validators can use
+#   simple singletons, while stateful validators need synchronization.
 #
 # When NOT to use the singleton:
 # - If you need custom execution shape rules (create your own instance)

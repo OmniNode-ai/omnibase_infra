@@ -7,10 +7,28 @@ These violations represent constraint breaches in the ONEX 4-node architecture
 that would compromise system integrity or determinism guarantees.
 
 Violation Categories:
-    - Return Type Violations: Handler returning forbidden message types
+    - Return Type Violations: Handler returning forbidden output types
     - Direct Publish Violations: Handler bypassing event bus routing
     - Determinism Violations: Handler accessing non-deterministic resources
     - Topic Mismatch Violations: Handler subscribed to wrong topic category
+
+Note on PROJECTION Violations:
+    PROJECTION is a valid node output type (EnumNodeOutputType.PROJECTION) that
+    ONLY REDUCERs may produce. It is NOT a message routing category (not in
+    EnumMessageCategory). This distinction is critical:
+
+    - EnumNodeOutputType: Defines what a node CAN produce (includes PROJECTION)
+    - EnumMessageCategory: Defines how messages are ROUTED (excludes PROJECTION)
+
+    Projections represent aggregated state from REDUCER nodes. They are not
+    routed via Kafka topics like EVENTs, COMMANDs, and INTENTs. Violations like
+    ORCHESTRATOR_RETURNS_PROJECTIONS or EFFECT_RETURNS_PROJECTIONS indicate a
+    non-REDUCER node is incorrectly trying to produce aggregated state output.
+
+See Also:
+    - EnumNodeOutputType: Defines valid node output types (includes PROJECTION)
+    - EnumMessageCategory: Defines message categories for routing (excludes PROJECTION)
+    - EnumHandlerType: Defines the 4-node architecture handler types
 """
 
 from enum import Enum
@@ -30,10 +48,17 @@ class EnumExecutionShapeViolation(str, Enum):
             Reducers manage state; event emission is an effect operation.
         ORCHESTRATOR_RETURNS_INTENTS: Orchestrators cannot emit intents.
             Intents originate from external systems, not orchestration.
-        ORCHESTRATOR_RETURNS_PROJECTIONS: Orchestrators cannot emit projections.
-            Projections are the domain of reducers for state management.
-        EFFECT_RETURNS_PROJECTIONS: Effect handlers cannot emit projections.
-            Projections are derived state, managed by reducers.
+        ORCHESTRATOR_RETURNS_PROJECTIONS: Orchestrators cannot produce projections.
+            PROJECTION is a node output type (EnumNodeOutputType.PROJECTION), NOT a
+            message routing category (EnumMessageCategory). Projections represent
+            aggregated state and are ONLY valid for REDUCER node output types.
+            Orchestrators coordinate workflows and should return COMMANDs or EVENTs.
+        EFFECT_RETURNS_PROJECTIONS: Effect handlers cannot produce projections.
+            PROJECTION is a node output type (EnumNodeOutputType.PROJECTION), NOT a
+            message routing category (EnumMessageCategory). Projections represent
+            aggregated state and are ONLY valid for REDUCER node output types.
+            Effect handlers interact with external systems and should return
+            EVENTs or COMMANDs.
 
     Operation Violations:
         HANDLER_DIRECT_PUBLISH: Handler bypasses event bus for direct publish.

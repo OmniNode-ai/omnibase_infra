@@ -23,6 +23,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 )
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.validation.routing_coverage_validator import (
     RoutingCoverageError,
     RoutingCoverageValidator,
@@ -382,11 +383,15 @@ class TestDiscoverMessageTypes:
     def test_discover_projection_classes(
         self, temp_source_dir: Path, sample_projection_file: Path
     ) -> None:
-        """Verify Projection suffix classes are discovered."""
+        """Verify Projection suffix classes are discovered.
+
+        Note: PROJECTION uses EnumNodeOutputType (not EnumMessageCategory)
+        because projections are node outputs, not routed messages.
+        """
         types = discover_message_types(temp_source_dir)
         assert "OrderSummaryProjection" in types
         assert "UserProfileProjection" in types
-        assert types["OrderSummaryProjection"] == EnumMessageCategory.PROJECTION
+        assert types["OrderSummaryProjection"] == EnumNodeOutputType.PROJECTION
 
     def test_discover_decorated_classes(
         self, temp_source_dir: Path, sample_decorator_file: Path
