@@ -17,6 +17,7 @@ from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtract
 from omnibase_infra.mixins.mixin_node_introspection import (
     CapabilitiesDict,
     IntrospectionCacheDict,
+    IntrospectionPerformanceMetrics,
     MixinNodeIntrospection,
 )
 from omnibase_infra.mixins.model_introspection_config import ModelIntrospectionConfig
@@ -26,6 +27,7 @@ __all__ = [
     "CapabilitiesDict",
     "CircuitState",
     "IntrospectionCacheDict",
+    "IntrospectionPerformanceMetrics",
     "MixinAsyncCircuitBreaker",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",

@@ -2,6 +2,16 @@
 # Copyright (c) 2025 OmniNode Team
 """Runtime module for omnibase_infra.
 
+Migration Note (OMN-934):
+    This module renames "Handler" terminology to "Dispatcher" for message routing.
+    Legacy aliases are provided for backwards compatibility in MessageDispatchEngine:
+
+    - register_handler() -> register_dispatcher() (method alias provided)
+    - handler_count -> dispatcher_count (property alias provided)
+    - get_handler_metrics() -> get_dispatcher_metrics() (method alias provided)
+
+    Note: DispatcherRegistry is a NEW class (no HandlerRegistry predecessor existed).
+
 This module provides the runtime infrastructure for the ONEX infrastructure layer,
 including three SINGLE SOURCE OF TRUTH registries and the runtime execution host.
 
@@ -33,12 +43,22 @@ Runtime Components
 - **Wiring functions**: Register handlers and event buses with registries
 - **Envelope validation**: Validate event envelope structures
 
+Message Dispatch Engine
+-----------------------
+- **MessageDispatchEngine**: Runtime dispatch engine for message routing
+- **DispatcherRegistry**: Thread-safe registry for message dispatchers with freeze pattern
+- **ProtocolMessageDispatcher**: Protocol for category-based message dispatchers
+
 The runtime module serves as the entry point for running infrastructure services
 and configuring the handler and policy ecosystem.
 """
 
 from __future__ import annotations
 
+from omnibase_infra.runtime.dispatcher_registry import (
+    DispatcherRegistry,
+    ProtocolMessageDispatcher,
+)
 from omnibase_infra.runtime.envelope_validator import (
     PAYLOAD_REQUIRED_OPERATIONS,
     validate_envelope,
@@ -70,6 +90,7 @@ from omnibase_infra.runtime.health_server import (
 from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
@@ -129,4 +150,8 @@ __all__: list[str] = [
     # Envelope validation
     "PAYLOAD_REQUIRED_OPERATIONS",
     "validate_envelope",
+    # Message dispatch engine
+    "MessageDispatchEngine",
+    "DispatcherRegistry",
+    "ProtocolMessageDispatcher",
 ]
