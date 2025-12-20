@@ -9,7 +9,7 @@ to return, whether it can publish directly, and other constraints.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -109,24 +109,14 @@ class ModelExecutionShapeRule(BaseModel):
         use_enum_values=False,  # Keep enum objects for type safety
     )
 
-    @field_validator("allowed_return_types")
+    @field_validator("allowed_return_types", "forbidden_return_types")
     @classmethod
-    def validate_no_duplicates_allowed(
-        cls, v: list[EnumNodeOutputType]
+    def validate_no_duplicates(
+        cls, v: list[EnumNodeOutputType], info: ValidationInfo
     ) -> list[EnumNodeOutputType]:
-        """Ensure no duplicate output types in allowed_return_types."""
+        """Ensure no duplicate output types in return type lists."""
         if len(v) != len(set(v)):
-            raise ValueError("Duplicate output types in allowed_return_types")
-        return v
-
-    @field_validator("forbidden_return_types")
-    @classmethod
-    def validate_no_duplicates_forbidden(
-        cls, v: list[EnumNodeOutputType]
-    ) -> list[EnumNodeOutputType]:
-        """Ensure no duplicate output types in forbidden_return_types."""
-        if len(v) != len(set(v)):
-            raise ValueError("Duplicate output types in forbidden_return_types")
+            raise ValueError(f"Duplicate output types in {info.field_name}")
         return v
 
     def is_return_type_allowed(self, output_type: EnumNodeOutputType) -> bool:
