@@ -77,8 +77,8 @@ class MockEnvelope:
 
     def __init__(
         self,
-        correlation_id: "UUID | None" = None,
-        trace_id: "UUID | None" = None,
+        correlation_id: UUID | None = None,
+        trace_id: UUID | None = None,
     ) -> None:
         self.correlation_id = correlation_id
         self.trace_id = trace_id

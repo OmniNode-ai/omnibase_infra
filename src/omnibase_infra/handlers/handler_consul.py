@@ -28,6 +28,7 @@ from typing import TypeVar
 from uuid import UUID, uuid4
 
 import consul
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -40,7 +41,6 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
-from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 T = TypeVar("T")

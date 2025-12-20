@@ -643,10 +643,29 @@ class RoutingCoverageValidator:
         self._registered_routes: set[str] | None = None
 
     def _ensure_discovery(self) -> None:
-        """Ensure discovery has been performed (lazy initialization)."""
-        if self._discovered_types is None:
+        """Ensure discovery has been performed (lazy initialization).
+
+        Thread Safety Note:
+            This method uses double-checked locking to avoid lock contention
+            on repeated calls. The critical invariant is that we check
+            `_registered_routes` (the LAST field assigned) in both the outer
+            and inner checks. This ensures that if a thread sees
+            `_registered_routes is not None`, then `_discovered_types` has
+            also been set (since it's assigned first inside the lock).
+
+            The assignment order inside the lock is:
+            1. _discovered_types = ...  (first)
+            2. _registered_routes = ... (second, acts as the "commit" flag)
+
+            Any thread that passes the outer check will see both fields set.
+        """
+        # Check _registered_routes (the LAST field assigned) for thread safety.
+        # This ensures that if we skip the lock, both fields are guaranteed set.
+        if self._registered_routes is None:
             with self._lock:
-                if self._discovered_types is None:
+                if self._registered_routes is None:
+                    # Order matters: _discovered_types MUST be set before
+                    # _registered_routes to maintain the thread-safety invariant.
                     self._discovered_types = discover_message_types(
                         self.source_directory
                     )
