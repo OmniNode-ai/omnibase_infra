@@ -25,6 +25,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     RuntimeHostError,
 )
+from omnibase_infra.mixins import MixinEnvelopeExtraction
 from omnibase_infra.handlers.models import (
     ModelDbDescribeResponse,
     ModelDbHealthResponse,
@@ -45,7 +46,7 @@ _DEFAULT_TIMEOUT_SECONDS: float = 30.0
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"db.query", "db.execute"})
 
 
-class DbAdapter:
+class DbAdapter(MixinEnvelopeExtraction):
     """PostgreSQL database adapter using asyncpg connection pool (MVP: query, execute only).
 
     Security Policy - DSN Handling:
@@ -273,30 +274,6 @@ class DbAdapter:
             return await self._execute_statement(
                 sql, parameters, correlation_id, input_envelope_id
             )
-
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate correlation ID from envelope."""
-        raw = envelope.get("correlation_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
-
-    def _extract_envelope_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate envelope ID for causality tracking."""
-        raw = envelope.get("envelope_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
 
     def _sanitize_dsn(self, dsn: str) -> str:
         """Sanitize DSN by removing password for safe logging.

@@ -49,7 +49,7 @@ from omnibase_infra.errors import (
     SecretResolutionError,
 )
 from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class VaultAdapter(MixinAsyncCircuitBreaker):
+class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     """HashiCorp Vault adapter using hvac client (MVP: KV v2 secrets engine).
 
     Security Policy - Token Handling:
@@ -497,30 +497,6 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             return await self._renew_token_operation(correlation_id, input_envelope_id)
         else:  # vault.health_check
             return await self._health_check_operation(correlation_id, input_envelope_id)
-
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate correlation ID from envelope."""
-        raw = envelope.get("correlation_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
-
-    def _extract_envelope_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate envelope ID for causality tracking."""
-        raw = envelope.get("envelope_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
 
     async def _check_token_renewal(self, correlation_id: UUID) -> None:
         """Check if token needs renewal and renew if necessary.
@@ -1243,6 +1219,22 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         Uses thread pool executor and retry logic for consistency with other operations.
         Includes circuit breaker protection and exponential backoff on transient failures.
 
+        This is the standalone health check method intended for direct invocation by
+        monitoring systems, health check endpoints, or diagnostic tools. It generates
+        its own correlation_id for tracing purposes.
+
+        Envelope-Based vs Direct Invocation:
+            - Direct: Call health_check() for monitoring/diagnostics. A new correlation_id
+              is generated internally for tracing the health check operation.
+            - Envelope: Use execute() with operation="vault.health_check" for dispatch.
+              The envelope's correlation_id and envelope_id are preserved for causality.
+
+        Note:
+            This method does not accept envelope_id because it's designed for direct
+            invocation outside the envelope dispatch context. For envelope-based health
+            checks that preserve causality tracking, use _health_check_operation() via
+            the execute() method.
+
         Returns:
             Health status dict with handler state information including:
             - Basic health status (healthy, initialized, handler_type, timeout_seconds)
@@ -1328,9 +1320,32 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
     ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute health check operation from envelope.
 
+        This method wraps the core health_check() functionality in a ModelHandlerOutput
+        for envelope-based operation dispatch. It differs from health_check() in that:
+
+        1. It accepts pre-extracted IDs from the request envelope
+        2. It returns ModelHandlerOutput (suitable for envelope dispatch)
+        3. It preserves causality tracking via input_envelope_id
+
+        ID Semantics:
+            correlation_id: Groups related operations across distributed services.
+                Used for filtering logs, tracing request flows, and debugging.
+                Propagated from the request envelope or auto-generated if missing.
+
+            input_envelope_id: Links this response to the originating request envelope.
+                Enables request/response correlation in observability systems.
+                When called via execute(), extracted from the request envelope.
+                Auto-generated if not provided, ensuring all responses have valid
+                causality tracking IDs.
+
+        The standalone health_check() method generates its own correlation_id since
+        it may be called directly (not via envelope dispatch) for monitoring purposes.
+
         Args:
-            correlation_id: Correlation ID for tracing
-            input_envelope_id: Input envelope ID for causality tracking
+            correlation_id: Correlation ID for distributed tracing across services.
+            input_envelope_id: Envelope ID for causality tracking. Links this health
+                check response to the original request envelope, enabling end-to-end
+                request/response correlation in observability systems.
 
         Returns:
             ModelHandlerOutput with health check information

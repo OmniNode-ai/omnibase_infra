@@ -25,6 +25,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.mixins import MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ def _categorize_size(size: int) -> str:
         return "very_large"
 
 
-class HttpRestAdapter:
+class HttpRestAdapter(MixinEnvelopeExtraction):
     """HTTP REST protocol adapter using httpx async client (MVP: GET, POST only).
 
     Security Features:
@@ -284,30 +285,6 @@ class HttpRestAdapter:
             return await self._execute_request(
                 "POST", url, headers, body, correlation_id, input_envelope_id, pre_serialized
             )
-
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate correlation ID from envelope."""
-        raw = envelope.get("correlation_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
-
-    def _extract_envelope_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate envelope ID for causality tracking."""
-        raw = envelope.get("envelope_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
 
     def _extract_headers(
         self, payload: dict[str, object], operation: str, url: str, correlation_id: UUID
