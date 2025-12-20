@@ -220,7 +220,19 @@ class TestValidateInfraUnionUsageDefaults:
     @patch("omnibase_infra.validation.infra_validators.validate_union_usage")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
         """Verify defaults are correctly passed to core validator."""
-        mock_validate.return_value = MagicMock(is_valid=True, errors=[])
+        # Mock validation result with proper structure for filtered result creation
+        # (validate_infra_union_usage now filters exempted patterns like patterns does)
+        mock_result = MagicMock()
+        mock_result.is_valid = True
+        mock_result.errors = []
+        mock_result.warnings = []
+        mock_result.suggestions = []
+        mock_result.issues = []
+        mock_result.validated_value = None
+        mock_result.summary = ""
+        mock_result.details = ""
+        mock_result.metadata = None
+        mock_validate.return_value = mock_result
 
         # Call with defaults
         validate_infra_union_usage()

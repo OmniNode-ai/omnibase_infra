@@ -3,10 +3,11 @@
 """
 Message Category Enumeration.
 
-Defines the three fundamental message categories in ONEX event-driven architecture:
+Defines the fundamental message categories in ONEX event-driven architecture:
 - EVENT: Domain events representing facts that have occurred
 - COMMAND: Instructions to perform an action
 - INTENT: User intents requiring interpretation and routing
+- PROJECTION: State projections for optimized read models
 
 Thread Safety:
     All enums in this module are immutable and thread-safe.
@@ -21,7 +22,7 @@ class EnumMessageCategory(str, Enum):
     """
     Message category classification for ONEX event-driven routing.
 
-    The three fundamental message categories determine how messages are
+    The four fundamental message categories determine how messages are
     processed and routed through the system:
 
     - **EVENT**: Facts that have occurred (past tense, immutable)
@@ -38,6 +39,10 @@ class EnumMessageCategory(str, Enum):
       - Published to intent topics (*.intents.*)
       - Consumed by orchestrators for routing decisions
       - Example: UserWantsToCheckoutIntent, RequestPasswordResetIntent
+
+    - **PROJECTION**: State projections for optimized read models
+      - Used by reducers for state consolidation
+      - Example: OrderSummaryProjection, UserProfileProjection
 
     Attributes:
         topic_suffix: The plural suffix used in topic names (e.g., "events")
@@ -61,6 +66,9 @@ class EnumMessageCategory(str, Enum):
     INTENT = "intent"
     """User intents requiring interpretation and routing."""
 
+    PROJECTION = "projection"
+    """State projections for optimized read models."""
+
     def __str__(self) -> str:
         """Return the string value for serialization."""
         return self.value
@@ -74,6 +82,7 @@ class EnumMessageCategory(str, Enum):
         - EVENT -> "events" (e.g., onex.user.events)
         - COMMAND -> "commands" (e.g., onex.order.commands)
         - INTENT -> "intents" (e.g., onex.checkout.intents)
+        - PROJECTION -> "projections" (e.g., onex.order.projections)
 
         Returns:
             The plural suffix string for topic names
@@ -88,6 +97,7 @@ class EnumMessageCategory(str, Enum):
             EnumMessageCategory.EVENT: "events",
             EnumMessageCategory.COMMAND: "commands",
             EnumMessageCategory.INTENT: "intents",
+            EnumMessageCategory.PROJECTION: "projections",
         }
         return suffix_map[self]
 
@@ -96,7 +106,7 @@ class EnumMessageCategory(str, Enum):
         """
         Infer the message category from a topic string.
 
-        Examines the topic for category keywords (events, commands, intents)
+        Examines the topic for category keywords (events, commands, intents, projections)
         and returns the corresponding category. Handles both ONEX Kafka format
         (onex.<domain>.<type>) and Environment-Aware format
         (<env>.<domain>.<category>.<version>).
@@ -129,6 +139,8 @@ class EnumMessageCategory(str, Enum):
             return cls.COMMAND
         if ".intents" in topic_lower:
             return cls.INTENT
+        if ".projections" in topic_lower:
+            return cls.PROJECTION
 
         return None
 
@@ -138,7 +150,7 @@ class EnumMessageCategory(str, Enum):
         Get the category from a topic suffix.
 
         Args:
-            suffix: The suffix to look up (e.g., "events", "commands", "intents")
+            suffix: The suffix to look up (e.g., "events", "commands", "intents", "projections")
 
         Returns:
             EnumMessageCategory if the suffix is valid, None otherwise
@@ -155,6 +167,7 @@ class EnumMessageCategory(str, Enum):
             "events": cls.EVENT,
             "commands": cls.COMMAND,
             "intents": cls.INTENT,
+            "projections": cls.PROJECTION,
         }
         return suffix_map.get(suffix.lower())
 
@@ -169,6 +182,10 @@ class EnumMessageCategory(str, Enum):
     def is_intent(self) -> bool:
         """Check if this is an intent category."""
         return self == EnumMessageCategory.INTENT
+
+    def is_projection(self) -> bool:
+        """Check if this is a projection category."""
+        return self == EnumMessageCategory.PROJECTION
 
 
 __all__ = ["EnumMessageCategory"]

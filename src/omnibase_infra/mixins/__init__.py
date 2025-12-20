@@ -18,6 +18,8 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     IntrospectionCacheDict,
     MixinNodeIntrospection,
 )
+from omnibase_infra.mixins.model_introspection_config import ModelIntrospectionConfig
+from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 
 __all__ = [
     "CapabilitiesDict",
@@ -25,4 +27,6 @@ __all__ = [
     "IntrospectionCacheDict",
     "MixinAsyncCircuitBreaker",
     "MixinNodeIntrospection",
+    "ModelIntrospectionConfig",
+    "ProtocolEventBusLike",
 ]
