@@ -419,7 +419,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - operation: Consul operation (consul.kv_get, consul.kv_put, etc.)
                 - payload: dict with operation-specific parameters
                 - correlation_id: Optional correlation ID for tracing
-                - envelope_id: Optional UUID for input envelope tracking
+                - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
             ModelHandlerOutput wrapping the operation result with correlation tracking

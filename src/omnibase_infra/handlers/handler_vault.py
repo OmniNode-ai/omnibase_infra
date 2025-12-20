@@ -511,7 +511,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         return uuid4()
 
     def _extract_envelope_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract envelope ID from envelope, or generate one if not present."""
+        """Extract or generate envelope ID for causality tracking."""
         raw = envelope.get("envelope_id")
         if isinstance(raw, UUID):
             return raw
