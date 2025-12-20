@@ -240,14 +240,14 @@ if metrics:
 
 Fan-out allows multiple dispatchers to process the same message type. This is a core
 capability for implementing event-driven architectures where a single event triggers
-multiple independent handlers.
+multiple independent dispatchers.
 
 ### When to Use Fan-out
 
 | Use Case | Description |
 |----------|-------------|
 | **Event Sourcing** | Multiple projections from single event stream |
-| **Notification System** | Email, SMS, push handlers from single notification event |
+| **Notification System** | Email, SMS, push dispatchers from single notification event |
 | **Analytics** | Multiple analytics processors from activity events |
 | **Audit Trail** | Separate audit logger alongside business logic |
 
@@ -256,7 +256,7 @@ multiple independent handlers.
 Register multiple dispatchers and routes that match the same topic pattern:
 
 ```python
-# Two independent handlers for user events
+# Two independent dispatchers for user events
 async def send_welcome_email(envelope: ModelEventEnvelope[object]) -> str:
     user = envelope.payload
     await email_service.send_welcome(user.email)
@@ -269,13 +269,13 @@ async def update_analytics(envelope: ModelEventEnvelope[object]) -> str:
 
 # Register both dispatchers
 engine.register_dispatcher(
-    dispatcher_id="email-handler",
+    dispatcher_id="email-dispatcher",
     dispatcher=send_welcome_email,
     category=EnumMessageCategory.EVENT,
     message_types={"UserCreated"},
 )
 engine.register_dispatcher(
-    dispatcher_id="analytics-handler",
+    dispatcher_id="analytics-dispatcher",
     dispatcher=update_analytics,
     category=EnumMessageCategory.EVENT,
     message_types={"UserCreated"},
@@ -286,19 +286,19 @@ engine.register_route(ModelDispatchRoute(
     route_id="email-route",
     topic_pattern="*.user.events.*",
     message_category=EnumMessageCategory.EVENT,
-    dispatcher_id="email-handler",
+    dispatcher_id="email-dispatcher",
 ))
 engine.register_route(ModelDispatchRoute(
     route_id="analytics-route",
     topic_pattern="*.user.events.*",
     message_category=EnumMessageCategory.EVENT,
-    dispatcher_id="analytics-handler",
+    dispatcher_id="analytics-dispatcher",
 ))
 engine.freeze()
 
-# Dispatch triggers BOTH handlers
+# Dispatch triggers BOTH dispatchers
 result = await engine.dispatch("dev.user.events.v1", user_created_envelope)
-assert result.output_count == 2  # Both handlers produced outputs
+assert result.output_count == 2  # Both dispatchers produced outputs
 ```
 
 ### Fan-out Execution Semantics
