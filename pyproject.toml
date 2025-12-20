@@ -18,7 +18,7 @@ onex-runtime = "omnibase_infra.runtime.kernel:main"
 [tool.poetry.dependencies]
 python = "^3.12"
 
-# ONEX dependencies - pinned for reproducible builds
+# ONEX dependencies - pinned to tags for reproducible builds
 # SECURITY: Git commit SHAs are immutable and tamper-evident. Tags can be
 # force-pushed unless protected or GPG-signed. Prefer SHAs for production.
 # - Reproducible builds: Same commit = same code, regardless of branch/tag changes

@@ -96,7 +96,7 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
 
 
 def validate_envelope(
-    envelope: JsonValue,
+    envelope: dict[str, JsonValue],
     registry: ProtocolBindingRegistry,
 ) -> None:
     """Validate envelope before dispatch to handler.
