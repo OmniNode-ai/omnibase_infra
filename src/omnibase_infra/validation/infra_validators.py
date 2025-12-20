@@ -335,7 +335,7 @@ INFRA_PATTERNS_STRICT = False
 # 1. Complete OMN-934 (Message Dispatch Engine) - addresses dispatch model unions
 # 2. Reduce INFRA_MAX_UNIONS from 450 to <200 through targeted refactoring
 # 3. Document remaining necessary unions in exempted_patterns
-# 4. Coordinate with INFRA_PATTERNS_STRICT re-enablement (OMN-1001)
+# 4. Coordinate with INFRA_PATTERNS_STRICT re-enablement (OMN-987)
 #
 # Review Cadence: Monthly review until re-enabled
 # Last Review: 2025-12-20
