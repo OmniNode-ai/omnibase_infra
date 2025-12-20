@@ -111,7 +111,7 @@ class UserEventDispatcher:
         return EnumNodeKind.REDUCER
 
     async def handle(
-        self, envelope: ModelEventEnvelope[Any]
+        self, envelope: ModelEventEnvelope[object]
     ) -> ModelDispatchResult:
         # Process the event
         return ModelDispatchResult(
@@ -137,6 +137,11 @@ dispatchers = registry.get_dispatchers(
 - `MessageDispatchEngine` accepts function-based dispatchers (callables)
 - Both use the "freeze after init" pattern for thread safety
 - Both support execution shape validation
+
+**Envelope Typing Note:**
+The `handle()` method uses `ModelEventEnvelope[object]` instead of `Any` for the envelope
+parameter. This satisfies ONEX "no Any types" guideline while allowing dispatchers to
+accept any payload type. See `CLAUDE.md` section "Envelope Typing" for complete guidelines.
 
 ### What Does NOT Change
 

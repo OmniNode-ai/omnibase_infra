@@ -212,80 +212,6 @@ from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
 # - None: No output topics to publish
 DispatcherOutput = str | list[str] | None
 
-# Patterns that may indicate sensitive data in error messages
-# These patterns are checked case-insensitively
-_SENSITIVE_PATTERNS = (
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "api_key",
-    "apikey",
-    "api-key",
-    "credential",
-    "auth",
-    "bearer",
-    "private_key",
-    "privatekey",
-    "private-key",
-    "connection_string",
-    "connectionstring",
-    "connection-string",
-    "mongodb://",
-    "postgres://",
-    "postgresql://",
-    "mysql://",
-    "redis://",
-    "amqp://",
-    "kafka://",
-)
-
-
-def _sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
-    """
-    Sanitize an exception message for safe inclusion in dispatch results.
-
-    This function removes or masks potentially sensitive information from
-    exception messages before they are stored in ModelDispatchResult or logged.
-
-    Sanitization rules:
-        1. Truncate long messages to prevent excessive data exposure
-        2. Check for common patterns indicating credentials/connection strings
-        3. If sensitive patterns detected, return generic error type only
-        4. Otherwise, return truncated exception message
-
-    Args:
-        exception: The exception to sanitize
-        max_length: Maximum length of the sanitized message (default 500)
-
-    Returns:
-        Sanitized error message safe for storage and logging
-
-    Example:
-        >>> try:
-        ...     raise ValueError("Failed with password=secret123")
-        ... except Exception as e:
-        ...     safe_msg = _sanitize_error_message(e)
-        >>> "password" not in safe_msg.lower()
-        True
-    """
-    exception_type = type(exception).__name__
-    exception_str = str(exception)
-
-    # Check for sensitive patterns in the exception message
-    exception_lower = exception_str.lower()
-    for pattern in _SENSITIVE_PATTERNS:
-        if pattern in exception_lower:
-            # Sensitive data detected - return only the exception type
-            return f"{exception_type}: [REDACTED - potentially sensitive data]"
-
-    # Truncate long messages
-    if len(exception_str) > max_length:
-        exception_str = exception_str[:max_length] + "... [truncated]"
-
-    return f"{exception_type}: {exception_str}"
-
-
 # Module-level logger for fallback when no custom logger is provided
 _module_logger = logging.getLogger(__name__)
 
@@ -476,6 +402,7 @@ class MessageDispatchEngine:
             EnumMessageCategory.EVENT: [],
             EnumMessageCategory.COMMAND: [],
             EnumMessageCategory.INTENT: [],
+            EnumMessageCategory.PROJECTION: [],
         }
 
         # Freeze state
@@ -898,7 +825,7 @@ class MessageDispatchEngine:
                 completed_at=datetime.now(UTC),
                 duration_ms=duration_ms,
                 error_message=f"Cannot infer message category from topic '{topic}'. "
-                "Topic must contain .events, .commands, or .intents segment.",
+                "Topic must contain .events, .commands, .intents, or .projections segment.",
                 error_code=EnumCoreErrorCode.VALIDATION_ERROR,
                 correlation_id=envelope.correlation_id,
             )

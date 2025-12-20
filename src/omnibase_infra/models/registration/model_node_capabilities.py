@@ -14,9 +14,17 @@ from pydantic import BaseModel, ConfigDict, Field
 # This type supports:
 # - Primitives: str, int, float, bool, None
 # - Lists of primitives: list[str | int | float | bool | None]
-# - Nested dicts up to 2 levels deep with primitive values
+# - Nested dicts up to 2 levels deep with primitive/list values
 #
-# For deeply nested structures, consider using a dedicated Pydantic model.
+# Nesting depth breakdown:
+#   Level 1: Top-level dict keys map to JsonNestedDict values
+#   Level 2: JsonNestedDict keys map to primitives or lists (no further nesting)
+#
+# Example of maximum nesting:
+#   {"level1_key": {"level2_key": "primitive_value"}}
+#   {"level1_key": {"level2_key": [1, 2, 3]}}  # list values allowed
+#
+# For structures requiring deeper nesting, use a dedicated Pydantic model.
 JsonPrimitive = str | int | float | bool | None
 JsonList = list[JsonPrimitive]
 JsonNestedDict = dict[str, JsonPrimitive | JsonList]

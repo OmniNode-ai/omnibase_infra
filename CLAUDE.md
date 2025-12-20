@@ -155,6 +155,52 @@ def parse_input(data: Optional[Union[str, int]]) -> ParsedResult:  # Avoid this
 
 **Exception**: When maintaining compatibility with older codebases or when `typing.Optional` is already imported for other purposes, using `Optional` is acceptable but not preferred.
 
+**Envelope Typing: Use `ModelEventEnvelope[object]` for Generic Dispatchers**
+
+The dispatch engine and protocol dispatchers use `ModelEventEnvelope[object]` instead of `Any` for envelope parameters. This pattern satisfies the ONEX "no Any types" rule while maintaining the necessary flexibility for generic message handling.
+
+```python
+# CORRECT - Generic dispatcher (accepts any payload type)
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+async def process_event(envelope: ModelEventEnvelope[object]) -> str | None:
+    """Process any event type - uses object for generic payloads."""
+    return "dev.processed.v1"
+
+# CORRECT - Specific dispatcher (knows the exact payload type)
+from my_models import UserCreatedEvent
+
+async def process_user_created(envelope: ModelEventEnvelope[UserCreatedEvent]) -> str:
+    """Process UserCreatedEvent - uses specific type when known."""
+    user = envelope.payload  # Type-safe: UserCreatedEvent
+    return f"dev.user.{user.user_id}.processed"
+
+# WRONG - Never use Any
+from typing import Any
+
+async def process_event(envelope: ModelEventEnvelope[Any]) -> str:  # Avoid
+    ...
+```
+
+**When to use each pattern**:
+
+| Context | Type Parameter | Rationale |
+|---------|----------------|-----------|
+| Protocol definitions | `object` | Protocols define structural interfaces; payload type varies |
+| Dispatch engine internals | `object` | Routes based on topic/category, not payload shape |
+| Generic dispatcher functions | `object` | Must accept any payload type within a category |
+| Concrete implementations | Specific type | When dispatcher knows exact payload type (e.g., `UserCreatedEvent`) |
+| Test fixtures | Specific type | Tests create envelopes with known payload types |
+
+**Rationale for `object` over `Any`**:
+- `object` explicitly says "any Python object" - clearer intent than `Any`
+- Type checkers treat `object` as the root of the type hierarchy
+- Satisfies ONEX "no Any types" coding guideline
+- Same runtime behavior as `Any` but with documented semantics
+- Encourages narrowing to specific types where possible
+
+**See also**: `src/omnibase_infra/runtime/message_dispatch_engine.py` for the complete design note.
+
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
 - **Container Injection** - `def __init__(self, container: ModelONEXContainer)`
@@ -838,6 +884,8 @@ if is_open:
 
 **Dispatcher Implementation Pattern**:
 ```python
+from typing import Any
+
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.enums import EnumInfraTransportType
@@ -856,9 +904,10 @@ class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
             transport_type=config.transport_type,
         )
 
-    # NOTE: ModelEventEnvelope[object] matches the DispatcherFunc signature.
-    # Using `object` provides type flexibility for dispatchers that handle
-    # envelopes with varying payload types based on topic/category routing.
+    # NOTE: ModelEventEnvelope[object] is used instead of Any to satisfy ONEX "no Any types"
+    # rule. Dispatchers must accept envelopes with any payload type since the dispatch
+    # engine routes based on topic/category, not payload shape. Using `object` provides
+    # the same flexibility as Any but with explicit semantics.
     async def handle(self, envelope: ModelEventEnvelope[object]) -> ModelDispatchResult:
         """Handle message with circuit breaker protection."""
         async with self._circuit_breaker_lock:
@@ -931,20 +980,42 @@ The mixin includes several filtering mechanisms to limit exposure:
 - Use the `exclude_prefixes` parameter to filter additional method patterns if needed
 
 **Example - Reviewing Exposed Capabilities**:
+
+The following example demonstrates introspection filtering using simplified placeholder models.
+In production ONEX nodes, input/output models follow the `Model<NodeName>Input` and
+`Model<NodeName>Output` naming convention (e.g., `ModelVaultAdapterInput`, `ModelKafkaAdapterOutput`).
+
 ```python
 from pydantic import BaseModel
 
 from omnibase_infra.mixins import MixinNodeIntrospection
 
 
+# Simplified placeholder models for demonstration purposes.
+# In production ONEX nodes, these would be named following the convention:
+# - Model<NodeName>Input (e.g., ModelVaultAdapterInput, ModelConsulAdapterInput)
+# - Model<NodeName>Output (e.g., ModelVaultAdapterOutput, ModelConsulAdapterOutput)
+# See docs/architecture/CURRENT_NODE_ARCHITECTURE.md for full examples.
+
+
 class NodeInput(BaseModel):
-    """Input model for node operation."""
+    """Placeholder input model for demonstration.
+
+    Represents the typed input payload for a node operation.
+    ONEX nodes use strongly-typed Pydantic models to ensure
+    type safety and enable contract-driven validation.
+    """
 
     value: str
 
 
 class NodeOutput(BaseModel):
-    """Output model for node operation."""
+    """Placeholder output model for demonstration.
+
+    Represents the typed output result from a node operation.
+    All ONEX nodes return strongly-typed Pydantic models,
+    never raw dictionaries or untyped data.
+    """
 
     processed: bool
 

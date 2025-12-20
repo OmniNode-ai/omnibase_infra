@@ -72,6 +72,39 @@ class ProtocolMessageDispatcher(Protocol):
     - message_types: Specific message types it accepts (empty = all)
     - node_kind: The ONEX node kind this dispatcher represents
 
+    Protocol Validation:
+        This protocol is marked ``@runtime_checkable``, enabling ``isinstance()``
+        checks for structural type verification. Use ``isinstance(obj, ProtocolMessageDispatcher)``
+        to verify that an object implements the required interface.
+
+        **Validation Approaches**:
+
+        1. **isinstance Check** (recommended for quick structural validation):
+           Use when you need to verify an object implements the dispatcher interface
+           before passing it to components that expect a dispatcher.
+
+           .. code-block:: python
+
+               if isinstance(dispatcher, ProtocolMessageDispatcher):
+                   registry.register_dispatcher(dispatcher)
+               else:
+                   raise TypeError("Object does not implement ProtocolMessageDispatcher")
+
+        2. **DispatcherRegistry Validation** (comprehensive validation):
+           The ``DispatcherRegistry.register_dispatcher()`` method performs thorough
+           validation including:
+           - All required properties exist and have correct types
+           - Execution shape is valid (category -> node_kind combination)
+           - ``handle()`` method is callable
+
+           This is the recommended approach for production registration as it
+           provides detailed error messages for debugging.
+
+        **Note on isinstance() Limitations**:
+        Python's runtime_checkable protocols only verify method/attribute existence,
+        not return types or parameter types. For complete type safety, use static
+        type checking (mypy) in addition to runtime checks.
+
     Thread Safety:
         WARNING: Dispatcher implementations may be invoked concurrently from the
         dispatch engine. The same dispatcher instance may be called from multiple
@@ -87,9 +120,12 @@ class ProtocolMessageDispatcher(Protocol):
     Example:
         .. code-block:: python
 
-            from omnibase_infra.runtime.dispatcher_registry import ProtocolMessageDispatcher
-            from omnibase_infra.enums import EnumMessageCategory
             from omnibase_core.enums.enum_node_kind import EnumNodeKind
+            from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+            from omnibase_infra.enums import EnumMessageCategory
+            from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+            from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+            from omnibase_infra.runtime.dispatcher_registry import ProtocolMessageDispatcher
 
             class UserEventDispatcher:
                 '''Dispatcher for user-related events.'''
@@ -120,9 +156,13 @@ class ProtocolMessageDispatcher(Protocol):
                         dispatcher_id=self.dispatcher_id,
                     )
 
-            # Verify protocol compliance
+            # Verify protocol compliance using isinstance (quick structural check)
             dispatcher: ProtocolMessageDispatcher = UserEventDispatcher()
             assert isinstance(dispatcher, ProtocolMessageDispatcher)
+
+            # Or use DispatcherRegistry for comprehensive validation
+            registry = DispatcherRegistry()
+            registry.register_dispatcher(dispatcher)  # Validates all properties and execution shape
 
     Attributes:
         dispatcher_id: Unique identifier for this dispatcher.
@@ -245,9 +285,19 @@ class ProtocolMessageDispatcher(Protocol):
         envelope, processes it according to its category and node kind,
         and returns a dispatch result indicating success or failure.
 
+        Typing Note:
+            The envelope parameter uses ``ModelEventEnvelope[object]`` instead of
+            ``Any`` to satisfy ONEX "no Any types" guideline. Dispatchers must accept
+            envelopes with any payload type since the dispatch engine routes based on
+            topic/category/message_type, not payload shape. Using ``object`` provides
+            explicit "any Python object" semantics while remaining type-checker friendly.
+
+            Concrete implementations that know the exact payload type should use
+            ``ModelEventEnvelope[SpecificType]`` for better type safety.
+
         Args:
             envelope: The input envelope containing the message to process.
-                The payload contains category-specific data.
+                The payload contains category-specific data (typed as ``object``).
 
         Returns:
             ModelDispatchResult: The result of the dispatch operation with:
@@ -258,6 +308,8 @@ class ProtocolMessageDispatcher(Protocol):
 
         Example:
             .. code-block:: python
+
+                from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 
                 async def handle(
                     self, envelope: ModelEventEnvelope[object]
@@ -274,7 +326,7 @@ class ProtocolMessageDispatcher(Protocol):
                         )
                     except Exception as e:
                         return ModelDispatchResult(
-                            status=EnumDispatchStatus.DISPATCHER_ERROR,
+                            status=EnumDispatchStatus.HANDLER_ERROR,
                             topic="user.events",
                             dispatcher_id=self.dispatcher_id,
                             error_message=str(e),
@@ -738,11 +790,30 @@ class DispatcherRegistry:
         """
         Validate that a dispatcher meets the ProtocolMessageDispatcher requirements.
 
+        This method provides comprehensive validation beyond what ``isinstance()``
+        checks offer. While ``isinstance(obj, ProtocolMessageDispatcher)`` verifies
+        that required attributes exist (due to ``@runtime_checkable``), this method
+        additionally validates:
+
+        - Property values have correct types (e.g., dispatcher_id is a non-empty str)
+        - EnumMessageCategory and EnumNodeKind are the actual enum instances
+        - message_types is a set (not just any iterable)
+        - handle method is callable
+
+        **When to Use Each Validation Approach**:
+
+        - ``isinstance(obj, ProtocolMessageDispatcher)``: Quick structural check,
+          suitable for type guards or early rejection of obviously invalid objects.
+        - ``_validate_dispatcher()``: Comprehensive validation with detailed error
+          messages, used internally by ``register_dispatcher()``.
+
         Args:
             dispatcher: The dispatcher to validate.
 
         Raises:
             ModelOnexError: If dispatcher is None or lacks required properties.
+                Error codes used:
+                - INVALID_PARAMETER: Missing or invalid property
         """
         if dispatcher is None:
             raise ModelOnexError(

@@ -10,7 +10,7 @@ Design Pattern:
     ModelDispatchMetrics is a comprehensive metrics container that aggregates:
     - Overall dispatch statistics (counts, latency)
     - Per-dispatcher metrics (via ModelDispatcherMetrics)
-    - Per-category metrics (event, command, intent counts)
+    - Per-category metrics (event, command, intent, projection counts)
     - Latency histogram buckets for distribution analysis
 
     Copy-on-Write Pattern:
@@ -95,7 +95,7 @@ class ModelDispatchMetrics(BaseModel):
 
         Specifically:
         - dispatcher_metrics: Bounded by registered dispatcher count (fixed after freeze)
-        - category_metrics: Fixed 3 keys (event, command, intent)
+        - category_metrics: Fixed 4 keys (event, command, intent, projection)
         - latency_histogram: Fixed 13 buckets
 
         The freeze-after-init pattern guarantees that after engine.freeze()
@@ -241,6 +241,7 @@ class ModelDispatchMetrics(BaseModel):
             "event": 0,
             "command": 0,
             "intent": 0,
+            "projection": 0,
         },
         description="Per-category dispatch counts.",
     )
