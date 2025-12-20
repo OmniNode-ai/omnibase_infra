@@ -279,6 +279,7 @@ def discover_message_types(
     Returns:
         Dictionary mapping message class names to their categories
         (EnumMessageCategory for EVENT/COMMAND/INTENT, EnumNodeOutputType for PROJECTION).
+        Returns empty dict if source_directory is invalid.
 
     Example:
         >>> types = discover_message_types(Path("src/omnibase_infra"))
@@ -289,6 +290,13 @@ def discover_message_types(
             ...
         }
     """
+    # Defensive type check for source_directory
+    if not isinstance(source_directory, Path):
+        try:
+            source_directory = Path(source_directory)
+        except (TypeError, ValueError):
+            return {}
+
     if exclude_patterns is None:
         exclude_patterns = [
             "**/test_*.py",
@@ -296,6 +304,9 @@ def discover_message_types(
             "**/tests/**",
             "**/__pycache__/**",
         ]
+    # Defensive type check for exclude_patterns
+    elif not isinstance(exclude_patterns, list):
+        exclude_patterns = []
 
     discovered_types: dict[str, EnumMessageCategory | EnumNodeOutputType] = {}
 
@@ -309,6 +320,9 @@ def discover_message_types(
     for file_path in python_files:
         excluded = False
         for exclude in exclude_patterns:
+            # Skip non-string exclude patterns
+            if not isinstance(exclude, str):
+                continue
             if file_path.match(exclude):
                 excluded = True
                 break
@@ -463,7 +477,16 @@ def discover_registered_routes(
 
     # Strategy 2: Static analysis of registration calls
     if source_directory is not None:
-        registered_types.update(_discover_routes_static(source_directory))
+        # Defensive type check - convert to Path if needed
+        if not isinstance(source_directory, Path):
+            try:
+                source_directory = Path(source_directory)
+            except (TypeError, ValueError):
+                pass
+            else:
+                registered_types.update(_discover_routes_static(source_directory))
+        else:
+            registered_types.update(_discover_routes_static(source_directory))
 
     return registered_types
 
@@ -501,8 +524,16 @@ def _discover_routes_static(source_directory: Path) -> set[str]:
 
     Returns:
         Set of message type names found in registration patterns.
+        Returns empty set if source_directory is invalid.
     """
     registered_types: set[str] = set()
+
+    # Defensive type check for source_directory
+    if not isinstance(source_directory, Path):
+        try:
+            source_directory = Path(source_directory)
+        except (TypeError, ValueError):
+            return registered_types
 
     # Registration patterns to search for.
     # Each pattern captures the message type name as group 1.

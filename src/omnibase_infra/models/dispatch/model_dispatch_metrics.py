@@ -10,7 +10,7 @@ Design Pattern:
     ModelDispatchMetrics is a comprehensive metrics container that aggregates:
     - Overall dispatch statistics (counts, latency)
     - Per-dispatcher metrics (via ModelDispatcherMetrics)
-    - Per-category metrics (event, command, intent counts)
+    - Per-category metrics (event, command, intent, projection counts)
     - Latency histogram buckets for distribution analysis
 
     Copy-on-Write Pattern:
@@ -96,7 +96,7 @@ class ModelDispatchMetrics(BaseModel):
 
         Specifically:
         - dispatcher_metrics: Bounded by registered dispatcher count (fixed after freeze)
-        - category_metrics: Fixed 3 keys (event, command, intent)
+        - category_metrics: Fixed 4 keys (event, command, intent, projection)
         - latency_histogram: Fixed 13 buckets
 
         The freeze-after-init pattern guarantees that after engine.freeze()
@@ -117,7 +117,7 @@ class ModelDispatchMetrics(BaseModel):
         total_dispatches: Total number of dispatch operations.
         successful_dispatches: Number of successful dispatches.
         failed_dispatches: Number of failed dispatches.
-        no_handler_count: Dispatches with no matching dispatcher.
+        no_dispatcher_count: Dispatches with no matching dispatcher.
         category_mismatch_count: Dispatches with category validation failures.
         total_latency_ms: Cumulative latency across all dispatches.
         min_latency_ms: Minimum observed dispatch latency.
@@ -154,7 +154,7 @@ class ModelDispatchMetrics(BaseModel):
         description="Number of failed dispatches.",
         ge=0,
     )
-    no_handler_count: int = Field(
+    no_dispatcher_count: int = Field(
         default=0,
         description="Dispatches with no matching dispatcher.",
         ge=0,
@@ -242,6 +242,7 @@ class ModelDispatchMetrics(BaseModel):
             "event": 0,
             "command": 0,
             "intent": 0,
+            "projection": 0,
         },
         description="Per-category dispatch counts.",
     )
@@ -301,7 +302,7 @@ class ModelDispatchMetrics(BaseModel):
         success: bool,
         category: EnumMessageCategory | None = None,
         dispatcher_id: str | None = None,
-        no_handler: bool = False,
+        no_dispatcher: bool = False,
         category_mismatch: bool = False,
         handler_error: bool = False,
         routes_matched: int = 0,
@@ -318,7 +319,7 @@ class ModelDispatchMetrics(BaseModel):
             success: Whether the dispatch was successful.
             category: Optional message category for per-category metrics.
             dispatcher_id: Optional dispatcher ID for per-dispatcher metrics.
-            no_handler: Whether no dispatcher was found.
+            no_dispatcher: Whether no dispatcher was found.
             category_mismatch: Whether category validation failed.
             handler_error: Whether a dispatcher execution error occurred.
             routes_matched: Number of routes that matched.
@@ -373,7 +374,8 @@ class ModelDispatchMetrics(BaseModel):
                 "successful_dispatches": self.successful_dispatches
                 + (1 if success else 0),
                 "failed_dispatches": self.failed_dispatches + (0 if success else 1),
-                "no_handler_count": self.no_handler_count + (1 if no_handler else 0),
+                "no_dispatcher_count": self.no_dispatcher_count
+                + (1 if no_dispatcher else 0),
                 "category_mismatch_count": self.category_mismatch_count
                 + (1 if category_mismatch else 0),
                 "dispatcher_execution_count": self.dispatcher_execution_count
@@ -462,7 +464,7 @@ class ModelDispatchMetrics(BaseModel):
             "total_dispatches": self.total_dispatches,
             "successful_dispatches": self.successful_dispatches,
             "failed_dispatches": self.failed_dispatches,
-            "no_handler_count": self.no_handler_count,
+            "no_dispatcher_count": self.no_dispatcher_count,
             "category_mismatch_count": self.category_mismatch_count,
             "dispatcher_execution_count": self.dispatcher_execution_count,
             "dispatcher_error_count": self.dispatcher_error_count,
