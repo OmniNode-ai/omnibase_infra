@@ -4,9 +4,11 @@
 
 Provides infrastructure-specific enumerations for transport types,
 protocol identification, policy classification, dispatch status,
-message categories, topic types, topic standards, and other infrastructure concerns.
+message categories, topic types, topic standards, chain validation,
+and other infrastructure concerns.
 
 Exports:
+    EnumChainViolationType: Chain violation type enumeration for correlation/causation validation
     EnumDispatchStatus: Dispatch operation status enumeration
     EnumInfraTransportType: Infrastructure transport type enumeration
     EnumMessageCategory: Message category enumeration (EVENT, COMMAND, INTENT)
@@ -18,6 +20,7 @@ Exports:
 
 from omnibase_core.enums import EnumTopicType
 
+from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -26,6 +29,7 @@ from omnibase_infra.enums.enum_policy_type import EnumPolicyType
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 
 __all__ = [
+    "EnumChainViolationType",
     "EnumDispatchStatus",
     "EnumInfraTransportType",
     "EnumMessageCategory",

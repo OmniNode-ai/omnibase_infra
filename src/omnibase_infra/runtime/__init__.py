@@ -49,12 +49,27 @@ Message Dispatch Engine
 - **DispatcherRegistry**: Thread-safe registry for message dispatchers with freeze pattern
 - **ProtocolMessageDispatcher**: Protocol for category-based message dispatchers
 
+Chain-Aware Dispatch (OMN-951)
+------------------------------
+- **ChainAwareDispatcher**: Dispatch wrapper with correlation/causation chain validation
+- **propagate_chain_context**: Helper to propagate chain context from parent to child
+- **validate_dispatch_chain**: Validate chain propagation and raise on violations
+
 The runtime module serves as the entry point for running infrastructure services
 and configuring the handler and policy ecosystem.
 """
 
 from __future__ import annotations
 
+# NOTE: Import order matters here due to circular import issues in omnibase_core.
+# The validation module imports ModelEventEnvelope which triggers complex import chains.
+# Importing validation FIRST warms the module cache, allowing subsequent imports to work.
+# ruff: noqa: I001
+from omnibase_infra.validation.chain_propagation_validator import (
+    ChainPropagationValidator as _ChainPropagationValidator,  # Warm cache
+)
+
+# Now safe to import other modules that use ModelEventEnvelope
 from omnibase_infra.runtime.dispatcher_registry import (
     DispatcherRegistry,
     ProtocolMessageDispatcher,
@@ -102,6 +117,16 @@ from omnibase_infra.runtime.wiring import (
     wire_default_handlers,
     wire_handlers_from_contract,
 )
+
+# Chain-aware dispatch (imports ModelEventEnvelope - must come after cache is warmed)
+from omnibase_infra.runtime.chain_aware_dispatch import (
+    ChainAwareDispatcher,
+    propagate_chain_context,
+    validate_dispatch_chain,
+)
+
+# Clean up temporary import
+del _ChainPropagationValidator
 
 __all__: list[str] = [
     # Kernel entrypoint
@@ -154,4 +179,8 @@ __all__: list[str] = [
     "MessageDispatchEngine",
     "DispatcherRegistry",
     "ProtocolMessageDispatcher",
+    # Chain-aware dispatch (OMN-951)
+    "ChainAwareDispatcher",
+    "propagate_chain_context",
+    "validate_dispatch_chain",
 ]
