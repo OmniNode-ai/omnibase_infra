@@ -4,18 +4,28 @@
 
 Defines the canonical handler types for the ONEX execution shape validator.
 Each handler type corresponds to a node category in the ONEX 4-node architecture
-and has specific constraints on allowed message types and operations.
+and has specific constraints on allowed output types and operations.
 
-Handler Type Constraints:
+Handler Type Output Constraints (see EnumNodeOutputType for output types):
     - EFFECT: External interactions (API calls, DB queries, file I/O).
-              Can return EVENTs and COMMANDs but not PROJECTIONs.
+              Can output EVENT, COMMAND but not PROJECTION.
     - COMPUTE: Pure data processing and business logic transformations.
-               Can return any message type, no side effects.
+               Can output EVENT, COMMAND, INTENT. No side effects.
     - REDUCER: State management and persistence operations.
-               Can return PROJECTIONs but not EVENTs.
+               Can output PROJECTION only. Cannot output EVENT.
                Cannot access system time (must be deterministic).
     - ORCHESTRATOR: Workflow coordination and step sequencing.
-                    Can return COMMANDs and EVENTs but not INTENTs or PROJECTIONs.
+                    Can output COMMAND, EVENT but not INTENT or PROJECTION.
+
+Note on PROJECTION:
+    PROJECTION is a node output type (EnumNodeOutputType.PROJECTION), not a
+    message routing category (not in EnumMessageCategory). Only REDUCERs may
+    produce PROJECTION outputs for state consolidation.
+
+See Also:
+    - EnumNodeOutputType: Defines valid node output types (includes PROJECTION)
+    - EnumMessageCategory: Defines message categories for routing (excludes PROJECTION)
+    - EnumExecutionShapeViolation: Defines validation violation types
 """
 
 from enum import Enum
@@ -26,21 +36,26 @@ class EnumHandlerType(str, Enum):
 
     These represent the four canonical node types in the ONEX architecture.
     Each type has specific constraints on what operations are allowed and
-    what message types can be produced.
+    what output types can be produced (see EnumNodeOutputType).
 
     Attributes:
         EFFECT: External interaction handlers (API calls, DB operations).
             Responsible for side effects and external system integration.
-            Cannot return PROJECTION messages.
+            Can output: EVENT, COMMAND. Cannot output: PROJECTION.
         COMPUTE: Pure data processing and transformation handlers.
             No side effects, deterministic transformations.
-            Can produce any message type.
+            Can output: EVENT, COMMAND, INTENT.
         REDUCER: State management and persistence handlers.
             Manages state consolidation and projections.
-            Cannot return EVENT messages or access system time.
+            Can output: PROJECTION only. Cannot output: EVENT.
+            Cannot access system time (must be deterministic).
         ORCHESTRATOR: Workflow coordination handlers.
             Coordinates multi-step workflows and routing.
-            Cannot return INTENT or PROJECTION messages.
+            Can output: COMMAND, EVENT. Cannot output: INTENT, PROJECTION.
+
+    Note:
+        Output types refer to EnumNodeOutputType values. PROJECTION is a node
+        output type, not a message routing category (not in EnumMessageCategory).
     """
 
     EFFECT = "effect"
