@@ -25,14 +25,41 @@ Security Considerations:
     discover node capabilities. While this enables powerful service discovery, it
     has security implications that developers must understand.
 
+    **Threat Model**:
+
+    Introspection data could be valuable to an attacker for:
+
+    - **Reconnaissance**: Learning what operations a node supports to identify
+      attack vectors (e.g., discovering ``decrypt_*``, ``admin_*`` methods).
+    - **Architecture mapping**: Understanding system topology through protocol
+      and mixin discovery (e.g., which nodes implement ``ProtocolDatabaseAdapter``).
+    - **Version fingerprinting**: Identifying outdated versions with known
+      vulnerabilities via the ``version`` field.
+    - **State inference**: Deducing system state or health from FSM state values.
+
     **What Gets Exposed via Introspection**:
 
-    - Public method names (potential operations a node can perform)
-    - Method signatures (parameter names and type annotations)
-    - Protocol and mixin implementations (discovered capabilities)
-    - FSM state information (if ``MixinFSM`` or similar state attributes are present)
-    - Endpoint URLs (health, API, metrics paths)
-    - Node metadata (name, version, type)
+    - **Public method names**: Method names that may reveal operations
+      (e.g., ``execute_query``, ``process_payment``).
+    - **Method signatures**: Full signatures including parameter names and type
+      annotations. Parameter names like ``api_key``, ``user_password``, or
+      ``decrypt_key`` reveal sensitive parameter purposes.
+    - **Protocol implementations**: Class names from inheritance hierarchy that
+      start with ``Protocol`` or ``Mixin`` (e.g., ``ProtocolDatabaseAdapter``,
+      ``MixinAsyncCircuitBreaker``).
+    - **FSM state information**: Current state value if FSM attributes exist
+      (e.g., ``connected``, ``authenticated``, ``processing``).
+    - **Endpoint URLs**: Health, API, and metrics endpoint paths.
+    - **Node metadata**: Node ID (UUID), type (EFFECT/COMPUTE/etc.), and version.
+
+    **What is NOT Exposed**:
+
+    - Private methods (prefixed with ``_``) - completely excluded from discovery.
+    - Method implementations or source code - only signatures, not logic.
+    - Internal state variables - only FSM state if present.
+    - Configuration values - secrets, connection strings, etc. are not exposed.
+    - Environment variables or runtime parameters.
+    - Request/response payloads or historical data.
 
     **Built-in Protections**:
 
@@ -47,12 +74,16 @@ Security Considerations:
       reported as capabilities in the operations list.
     - **Configurable exclusions**: The ``exclude_prefixes`` parameter in
       ``initialize_introspection()`` allows additional filtering.
+    - **Caching with TTL**: Introspection data is cached to reduce reflection
+      frequency, with configurable TTL for freshness.
 
     **Best Practices for Node Developers**:
 
     - Prefix internal/sensitive methods with ``_`` to exclude them from introspection.
     - Avoid exposing sensitive business logic in public method names (e.g., use
       ``process_request`` instead of ``decrypt_and_forward_to_payment_gateway``).
+    - Use generic parameter names for public methods (e.g., ``data`` instead of
+      ``user_credentials``, ``payload`` instead of ``encrypted_secret``).
     - Review exposed capabilities before deploying to production environments.
     - Consider network segmentation for introspection event topics in multi-tenant
       environments.
@@ -61,10 +92,22 @@ Security Considerations:
 
     **Network Security Considerations**:
 
-    - Introspection data is published to Kafka topics (``node.introspection``).
+    - Introspection data is published to Kafka topics (``node.introspection``,
+      ``node.heartbeat``, ``node.request_introspection``).
     - In multi-tenant environments, ensure proper topic ACLs are configured.
     - Consider whether introspection topics should be accessible outside the cluster.
     - Monitor introspection topic consumers for unauthorized access.
+    - The registry listener responds to ANY request on the request topic without
+      authentication - secure the topic with Kafka ACLs.
+
+    **Production Deployment Checklist**:
+
+    1. Review ``get_capabilities()`` output for each node before deployment.
+    2. Verify no sensitive method names or parameter names are exposed.
+    3. Configure Kafka topic ACLs to restrict introspection topic access.
+    4. Consider disabling ``enable_registry_listener`` if not needed.
+    5. Monitor introspection topic consumer groups for unexpected consumers.
+    6. Use network segmentation to isolate introspection traffic if required.
 
     For more details, see the "Node Introspection Security Considerations" section
     in ``CLAUDE.md``.
@@ -127,12 +170,14 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
 from omnibase_infra.mixins.model_introspection_config import ModelIntrospectionConfig
+from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+from omnibase_infra.models.discovery.model_node_introspection_event import (
+    CapabilitiesTypedDict,
+)
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 if TYPE_CHECKING:
-    from omnibase_core.protocols.event_bus import ProtocolEventBus
-
     from omnibase_infra.event_bus.models import ModelEventMessage
 
 logger = logging.getLogger(__name__)
@@ -142,10 +187,10 @@ INTROSPECTION_TOPIC = "node.introspection"
 HEARTBEAT_TOPIC = "node.heartbeat"
 REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
 
-# Type alias for capabilities dictionary structure
-# operations: list of method names, protocols: list of protocol names
-# has_fsm: boolean, method_signatures: dict of method name to signature string
-CapabilitiesDict = dict[str, list[str] | bool | dict[str, str]]
+# Backward-compatible alias for CapabilitiesTypedDict
+# The canonical definition is in model_node_introspection_event.py
+# This provides a shorter name for internal use and maintains backward compatibility
+CapabilitiesDict = CapabilitiesTypedDict
 
 # Performance threshold constants (in milliseconds)
 PERF_THRESHOLD_GET_CAPABILITIES_MS = 50.0
@@ -223,17 +268,17 @@ class IntrospectionCacheDict(TypedDict):
     enabling proper type checking for cache operations without requiring type: ignore comments.
 
     Note:
-        The capabilities field uses a permissive type to accommodate all possible
-        values from model_dump(), including nested structures and dynamic values.
-        The actual structure is: operations (list[str]), protocols (list[str]),
+        The capabilities field uses CapabilitiesTypedDict for type safety.
+        When serialized to JSON, the structure is:
+        operations (list[str]), protocols (list[str]),
         has_fsm (bool), method_signatures (dict[str, str]).
     """
 
     node_id: str
     node_type: str
-    # Permissive type for capabilities to handle all model_dump() output variations
-    # Actual structure: {"operations": list, "protocols": list, "has_fsm": bool, "method_signatures": dict}
-    capabilities: dict[str, list[str] | bool | dict[str, str] | int | float | None]
+    # Uses CapabilitiesTypedDict for type safety
+    # JSON serialization preserves the structure from model_dump()
+    capabilities: CapabilitiesTypedDict
     endpoints: dict[str, str]
     current_state: str | None
     version: str
@@ -270,6 +315,13 @@ class MixinNodeIntrospection:
         automatically discover node capabilities. While this enables powerful
         service discovery, it has security implications:
 
+        **Threat Model**:
+
+        - **Reconnaissance**: Method names may reveal attack vectors
+        - **Architecture mapping**: Protocol discovery exposes topology
+        - **Version fingerprinting**: Version field enables vulnerability scanning
+        - **State inference**: FSM state reveals system status
+
         **Exposed Information**:
 
         - Public method names (potential operations a node can perform)
@@ -279,6 +331,14 @@ class MixinNodeIntrospection:
         - Endpoint URLs (health, API, metrics paths)
         - Node metadata (name, version, type)
 
+        **What is NOT Exposed**:
+
+        - Private methods (``_`` prefix) - excluded from discovery
+        - Method implementations or source code
+        - Configuration values, secrets, or connection strings
+        - Environment variables or runtime parameters
+        - Request/response payloads or historical data
+
         **Built-in Protections**:
 
         - Private methods (prefixed with ``_``) are excluded by default
@@ -286,20 +346,23 @@ class MixinNodeIntrospection:
         - Only methods containing operation keywords are reported as operations
         - Configure ``exclude_prefixes`` in ``initialize_introspection()`` for
           additional filtering
+        - Caching with TTL reduces reflection frequency
 
         **Recommendations for Production**:
 
         - Prefix internal/sensitive methods with ``_`` to exclude them
         - Use generic operation names that don't reveal implementation details
+        - Use generic parameter names (``data`` instead of ``user_credentials``)
         - Review ``get_capabilities()`` output before production deployment
         - In multi-tenant environments, configure Kafka topic ACLs for
           introspection events (``node.introspection``, ``node.heartbeat``,
           ``node.request_introspection``)
         - Monitor introspection topic consumers for unauthorized access
         - Consider network segmentation for introspection event topics
+        - Consider disabling ``enable_registry_listener`` if not needed
 
     See Also:
-        - Module docstring for detailed security documentation
+        - Module docstring for detailed security documentation and threat model
         - CLAUDE.md "Node Introspection Security Considerations" section
         - ``get_capabilities()`` for filtering logic details
 
@@ -348,7 +411,7 @@ class MixinNodeIntrospection:
     # Configuration attributes
     _introspection_node_id: UUID | None
     _introspection_node_type: str | None
-    _introspection_event_bus: ProtocolEventBus | None
+    _introspection_event_bus: ProtocolEventBusLike | None
     _introspection_version: str
     _introspection_start_time: float | None
 
@@ -550,7 +613,7 @@ class MixinNodeIntrospection:
         self,
         node_id: UUID,
         node_type: str,
-        event_bus: ProtocolEventBus | None = None,
+        event_bus: ProtocolEventBusLike | None = None,
         version: str = "1.0.0",
         cache_ttl: float = 300.0,
         operation_keywords: set[str] | None = None,
@@ -644,7 +707,11 @@ class MixinNodeIntrospection:
                 # ... rest of method
             ```
         """
-        if self._introspection_node_id is None:
+        # Use getattr with sentinel to avoid AttributeError if initialize_introspection()
+        # was never called. This ensures we always raise RuntimeError, not AttributeError.
+        _not_set = object()
+        node_id = getattr(self, "_introspection_node_id", _not_set)
+        if node_id is _not_set or node_id is None:
             raise RuntimeError(
                 "MixinNodeIntrospection not initialized. "
                 "Call initialize_introspection() before using introspection methods."
@@ -1939,7 +2006,8 @@ __all__ = [
     "INTROSPECTION_TOPIC",
     "HEARTBEAT_TOPIC",
     "REQUEST_INTROSPECTION_TOPIC",
-    "CapabilitiesDict",
+    "CapabilitiesDict",  # Backward-compatible alias for CapabilitiesTypedDict
+    "CapabilitiesTypedDict",  # Re-export from model for convenience
     "IntrospectionCacheDict",
     "IntrospectionPerformanceMetrics",
     "PERF_THRESHOLD_GET_CAPABILITIES_MS",

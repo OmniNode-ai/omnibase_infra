@@ -472,15 +472,35 @@ class CircuitBreaker:
 Use graceful degradation for `InfraTimeoutError` to maintain service availability with reduced functionality:
 
 ```python
+from collections.abc import Callable
+from types import FrameType
+from typing import TypeVar
+from uuid import UUID
+
+from pydantic import BaseModel
+
 from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
 from omnibase_infra.enums import EnumInfraTransportType
 
+# TypeVar for generic data types in fetch operations
+T = TypeVar("T", bound=BaseModel)
+
+
+class ModelFetchResult(BaseModel):
+    """Result model for fetch operations with graceful degradation."""
+
+    data: BaseModel
+    source: str  # "primary" or "fallback"
+    degraded: bool
+    warning: str | None = None
+
+
 def fetch_with_timeout_fallback(
-    primary_func,
-    fallback_func,
+    primary_func: Callable[[], T],
+    fallback_func: Callable[[], T],
     timeout_seconds: float = 5.0,
-    correlation_id = None,
-) -> dict:
+    correlation_id: UUID | None = None,
+) -> ModelFetchResult:
     """Fetch from primary source with graceful degradation to fallback."""
     import signal
 
@@ -491,7 +511,7 @@ def fetch_with_timeout_fallback(
         correlation_id=correlation_id,
     )
 
-    def timeout_handler(signum, frame):
+    def timeout_handler(signum: int, frame: FrameType | None) -> None:
         raise TimeoutError("Operation exceeded timeout")
 
     # Set timeout handler
@@ -500,9 +520,13 @@ def fetch_with_timeout_fallback(
 
     try:
         # Try primary data source
-        return {"data": primary_func(), "source": "primary", "degraded": False}
+        return ModelFetchResult(
+            data=primary_func(),
+            source="primary",
+            degraded=False,
+        )
 
-    except TimeoutError as e:
+    except TimeoutError:
         # Log timeout but continue with fallback
         context_with_fallback = ModelInfraErrorContext(
             transport_type=context.transport_type,
@@ -513,12 +537,12 @@ def fetch_with_timeout_fallback(
 
         try:
             # Use fallback source (cache, secondary database, etc.)
-            return {
-                "data": fallback_func(),
-                "source": "fallback",
-                "degraded": True,
-                "warning": f"Primary source timed out, using fallback data",
-            }
+            return ModelFetchResult(
+                data=fallback_func(),
+                source="fallback",
+                degraded=True,
+                warning="Primary source timed out, using fallback data",
+            )
 
         except Exception as fallback_error:
             raise InfraTimeoutError(
@@ -726,7 +750,9 @@ self._init_circuit_breaker(
 
 **Integration with Error Recovery**:
 ```python
-async def publish_with_retry(self, message: dict) -> None:
+from pydantic import BaseModel
+
+async def publish_with_retry(self, message: BaseModel) -> None:
     """Publish message with circuit breaker and retry logic."""
     correlation_id = uuid4()
     max_retries = 3
@@ -800,49 +826,142 @@ if is_open:
 - Never suppress InfraUnavailableError from circuit breaker
 - Never use circuit breaker for non-transient errors
 
+### Dispatcher Resilience Pattern
+
+**Dispatchers own their own resilience** - the `MessageDispatchEngine` does NOT wrap dispatchers with circuit breakers.
+
+**Design Rationale**:
+- **Separation of concerns**: Each dispatcher knows its specific failure modes and recovery strategies
+- **Transport-specific tuning**: Kafka dispatchers need different thresholds than HTTP dispatchers
+- **No hidden behavior**: Engine users see exactly what resilience each dispatcher provides
+- **Composability**: Dispatchers can combine circuit breakers with retry, backoff, or degradation
+
+**Dispatcher Implementation Pattern**:
+```python
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.models.dispatch import ModelDispatchResult
+from omnibase_infra.runtime import ProtocolMessageDispatcher
+
+
+class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
+    """Dispatcher with built-in circuit breaker resilience."""
+
+    def __init__(self, config: DispatcherConfig):
+        self._init_circuit_breaker(
+            threshold=config.failure_threshold,
+            reset_timeout=config.reset_timeout_seconds,
+            service_name=f"dispatcher.{config.target_service}",
+            transport_type=config.transport_type,
+        )
+
+    # NOTE: ModelEventEnvelope[object] matches the DispatcherFunc signature.
+    # Using `object` provides type flexibility for dispatchers that handle
+    # envelopes with varying payload types based on topic/category routing.
+    async def handle(self, envelope: ModelEventEnvelope[object]) -> ModelDispatchResult:
+        """Handle message with circuit breaker protection."""
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("handle", envelope.correlation_id)
+
+        try:
+            result = await self._do_handle(envelope)
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+            return result
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("handle", envelope.correlation_id)
+            raise
+```
+
+**What the Engine Does NOT Do**:
+- Does not wrap dispatcher calls with circuit breakers
+- Does not implement retry logic around dispatchers
+- Does not catch and suppress dispatcher errors (except for error aggregation)
+
+**What Dispatchers Should Do**:
+- Implement `MixinAsyncCircuitBreaker` for external service calls
+- Configure thresholds appropriate to their transport type
+- Raise `InfraUnavailableError` when circuit opens (engine will capture this)
+- Optionally combine with retry logic for transient failures
+
 ### Node Introspection Security Considerations
 
 The `MixinNodeIntrospection` mixin uses Python reflection (via the `inspect` module) to automatically discover node capabilities. This provides powerful service discovery but has security implications that developers should understand.
 
+**Threat Model**:
+
+Introspection data could be valuable to an attacker for:
+- **Reconnaissance**: Learning what operations a node supports to identify attack vectors (e.g., discovering `decrypt_*`, `admin_*` methods)
+- **Architecture mapping**: Understanding system topology through protocol and mixin discovery
+- **Version fingerprinting**: Identifying outdated versions with known vulnerabilities
+- **State inference**: Deducing system state or health from FSM state values
+
 **What Gets Exposed via Introspection**:
 - Public method names (potential operations a node can perform)
-- Method signatures (parameter names and type annotations)
+- Method signatures (parameter names and type annotations - names like `api_key`, `decrypt_key` reveal sensitive purposes)
 - Protocol and mixin implementations (discovered capabilities)
 - FSM state information (if `MixinFSM` is present)
 - Endpoint URLs (health, API, metrics paths)
 - Node metadata (name, version, type from contract)
 
+**What is NOT Exposed**:
+- Private methods (prefixed with `_`) - completely excluded from discovery
+- Method implementations or source code - only signatures, not logic
+- Configuration values - secrets, connection strings, etc. are not exposed
+- Environment variables or runtime parameters
+- Request/response payloads or historical data
+
 **Built-in Protections**:
 The mixin includes several filtering mechanisms to limit exposure:
 - **Private method exclusion**: Methods prefixed with `_` are excluded from capability discovery
 - **Utility method filtering**: Common utility prefixes (`get_*`, `set_*`, `initialize*`, `start_*`, `stop_*`) are filtered out
-- **Operation keyword matching**: Only methods matching operation keywords (`execute`, `process`, `handle`, `run`, `perform`, `compute`, `validate`, `transform`, `aggregate`, `orchestrate`) are reported as capabilities
+- **Operation keyword matching**: Only methods matching operation keywords (`execute`, `handle`, `process`, `run`, `invoke`, `call`) are reported as capabilities. Node-type-specific keywords (e.g., `fetch`, `compute`, `aggregate`, `orchestrate`) are also available.
 - **Configurable exclusions**: The `exclude_prefixes` parameter allows additional filtering
+- **Caching with TTL**: Introspection data is cached to reduce reflection frequency
 
 **Best Practices for Node Developers**:
 - Prefix internal/sensitive methods with `_` to exclude them from introspection
 - Avoid exposing sensitive business logic in public method names
 - Use generic operation names that don't reveal implementation details (e.g., `process_request` instead of `decrypt_and_forward_to_payment_gateway`)
+- Use generic parameter names (e.g., `data` instead of `user_credentials`, `payload` instead of `encrypted_secret`)
 - Review exposed capabilities before deploying to production environments
 - Consider network segmentation for introspection event topics in multi-tenant environments
 - Use the `exclude_prefixes` parameter to filter additional method patterns if needed
 
 **Example - Reviewing Exposed Capabilities**:
 ```python
+from pydantic import BaseModel
+
 from omnibase_infra.mixins import MixinNodeIntrospection
 
+
+class NodeInput(BaseModel):
+    """Input model for node operation."""
+
+    value: str
+
+
+class NodeOutput(BaseModel):
+    """Output model for node operation."""
+
+    processed: bool
+
+
 class MyNode(MixinNodeIntrospection):
-    def execute_operation(self, data: dict) -> dict:
+    def execute_operation(self, data: NodeInput) -> NodeOutput:
         """Public operation - WILL be exposed."""
         return self._internal_process(data)
 
-    def _internal_process(self, data: dict) -> dict:
+    def _internal_process(self, data: NodeInput) -> NodeOutput:
         """Private method - will NOT be exposed."""
-        return {"processed": True}
+        return NodeOutput(processed=True)
 
     def get_status(self) -> str:
         """Utility method - will NOT be exposed (get_* prefix filtered)."""
         return "healthy"
+
 
 # Review what gets exposed
 node = MyNode()
@@ -851,10 +970,19 @@ capabilities = node.get_capabilities()
 ```
 
 **Network Security Considerations**:
-- Introspection data is published to Kafka topics (`*.introspection.*`)
-- In multi-tenant environments, ensure proper topic ACLs
-- Consider whether introspection topics should be accessible outside the cluster
+- Introspection data is published to Kafka topics (`node.introspection`, `node.heartbeat`, `node.request_introspection`)
+- In multi-tenant environments, ensure proper topic ACLs are configured
+- Consider whether introspection topics should be accessible outside the cluster boundary
 - Monitor introspection topic consumers for unauthorized access
+- The registry listener responds to ANY request on the request topic without authentication - secure the topic with Kafka ACLs
+
+**Production Deployment Checklist**:
+1. Review `get_capabilities()` output for each node before deployment
+2. Verify no sensitive method names or parameter names are exposed
+3. Configure Kafka topic ACLs to restrict introspection topic access
+4. Consider disabling `enable_registry_listener` if not needed
+5. Monitor introspection topic consumer groups for unexpected consumers
+6. Use network segmentation to isolate introspection traffic if required
 
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`

@@ -110,11 +110,13 @@ def run_unions(verbose: bool = False) -> bool:
         # for documented infrastructure patterns
         from omnibase_infra.validation.infra_validators import (
             INFRA_MAX_UNIONS,
+            INFRA_UNIONS_STRICT,
             validate_infra_union_usage,
         )
 
         result = validate_infra_union_usage(
             max_unions=INFRA_MAX_UNIONS,
+            strict=INFRA_UNIONS_STRICT,
         )
         if verbose or not result.is_valid:
             print(f"Unions: {'PASS' if result.is_valid else 'FAIL'}")
