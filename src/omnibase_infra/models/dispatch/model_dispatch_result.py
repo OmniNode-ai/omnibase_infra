@@ -56,11 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-
-# JSON-serializable types for error details (no Any usage per ONEX guidelines)
-# Using PEP 695 type aliases for Pydantic recursive type support
-type JsonPrimitive = str | int | float | bool | None
-type JsonValue = JsonPrimitive | list[JsonValue] | dict[str, JsonValue]
+from omnibase_infra.models.types import JsonPrimitive, JsonValue
 
 
 class ModelDispatchResult(BaseModel):

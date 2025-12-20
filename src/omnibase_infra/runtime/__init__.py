@@ -108,6 +108,13 @@ from omnibase_infra.runtime.kernel import main as kernel_main
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+from omnibase_infra.runtime.registry import (
+    MessageTypeRegistry,
+    MessageTypeRegistryError,
+    ModelDomainConstraint,
+    ModelMessageTypeEntry,
+    ProtocolMessageTypeRegistry,
+)
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.wiring import (
     get_known_event_bus_kinds,
@@ -179,6 +186,12 @@ __all__: list[str] = [
     "MessageDispatchEngine",
     "DispatcherRegistry",
     "ProtocolMessageDispatcher",
+    # Message type registry (OMN-937)
+    "MessageTypeRegistry",
+    "MessageTypeRegistryError",
+    "ModelMessageTypeEntry",
+    "ModelDomainConstraint",
+    "ProtocolMessageTypeRegistry",
     # Chain-aware dispatch (OMN-951)
     "ChainAwareDispatcher",
     "propagate_chain_context",
