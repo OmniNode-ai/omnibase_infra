@@ -100,6 +100,13 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 
+# Type alias for dispatcher output topics
+# Dispatchers can return:
+# - str: A single output topic
+# - list[str]: Multiple output topics
+# - None: No output topics to publish
+DispatcherOutput = str | list[str] | None
+
 # Patterns that may indicate sensitive data in error messages
 # These patterns are checked case-insensitively
 _SENSITIVE_PATTERNS = (
@@ -186,8 +193,22 @@ from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
 _module_logger = logging.getLogger(__name__)
 
 # Type alias for dispatcher functions
-# Dispatchers can be sync or async, take an envelope and return Any (dispatcher output)
-DispatcherFunc = Callable[[ModelEventEnvelope[Any]], Any | Awaitable[Any]]
+#
+# ONEX Pattern Exception (Documented):
+# - Input: ModelEventEnvelope[Any] is intentionally generic because dispatchers
+#   must accept envelopes with any payload type. The dispatch engine routes based
+#   on topic/category/message_type, not payload shape. Using a TypeVar would require
+#   dispatchers to be generic, adding complexity without benefit since the engine
+#   already performs type-based routing.
+# - Output: DispatcherOutput | Awaitable[DispatcherOutput] defines the valid return
+#   types: str (single topic), list[str] (multiple topics), or None (no output).
+#   Dispatchers can be sync or async.
+#
+# See also: ProtocolMessageDispatcher in dispatcher_registry.py for protocol-based
+# dispatchers that return ModelDispatchResult.
+DispatcherFunc = Callable[
+    [ModelEventEnvelope[Any]], DispatcherOutput | Awaitable[DispatcherOutput]
+]
 
 
 class DispatchEntryInternal:
@@ -431,7 +452,7 @@ class MessageDispatchEngine:
         Args:
             dispatcher_id: Unique identifier for this dispatcher
             dispatcher: Callable that processes messages. Can be sync or async.
-                Signature: (envelope: ModelEventEnvelope[Any]) -> Any
+                Signature: (envelope: ModelEventEnvelope[Any]) -> DispatcherOutput
             category: Message category this dispatcher processes
             message_types: Optional set of specific message types to handle.
                 When None, handles all message types in the category.
@@ -747,6 +768,7 @@ class MessageDispatchEngine:
                 error_message=f"Cannot infer message category from topic '{topic}'. "
                 "Topic must contain .events, .commands, or .intents segment.",
                 error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+                correlation_id=envelope.correlation_id,
             )
 
         # Log dispatch start at INFO level
@@ -843,6 +865,7 @@ class MessageDispatchEngine:
                 error_message=f"No dispatcher registered for category '{topic_category}' "
                 f"and message type '{message_type}' matching topic '{topic}'.",
                 error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
+                correlation_id=envelope.correlation_id,
             )
 
         # Step 5: Execute dispatchers and collect outputs
@@ -878,46 +901,43 @@ class MessageDispatchEngine:
                 executed_dispatcher_ids.append(dispatcher_entry.dispatcher_id)
 
                 # Update per-dispatcher metrics (protected by lock)
+                # Read existing metrics under lock, compute updates outside lock,
+                # then update atomically with model_copy to minimize lock hold time
                 with self._metrics_lock:
                     existing_dispatcher_metrics = (
                         self._structured_metrics.dispatcher_metrics.get(
                             dispatcher_entry.dispatcher_id
                         )
                     )
-                    if existing_dispatcher_metrics is None:
-                        existing_dispatcher_metrics = ModelDispatcherMetrics(
-                            dispatcher_id=dispatcher_entry.dispatcher_id
-                        )
-                    new_dispatcher_metrics = (
-                        existing_dispatcher_metrics.record_execution(
-                            duration_ms=dispatcher_duration_ms,
-                            success=True,
-                            topic=topic,
-                        )
+                    current_execution_count = (
+                        self._structured_metrics.dispatcher_execution_count
                     )
-                    new_dispatcher_metrics_dict = dict(
+                    current_dispatcher_metrics = (
                         self._structured_metrics.dispatcher_metrics
                     )
-                    new_dispatcher_metrics_dict[dispatcher_entry.dispatcher_id] = (
-                        new_dispatcher_metrics
+
+                # Compute new metrics outside lock (no I/O, but keeps lock minimal)
+                if existing_dispatcher_metrics is None:
+                    existing_dispatcher_metrics = ModelDispatcherMetrics(
+                        dispatcher_id=dispatcher_entry.dispatcher_id
                     )
-                    # Update structured metrics with new dispatcher metrics
-                    self._structured_metrics = ModelDispatchMetrics(
-                        total_dispatches=self._structured_metrics.total_dispatches,
-                        successful_dispatches=self._structured_metrics.successful_dispatches,
-                        failed_dispatches=self._structured_metrics.failed_dispatches,
-                        no_handler_count=self._structured_metrics.no_handler_count,
-                        category_mismatch_count=self._structured_metrics.category_mismatch_count,
-                        dispatcher_execution_count=self._structured_metrics.dispatcher_execution_count
-                        + 1,
-                        dispatcher_error_count=self._structured_metrics.dispatcher_error_count,
-                        routes_matched_count=self._structured_metrics.routes_matched_count,
-                        total_latency_ms=self._structured_metrics.total_latency_ms,
-                        min_latency_ms=self._structured_metrics.min_latency_ms,
-                        max_latency_ms=self._structured_metrics.max_latency_ms,
-                        latency_histogram=self._structured_metrics.latency_histogram,
-                        dispatcher_metrics=new_dispatcher_metrics_dict,
-                        category_metrics=self._structured_metrics.category_metrics,
+                new_dispatcher_metrics = existing_dispatcher_metrics.record_execution(
+                    duration_ms=dispatcher_duration_ms,
+                    success=True,
+                    topic=topic,
+                )
+                new_dispatcher_metrics_dict = {
+                    **current_dispatcher_metrics,
+                    dispatcher_entry.dispatcher_id: new_dispatcher_metrics,
+                }
+
+                # Update structured metrics atomically with model_copy
+                with self._metrics_lock:
+                    self._structured_metrics = self._structured_metrics.model_copy(
+                        update={
+                            "dispatcher_execution_count": current_execution_count + 1,
+                            "dispatcher_metrics": new_dispatcher_metrics_dict,
+                        }
                     )
 
                 # Log dispatcher completion at DEBUG level
@@ -961,6 +981,8 @@ class MessageDispatchEngine:
                 dispatcher_errors.append(error_msg)
 
                 # Update per-dispatcher metrics with error (protected by lock)
+                # Read existing metrics under lock, compute updates outside lock,
+                # then update atomically with model_copy to minimize lock hold time
                 with self._metrics_lock:
                     self._metrics["dispatcher_error_count"] += 1
                     existing_dispatcher_metrics = (
@@ -968,43 +990,41 @@ class MessageDispatchEngine:
                             dispatcher_entry.dispatcher_id
                         )
                     )
-                    if existing_dispatcher_metrics is None:
-                        existing_dispatcher_metrics = ModelDispatcherMetrics(
-                            dispatcher_id=dispatcher_entry.dispatcher_id
-                        )
-                    new_dispatcher_metrics = (
-                        existing_dispatcher_metrics.record_execution(
-                            duration_ms=dispatcher_duration_ms,
-                            success=False,
-                            topic=topic,
-                            # Use sanitized error message for metrics as well
-                            error_message=sanitized_error,
-                        )
+                    current_execution_count = (
+                        self._structured_metrics.dispatcher_execution_count
                     )
-                    new_dispatcher_metrics_dict = dict(
+                    current_error_count = (
+                        self._structured_metrics.dispatcher_error_count
+                    )
+                    current_dispatcher_metrics = (
                         self._structured_metrics.dispatcher_metrics
                     )
-                    new_dispatcher_metrics_dict[dispatcher_entry.dispatcher_id] = (
-                        new_dispatcher_metrics
+
+                # Compute new metrics outside lock (no I/O, but keeps lock minimal)
+                if existing_dispatcher_metrics is None:
+                    existing_dispatcher_metrics = ModelDispatcherMetrics(
+                        dispatcher_id=dispatcher_entry.dispatcher_id
                     )
-                    # Update structured metrics with new dispatcher metrics
-                    self._structured_metrics = ModelDispatchMetrics(
-                        total_dispatches=self._structured_metrics.total_dispatches,
-                        successful_dispatches=self._structured_metrics.successful_dispatches,
-                        failed_dispatches=self._structured_metrics.failed_dispatches,
-                        no_handler_count=self._structured_metrics.no_handler_count,
-                        category_mismatch_count=self._structured_metrics.category_mismatch_count,
-                        dispatcher_execution_count=self._structured_metrics.dispatcher_execution_count
-                        + 1,
-                        dispatcher_error_count=self._structured_metrics.dispatcher_error_count
-                        + 1,
-                        routes_matched_count=self._structured_metrics.routes_matched_count,
-                        total_latency_ms=self._structured_metrics.total_latency_ms,
-                        min_latency_ms=self._structured_metrics.min_latency_ms,
-                        max_latency_ms=self._structured_metrics.max_latency_ms,
-                        latency_histogram=self._structured_metrics.latency_histogram,
-                        dispatcher_metrics=new_dispatcher_metrics_dict,
-                        category_metrics=self._structured_metrics.category_metrics,
+                new_dispatcher_metrics = existing_dispatcher_metrics.record_execution(
+                    duration_ms=dispatcher_duration_ms,
+                    success=False,
+                    topic=topic,
+                    # Use sanitized error message for metrics as well
+                    error_message=sanitized_error,
+                )
+                new_dispatcher_metrics_dict = {
+                    **current_dispatcher_metrics,
+                    dispatcher_entry.dispatcher_id: new_dispatcher_metrics,
+                }
+
+                # Update structured metrics atomically with model_copy
+                with self._metrics_lock:
+                    self._structured_metrics = self._structured_metrics.model_copy(
+                        update={
+                            "dispatcher_execution_count": current_execution_count + 1,
+                            "dispatcher_error_count": current_error_count + 1,
+                            "dispatcher_metrics": new_dispatcher_metrics_dict,
+                        }
                     )
 
                 # Log error with sanitized message
@@ -1192,7 +1212,7 @@ class MessageDispatchEngine:
         self,
         entry: DispatchEntryInternal,
         envelope: ModelEventEnvelope[Any],
-    ) -> Any:
+    ) -> DispatcherOutput:
         """
         Execute a dispatcher (sync or async).
 
@@ -1221,7 +1241,8 @@ class MessageDispatchEngine:
             envelope: The message envelope to process
 
         Returns:
-            Dispatcher result (any type)
+            DispatcherOutput: str (single topic), list[str] (multiple topics),
+                or None (no output topics)
 
         Raises:
             Any exception raised by the dispatcher
@@ -1235,7 +1256,7 @@ class MessageDispatchEngine:
 
         # Check if dispatcher is async
         if inspect.iscoroutinefunction(dispatcher):
-            return await dispatcher(envelope)
+            return await dispatcher(envelope)  # type: ignore[no-any-return]
         else:
             # Sync dispatcher execution via ThreadPoolExecutor
             # -----------------------------------------------
@@ -1247,7 +1268,11 @@ class MessageDispatchEngine:
             #
             # For blocking I/O operations, use async dispatchers instead.
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, dispatcher, envelope)
+            return await loop.run_in_executor(
+                None,
+                dispatcher,
+                envelope,  # type: ignore[arg-type]
+            )
 
     def get_metrics(self) -> dict[str, Any]:
         """

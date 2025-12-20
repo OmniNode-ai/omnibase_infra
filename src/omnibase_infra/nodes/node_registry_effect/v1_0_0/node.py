@@ -55,7 +55,7 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -97,11 +97,10 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_types import (
     ResultDict,
 )
 
-# Type alias for JSON-serializable values.
-# Using `Any` is a documented ONEX exception for JSON containers since JSON payloads
-# contain arbitrary serializable data that cannot be precisely typed without
-# schema-specific Pydantic models.
-JsonValue = Any
+# Type alias for JSON-serializable values using recursive union pattern.
+# This is the ONEX-compliant alternative to Any for JSON containers.
+JsonPrimitive = str | int | float | bool | None
+JsonValue = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
 
 logger = logging.getLogger(__name__)
 

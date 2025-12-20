@@ -18,11 +18,13 @@ Design Pattern:
     - Environment and version (for Environment-Aware format)
 
     This enables deterministic routing decisions based on topic structure
-    without requiring handler registration lookups.
+    without requiring dispatcher registration lookups.
 
 Thread Safety:
-    ModelTopicParser is stateless and all methods are pure functions,
-    making it fully thread-safe for concurrent access.
+    ModelTopicParser methods are pure functions for parsing operations,
+    making it safe for concurrent access. The internal pattern cache
+    uses dict operations which are atomic in CPython, so concurrent
+    pattern compilation is safe (though may result in duplicate work).
 
 Example:
     >>> from omnibase_infra.models.dispatch import ModelTopicParser, ModelParsedTopic
@@ -103,7 +105,7 @@ Topic Taxonomy Reference:
 """
 
 import re
-from functools import cached_property, lru_cache
+from functools import lru_cache
 from typing import NamedTuple
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -492,18 +494,18 @@ class ModelTopicParser:
         regex_pattern = self._pattern_to_regex(pattern)
         return bool(regex_pattern.match(topic))
 
-    @cached_property
-    def _pattern_cache(self) -> dict[str, re.Pattern[str]]:
-        """Cache for compiled patterns."""
-        return {}
+    def __init__(self) -> None:
+        """Initialize the topic parser with an empty pattern cache."""
+        self._pattern_cache: dict[str, re.Pattern[str]] = {}
 
     def _pattern_to_regex(self, pattern: str) -> re.Pattern[str]:
-        """
-        Convert a glob-style pattern to a compiled regex.
+        """Convert a glob-style pattern to a compiled regex.
 
         Handles:
         - '*' -> matches any single segment (no dots)
         - '**' -> matches any number of segments (including empty)
+
+        Uses an instance-level cache to avoid recompiling frequently used patterns.
         """
         # Check cache first
         if pattern in self._pattern_cache:
@@ -526,10 +528,7 @@ class ModelTopicParser:
 
         # Compile and cache
         compiled = re.compile(f"^{escaped}$", re.IGNORECASE)
-        # Note: cached_property creates dict on first access, but we need to
-        # update it. Since this is for optimization only, we can use a class-level
-        # cache instead. For simplicity in this implementation, we'll just return
-        # the compiled pattern without caching (the cached_property above is unused).
+        self._pattern_cache[pattern] = compiled
         return compiled
 
     def validate_topic(

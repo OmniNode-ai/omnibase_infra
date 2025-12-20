@@ -6,29 +6,31 @@ These type aliases define JSON-serializable value types and envelope/result
 dictionary structures used by protocol methods.
 
 Type Aliases:
+    JsonPrimitive: Base JSON primitive types (str, int, float, bool, None)
+    JsonValue: Recursive JSON value type including primitives, lists, and dicts
     EnvelopeDict: Dictionary type for operation envelopes
     ResultDict: Dictionary type for operation results
 
-DESIGN NOTE: Using `Any` for JSON container types is a documented ONEX exception.
-JSON payloads in envelope/result dictionaries contain arbitrary serializable data
-that cannot be precisely typed without schema-specific Pydantic models.
-
+These types represent valid JSON-serializable data without using Any.
+The structure is validated at runtime by envelope executor implementations.
 For strongly-typed data exchange, prefer explicit Pydantic models over raw JSON.
-These type aliases are intentionally broad to support dynamic envelope patterns
-while still providing meaningful type hints for dict containers.
+
+Note: Uses PEP 695 type statement syntax for proper Pydantic recursive type support.
 """
 
-from __future__ import annotations
-
-from typing import Any
+# JSON-serializable types for protocol boundaries using PEP 695 syntax.
+# These provide type safety while allowing arbitrary JSON structures.
+type JsonPrimitive = str | int | float | bool | None
+type JsonValue = JsonPrimitive | list[JsonValue] | dict[str, JsonValue]
 
 # Envelope dictionary types for protocol methods.
-# Values use `Any` because envelope payloads contain arbitrary JSON-serializable data.
-# The structure is validated at runtime by the envelope executor implementations.
-EnvelopeDict = dict[str, Any]
-ResultDict = dict[str, Any]
+# Values are JSON-serializable, validated at runtime by executor implementations.
+type EnvelopeDict = dict[str, JsonValue]
+type ResultDict = dict[str, JsonValue]
 
 __all__ = [
+    "JsonPrimitive",
+    "JsonValue",
     "EnvelopeDict",
     "ResultDict",
 ]

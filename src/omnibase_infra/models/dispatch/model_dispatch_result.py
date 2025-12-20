@@ -49,7 +49,6 @@ See Also:
 """
 
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -57,6 +56,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+
+# JSON-serializable types for error details (no Any usage per ONEX guidelines)
+# Using PEP 695 type aliases for Pydantic recursive type support
+type JsonPrimitive = str | int | float | bool | None
+type JsonValue = JsonPrimitive | list[JsonValue] | dict[str, JsonValue]
 
 
 class ModelDispatchResult(BaseModel):
@@ -81,7 +85,7 @@ class ModelDispatchResult(BaseModel):
         output_count: Number of outputs produced by the handler.
         error_message: Error message if the dispatch failed.
         error_code: Error code if the dispatch failed.
-        error_details: Additional error details for debugging.
+        error_details: Additional JSON-serializable error details for debugging.
         retry_count: Number of times this dispatch was retried.
         correlation_id: Correlation ID from the original message.
         trace_id: Distributed trace ID for observability.
@@ -184,9 +188,9 @@ class ModelDispatchResult(BaseModel):
         default=None,
         description="Error code if the dispatch failed.",
     )
-    error_details: dict[str, Any] | None = Field(
+    error_details: dict[str, JsonValue] | None = Field(
         default=None,
-        description="Additional error details for debugging.",
+        description="Additional JSON-serializable error details for debugging.",
     )
 
     # ---- Retry Information ----
@@ -285,7 +289,7 @@ class ModelDispatchResult(BaseModel):
         status: EnumDispatchStatus,
         message: str,
         code: EnumCoreErrorCode | None = None,
-        details: dict[str, Any] | None = None,
+        details: dict[str, JsonValue] | None = None,
     ) -> "ModelDispatchResult":
         """
         Create a new result with error information.
@@ -294,7 +298,7 @@ class ModelDispatchResult(BaseModel):
             status: The error status
             message: Error message
             code: Optional error code (EnumCoreErrorCode)
-            details: Optional error details
+            details: Optional JSON-serializable error details
 
         Returns:
             New ModelDispatchResult with error information
@@ -379,4 +383,4 @@ class ModelDispatchResult(BaseModel):
         )
 
 
-__all__ = ["ModelDispatchResult"]
+__all__ = ["ModelDispatchResult", "JsonPrimitive", "JsonValue"]

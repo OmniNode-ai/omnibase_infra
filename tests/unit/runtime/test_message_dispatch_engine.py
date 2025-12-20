@@ -1026,6 +1026,118 @@ class TestDispatchErrors:
         # No handlers should match due to disabled route
         assert result.status == EnumDispatchStatus.NO_HANDLER
 
+    # ---- Correlation ID Propagation in Error Results ----
+
+    @pytest.mark.asyncio
+    async def test_dispatch_no_handler_preserves_correlation_id(
+        self,
+        dispatch_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that NO_HANDLER error result preserves envelope correlation_id."""
+        dispatch_engine.freeze()
+
+        result = await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
+
+        assert result.status == EnumDispatchStatus.NO_HANDLER
+        assert result.correlation_id == event_envelope.correlation_id
+
+    @pytest.mark.asyncio
+    async def test_dispatch_handler_error_preserves_correlation_id(
+        self,
+        dispatch_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that HANDLER_ERROR result preserves envelope correlation_id."""
+
+        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> None:
+            raise ValueError("Handler crashed!")
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="failing-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="failing-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        result = await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
+
+        assert result.status == EnumDispatchStatus.HANDLER_ERROR
+        assert result.correlation_id == event_envelope.correlation_id
+
+    @pytest.mark.asyncio
+    async def test_dispatch_invalid_message_preserves_correlation_id(
+        self,
+        dispatch_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that INVALID_MESSAGE result preserves envelope correlation_id."""
+        dispatch_engine.freeze()
+
+        # Topic without valid category segment (no events/commands/intents)
+        result = await dispatch_engine.dispatch("invalid.topic.here", event_envelope)
+
+        assert result.status == EnumDispatchStatus.INVALID_MESSAGE
+        assert result.correlation_id == event_envelope.correlation_id
+
+    @pytest.mark.asyncio
+    async def test_dispatch_partial_failure_preserves_correlation_id(
+        self,
+        dispatch_engine: MessageDispatchEngine,
+        event_envelope: ModelEventEnvelope[UserCreatedEvent],
+    ) -> None:
+        """Test that partial handler failure result preserves envelope correlation_id."""
+
+        async def success_handler(envelope: ModelEventEnvelope[Any]) -> str:
+            return "success"
+
+        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> None:
+            raise RuntimeError("Partial failure!")
+
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="success-handler",
+            dispatcher=success_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        dispatch_engine.register_dispatcher(
+            dispatcher_id="failing-handler",
+            dispatcher=failing_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="success-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="success-handler",
+            )
+        )
+        dispatch_engine.register_route(
+            ModelDispatchRoute(
+                route_id="failing-route",
+                topic_pattern="dev.**",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="failing-handler",
+            )
+        )
+        dispatch_engine.freeze()
+
+        result = await dispatch_engine.dispatch("dev.user.events.v1", event_envelope)
+
+        # Partial failure should still result in HANDLER_ERROR
+        assert result.status == EnumDispatchStatus.HANDLER_ERROR
+        # But correlation_id should still be preserved
+        assert result.correlation_id == event_envelope.correlation_id
+
 
 # ============================================================================
 # Async Handler Tests
