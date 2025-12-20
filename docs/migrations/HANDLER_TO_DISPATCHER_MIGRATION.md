@@ -20,7 +20,7 @@ This guide documents the terminology migration from "Handler" to "Dispatcher" in
 | `handler` | `dispatcher` | Message routing and event processing |
 | `handler_id` | `dispatcher_id` | Unique identifier for routing unit |
 | `handler_count` | `dispatcher_count` | Count of registered routing units |
-| `no_handler` | `no_dispatcher` | Status when no routing unit found |
+| `NO_HANDLER` | `NO_DISPATCHER` | Status enum when no routing unit found |
 | `handler_error` | `dispatcher_error` | Execution error in routing unit |
 | `HANDLER_ERROR` | `HANDLER_ERROR` | **Unchanged** - EnumDispatchStatus value |
 
@@ -72,7 +72,7 @@ New model names in `omnibase_infra.models.dispatch`:
 
 # NEW metrics field names
 {
-    "no_handler_count": 5,  # Note: unchanged in EnumDispatchStatus
+    "no_dispatcher_count": 5,
     "dispatcher_execution_count": 100,
     "dispatcher_error_count": 2,
 }
@@ -111,7 +111,7 @@ class UserEventDispatcher:
         return EnumNodeKind.REDUCER
 
     async def handle(
-        self, envelope: ModelEventEnvelope[Any]
+        self, envelope: ModelEventEnvelope[object]
     ) -> ModelDispatchResult:
         # Process the event
         return ModelDispatchResult(
@@ -138,6 +138,11 @@ dispatchers = registry.get_dispatchers(
 - Both use the "freeze after init" pattern for thread safety
 - Both support execution shape validation
 
+**Envelope Typing Note:**
+The `handle()` method uses `ModelEventEnvelope[object]` instead of `Any` for the envelope
+parameter. This satisfies ONEX "no Any types" guideline while allowing dispatchers to
+accept any payload type. See `CLAUDE.md` section "Envelope Typing" for complete guidelines.
+
 ### What Does NOT Change
 
 1. **Protocol Handlers** (`handlers/` directory):
@@ -147,7 +152,7 @@ dispatchers = registry.get_dispatchers(
    - `ProtocolBindingRegistry` continues to manage handlers
 
 2. **EnumDispatchStatus Values**:
-   - `NO_HANDLER` - Status enum value unchanged
+   - `NO_DISPATCHER` - Renamed from `NO_HANDLER` (value: `no_dispatcher`)
    - `HANDLER_ERROR` - Status enum value unchanged
 
 3. **Error Classes**:
@@ -412,7 +417,7 @@ from omnibase_infra.models.dispatch import (
     ModelDispatcherRegistration,  # Dispatcher registration metadata
     ModelDispatcherMetrics,       # Per-dispatcher metrics
     ModelDispatchMetrics,         # Aggregate dispatch metrics
-    EnumDispatchStatus,           # Status enum (SUCCESS, NO_HANDLER, HANDLER_ERROR, etc.)
+    EnumDispatchStatus,           # Status enum (SUCCESS, NO_DISPATCHER, HANDLER_ERROR, etc.)
 )
 
 # Message category enum

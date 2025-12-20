@@ -100,6 +100,20 @@ Related:
     - OMN-934: Message dispatch engine implementation
     - EnvelopeRouter: Transport-agnostic orchestrator (reference for freeze pattern)
 
+Category Support:
+    The engine supports all four ONEX message categories:
+    - EVENT: Domain events (e.g., UserCreatedEvent)
+    - COMMAND: Action requests (e.g., CreateUserCommand)
+    - INTENT: User intentions (e.g., ProvisionUserIntent)
+    - PROJECTION: State projections (e.g., OrderSummaryProjection)
+
+    Note: PROJECTION has no topic naming constraint (unlike EVENT/COMMAND/INTENT
+    which require *.events, *.commands, *.intents suffixes). Projections are
+    typically internal state representations consumed by reducers.
+
+    TODO(OMN-985): Add integration tests for PROJECTION category dispatch.
+    Current test coverage focuses on EVENT/COMMAND/INTENT routing.
+
 .. versionadded:: 0.4.0
 """
 
@@ -122,20 +136,6 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
-from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
-from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
-from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
-from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
-    ModelDispatcherMetrics,
-)
-
-# Type alias for dispatcher output topics
-# Dispatchers can return:
-# - str: A single output topic
-# - list[str]: Multiple output topics
-# - None: No output topics to publish
-DispatcherOutput = str | list[str] | None
 
 # Patterns that may indicate sensitive data in error messages
 # These patterns are checked case-insensitively
@@ -210,6 +210,21 @@ def _sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
 
     return f"{exception_type}: {exception_str}"
 
+
+from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
+from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
+from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
+    ModelDispatcherMetrics,
+)
+
+# Type alias for dispatcher output topics
+# Dispatchers can return:
+# - str: A single output topic
+# - list[str]: Multiple output topics
+# - None: No output topics to publish
+DispatcherOutput = str | list[str] | None
 
 # Module-level logger for fallback when no custom logger is provided
 _module_logger = logging.getLogger(__name__)
@@ -390,6 +405,9 @@ class MessageDispatchEngine:
 
         # Index for fast dispatcher lookup by category
         # category -> list of dispatcher_ids
+        # NOTE: Only routable message categories are indexed here.
+        # PROJECTION is NOT included because projections are reducer outputs,
+        # not routable messages. See CLAUDE.md "Enum Usage" section.
         self._dispatchers_by_category: dict[EnumMessageCategory, list[str]] = {
             EnumMessageCategory.EVENT: [],
             EnumMessageCategory.COMMAND: [],
@@ -791,7 +809,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     success=False,
                     category=None,
-                    no_handler=False,
+                    no_dispatcher=False,
                     category_mismatch=False,
                     topic=topic,
                 )
@@ -816,7 +834,7 @@ class MessageDispatchEngine:
                 completed_at=datetime.now(UTC),
                 duration_ms=duration_ms,
                 error_message=f"Cannot infer message category from topic '{topic}'. "
-                "Topic must contain .events, .commands, or .intents segment.",
+                "Topic must contain .events, .commands, .intents, or .projections segment.",
                 error_code=EnumCoreErrorCode.VALIDATION_ERROR,
                 correlation_id=envelope.correlation_id,
             )
@@ -882,7 +900,7 @@ class MessageDispatchEngine:
                     duration_ms=duration_ms,
                     success=False,
                     category=topic_category,
-                    no_handler=True,
+                    no_dispatcher=True,
                     topic=topic,
                 )
 
@@ -905,7 +923,7 @@ class MessageDispatchEngine:
 
             return ModelDispatchResult(
                 dispatch_id=dispatch_id,
-                status=EnumDispatchStatus.NO_HANDLER,
+                status=EnumDispatchStatus.NO_DISPATCHER,
                 topic=topic,
                 message_category=topic_category,
                 message_type=message_type,

@@ -24,12 +24,12 @@ class EnumDispatchStatus(str, Enum):
 
     Values:
         SUCCESS: Message was successfully routed, handled, and outputs published
-        ROUTED: Message was successfully routed to a handler (not yet executed)
-        NO_HANDLER: No handler was registered for the message type/topic
-        HANDLER_ERROR: Handler execution failed with an exception
-        TIMEOUT: Handler execution exceeded the configured timeout
+        ROUTED: Message was successfully routed to a dispatcher (not yet executed)
+        NO_DISPATCHER: No dispatcher was registered for the message type/topic
+        HANDLER_ERROR: Dispatcher execution failed with an exception
+        TIMEOUT: Dispatcher execution exceeded the configured timeout
         INVALID_MESSAGE: Message failed validation before dispatch
-        PUBLISH_FAILED: Handler succeeded but output publishing failed
+        PUBLISH_FAILED: Dispatcher succeeded but output publishing failed
         SKIPPED: Message was intentionally skipped (e.g., filtered, deduplicated)
 
     Example:
@@ -46,22 +46,22 @@ class EnumDispatchStatus(str, Enum):
     """Message was successfully routed, handled, and outputs published."""
 
     ROUTED = "routed"
-    """Message was successfully routed to a handler (pending execution)."""
+    """Message was successfully routed to a dispatcher (pending execution)."""
 
-    NO_HANDLER = "no_handler"
-    """No handler was registered for the message type/topic."""
+    NO_DISPATCHER = "no_dispatcher"
+    """No dispatcher was registered for the message type/topic."""
 
     HANDLER_ERROR = "handler_error"
-    """Handler execution failed with an exception."""
+    """Dispatcher execution failed with an exception."""
 
     TIMEOUT = "timeout"
-    """Handler execution exceeded the configured timeout."""
+    """Dispatcher execution exceeded the configured timeout."""
 
     INVALID_MESSAGE = "invalid_message"
     """Message failed validation before dispatch."""
 
     PUBLISH_FAILED = "publish_failed"
-    """Handler succeeded but output publishing failed."""
+    """Dispatcher succeeded but output publishing failed."""
 
     SKIPPED = "skipped"
     """Message was intentionally skipped (e.g., filtered, deduplicated)."""
@@ -88,7 +88,7 @@ class EnumDispatchStatus(str, Enum):
         """
         return self in {
             EnumDispatchStatus.SUCCESS,
-            EnumDispatchStatus.NO_HANDLER,
+            EnumDispatchStatus.NO_DISPATCHER,
             EnumDispatchStatus.HANDLER_ERROR,
             EnumDispatchStatus.TIMEOUT,
             EnumDispatchStatus.INVALID_MESSAGE,
@@ -125,7 +125,7 @@ class EnumDispatchStatus(str, Enum):
             False
         """
         return self in {
-            EnumDispatchStatus.NO_HANDLER,
+            EnumDispatchStatus.NO_DISPATCHER,
             EnumDispatchStatus.HANDLER_ERROR,
             EnumDispatchStatus.TIMEOUT,
             EnumDispatchStatus.INVALID_MESSAGE,
@@ -137,7 +137,7 @@ class EnumDispatchStatus(str, Enum):
         Check if this status indicates the operation should be retried.
 
         Only transient failures (timeout, publish_failed) should be retried.
-        Permanent failures (no_handler, invalid_message) should not be retried.
+        Permanent failures (no_dispatcher, invalid_message) should not be retried.
 
         Returns:
             True if the operation should be retried, False otherwise
@@ -145,7 +145,7 @@ class EnumDispatchStatus(str, Enum):
         Example:
             >>> EnumDispatchStatus.TIMEOUT.requires_retry()
             True
-            >>> EnumDispatchStatus.NO_HANDLER.requires_retry()
+            >>> EnumDispatchStatus.NO_DISPATCHER.requires_retry()
             False
         """
         return self in {
@@ -170,12 +170,12 @@ class EnumDispatchStatus(str, Enum):
         """
         descriptions = {
             cls.SUCCESS: "Message was successfully routed, handled, and outputs published",
-            cls.ROUTED: "Message was successfully routed to a handler (pending execution)",
-            cls.NO_HANDLER: "No handler was registered for the message type/topic",
-            cls.HANDLER_ERROR: "Handler execution failed with an exception",
-            cls.TIMEOUT: "Handler execution exceeded the configured timeout",
+            cls.ROUTED: "Message was successfully routed to a dispatcher (pending execution)",
+            cls.NO_DISPATCHER: "No dispatcher was registered for the message type/topic",
+            cls.HANDLER_ERROR: "Dispatcher execution failed with an exception",
+            cls.TIMEOUT: "Dispatcher execution exceeded the configured timeout",
             cls.INVALID_MESSAGE: "Message failed validation before dispatch",
-            cls.PUBLISH_FAILED: "Handler succeeded but output publishing failed",
+            cls.PUBLISH_FAILED: "Dispatcher succeeded but output publishing failed",
             cls.SKIPPED: "Message was intentionally skipped",
         }
         return descriptions.get(status, "Unknown dispatch status")

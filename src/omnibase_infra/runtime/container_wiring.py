@@ -191,7 +191,7 @@ async def wire_infrastructure_services(
             )
         elif "metadata" in error_str:
             invalid_arg = "metadata"
-            hint = "Invalid 'metadata' argument. Expected dict[str, Any]."
+            hint = "Invalid 'metadata' argument. Expected dict[str, object]."
         elif "positional" in error_str or "argument" in error_str:
             invalid_arg = "signature"
             hint = (

@@ -123,9 +123,13 @@ class EnumMessageCategory(str, Enum):
         Infer the message category from a topic string.
 
         Examines the topic for category keywords (events, commands, intents)
-        and returns the corresponding category. Handles both ONEX Kafka format
-        (onex.<domain>.<type>) and Environment-Aware format
+        as complete segments and returns the corresponding category. Handles both
+        ONEX Kafka format (onex.<domain>.<type>) and Environment-Aware format
         (<env>.<domain>.<category>.<version>).
+
+        The matching is segment-based to prevent false positives. For example:
+        - "onex.user.events" matches EVENT (segment "events" exists)
+        - "dev.eventsource.data.v1" does NOT match ("eventsource" != "events")
 
         Args:
             topic: The topic string to analyze
@@ -142,19 +146,19 @@ class EnumMessageCategory(str, Enum):
             <EnumMessageCategory.INTENT: 'intent'>
             >>> EnumMessageCategory.from_topic("invalid.topic")
             None
+            >>> EnumMessageCategory.from_topic("dev.eventsource.data.v1")
+            None  # No false positive: "eventsource" is not the same as "events"
         """
         if not topic:
             return None
 
-        topic_lower = topic.lower()
-
-        # Check for each category's suffix in the topic
-        if ".events" in topic_lower:
-            return cls.EVENT
-        if ".commands" in topic_lower:
-            return cls.COMMAND
-        if ".intents" in topic_lower:
-            return cls.INTENT
+        # Split topic into segments and check for exact category suffix matches.
+        # This prevents false positives where a segment merely contains the
+        # category suffix as a substring (e.g., "eventsource" containing "events").
+        segments = topic.lower().split(".")
+        for suffix, category in _SUFFIX_TO_CATEGORY.items():
+            if suffix in segments:
+                return category
 
         return None
 

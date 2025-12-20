@@ -69,6 +69,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+#### Handler to Dispatcher Terminology Migration (OMN-977, PR #63)
+
+The codebase has migrated from "handler" to "dispatcher" terminology for message routing components to better reflect their purpose as message dispatchers rather than generic handlers.
+
+- **Protocol Rename**: `ProtocolHandler` → `ProtocolMessageDispatcher`
+- **Class Naming**: Handler implementations renamed to Dispatcher (e.g., `UserEventHandler` → `UserEventDispatcher`)
+- **ID Convention**: `dispatcher_id` values now use `-dispatcher` suffix instead of `-handler`
+- **Enum Rename**: `EnumDispatchStatus.NO_HANDLER` renamed to `NO_DISPATCHER` with new value `no_dispatcher` for consistency with dispatcher terminology
+- **Enum Stability**: `EnumDispatchStatus.HANDLER_ERROR` value remains **unchanged** for backwards compatibility with existing metrics, logs, and monitoring systems
+- **Full Migration Guide**: See `docs/migrations/HANDLER_TO_DISPATCHER_MIGRATION.md` for complete migration details and code examples
+
 #### CI/CD
 - **Pre-commit Configuration**: Migrated to fix deprecated stage warnings (PR #25)
 
