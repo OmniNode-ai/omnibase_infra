@@ -259,6 +259,16 @@ pattern_exemptions:
       Metrics recording requires multiple parameters for complete dispatch tracking: identifiers (dispatcher_id, route_id, topic, message_type), timing (start_time, end_time, duration_ms), status (success, error_code, error_message).
 
     ticket: OMN-983
+  # ==========================================================================
+  # MessageTypeRegistry Exemptions (OMN-983)
+  # ==========================================================================
+  - file_pattern: 'registry_message_type\.py'
+    class_pattern: "Class 'MessageTypeRegistry'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Domain registry pattern requires comprehensive message type management: CRUD operations (register, unregister, get), query operations (list, filter, search by topic/domain), validation operations (validate_topic, resolve_type), and statistics (get_statistics). This is an established domain registry pattern.
+
+    ticket: OMN-983
 # Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:
@@ -271,3 +281,12 @@ union_exemptions:
       The config field uses dict[str, int | str | bool | float] for nested configuration values. This is a standard JSON-like config pattern where values can be any primitive type. Creating a ModelConfigValue wrapper would add unnecessary complexity without real benefit for this infrastructure domain.
 
     ticket: null
+  # ==========================================================================
+  # JsonPrimitive Type Alias Exemption (OMN-983)
+  # ==========================================================================
+  - file_pattern: 'json_types\.py'
+    violation_pattern: 'Union with 4\+ primitive types.*bool.*float.*int.*str'
+    reason: >
+      JsonPrimitive is a fundamental type alias defining JSON primitive types (str | int | float | bool | None). This is the canonical definition for JSON primitives in the infrastructure layer. Cannot be reduced - represents JSON specification primitives.
+
+    ticket: OMN-983
