@@ -695,6 +695,12 @@ class ExecutionShapeValidator:
         elif isinstance(category, EnumMessageCategory):
             # Map EnumMessageCategory to EnumNodeOutputType
             # Both enums share EVENT, COMMAND, INTENT with same string values
+            #
+            # FORWARD COMPATIBILITY NOTE:
+            # If new values are added to EnumMessageCategory in the future,
+            # this mapping must be updated. The .get() with None check below
+            # ensures graceful handling - unknown categories are disallowed
+            # by default rather than causing a runtime error.
             category_to_output = {
                 EnumMessageCategory.EVENT: EnumNodeOutputType.EVENT,
                 EnumMessageCategory.COMMAND: EnumNodeOutputType.COMMAND,
@@ -702,7 +708,8 @@ class ExecutionShapeValidator:
             }
             mapped_type = category_to_output.get(category)
             if mapped_type is None:
-                # Unknown message category - disallow by default
+                # Forward compatibility: Unknown/new message category - disallow
+                # by default until explicitly added to the mapping above.
                 return False
             output_type = mapped_type
         else:
