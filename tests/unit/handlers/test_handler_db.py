@@ -199,7 +199,8 @@ class TestDbAdapterQueryOperations:
                 "correlation_id": correlation_id,
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             assert result.status == "success"
             assert result.payload.row_count == 2
@@ -207,6 +208,7 @@ class TestDbAdapterQueryOperations:
             assert result.payload.rows[0] == {"id": 1, "name": "Alice"}
             assert result.payload.rows[1] == {"id": 2, "name": "Bob"}
             assert result.correlation_id == correlation_id
+            assert output.correlation_id == correlation_id
 
             mock_conn.fetch.assert_called_once_with("SELECT id, name FROM users")
 
@@ -237,7 +239,8 @@ class TestDbAdapterQueryOperations:
                 },
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             mock_conn.fetch.assert_called_once_with(
                 "SELECT id, name FROM users WHERE id = $1", 1
@@ -268,7 +271,8 @@ class TestDbAdapterQueryOperations:
                 "payload": {"sql": "SELECT * FROM empty_table"},
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             assert result.payload.row_count == 0
             assert result.payload.rows == []
@@ -313,7 +317,8 @@ class TestDbAdapterExecuteOperations:
                 },
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             assert result.status == "success"
             assert result.payload.row_count == 1
@@ -349,7 +354,8 @@ class TestDbAdapterExecuteOperations:
                 },
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             assert result.payload.row_count == 5
 
@@ -376,7 +382,8 @@ class TestDbAdapterExecuteOperations:
                 "payload": {"sql": "DELETE FROM users WHERE inactive = true"},
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             assert result.payload.row_count == 3
 
@@ -406,7 +413,8 @@ class TestDbAdapterExecuteOperations:
                 },
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             assert result.payload.row_count == 0
 
@@ -1123,9 +1131,11 @@ class TestDbAdapterCorrelationId:
                 "correlation_id": correlation_id,
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             assert result.correlation_id == correlation_id
+            assert output.correlation_id == correlation_id
 
             await adapter.shutdown()
 
@@ -1152,10 +1162,12 @@ class TestDbAdapterCorrelationId:
                 "correlation_id": correlation_id,
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             # String correlation_id is converted to UUID by handler
             assert result.correlation_id == UUID(correlation_id)
+            assert output.correlation_id == UUID(correlation_id)
 
             await adapter.shutdown()
 
@@ -1180,10 +1192,14 @@ class TestDbAdapterCorrelationId:
                 "payload": {"sql": "SELECT 1"},
             }
 
-            result = await adapter.execute(envelope)
+            output = await adapter.execute(envelope)
+            result = output.result  # ModelDbQueryResponse
 
             # Should have a generated UUID
             assert isinstance(result.correlation_id, UUID)
+            assert isinstance(output.correlation_id, UUID)
+            # Correlation IDs should match between output wrapper and result
+            assert output.correlation_id == result.correlation_id
 
             await adapter.shutdown()
 
@@ -1398,7 +1414,8 @@ class TestDbAdapterLogWarnings:
                     "correlation_id": correlation_id,
                 }
 
-                result = await adapter.execute(envelope)
+                output = await adapter.execute(envelope)
+                result = output.result  # ModelDbQueryResponse
                 assert result.status == "success"
 
                 # Shutdown

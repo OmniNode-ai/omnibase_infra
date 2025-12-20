@@ -720,7 +720,7 @@ class HttpRestAdapter:
                     "headers": dict(response.headers),
                     "body": body,
                 },
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             },
         )
 

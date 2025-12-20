@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -32,9 +31,6 @@ from tests.helpers import (
     DeterministicIdGenerator,
     filter_handler_warnings,
 )
-
-# Type alias for response dict with nested structure
-ResponseDict = dict[str, object]
 
 
 def create_mock_streaming_response(
@@ -177,13 +173,14 @@ class TestHttpRestAdapterGetOperations:
                 "correlation_id": correlation_id,
             }
 
-            result = cast(ResponseDict, await handler.execute(envelope))
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["status"] == "success"
-            payload = cast(ResponseDict, result["payload"])
+            payload = result["payload"]
             assert payload["status_code"] == 200
             assert payload["body"] == {"data": "test_value"}
-            assert result["correlation_id"] == correlation_id
+            assert result["correlation_id"] == str(correlation_id)
 
             mock_stream.assert_called_once_with(
                 "GET",
@@ -221,7 +218,8 @@ class TestHttpRestAdapterGetOperations:
                 },
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             mock_stream.assert_called_once_with(
                 "GET",
@@ -260,7 +258,8 @@ class TestHttpRestAdapterGetOperations:
                 },
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             mock_stream.assert_called_once_with(
                 "GET",
@@ -294,7 +293,8 @@ class TestHttpRestAdapterGetOperations:
                 "payload": {"url": "https://example.com/hello"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["payload"]["body"] == "Hello, World!"
             assert result["payload"]["status_code"] == 200
@@ -342,7 +342,8 @@ class TestHttpRestAdapterPostOperations:
                 },
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             # Dict bodies are pre-serialized to avoid double serialization.
             # Expect content= with serialized bytes and Content-Type header.
@@ -384,7 +385,8 @@ class TestHttpRestAdapterPostOperations:
                 },
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             mock_stream.assert_called_once_with(
                 "POST",
@@ -418,7 +420,8 @@ class TestHttpRestAdapterPostOperations:
                 "payload": {"url": "https://api.example.com/trigger"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             mock_stream.assert_called_once_with(
                 "POST",
@@ -467,7 +470,8 @@ class TestHttpRestAdapterPostOperations:
                 },
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             # Dict bodies are pre-serialized. Content-Type is preserved from
             # custom headers since it's already set (case-insensitive check).
@@ -515,7 +519,8 @@ class TestHttpRestAdapterPostOperations:
                 },
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             # List body uses content= with json.dumps()
             mock_stream.assert_called_once()
@@ -771,7 +776,8 @@ class TestHttpRestAdapterErrorHandling:
                 "payload": {"url": "https://api.example.com/missing"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             # Should return the error response, not raise
             assert result["status"] == "success"
@@ -1058,10 +1064,11 @@ class TestHttpRestAdapterCorrelationId:
                 "correlation_id": correlation_id,
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            # Verify deterministic UUID is properly returned (as UUID, not string)
-            assert result["correlation_id"] == correlation_id
+            # Verify deterministic UUID is properly returned (as string in result)
+            assert result["correlation_id"] == str(correlation_id)
             # With seed=100, first UUID has int value 101
             assert correlation_id.int == 101
 
@@ -1090,10 +1097,12 @@ class TestHttpRestAdapterCorrelationId:
                 "correlation_id": correlation_id,
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            # String correlation_id is converted to UUID by handler
-            assert result["correlation_id"] == UUID(correlation_id)
+            # String correlation_id is converted to UUID by handler,
+            # then back to string in the result
+            assert result["correlation_id"] == correlation_id
 
         await handler.shutdown()
 
@@ -1118,11 +1127,14 @@ class TestHttpRestAdapterCorrelationId:
                 "payload": {"url": "https://example.com"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            # Should have a generated UUID (returned as UUID object)
+            # Should have a generated UUID (returned as string in result)
             assert "correlation_id" in result
-            assert isinstance(result["correlation_id"], UUID)
+            # Verify it's a valid UUID string
+            assert isinstance(result["correlation_id"], str)
+            UUID(result["correlation_id"])  # Should not raise
 
         await handler.shutdown()
 
@@ -1148,13 +1160,15 @@ class TestHttpRestAdapterCorrelationId:
                 "correlation_id": "not-a-valid-uuid",
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            # Should have a generated UUID (not the invalid string)
+            # Should have a generated UUID (not the invalid string, returned as string)
             assert "correlation_id" in result
             generated_id = result["correlation_id"]
-            assert isinstance(generated_id, UUID)
-            assert str(generated_id) != "not-a-valid-uuid"
+            assert isinstance(generated_id, str)
+            assert generated_id != "not-a-valid-uuid"
+            UUID(generated_id)  # Should parse as valid UUID
 
         await handler.shutdown()
 
@@ -1190,7 +1204,8 @@ class TestHttpRestAdapterResponseParsing:
                 "payload": {"url": "https://example.com"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["payload"]["body"] == {"key": "value", "nested": {"a": 1}}
 
@@ -1216,7 +1231,8 @@ class TestHttpRestAdapterResponseParsing:
                 "payload": {"url": "https://example.com"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["payload"]["body"] == "Not valid JSON {"
 
@@ -1244,7 +1260,8 @@ class TestHttpRestAdapterResponseParsing:
                 "payload": {"url": "https://example.com"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["payload"]["body"] == "<html><body>Hello</body></html>"
 
@@ -1273,7 +1290,8 @@ class TestHttpRestAdapterResponseParsing:
                 "payload": {"url": "https://example.com"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["payload"]["headers"]["content-type"] == "application/json"
             assert result["payload"]["headers"]["x-request-id"] == "req-123"
@@ -1465,7 +1483,8 @@ class TestHttpRestAdapterSizeLimits:
                 "payload": {"url": "https://example.com"},  # No body
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
             assert result["status"] == "success"
 
         await handler.shutdown()
@@ -1500,7 +1519,8 @@ class TestHttpRestAdapterSizeLimits:
                 },
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
             assert result["status"] == "success"
 
         await handler.shutdown()
@@ -1528,7 +1548,8 @@ class TestHttpRestAdapterSizeLimits:
                 "payload": {"url": "https://example.com"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
             assert result["status"] == "success"
             assert result["payload"]["body"] == "x" * 50
 
@@ -1641,7 +1662,8 @@ class TestHttpRestAdapterSizeLimits:
                 "payload": {"url": "https://example.com/small-file"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["status"] == "success"
             assert result["payload"]["body"] == "x" * 50
@@ -1713,7 +1735,8 @@ class TestHttpRestAdapterSizeLimits:
                 "payload": {"url": "https://example.com/empty-response"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["status"] == "success"
             # Empty body parsed as empty string (not JSON because empty string is invalid JSON)
@@ -1756,7 +1779,8 @@ class TestHttpRestAdapterSizeLimits:
 
             # Should succeed - either by parsing " 50 " as 50 or falling through
             # to streaming validation (which passes for 50 bytes)
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["status"] == "success"
             assert result["payload"]["body"] == "x" * 50
@@ -1798,7 +1822,8 @@ class TestHttpRestAdapterSizeLimits:
 
             # Should succeed - the invalid "30, 30" cannot be parsed as int
             # so it falls through to streaming validation which passes for 30 bytes
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
             assert result["status"] == "success"
             assert result["payload"]["body"] == "x" * 30
@@ -1858,7 +1883,8 @@ class TestHttpRestAdapterLogWarnings:
                     "correlation_id": correlation_id,
                 }
 
-                result = await handler.execute(envelope)
+                output = await handler.execute(envelope)
+                result = output.result
                 assert result["status"] == "success"
 
             # Shutdown
@@ -1956,7 +1982,8 @@ class TestHttpRestAdapterLogWarnings:
                     "payload": {"url": "https://example.com/resource"},
                 }
 
-                result = await handler.execute(envelope)
+                output = await handler.execute(envelope)
+                result = output.result
                 assert result["status"] == "success"
 
         await handler.shutdown()
@@ -2014,10 +2041,11 @@ class TestHttpRestAdapterDeterministicIntegration:
                 "correlation_id": correlation_id,
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
 
-            # Verify deterministic correlation ID flows through (as UUID)
-            assert result["correlation_id"] == correlation_id
+            # Verify deterministic correlation ID flows through (as string in result)
+            assert result["correlation_id"] == str(correlation_id)
             assert result["status"] == "success"
 
         await handler.shutdown()
@@ -2051,7 +2079,8 @@ class TestHttpRestAdapterDeterministicIntegration:
                 "payload": {"url": "https://api.example.com/time"},
             }
 
-            result = await handler.execute(envelope)
+            output = await handler.execute(envelope)
+            result = output.result
             assert result["status"] == "success"
 
         # Advance clock to simulate elapsed time
@@ -2106,8 +2135,9 @@ class TestHttpRestAdapterDeterministicIntegration:
                 "correlation_id": correlation_id_1,
             }
 
-            result_1 = await handler.execute(envelope_1)
-            assert result_1["correlation_id"] == correlation_id_1
+            output_1 = await handler.execute(envelope_1)
+            result_1 = output_1.result
+            assert result_1["correlation_id"] == str(correlation_id_1)
 
         # Simulate 30 second delay between requests
         clock.advance(30)
@@ -2122,8 +2152,9 @@ class TestHttpRestAdapterDeterministicIntegration:
                 "correlation_id": correlation_id_2,
             }
 
-            result_2 = await handler.execute(envelope_2)
-            assert result_2["correlation_id"] == correlation_id_2
+            output_2 = await handler.execute(envelope_2)
+            result_2 = output_2.result
+            assert result_2["correlation_id"] == str(correlation_id_2)
 
         # Record end time and verify deterministic timing
         request_end = clock.now()

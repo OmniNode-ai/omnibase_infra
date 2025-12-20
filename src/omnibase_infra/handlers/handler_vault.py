@@ -856,6 +856,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                     "data": secret_data if isinstance(secret_data, dict) else {},
                     "metadata": metadata if isinstance(metadata, dict) else {},
                 },
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -945,6 +946,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                     "version": data_dict.get("version"),
                     "created_time": data_dict.get("created_time"),
                 },
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -1009,6 +1011,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             result={
                 "status": "success",
                 "payload": {"deleted": True},
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -1078,6 +1081,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             result={
                 "status": "success",
                 "payload": {"keys": keys if isinstance(keys, list) else []},
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -1229,6 +1233,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                     "renewable": auth_data.get("renewable", False),
                     "lease_duration": auth_data.get("lease_duration", 0),
                 },
+                "correlation_id": str(correlation_id),
             },
         )
 
@@ -1339,6 +1344,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             result={
                 "status": "success",
                 "payload": health_status,
+                "correlation_id": str(correlation_id),
             },
         )
 
