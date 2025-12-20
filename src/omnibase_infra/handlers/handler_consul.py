@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TypeVar
@@ -36,7 +35,6 @@ from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
-    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,

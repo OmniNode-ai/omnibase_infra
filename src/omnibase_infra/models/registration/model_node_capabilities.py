@@ -6,15 +6,27 @@ This module provides ModelNodeCapabilities for strongly-typed node capabilities
 in the ONEX 2-way registration pattern.
 """
 
-from __future__ import annotations
-
 from pydantic import BaseModel, ConfigDict, Field
+
+# JSON-serializable value type for configuration.
+# Using explicit union instead of Any for ONEX coding guidelines compliance.
+#
+# This type supports:
+# - Primitives: str, int, float, bool, None
+# - Lists of primitives: list[str | int | float | bool | None]
+# - Nested dicts up to 2 levels deep with primitive values
+#
+# For deeply nested structures, consider using a dedicated Pydantic model.
+JsonPrimitive = str | int | float | bool | None
+JsonList = list[JsonPrimitive]
+JsonNestedDict = dict[str, JsonPrimitive | JsonList]
+JsonValue = JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
 
 
 class ModelNodeCapabilities(BaseModel):
     """Strongly-typed node capabilities model.
 
-    Replaces dict[str, Any] with explicit capability fields.
+    Uses explicit capability fields instead of generic dictionaries.
     Uses extra="allow" to support custom capabilities while
     providing type safety for known fields.
 
@@ -32,7 +44,7 @@ class ModelNodeCapabilities(BaseModel):
         max_batch: Optional maximum batch size.
         supported_types: List of supported data types.
         routing: Whether node has routing capability.
-        config: Nested configuration dictionary.
+        config: Nested configuration dictionary (JSON-serializable values only).
         transactions: Whether node supports transactions.
         feature: Generic feature flag.
 
@@ -81,9 +93,11 @@ class ModelNodeCapabilities(BaseModel):
     # Generic feature flag (used in tests)
     feature: bool = Field(default=False, description="Generic feature flag")
 
-    # Configuration (nested) - using constrained types instead of Any
-    config: dict[str, int | str | bool | float] = Field(
-        default_factory=dict, description="Nested configuration"
+    # Configuration (nested) - uses JsonValue for strongly-typed JSON-serializable values.
+    # Supports primitives (str, int, float, bool, None), lists, and nested dicts.
+    config: dict[str, JsonValue] = Field(
+        default_factory=dict,
+        description="Nested configuration (JSON-serializable values)",
     )
 
     def __getitem__(self, key: str) -> object:
@@ -166,4 +180,10 @@ class ModelNodeCapabilities(BaseModel):
             return default
 
 
-__all__ = ["ModelNodeCapabilities"]
+__all__ = [
+    "JsonList",
+    "JsonNestedDict",
+    "JsonPrimitive",
+    "JsonValue",
+    "ModelNodeCapabilities",
+]
