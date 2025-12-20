@@ -68,15 +68,15 @@ poetry run python scripts/validate.py all --quick
 **Purpose**: Prevent overly complex union types
 
 **Configuration**:
-- Max unions: `20` (infrastructure has many typed handlers)
-- Strict mode: `False` (allow necessary unions)
+- Max unions: `400` (tight buffer above ~379 baseline, target: <200)
+- Strict mode: `True` (flags actual violations per OMN-983)
 - Directory: `src/omnibase_infra/`
 
 **What it checks**:
-- Complex union type count
-- Union complexity thresholds
+- Total union count (including `X | None` patterns which are counted but NOT flagged)
+- Actual violations (primitive soup like `str | int | bool | float`, `Union[X, None]` syntax)
 
-**Why it matters**: Infrastructure code has typed unions for protocol implementations and message routing, but excessive unions complicate maintenance.
+**Why it matters**: Infrastructure code has typed unions for protocol implementations and message routing. The threshold is set above the current baseline to prevent regression while ongoing `dict[str, object]` to `JsonValue` migration reduces the count toward <200.
 
 ### 5. Circular Import Validator (MEDIUM Priority)
 **Purpose**: Detect circular import dependencies
@@ -139,10 +139,10 @@ Validators are pre-configured with infrastructure-appropriate defaults:
 # src/omnibase_infra/validation/infra_validators.py
 INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
-INFRA_MAX_UNIONS = 20
+INFRA_MAX_UNIONS = 400          # Tight buffer above ~379 baseline (target: <200)
 INFRA_MAX_VIOLATIONS = 0
-INFRA_PATTERNS_STRICT = False
-INFRA_UNIONS_STRICT = False
+INFRA_PATTERNS_STRICT = True    # Strict mode with documented exemptions (OMN-983)
+INFRA_UNIONS_STRICT = True      # Strict union validation (OMN-983)
 ```
 
 ### Customization

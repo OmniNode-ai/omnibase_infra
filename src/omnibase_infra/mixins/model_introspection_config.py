@@ -8,7 +8,7 @@ mixin, consolidating initialization parameters into a single typed configuration
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field

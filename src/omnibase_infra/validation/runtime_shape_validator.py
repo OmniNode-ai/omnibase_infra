@@ -164,6 +164,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 )
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
 )
@@ -199,7 +200,8 @@ F = TypeVar("F", bound=Callable[..., object])
 # These implicit violations use FORBIDDEN_RETURN_TYPE as the fallback, which is
 # semantically correct: the handler is returning a type that's not in its allow-list.
 _VIOLATION_TYPE_MAP: dict[
-    tuple[EnumHandlerType, EnumMessageCategory], EnumExecutionShapeViolation
+    tuple[EnumHandlerType, EnumMessageCategory | EnumNodeOutputType],
+    EnumExecutionShapeViolation,
 ] = {
     (
         EnumHandlerType.REDUCER,
@@ -211,11 +213,11 @@ _VIOLATION_TYPE_MAP: dict[
     ): EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_INTENTS,
     (
         EnumHandlerType.ORCHESTRATOR,
-        EnumMessageCategory.PROJECTION,
+        EnumNodeOutputType.PROJECTION,
     ): EnumExecutionShapeViolation.ORCHESTRATOR_RETURNS_PROJECTIONS,
     (
         EnumHandlerType.EFFECT,
-        EnumMessageCategory.PROJECTION,
+        EnumNodeOutputType.PROJECTION,
     ): EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS,
 }
 
@@ -287,25 +289,79 @@ class ExecutionShapeViolationError(ModelOnexError):
 
 
 # ==============================================================================
+# Type Conversion Utilities
+# ==============================================================================
+
+
+# Mapping from EnumMessageCategory to EnumNodeOutputType for validation.
+# Both enums share EVENT, COMMAND, INTENT with identical string values.
+_MESSAGE_CATEGORY_TO_NODE_OUTPUT: dict[EnumMessageCategory, EnumNodeOutputType] = {
+    EnumMessageCategory.EVENT: EnumNodeOutputType.EVENT,
+    EnumMessageCategory.COMMAND: EnumNodeOutputType.COMMAND,
+    EnumMessageCategory.INTENT: EnumNodeOutputType.INTENT,
+}
+
+
+def _to_node_output_type(
+    category: EnumMessageCategory | EnumNodeOutputType,
+) -> EnumNodeOutputType:
+    """Convert a message category or node output type to EnumNodeOutputType.
+
+    This utility handles the mapping between EnumMessageCategory (routing)
+    and EnumNodeOutputType (validation). Since EVENT, COMMAND, and INTENT
+    exist in both enums with the same values, they can be safely converted.
+
+    Args:
+        category: Either an EnumMessageCategory or EnumNodeOutputType.
+
+    Returns:
+        The corresponding EnumNodeOutputType.
+
+    Raises:
+        ValueError: If an EnumMessageCategory cannot be mapped to EnumNodeOutputType
+            (should not happen with valid enum values).
+    """
+    if isinstance(category, EnumNodeOutputType):
+        return category
+
+    if isinstance(category, EnumMessageCategory):
+        if category in _MESSAGE_CATEGORY_TO_NODE_OUTPUT:
+            return _MESSAGE_CATEGORY_TO_NODE_OUTPUT[category]
+        # This should never happen with valid EnumMessageCategory values
+        raise ValueError(f"Cannot convert {category} to EnumNodeOutputType")
+
+    # Type safety fallback (should not be reached with proper typing)
+    raise TypeError(
+        f"Expected EnumMessageCategory or EnumNodeOutputType, got {type(category)}"
+    )
+
+
+# ==============================================================================
 # Message Category Detection
 # ==============================================================================
 
 
-def detect_message_category(message: object) -> EnumMessageCategory | None:
-    """Detect message category from object type or attributes.
+def detect_message_category(
+    message: object,
+) -> EnumMessageCategory | EnumNodeOutputType | None:
+    """Detect message category or node output type from object type or attributes.
 
-    This function attempts to determine the message category of an object
-    using several strategies:
+    This function attempts to determine the message category or node output type
+    of an object using several strategies:
 
-    1. Check for explicit `category` attribute (EnumMessageCategory value)
-    2. Check for explicit `message_category` attribute
+    1. Check for explicit `category` attribute (EnumMessageCategory or EnumNodeOutputType)
+    2. Check for explicit `message_category` or `output_type` attribute
     3. Check type name patterns (Event*, Command*, Intent*, Projection*)
+
+    Note: PROJECTION is detected as EnumNodeOutputType.PROJECTION since projections
+    are node output types (used by REDUCERs), not message routing categories.
 
     Args:
         message: The message object to analyze.
 
     Returns:
-        The detected EnumMessageCategory, or None if category cannot be determined.
+        The detected EnumMessageCategory or EnumNodeOutputType,
+        or None if category cannot be determined.
 
     Example:
         >>> class OrderCreatedEvent:
@@ -314,9 +370,9 @@ def detect_message_category(message: object) -> EnumMessageCategory | None:
         EnumMessageCategory.EVENT
 
         >>> class UserProjection:
-        ...     category = EnumMessageCategory.PROJECTION
+        ...     output_type = EnumNodeOutputType.PROJECTION
         >>> detect_message_category(UserProjection())
-        EnumMessageCategory.PROJECTION
+        EnumNodeOutputType.PROJECTION
     """
     if message is None:
         return None
@@ -324,24 +380,31 @@ def detect_message_category(message: object) -> EnumMessageCategory | None:
     # Strategy 1: Check for explicit category attribute
     if hasattr(message, "category"):
         category = message.category
-        if isinstance(category, EnumMessageCategory):
+        if isinstance(category, (EnumMessageCategory, EnumNodeOutputType)):
             return category
 
-    # Strategy 2: Check for message_category attribute
+    # Strategy 2a: Check for message_category attribute
     if hasattr(message, "message_category"):
         category = message.message_category
         if isinstance(category, EnumMessageCategory):
             return category
 
+    # Strategy 2b: Check for output_type attribute (for node outputs like projections)
+    if hasattr(message, "output_type"):
+        output_type = message.output_type
+        if isinstance(output_type, EnumNodeOutputType):
+            return output_type
+
     # Strategy 3: Check type name patterns
     type_name = type(message).__name__
 
     # Check for common naming patterns
-    name_patterns: list[tuple[str, EnumMessageCategory]] = [
+    # Note: PROJECTION returns EnumNodeOutputType since it's a node output type
+    name_patterns: list[tuple[str, EnumMessageCategory | EnumNodeOutputType]] = [
         ("Event", EnumMessageCategory.EVENT),
         ("Command", EnumMessageCategory.COMMAND),
         ("Intent", EnumMessageCategory.INTENT),
-        ("Projection", EnumMessageCategory.PROJECTION),
+        ("Projection", EnumNodeOutputType.PROJECTION),
     ]
 
     for pattern, category in name_patterns:
@@ -436,10 +499,35 @@ class RuntimeShapeValidator:
             raise KeyError(f"No execution shape rule defined for: {handler_type.value}")
         return self.rules[handler_type]
 
+    def _get_allowed_types_for_handler(self, handler_type: EnumHandlerType) -> str:
+        """Get a human-readable string of allowed output types for a handler.
+
+        Used to generate helpful error messages that suggest valid alternatives
+        when a handler attempts to return a forbidden output type.
+
+        Args:
+            handler_type: The handler type to get allowed types for.
+
+        Returns:
+            A formatted string listing allowed output types (e.g., "EVENTs or COMMANDs").
+        """
+        try:
+            rule = self.get_rule(handler_type)
+            allowed = [t.value.upper() + "s" for t in rule.allowed_return_types]
+            if len(allowed) == 0:
+                return "no specific types (check EXECUTION_SHAPE_RULES)"
+            if len(allowed) == 1:
+                return allowed[0]
+            if len(allowed) == 2:
+                return f"{allowed[0]} or {allowed[1]}"
+            return ", ".join(allowed[:-1]) + f", or {allowed[-1]}"
+        except KeyError:
+            return "appropriate types (check EXECUTION_SHAPE_RULES)"
+
     def is_output_allowed(
         self,
         handler_type: EnumHandlerType,
-        output_category: EnumMessageCategory,
+        output_category: EnumMessageCategory | EnumNodeOutputType,
     ) -> bool:
         """Check if an output category is allowed for a handler type.
 
@@ -448,7 +536,7 @@ class RuntimeShapeValidator:
 
         Args:
             handler_type: The handler type to check.
-            output_category: The message category of the output.
+            output_category: The message category or node output type of the output.
 
         Returns:
             True if the output category is allowed, False if forbidden.
@@ -480,7 +568,9 @@ class RuntimeShapeValidator:
         """
         try:
             rule = self.get_rule(handler_type)
-            return rule.is_return_type_allowed(output_category)
+            # Convert to EnumNodeOutputType for validation
+            node_output_type = _to_node_output_type(output_category)
+            return rule.is_return_type_allowed(node_output_type)
         except KeyError:
             # SECURITY DESIGN: Fail-open for unknown handler types.
             # See docstring "Security Note" for rationale.
@@ -491,7 +581,7 @@ class RuntimeShapeValidator:
         self,
         handler_type: EnumHandlerType,
         output: object,
-        output_category: EnumMessageCategory,
+        output_category: EnumMessageCategory | EnumNodeOutputType,
         file_path: str = "<runtime>",
         line_number: int = 0,
     ) -> ModelExecutionShapeViolationResult | None:
@@ -500,7 +590,7 @@ class RuntimeShapeValidator:
         Args:
             handler_type: The declared handler type.
             output: The actual output object (used for context in violation message).
-            output_category: The message category of the output.
+            output_category: The message category or node output type of the output.
             file_path: Optional file path for violation reporting.
             line_number: Optional line number for violation reporting.
 
@@ -537,18 +627,43 @@ class RuntimeShapeValidator:
         handler_name = handler_type.value.upper()
         category_name = output_category.value.upper()
 
+        # Check if this is a PROJECTION violation - these need educational context
+        # about the distinction between node output types and message categories
+        is_projection_violation = output_category == EnumNodeOutputType.PROJECTION
+
         # Provide context-specific guidance based on whether this is an explicit
         # or implicit violation
         if violation_type == EnumExecutionShapeViolation.FORBIDDEN_RETURN_TYPE:
             # Implicit violation: category not in allow-list
+            if is_projection_violation:
+                # Special case: PROJECTION needs educational message
+                message = (
+                    f"{handler_name} handler cannot return PROJECTION type "
+                    f"'{output_type_name}'. PROJECTION is a node output type "
+                    f"(EnumNodeOutputType), not a message routing category "
+                    f"(EnumMessageCategory). Projections represent aggregated state "
+                    f"and are only valid for REDUCER node output types."
+                )
+            else:
+                message = (
+                    f"{handler_name} handler cannot return {category_name} type "
+                    f"'{output_type_name}'. {category_name} is not in the allowed "
+                    f"return types for {handler_name} handlers. "
+                    f"Check EXECUTION_SHAPE_RULES for allowed message categories."
+                )
+        # Explicit violation: known architectural constraint
+        elif is_projection_violation:
+            # PROJECTION violations get enhanced educational message
+            allowed_types = self._get_allowed_types_for_handler(handler_type)
             message = (
-                f"{handler_name} handler cannot return {category_name} type "
-                f"'{output_type_name}'. {category_name} is not in the allowed "
-                f"return types for {handler_name} handlers. "
-                f"Check EXECUTION_SHAPE_RULES for allowed message categories."
+                f"{handler_name} handler cannot return PROJECTION type "
+                f"'{output_type_name}'. PROJECTION is a node output type "
+                f"(EnumNodeOutputType), not a message routing category "
+                f"(EnumMessageCategory). Projections represent aggregated state "
+                f"and are only valid for REDUCER node output types. "
+                f"{handler_name} handlers should return {allowed_types} instead."
             )
         else:
-            # Explicit violation: known architectural constraint
             message = (
                 f"{handler_name} handler cannot return {category_name} type "
                 f"'{output_type_name}'. This violates ONEX 4-node architecture "
@@ -568,7 +683,7 @@ class RuntimeShapeValidator:
         self,
         handler_type: EnumHandlerType,
         output: object,
-        output_category: EnumMessageCategory,
+        output_category: EnumMessageCategory | EnumNodeOutputType,
         file_path: str = "<runtime>",
         line_number: int = 0,
         correlation_id: UUID | None = None,
@@ -581,7 +696,7 @@ class RuntimeShapeValidator:
         Args:
             handler_type: The declared handler type.
             output: The actual output object.
-            output_category: The message category of the output.
+            output_category: The message category or node output type of the output.
             file_path: Optional file path for violation reporting.
             line_number: Optional line number for violation reporting.
             correlation_id: Optional correlation ID for distributed tracing.

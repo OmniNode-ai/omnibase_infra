@@ -59,7 +59,7 @@ from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycle
 from omnibase_infra.runtime.wiring import wire_default_handlers
 
 if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
+    from omnibase_core.types import JsonValue
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
     from omnibase_spi.protocols.storage.protocol_idempotency_store import (
         ProtocolIdempotencyStore,
@@ -143,7 +143,7 @@ class RuntimeHostProcess:
         event_bus: InMemoryEventBus | None = None,
         input_topic: str = DEFAULT_INPUT_TOPIC,
         output_topic: str = DEFAULT_OUTPUT_TOPIC,
-        config: dict[str, object] | None = None,
+        config: JsonValue | None = None,
         handler_registry: ProtocolBindingRegistry | None = None,
     ) -> None:
         """Initialize the runtime host process.
@@ -300,7 +300,7 @@ class RuntimeHostProcess:
         )
 
         # Store full config for handler initialization
-        self._config: dict[str, object] = config
+        self._config: JsonValue = config
 
         # Runtime state
         self._is_running: bool = False
@@ -864,7 +864,7 @@ class RuntimeHostProcess:
             async with self._pending_lock:
                 self._pending_message_count -= 1
 
-    async def _handle_envelope(self, envelope: dict[str, object]) -> None:
+    async def _handle_envelope(self, envelope: JsonValue) -> None:
         """Route envelope to appropriate handler.
 
         Validates envelope before dispatch and routes it to the appropriate
@@ -1044,7 +1044,7 @@ class RuntimeHostProcess:
         self,
         error: str,
         correlation_id: UUID | None,
-    ) -> dict[str, object]:
+    ) -> JsonValue:
         """Create a standardized error response envelope.
 
         Args:
@@ -1063,7 +1063,7 @@ class RuntimeHostProcess:
             "correlation_id": final_correlation_id,
         }
 
-    def _serialize_envelope(self, envelope: dict[str, object]) -> dict[str, object]:
+    def _serialize_envelope(self, envelope: JsonValue) -> JsonValue:
         """Recursively convert UUID objects to strings for JSON serialization.
 
         Args:
@@ -1084,9 +1084,7 @@ class RuntimeHostProcess:
 
         return {k: convert_value(v) for k, v in envelope.items()}
 
-    async def _publish_envelope_safe(
-        self, envelope: dict[str, object], topic: str
-    ) -> None:
+    async def _publish_envelope_safe(self, envelope: JsonValue, topic: str) -> None:
         """Publish envelope with UUID serialization support.
 
         Converts any UUID objects to strings before publishing to ensure
@@ -1100,7 +1098,7 @@ class RuntimeHostProcess:
         json_safe_envelope = self._serialize_envelope(envelope)
         await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(self) -> JsonValue:
         """Return health check status.
 
         Returns:
@@ -1145,7 +1143,7 @@ class RuntimeHostProcess:
             config, default: 5.0 seconds) to prevent slow handlers from blocking.
         """
         # Get event bus health if available
-        event_bus_health: dict[str, object] = {}
+        event_bus_health: JsonValue = {}
         event_bus_healthy = False
 
         try:
@@ -1181,7 +1179,7 @@ class RuntimeHostProcess:
 
         # Check handler health for all registered handlers concurrently
         # Delegates to ProtocolLifecycleExecutor with configured timeout to prevent blocking
-        handler_health_results: dict[str, dict[str, object]] = {}
+        handler_health_results: dict[str, JsonValue] = {}
         handlers_all_healthy = True
 
         if self._handlers:

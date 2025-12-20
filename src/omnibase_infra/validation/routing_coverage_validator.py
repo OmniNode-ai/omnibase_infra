@@ -50,6 +50,7 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
@@ -121,11 +122,12 @@ class RoutingCoverageError(RuntimeHostError):
 # =============================================================================
 
 # Suffix patterns for message type detection
-_MESSAGE_SUFFIX_PATTERNS: dict[str, EnumMessageCategory] = {
+# Note: PROJECTION uses EnumNodeOutputType as it's a node output, not a message category
+_MESSAGE_SUFFIX_PATTERNS: dict[str, EnumMessageCategory | EnumNodeOutputType] = {
     "Event": EnumMessageCategory.EVENT,
     "Command": EnumMessageCategory.COMMAND,
     "Intent": EnumMessageCategory.INTENT,
-    "Projection": EnumMessageCategory.PROJECTION,
+    "Projection": EnumNodeOutputType.PROJECTION,
 }
 
 # Decorator patterns that indicate a message type
@@ -158,14 +160,16 @@ _MESSAGE_BASE_PATTERNS: frozenset[str] = frozenset(
 )
 
 
-def _get_category_from_suffix(class_name: str) -> EnumMessageCategory | None:
-    """Determine message category from class name suffix.
+def _get_category_from_suffix(
+    class_name: str,
+) -> EnumMessageCategory | EnumNodeOutputType | None:
+    """Determine message category or node output type from class name suffix.
 
     Args:
         class_name: The class name to analyze.
 
     Returns:
-        EnumMessageCategory if suffix matches, None otherwise.
+        EnumMessageCategory or EnumNodeOutputType if suffix matches, None otherwise.
     """
     for suffix, category in _MESSAGE_SUFFIX_PATTERNS.items():
         if class_name.endswith(suffix):
@@ -173,14 +177,16 @@ def _get_category_from_suffix(class_name: str) -> EnumMessageCategory | None:
     return None
 
 
-def _get_category_from_base(base_name: str) -> EnumMessageCategory | None:
-    """Determine message category from base class name.
+def _get_category_from_base(
+    base_name: str,
+) -> EnumMessageCategory | EnumNodeOutputType | None:
+    """Determine message category or node output type from base class name.
 
     Args:
         base_name: The base class name to analyze.
 
     Returns:
-        EnumMessageCategory if base matches, None otherwise.
+        EnumMessageCategory or EnumNodeOutputType if base matches, None otherwise.
     """
     base_lower = base_name.lower()
     if "event" in base_lower:
@@ -190,13 +196,13 @@ def _get_category_from_base(base_name: str) -> EnumMessageCategory | None:
     if "intent" in base_lower:
         return EnumMessageCategory.INTENT
     if "projection" in base_lower:
-        return EnumMessageCategory.PROJECTION
+        return EnumNodeOutputType.PROJECTION
     return None
 
 
 def _has_message_decorator(
     node: ast.ClassDef,
-) -> tuple[bool, EnumMessageCategory | None]:
+) -> tuple[bool, EnumMessageCategory | EnumNodeOutputType | None]:
     """Check if class has a message type decorator.
 
     Args:
@@ -224,7 +230,7 @@ def _has_message_decorator(
             if "intent" in decorator_name.lower():
                 return True, EnumMessageCategory.INTENT
             if "projection" in decorator_name.lower():
-                return True, EnumMessageCategory.PROJECTION
+                return True, EnumNodeOutputType.PROJECTION
             # Generic message_type decorator
             return True, None
 
@@ -257,7 +263,7 @@ def _get_base_classes(node: ast.ClassDef) -> list[str]:
 def discover_message_types(
     source_directory: Path,
     exclude_patterns: list[str] | None = None,
-) -> dict[str, EnumMessageCategory]:
+) -> dict[str, EnumMessageCategory | EnumNodeOutputType]:
     """Discover all message types defined in source code.
 
     Scans Python files in the source directory for classes that match
@@ -271,7 +277,9 @@ def discover_message_types(
         exclude_patterns: Optional list of glob patterns to exclude.
 
     Returns:
-        Dictionary mapping message class names to their categories.
+        Dictionary mapping message class names to their categories
+        (EnumMessageCategory for EVENT/COMMAND/INTENT, EnumNodeOutputType for PROJECTION).
+        Returns empty dict if source_directory is invalid.
 
     Example:
         >>> types = discover_message_types(Path("src/omnibase_infra"))
@@ -282,6 +290,13 @@ def discover_message_types(
             ...
         }
     """
+    # Defensive type check for source_directory
+    if not isinstance(source_directory, Path):
+        try:
+            source_directory = Path(source_directory)
+        except (TypeError, ValueError):
+            return {}
+
     if exclude_patterns is None:
         exclude_patterns = [
             "**/test_*.py",
@@ -289,8 +304,11 @@ def discover_message_types(
             "**/tests/**",
             "**/__pycache__/**",
         ]
+    # Defensive type check for exclude_patterns
+    elif not isinstance(exclude_patterns, list):
+        exclude_patterns = []
 
-    discovered_types: dict[str, EnumMessageCategory] = {}
+    discovered_types: dict[str, EnumMessageCategory | EnumNodeOutputType] = {}
 
     # Collect all Python files
     python_files: list[Path] = []
@@ -302,6 +320,9 @@ def discover_message_types(
     for file_path in python_files:
         excluded = False
         for exclude in exclude_patterns:
+            # Skip non-string exclude patterns
+            if not isinstance(exclude, str):
+                continue
             if file_path.match(exclude):
                 excluded = True
                 break
@@ -338,7 +359,7 @@ def discover_message_types(
                 continue
 
             class_name = node.name
-            category: EnumMessageCategory | None = None
+            category: EnumMessageCategory | EnumNodeOutputType | None = None
 
             # Strategy 1: Check suffix pattern (most common)
             category = _get_category_from_suffix(class_name)
@@ -456,7 +477,16 @@ def discover_registered_routes(
 
     # Strategy 2: Static analysis of registration calls
     if source_directory is not None:
-        registered_types.update(_discover_routes_static(source_directory))
+        # Defensive type check - convert to Path if needed
+        if not isinstance(source_directory, Path):
+            try:
+                source_directory = Path(source_directory)
+            except (TypeError, ValueError):
+                pass
+            else:
+                registered_types.update(_discover_routes_static(source_directory))
+        else:
+            registered_types.update(_discover_routes_static(source_directory))
 
     return registered_types
 
@@ -494,8 +524,16 @@ def _discover_routes_static(source_directory: Path) -> set[str]:
 
     Returns:
         Set of message type names found in registration patterns.
+        Returns empty set if source_directory is invalid.
     """
     registered_types: set[str] = set()
+
+    # Defensive type check for source_directory
+    if not isinstance(source_directory, Path):
+        try:
+            source_directory = Path(source_directory)
+        except (TypeError, ValueError):
+            return registered_types
 
     # Registration patterns to search for.
     # Each pattern captures the message type name as group 1.
@@ -639,14 +677,36 @@ class RoutingCoverageValidator:
         self.source_directory = source_directory
         self.registry = registry
         self._lock = threading.Lock()
-        self._discovered_types: dict[str, EnumMessageCategory] | None = None
+        # Explicit initialization flag - more robust than checking data fields
+        # See _ensure_discovery() docstring for thread safety rationale
+        self._initialized = False
+        self._discovered_types: (
+            dict[str, EnumMessageCategory | EnumNodeOutputType] | None
+        ) = None
         self._registered_routes: set[str] | None = None
 
     def _ensure_discovery(self) -> None:
-        """Ensure discovery has been performed (lazy initialization)."""
-        if self._discovered_types is None:
+        """Ensure discovery has been performed (lazy initialization).
+
+        Thread Safety:
+            Uses double-checked locking with an explicit _initialized flag.
+
+            Why a separate flag instead of checking data fields?
+            - Eliminates ordering dependency between field assignments
+            - Future refactoring can't accidentally break the invariant
+            - The flag is only set True AFTER all fields are fully populated
+            - Any thread seeing _initialized=True is guaranteed to see
+              both _discovered_types and _registered_routes populated
+
+            The pattern:
+            1. Check _initialized without lock (fast path for already-initialized)
+            2. Acquire lock and re-check (prevents duplicate initialization)
+            3. Set all data fields first
+            4. Set _initialized=True last (makes state visible atomically)
+        """
+        if not self._initialized:
             with self._lock:
-                if self._discovered_types is None:
+                if not self._initialized:
                     self._discovered_types = discover_message_types(
                         self.source_directory
                     )
@@ -654,6 +714,9 @@ class RoutingCoverageValidator:
                         registry=self.registry,
                         source_directory=self.source_directory,
                     )
+                    # CRITICAL: Set _initialized LAST to ensure all fields
+                    # are visible to other threads before they skip the lock
+                    self._initialized = True
 
     def validate_coverage(self) -> list[ModelExecutionShapeViolationResult]:
         """Validate all message types are registered.
@@ -773,8 +836,15 @@ class RoutingCoverageValidator:
 
         Call this method if source files have changed and you need
         to re-discover message types and routes.
+
+        Thread Safety:
+            Clears _initialized FIRST to ensure any concurrent readers
+            see the invalidated state and wait for the lock.
         """
         with self._lock:
+            # CRITICAL: Clear _initialized FIRST to invalidate
+            # Any thread checking this will then acquire the lock
+            self._initialized = False
             self._discovered_types = None
             self._registered_routes = None
 

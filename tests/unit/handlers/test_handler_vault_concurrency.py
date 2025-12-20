@@ -189,7 +189,7 @@ class TestVaultAdapterConcurrency:
             results = await asyncio.gather(*tasks)
 
             # All should succeed
-            assert all(result["status"] == "success" for result in results)
+            assert all(output.result["status"] == "success" for output in results)
 
             # Circuit breaker should remain CLOSED with zero failures (using mixin attrs)
             assert handler._circuit_breaker_open is False
@@ -269,7 +269,7 @@ class TestVaultAdapterConcurrency:
             results = await asyncio.gather(*tasks)
 
             # All writes should succeed
-            assert all(result["status"] == "success" for result in results)
+            assert all(output.result["status"] == "success" for output in results)
 
             # Verify create_or_update_secret was called 30 times (once per request)
             assert (
@@ -431,7 +431,7 @@ class TestVaultAdapterConcurrency:
             results = await asyncio.gather(*tasks)
 
             # All should succeed despite thread pool size < request count
-            assert all(result["status"] == "success" for result in results)
+            assert all(output.result["status"] == "success" for output in results)
 
             # Verify all 25 requests were processed
             assert len(results) == 25

@@ -3,29 +3,34 @@
 """ONEX Infrastructure Enumerations Module.
 
 Provides infrastructure-specific enumerations for transport types,
-protocol identification, policy classification, execution shape
-validation, and other infrastructure concerns.
+protocol identification, policy classification, dispatch status,
+message categories, topic types, topic standards, and other infrastructure concerns.
 
 Exports:
+    EnumDispatchStatus: Dispatch operation status enumeration
     EnumInfraTransportType: Infrastructure transport type enumeration
+    EnumMessageCategory: Message category enumeration (EVENT, COMMAND, INTENT)
+    EnumNodeOutputType: Node output type enumeration for execution shape validation
     EnumPolicyType: Policy type enumeration for PolicyRegistry plugins
-    EnumHandlerType: Handler type enumeration for ONEX 4-node architecture
-    EnumMessageCategory: Message category enumeration for event-driven architecture
-    EnumExecutionShapeViolation: Execution shape violation types for validation
+    EnumTopicStandard: Topic standard enumeration (ONEX_KAFKA, ENVIRONMENT_AWARE)
+    EnumTopicType: Topic type enumeration (EVENTS, COMMANDS, INTENTS, SNAPSHOTS)
 """
 
-from omnibase_infra.enums.enum_execution_shape_violation import (
-    EnumExecutionShapeViolation,
-)
-from omnibase_infra.enums.enum_handler_type import EnumHandlerType
+from omnibase_core.enums import EnumTopicType
+
+from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
 from omnibase_infra.enums.enum_policy_type import EnumPolicyType
+from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 
 __all__ = [
-    "EnumExecutionShapeViolation",
-    "EnumHandlerType",
+    "EnumDispatchStatus",
     "EnumInfraTransportType",
     "EnumMessageCategory",
+    "EnumNodeOutputType",
     "EnumPolicyType",
+    "EnumTopicStandard",
+    "EnumTopicType",
 ]
