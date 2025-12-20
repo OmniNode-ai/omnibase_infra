@@ -876,3 +876,481 @@ class TestAllowedReturnTypesValidation:
             assert compute_rule.is_return_type_allowed(output_type) is True, (
                 f"COMPUTE should allow {output_type.value}"
             )
+
+
+class TestEnumMappingLogic:
+    """Test enum mapping between EnumMessageCategory and EnumNodeOutputType.
+
+    These tests verify that the ExecutionShapeValidator._is_return_type_allowed()
+    method correctly handles both enum types and properly maps EnumMessageCategory
+    values to EnumNodeOutputType values for validation.
+
+    Context:
+        PR #64 introduced EnumNodeOutputType separate from EnumMessageCategory.
+        PROJECTION is only in EnumNodeOutputType (not a routable message category).
+        The validator must handle both enum types since AST detection may return
+        either type depending on how return types are detected in source code.
+    """
+
+    def test_message_category_event_maps_correctly(self) -> None:
+        """EnumMessageCategory.EVENT maps correctly to EnumNodeOutputType.EVENT."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+
+        # EnumMessageCategory.EVENT should work via internal mapping
+        result = validator._is_return_type_allowed(
+            EnumMessageCategory.EVENT, EnumHandlerType.EFFECT, effect_rule
+        )
+        assert result is True, "EFFECT should allow EVENT via EnumMessageCategory"
+
+    def test_message_category_command_maps_correctly(self) -> None:
+        """EnumMessageCategory.COMMAND maps correctly to EnumNodeOutputType.COMMAND."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+
+        # EnumMessageCategory.COMMAND should work via internal mapping
+        result = validator._is_return_type_allowed(
+            EnumMessageCategory.COMMAND, EnumHandlerType.EFFECT, effect_rule
+        )
+        assert result is True, "EFFECT should allow COMMAND via EnumMessageCategory"
+
+    def test_message_category_intent_maps_correctly(self) -> None:
+        """EnumMessageCategory.INTENT maps correctly to EnumNodeOutputType.INTENT."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+
+        # EnumMessageCategory.INTENT should work via internal mapping
+        result = validator._is_return_type_allowed(
+            EnumMessageCategory.INTENT, EnumHandlerType.COMPUTE, compute_rule
+        )
+        assert result is True, "COMPUTE should allow INTENT via EnumMessageCategory"
+
+    def test_node_output_type_works_directly(self) -> None:
+        """EnumNodeOutputType values work directly without mapping."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+
+        # EnumNodeOutputType.EVENT should work directly
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.EVENT, EnumHandlerType.EFFECT, effect_rule
+            )
+            is True
+        )
+
+        # EnumNodeOutputType.PROJECTION should work directly for REDUCER
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.PROJECTION, EnumHandlerType.REDUCER, reducer_rule
+            )
+            is True
+        )
+
+    def test_mixed_enum_types_in_validation(self) -> None:
+        """Both enum types produce consistent validation results."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+
+        # EnumMessageCategory.EVENT and EnumNodeOutputType.EVENT should behave identically
+        result_message_cat = validator._is_return_type_allowed(
+            EnumMessageCategory.EVENT, EnumHandlerType.EFFECT, effect_rule
+        )
+        result_node_output = validator._is_return_type_allowed(
+            EnumNodeOutputType.EVENT, EnumHandlerType.EFFECT, effect_rule
+        )
+        assert result_message_cat == result_node_output, (
+            "Both enum types should produce consistent results for EVENT"
+        )
+
+
+class TestProjectionOnlyAllowedForReducer:
+    """Test that PROJECTION is a node output type only valid for REDUCERs.
+
+    PROJECTION represents state consolidation output and is NOT a message
+    routing category. It exists in EnumNodeOutputType but not EnumMessageCategory,
+    and can only be produced by REDUCER handlers.
+    """
+
+    def test_projection_allowed_for_reducer(self) -> None:
+        """PROJECTION is allowed as output for REDUCER handlers."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.PROJECTION, EnumHandlerType.REDUCER, reducer_rule
+            )
+            is True
+        ), "REDUCER should be allowed to produce PROJECTION"
+
+    def test_projection_not_allowed_for_effect(self) -> None:
+        """PROJECTION is NOT allowed as output for EFFECT handlers."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.PROJECTION, EnumHandlerType.EFFECT, effect_rule
+            )
+            is False
+        ), "EFFECT should NOT be allowed to produce PROJECTION"
+
+    def test_projection_not_allowed_for_orchestrator(self) -> None:
+        """PROJECTION is NOT allowed as output for ORCHESTRATOR handlers."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        orchestrator_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.PROJECTION,
+                EnumHandlerType.ORCHESTRATOR,
+                orchestrator_rule,
+            )
+            is False
+        ), "ORCHESTRATOR should NOT be allowed to produce PROJECTION"
+
+    def test_projection_allowed_for_compute(self) -> None:
+        """PROJECTION is allowed as output for COMPUTE handlers (most permissive)."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+
+        # COMPUTE is the most permissive handler type - allows all output types
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.PROJECTION, EnumHandlerType.COMPUTE, compute_rule
+            )
+            is True
+        ), "COMPUTE should be allowed to produce PROJECTION (most permissive)"
+
+
+class TestHandlerTypeOutputRestrictions:
+    """Comprehensive tests for handler-specific output type restrictions.
+
+    Each handler type has specific constraints on what output types it can produce:
+    - EFFECT: Can return EVENT, COMMAND but NOT PROJECTION or INTENT
+    - REDUCER: Can only return PROJECTION, NOT EVENT, COMMAND, or INTENT
+    - ORCHESTRATOR: Can return EVENT, COMMAND but NOT INTENT or PROJECTION
+    - COMPUTE: Can return any type (most permissive)
+    """
+
+    def test_effect_can_return_event(self) -> None:
+        """EFFECT handlers can return EVENT type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.EVENT, EnumHandlerType.EFFECT, effect_rule
+            )
+            is True
+        )
+
+    def test_effect_can_return_command(self) -> None:
+        """EFFECT handlers can return COMMAND type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.COMMAND, EnumHandlerType.EFFECT, effect_rule
+            )
+            is True
+        )
+
+    def test_effect_cannot_return_intent(self) -> None:
+        """EFFECT handlers cannot return INTENT type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+
+        # INTENT is not in EFFECT's allowed_return_types
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.INTENT, EnumHandlerType.EFFECT, effect_rule
+            )
+            is False
+        )
+
+    def test_effect_cannot_return_projection(self) -> None:
+        """EFFECT handlers cannot return PROJECTION type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        effect_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.EFFECT]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.PROJECTION, EnumHandlerType.EFFECT, effect_rule
+            )
+            is False
+        )
+
+    def test_reducer_can_return_projection(self) -> None:
+        """REDUCER handlers can only return PROJECTION type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.PROJECTION, EnumHandlerType.REDUCER, reducer_rule
+            )
+            is True
+        )
+
+    def test_reducer_cannot_return_event(self) -> None:
+        """REDUCER handlers cannot return EVENT type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.EVENT, EnumHandlerType.REDUCER, reducer_rule
+            )
+            is False
+        )
+
+    def test_reducer_cannot_return_command(self) -> None:
+        """REDUCER handlers cannot return COMMAND type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.COMMAND, EnumHandlerType.REDUCER, reducer_rule
+            )
+            is False
+        )
+
+    def test_reducer_cannot_return_intent(self) -> None:
+        """REDUCER handlers cannot return INTENT type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        reducer_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.REDUCER]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.INTENT, EnumHandlerType.REDUCER, reducer_rule
+            )
+            is False
+        )
+
+    def test_orchestrator_can_return_event(self) -> None:
+        """ORCHESTRATOR handlers can return EVENT type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.EVENT, EnumHandlerType.ORCHESTRATOR, orch_rule
+            )
+            is True
+        )
+
+    def test_orchestrator_can_return_command(self) -> None:
+        """ORCHESTRATOR handlers can return COMMAND type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.COMMAND, EnumHandlerType.ORCHESTRATOR, orch_rule
+            )
+            is True
+        )
+
+    def test_orchestrator_cannot_return_intent(self) -> None:
+        """ORCHESTRATOR handlers cannot return INTENT type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.INTENT, EnumHandlerType.ORCHESTRATOR, orch_rule
+            )
+            is False
+        )
+
+    def test_orchestrator_cannot_return_projection(self) -> None:
+        """ORCHESTRATOR handlers cannot return PROJECTION type."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        orch_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.ORCHESTRATOR]
+
+        assert (
+            validator._is_return_type_allowed(
+                EnumNodeOutputType.PROJECTION, EnumHandlerType.ORCHESTRATOR, orch_rule
+            )
+            is False
+        )
+
+    def test_compute_can_return_any_type(self) -> None:
+        """COMPUTE handlers can return any output type (most permissive)."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+
+        # COMPUTE is the most permissive - should allow all output types
+        for output_type in EnumNodeOutputType:
+            assert (
+                validator._is_return_type_allowed(
+                    output_type, EnumHandlerType.COMPUTE, compute_rule
+                )
+                is True
+            ), f"COMPUTE should allow {output_type.value}"
+
+
+class TestEnumMappingEdgeCases:
+    """Test edge cases and forward compatibility for enum mapping.
+
+    These tests verify that the mapping logic handles edge cases gracefully
+    and provides future-proof behavior for potential enum extensions.
+    """
+
+    def test_all_message_categories_have_output_type_mapping(self) -> None:
+        """Every EnumMessageCategory value has a corresponding EnumNodeOutputType."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+
+        # For each message category, the validator should return True or False
+        # (not raise an exception) when called with COMPUTE (most permissive)
+        for category in EnumMessageCategory:
+            result = validator._is_return_type_allowed(
+                category, EnumHandlerType.COMPUTE, compute_rule
+            )
+            # COMPUTE allows all mapped types, so all should be True
+            assert result is True, (
+                f"EnumMessageCategory.{category.name} should map and be allowed for COMPUTE"
+            )
+
+    def test_all_node_output_types_handled(self) -> None:
+        """Every EnumNodeOutputType value is properly handled."""
+        from omnibase_infra.validation.execution_shape_validator import (
+            EXECUTION_SHAPE_RULES,
+        )
+
+        validator = ExecutionShapeValidator()
+        compute_rule = EXECUTION_SHAPE_RULES[EnumHandlerType.COMPUTE]
+
+        for output_type in EnumNodeOutputType:
+            result = validator._is_return_type_allowed(
+                output_type, EnumHandlerType.COMPUTE, compute_rule
+            )
+            assert result is True, (
+                f"EnumNodeOutputType.{output_type.name} should be allowed for COMPUTE"
+            )
+
+    def test_message_category_to_output_type_value_consistency(self) -> None:
+        """EnumMessageCategory and EnumNodeOutputType share consistent string values.
+
+        The mapping relies on both enums having the same string values for
+        EVENT, COMMAND, and INTENT. This test verifies that assumption.
+        """
+        # Shared categories should have identical string values
+        assert EnumMessageCategory.EVENT.value == EnumNodeOutputType.EVENT.value
+        assert EnumMessageCategory.COMMAND.value == EnumNodeOutputType.COMMAND.value
+        assert EnumMessageCategory.INTENT.value == EnumNodeOutputType.INTENT.value
+
+    def test_projection_not_in_message_category(self) -> None:
+        """PROJECTION exists only in EnumNodeOutputType, not EnumMessageCategory.
+
+        This is intentional: PROJECTION is a node output type for state
+        consolidation, not a message routing category for Kafka topics.
+        """
+        # EnumMessageCategory should not have PROJECTION
+        message_category_names = {m.name for m in EnumMessageCategory}
+        assert "PROJECTION" not in message_category_names, (
+            "PROJECTION should not be a message routing category"
+        )
+
+        # EnumNodeOutputType should have PROJECTION
+        node_output_names = {o.name for o in EnumNodeOutputType}
+        assert "PROJECTION" in node_output_names, (
+            "PROJECTION should be a valid node output type"
+        )

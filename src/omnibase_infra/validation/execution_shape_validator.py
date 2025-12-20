@@ -195,6 +195,27 @@ _TIME_FUNCTION_NAMES: frozenset[str] = frozenset(
     }
 )
 
+# Mapping from EnumMessageCategory to EnumNodeOutputType for type normalization.
+#
+# Used by _is_return_type_allowed() to convert message categories to their
+# corresponding node output types during execution shape validation. The rules
+# use EnumNodeOutputType consistently, but message category detection may return
+# EnumMessageCategory values that need conversion.
+#
+# FORWARD COMPATIBILITY NOTE:
+# If new values are added to EnumMessageCategory in the future, this mapping
+# must be updated. The .get() usage in _is_return_type_allowed() ensures
+# graceful handling - unknown categories are disallowed by default rather
+# than causing a runtime error.
+#
+# Both enums share EVENT, COMMAND, INTENT with same string values, so this
+# mapping provides a clean bridge between the two type systems.
+_MESSAGE_CATEGORY_TO_OUTPUT_TYPE: dict[EnumMessageCategory, EnumNodeOutputType] = {
+    EnumMessageCategory.EVENT: EnumNodeOutputType.EVENT,
+    EnumMessageCategory.COMMAND: EnumNodeOutputType.COMMAND,
+    EnumMessageCategory.INTENT: EnumNodeOutputType.INTENT,
+}
+
 # Canonical execution shape rules for each handler type.
 # All output types use EnumNodeOutputType consistently (EVENT, COMMAND, INTENT, PROJECTION).
 # EnumMessageCategory (EVENT, COMMAND, INTENT) is used for message routing topics,
@@ -679,6 +700,10 @@ class ExecutionShapeValidator:
         EnumNodeOutputType (PROJECTION) appropriately by converting
         message categories to their corresponding node output types.
 
+        Uses the module-level _MESSAGE_CATEGORY_TO_OUTPUT_TYPE mapping for
+        type conversion. See that constant's docstring for forward
+        compatibility notes.
+
         Args:
             category: The detected message category or node output type.
             handler_type: The handler type to check against.
@@ -688,28 +713,16 @@ class ExecutionShapeValidator:
             True if the return type is allowed, False otherwise.
         """
         # Convert EnumMessageCategory to EnumNodeOutputType for validation
-        # since the rules now use EnumNodeOutputType consistently
+        # since the rules use EnumNodeOutputType consistently
         output_type: EnumNodeOutputType
         if isinstance(category, EnumNodeOutputType):
             output_type = category
         elif isinstance(category, EnumMessageCategory):
-            # Map EnumMessageCategory to EnumNodeOutputType
-            # Both enums share EVENT, COMMAND, INTENT with same string values
-            #
-            # FORWARD COMPATIBILITY NOTE:
-            # If new values are added to EnumMessageCategory in the future,
-            # this mapping must be updated. The .get() with None check below
-            # ensures graceful handling - unknown categories are disallowed
-            # by default rather than causing a runtime error.
-            category_to_output = {
-                EnumMessageCategory.EVENT: EnumNodeOutputType.EVENT,
-                EnumMessageCategory.COMMAND: EnumNodeOutputType.COMMAND,
-                EnumMessageCategory.INTENT: EnumNodeOutputType.INTENT,
-            }
-            mapped_type = category_to_output.get(category)
+            # Use module-level mapping constant for type conversion
+            mapped_type = _MESSAGE_CATEGORY_TO_OUTPUT_TYPE.get(category)
             if mapped_type is None:
                 # Forward compatibility: Unknown/new message category - disallow
-                # by default until explicitly added to the mapping above.
+                # by default until explicitly added to the module-level mapping.
                 return False
             output_type = mapped_type
         else:
