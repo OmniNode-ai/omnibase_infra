@@ -17,7 +17,6 @@ Related:
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -65,7 +64,7 @@ class MockMessageDispatcher:
     def node_kind(self) -> EnumNodeKind:
         return self._node_kind
 
-    async def handle(self, envelope: Any) -> ModelDispatchResult:
+    async def handle(self, envelope: object) -> ModelDispatchResult:
         return ModelDispatchResult(
             status=EnumDispatchStatus.SUCCESS,
             topic="test.events",

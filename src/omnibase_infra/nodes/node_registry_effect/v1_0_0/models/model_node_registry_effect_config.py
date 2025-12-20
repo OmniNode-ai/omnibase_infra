@@ -23,6 +23,9 @@ class ModelNodeRegistryEffectConfig(BaseModel):
         circuit_breaker_reset_timeout: Seconds before circuit breaker auto-resets.
             After this timeout, the circuit enters half-open state and allows
             a test request to determine if the service has recovered.
+        slow_operation_threshold_ms: Threshold in milliseconds for logging slow
+            operation warnings. Operations exceeding this duration will be logged
+            at warning level for performance monitoring.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)

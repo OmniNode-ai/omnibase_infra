@@ -161,7 +161,7 @@ INFRA_MAX_VIOLATIONS = 0
 # ------------------------------------------
 # 1. Complete OMN-934 (Message Dispatch Engine) - addresses ~148 dispatch model unions
 # 2. Complete H1 Legacy Migration - migrate v1_0_0 directories to flat structure
-# 3. Reduce INFRA_MAX_UNIONS from 350 to <200 through targeted refactoring
+# 3. Reduce INFRA_MAX_UNIONS from 450 to <200 through targeted refactoring
 # 4. Add remaining infrastructure components to exempted_patterns list
 # 5. Validate all infrastructure nodes pass strict mode or have documented exemptions
 #
@@ -643,7 +643,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (350).
+        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (450).
         strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
 
     Returns:

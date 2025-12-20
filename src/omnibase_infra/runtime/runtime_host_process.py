@@ -59,7 +59,6 @@ from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycle
 from omnibase_infra.runtime.wiring import wire_default_handlers
 
 if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
     from omnibase_infra.event_bus.models import ModelEventMessage

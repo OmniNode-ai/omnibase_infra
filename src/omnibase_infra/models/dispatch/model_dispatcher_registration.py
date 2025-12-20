@@ -97,7 +97,6 @@ class ModelDispatcherRegistration(BaseModel):
         frozen=True,
         extra="forbid",
         from_attributes=True,
-        validate_assignment=True,
     )
 
     # ---- Dispatcher Identity ----

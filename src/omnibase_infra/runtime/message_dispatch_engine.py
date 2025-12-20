@@ -65,9 +65,12 @@ Thread Safety:
 
     **Metrics Thread Safety**:
     Structured metrics updates are protected by ``_metrics_lock`` to prevent
-    race conditions during concurrent dispatch operations. This lock ensures
-    atomic read-modify-write operations on ``_structured_metrics``. The lock
-    is held briefly only during metrics updates, not during dispatcher execution.
+    race conditions during concurrent dispatch operations. All read-modify-write
+    operations on ``_structured_metrics`` are performed within a single lock
+    acquisition to prevent TOCTOU (time-of-check-to-time-of-use) race conditions.
+    The computations within the lock (``record_execution``, ``model_copy``) are
+    pure and fast, so holding the lock during these operations is acceptable.
+    The lock is never held during I/O operations (dispatcher execution).
 
     Legacy dict-based metrics (``_metrics``) use simple atomic increments and
     may be approximate under very high concurrency. For production monitoring,
@@ -91,7 +94,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -194,11 +197,11 @@ _module_logger = logging.getLogger(__name__)
 
 # Type alias for dispatcher functions
 #
-# ONEX Pattern Exception (Documented - PR #61 Review):
-# ModelEventEnvelope[Any] is an intentional exception to the "no Any types" rule.
+# Design Note (PR #61 Review):
+# ModelEventEnvelope[object] is used instead of Any to satisfy ONEX "no Any types" rule.
 #
 # Rationale:
-# - Input: ModelEventEnvelope[Any] is intentionally generic because dispatchers
+# - Input: ModelEventEnvelope[object] is intentionally generic because dispatchers
 #   must accept envelopes with any payload type. The dispatch engine routes based
 #   on topic/category/message_type, not payload shape. Using a TypeVar would require
 #   dispatchers to be generic, adding complexity without benefit since the engine
@@ -207,20 +210,20 @@ _module_logger = logging.getLogger(__name__)
 #   types: str (single topic), list[str] (multiple topics), or None (no output).
 #   Dispatchers can be sync or async.
 #
-# Alternative considered:
-# - TypeVar[T] with Generic dispatcher interface - rejected because it would require
-#   all dispatcher registrations to specify payload types at registration time,
-#   defeating the purpose of runtime type-based routing.
+# Using `object` instead of `Any` provides:
+# - Explicit "any object" semantics that are more informative to type checkers
+# - Compliance with ONEX coding guidelines
+# - Same runtime behavior as Any but with clearer intent
 #
 # See also: ProtocolMessageDispatcher in dispatcher_registry.py for protocol-based
 # dispatchers that return ModelDispatchResult.
 DispatcherFunc = Callable[
-    [ModelEventEnvelope[Any]], DispatcherOutput | Awaitable[DispatcherOutput]
+    [ModelEventEnvelope[object]], DispatcherOutput | Awaitable[DispatcherOutput]
 ]
 
 # Sync-only dispatcher type for use with run_in_executor
 # Used internally after runtime type narrowing via inspect.iscoroutinefunction
-_SyncDispatcherFunc = Callable[[ModelEventEnvelope[Any]], DispatcherOutput]
+_SyncDispatcherFunc = Callable[[ModelEventEnvelope[object]], DispatcherOutput]
 
 
 class DispatchEntryInternal:
@@ -465,7 +468,7 @@ class MessageDispatchEngine:
         Args:
             dispatcher_id: Unique identifier for this dispatcher
             dispatcher: Callable that processes messages. Can be sync or async.
-                Signature: (envelope: ModelEventEnvelope[Any]) -> DispatcherOutput
+                Signature: (envelope: ModelEventEnvelope[object]) -> DispatcherOutput
             category: Message category this dispatcher processes
             message_types: Optional set of specific message types to handle.
                 When None, handles all message types in the category.
@@ -663,7 +666,7 @@ class MessageDispatchEngine:
     async def dispatch(
         self,
         topic: str,
-        envelope: ModelEventEnvelope[Any],
+        envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult:
         """
         Dispatch a message to matching dispatchers.
@@ -912,42 +915,37 @@ class MessageDispatchEngine:
                 ) * 1000
                 executed_dispatcher_ids.append(dispatcher_entry.dispatcher_id)
 
-                # Update per-dispatcher metrics (protected by lock)
-                # Read existing metrics under lock, compute updates outside lock,
-                # then update atomically with model_copy to minimize lock hold time
+                # Update per-dispatcher metrics atomically (protected by lock)
+                # All read-modify-write operations are performed within a single
+                # lock acquisition to prevent TOCTOU race conditions. The computations
+                # (record_execution, model_copy) are pure and fast, so holding the
+                # lock during these operations is acceptable and ensures consistency.
                 with self._metrics_lock:
                     existing_dispatcher_metrics = (
                         self._structured_metrics.dispatcher_metrics.get(
                             dispatcher_entry.dispatcher_id
                         )
                     )
-                    current_execution_count = (
-                        self._structured_metrics.dispatcher_execution_count
+                    if existing_dispatcher_metrics is None:
+                        existing_dispatcher_metrics = ModelDispatcherMetrics(
+                            dispatcher_id=dispatcher_entry.dispatcher_id
+                        )
+                    new_dispatcher_metrics = (
+                        existing_dispatcher_metrics.record_execution(
+                            duration_ms=dispatcher_duration_ms,
+                            success=True,
+                            topic=topic,
+                        )
                     )
-                    current_dispatcher_metrics = (
-                        self._structured_metrics.dispatcher_metrics
-                    )
-
-                # Compute new metrics outside lock (no I/O, but keeps lock minimal)
-                if existing_dispatcher_metrics is None:
-                    existing_dispatcher_metrics = ModelDispatcherMetrics(
-                        dispatcher_id=dispatcher_entry.dispatcher_id
-                    )
-                new_dispatcher_metrics = existing_dispatcher_metrics.record_execution(
-                    duration_ms=dispatcher_duration_ms,
-                    success=True,
-                    topic=topic,
-                )
-                new_dispatcher_metrics_dict = {
-                    **current_dispatcher_metrics,
-                    dispatcher_entry.dispatcher_id: new_dispatcher_metrics,
-                }
-
-                # Update structured metrics atomically with model_copy
-                with self._metrics_lock:
+                    new_dispatcher_metrics_dict = {
+                        **self._structured_metrics.dispatcher_metrics,
+                        dispatcher_entry.dispatcher_id: new_dispatcher_metrics,
+                    }
                     self._structured_metrics = self._structured_metrics.model_copy(
                         update={
-                            "dispatcher_execution_count": current_execution_count + 1,
+                            "dispatcher_execution_count": (
+                                self._structured_metrics.dispatcher_execution_count + 1
+                            ),
                             "dispatcher_metrics": new_dispatcher_metrics_dict,
                         }
                     )
@@ -992,9 +990,11 @@ class MessageDispatchEngine:
                 )
                 dispatcher_errors.append(error_msg)
 
-                # Update per-dispatcher metrics with error (protected by lock)
-                # Read existing metrics under lock, compute updates outside lock,
-                # then update atomically with model_copy to minimize lock hold time
+                # Update per-dispatcher metrics with error atomically (protected by lock)
+                # All read-modify-write operations are performed within a single
+                # lock acquisition to prevent TOCTOU race conditions. The computations
+                # (record_execution, model_copy) are pure and fast, so holding the
+                # lock during these operations is acceptable and ensures consistency.
                 with self._metrics_lock:
                     self._metrics["dispatcher_error_count"] += 1
                     existing_dispatcher_metrics = (
@@ -1002,39 +1002,31 @@ class MessageDispatchEngine:
                             dispatcher_entry.dispatcher_id
                         )
                     )
-                    current_execution_count = (
-                        self._structured_metrics.dispatcher_execution_count
+                    if existing_dispatcher_metrics is None:
+                        existing_dispatcher_metrics = ModelDispatcherMetrics(
+                            dispatcher_id=dispatcher_entry.dispatcher_id
+                        )
+                    new_dispatcher_metrics = (
+                        existing_dispatcher_metrics.record_execution(
+                            duration_ms=dispatcher_duration_ms,
+                            success=False,
+                            topic=topic,
+                            # Use sanitized error message for metrics as well
+                            error_message=sanitized_error,
+                        )
                     )
-                    current_error_count = (
-                        self._structured_metrics.dispatcher_error_count
-                    )
-                    current_dispatcher_metrics = (
-                        self._structured_metrics.dispatcher_metrics
-                    )
-
-                # Compute new metrics outside lock (no I/O, but keeps lock minimal)
-                if existing_dispatcher_metrics is None:
-                    existing_dispatcher_metrics = ModelDispatcherMetrics(
-                        dispatcher_id=dispatcher_entry.dispatcher_id
-                    )
-                new_dispatcher_metrics = existing_dispatcher_metrics.record_execution(
-                    duration_ms=dispatcher_duration_ms,
-                    success=False,
-                    topic=topic,
-                    # Use sanitized error message for metrics as well
-                    error_message=sanitized_error,
-                )
-                new_dispatcher_metrics_dict = {
-                    **current_dispatcher_metrics,
-                    dispatcher_entry.dispatcher_id: new_dispatcher_metrics,
-                }
-
-                # Update structured metrics atomically with model_copy
-                with self._metrics_lock:
+                    new_dispatcher_metrics_dict = {
+                        **self._structured_metrics.dispatcher_metrics,
+                        dispatcher_entry.dispatcher_id: new_dispatcher_metrics,
+                    }
                     self._structured_metrics = self._structured_metrics.model_copy(
                         update={
-                            "dispatcher_execution_count": current_execution_count + 1,
-                            "dispatcher_error_count": current_error_count + 1,
+                            "dispatcher_execution_count": (
+                                self._structured_metrics.dispatcher_execution_count + 1
+                            ),
+                            "dispatcher_error_count": (
+                                self._structured_metrics.dispatcher_error_count + 1
+                            ),
                             "dispatcher_metrics": new_dispatcher_metrics_dict,
                         }
                     )
@@ -1223,7 +1215,7 @@ class MessageDispatchEngine:
     async def _execute_dispatcher(
         self,
         entry: DispatchEntryInternal,
-        envelope: ModelEventEnvelope[Any],
+        envelope: ModelEventEnvelope[object],
     ) -> DispatcherOutput:
         """
         Execute a dispatcher (sync or async).

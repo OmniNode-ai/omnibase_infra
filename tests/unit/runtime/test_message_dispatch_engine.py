@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -218,7 +217,7 @@ class TestHandlerRegistration:
     ) -> None:
         """Test successful sync handler registration."""
 
-        def sync_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def sync_handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         dispatch_engine.register_dispatcher(
@@ -234,7 +233,7 @@ class TestHandlerRegistration:
     ) -> None:
         """Test successful async handler registration."""
 
-        async def async_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def async_handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         dispatch_engine.register_dispatcher(
@@ -250,7 +249,7 @@ class TestHandlerRegistration:
     ) -> None:
         """Test handler registration with specific message types."""
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         dispatch_engine.register_dispatcher(
@@ -267,13 +266,13 @@ class TestHandlerRegistration:
     ) -> None:
         """Test registering handlers for different categories."""
 
-        def event_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def event_handler(envelope: ModelEventEnvelope[object]) -> str:
             return "event"
 
-        def command_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def command_handler(envelope: ModelEventEnvelope[object]) -> str:
             return "command"
 
-        def intent_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def intent_handler(envelope: ModelEventEnvelope[object]) -> str:
             return "intent"
 
         dispatch_engine.register_dispatcher(
@@ -299,7 +298,7 @@ class TestHandlerRegistration:
     ) -> None:
         """Test that duplicate dispatcher_id raises DUPLICATE_REGISTRATION error."""
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         dispatch_engine.register_dispatcher(
@@ -323,7 +322,7 @@ class TestHandlerRegistration:
     ) -> None:
         """Test that empty dispatcher_id raises INVALID_PARAMETER error."""
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -340,7 +339,7 @@ class TestHandlerRegistration:
     ) -> None:
         """Test that whitespace-only dispatcher_id raises INVALID_PARAMETER error."""
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -383,7 +382,7 @@ class TestHandlerRegistration:
     ) -> None:
         """Test that invalid category raises INVALID_PARAMETER error."""
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -401,7 +400,7 @@ class TestHandlerRegistration:
         """Test that handler registration after freeze raises INVALID_STATE error."""
         dispatch_engine.freeze()
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         with pytest.raises(ModelOnexError) as exc_info:
@@ -469,7 +468,7 @@ class TestFreezePattern:
     ) -> None:
         """Test successful freeze with valid route-handler configuration."""
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         dispatch_engine.register_dispatcher(
@@ -519,7 +518,7 @@ class TestDispatchSuccess:
         """Test dispatch with a single matching handler."""
         results: list[str] = []
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler(envelope: ModelEventEnvelope[object]) -> str:
             results.append("handled")
             return "output.topic.v1"
 
@@ -554,7 +553,7 @@ class TestDispatchSuccess:
         """Test dispatch with a sync handler (runs in executor)."""
         results: list[str] = []
 
-        def sync_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def sync_handler(envelope: ModelEventEnvelope[object]) -> str:
             results.append("sync_handled")
             return "sync.output.v1"
 
@@ -587,11 +586,11 @@ class TestDispatchSuccess:
         """Test fan-out dispatch to multiple handlers via multiple routes."""
         results: list[str] = []
 
-        async def handler1(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler1(envelope: ModelEventEnvelope[object]) -> str:
             results.append("handler1")
             return "output1.v1"
 
-        async def handler2(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler2(envelope: ModelEventEnvelope[object]) -> str:
             results.append("handler2")
             return "output2.v1"
 
@@ -641,7 +640,7 @@ class TestDispatchSuccess:
     ) -> None:
         """Test handler that returns list of output topics."""
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> list[str]:
+        async def handler(envelope: ModelEventEnvelope[object]) -> list[str]:
             return ["output1.v1", "output2.v1", "output3.v1"]
 
         dispatch_engine.register_dispatcher(
@@ -674,7 +673,7 @@ class TestDispatchSuccess:
     ) -> None:
         """Test handler that returns None (no outputs)."""
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def handler(envelope: ModelEventEnvelope[object]) -> None:
             pass  # No return value
 
         dispatch_engine.register_dispatcher(
@@ -706,11 +705,11 @@ class TestDispatchSuccess:
         """Test dispatch with message type filtering."""
         results: list[str] = []
 
-        async def user_created_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def user_created_handler(envelope: ModelEventEnvelope[object]) -> str:
             results.append("user_created")
             return "created.output"
 
-        async def user_updated_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def user_updated_handler(envelope: ModelEventEnvelope[object]) -> str:
             results.append("user_updated")
             return "updated.output"
 
@@ -760,7 +759,7 @@ class TestDispatchSuccess:
     ) -> None:
         """Test that dispatch result preserves envelope correlation_id."""
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def handler(envelope: ModelEventEnvelope[object]) -> None:
             pass
 
         dispatch_engine.register_dispatcher(
@@ -908,7 +907,7 @@ class TestDispatchErrors:
     ) -> None:
         """Test that handler exception results in HANDLER_ERROR status."""
 
-        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def failing_handler(envelope: ModelEventEnvelope[object]) -> None:
             raise ValueError("Something went wrong!")
 
         dispatch_engine.register_dispatcher(
@@ -941,11 +940,11 @@ class TestDispatchErrors:
         """Test dispatch where some handlers succeed and some fail."""
         results: list[str] = []
 
-        async def success_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def success_handler(envelope: ModelEventEnvelope[object]) -> str:
             results.append("success")
             return "success.output"
 
-        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def failing_handler(envelope: ModelEventEnvelope[object]) -> None:
             results.append("failing")
             raise RuntimeError("Handler failed!")
 
@@ -1002,7 +1001,7 @@ class TestDispatchErrors:
     ) -> None:
         """Test that disabled routes are not matched."""
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "handled"
 
         dispatch_engine.register_dispatcher(
@@ -1050,7 +1049,7 @@ class TestDispatchErrors:
     ) -> None:
         """Test that HANDLER_ERROR result preserves envelope correlation_id."""
 
-        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def failing_handler(envelope: ModelEventEnvelope[object]) -> None:
             raise ValueError("Handler crashed!")
 
         dispatch_engine.register_dispatcher(
@@ -1096,10 +1095,10 @@ class TestDispatchErrors:
     ) -> None:
         """Test that partial handler failure result preserves envelope correlation_id."""
 
-        async def success_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def success_handler(envelope: ModelEventEnvelope[object]) -> str:
             return "success"
 
-        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def failing_handler(envelope: ModelEventEnvelope[object]) -> None:
             raise RuntimeError("Partial failure!")
 
         dispatch_engine.register_dispatcher(
@@ -1157,7 +1156,7 @@ class TestAsyncHandlers:
         """Test async handler that uses await."""
         results: list[str] = []
 
-        async def async_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def async_handler(envelope: ModelEventEnvelope[object]) -> str:
             await asyncio.sleep(0.01)  # Simulate async work
             results.append("async_complete")
             return "async.output"
@@ -1215,7 +1214,7 @@ class TestMetrics:
     ) -> None:
         """Test metrics are updated on successful dispatch."""
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "output"
 
         dispatch_engine.register_dispatcher(
@@ -1251,7 +1250,7 @@ class TestMetrics:
     ) -> None:
         """Test metrics are updated on handler error."""
 
-        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def failing_handler(envelope: ModelEventEnvelope[object]) -> None:
             raise ValueError("Failure!")
 
         dispatch_engine.register_dispatcher(
@@ -1321,7 +1320,7 @@ class TestMetrics:
     ) -> None:
         """Test metrics accumulate across multiple dispatches."""
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "output"
 
         dispatch_engine.register_dispatcher(
@@ -1366,10 +1365,10 @@ class TestDeterministicRouting:
         """Test that same input always produces same handler selection."""
         handler_calls: list[list[str]] = []
 
-        async def handler1(envelope: ModelEventEnvelope[Any]) -> None:
+        async def handler1(envelope: ModelEventEnvelope[object]) -> None:
             pass
 
-        async def handler2(envelope: ModelEventEnvelope[Any]) -> None:
+        async def handler2(envelope: ModelEventEnvelope[object]) -> None:
             pass
 
         dispatch_engine.register_dispatcher(
@@ -1420,10 +1419,10 @@ class TestDeterministicRouting:
     ) -> None:
         """Test that different topics route to different handlers."""
 
-        async def user_handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def user_handler(envelope: ModelEventEnvelope[object]) -> None:
             pass
 
-        async def order_handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def order_handler(envelope: ModelEventEnvelope[object]) -> None:
             pass
 
         dispatch_engine.register_dispatcher(
@@ -1486,7 +1485,7 @@ class TestPureRouting:
         """Test that routing is based on topic/category, not payload content."""
         handler_calls: list[str] = []
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> None:
+        async def handler(envelope: ModelEventEnvelope[object]) -> None:
             handler_calls.append(type(envelope.payload).__name__)
 
         dispatch_engine.register_dispatcher(
@@ -1527,7 +1526,7 @@ class TestPureRouting:
         """Test that outputs are collected for publishing, not interpreted."""
 
         # Handler returns various output formats
-        async def handler(envelope: ModelEventEnvelope[Any]) -> list[str]:
+        async def handler(envelope: ModelEventEnvelope[object]) -> list[str]:
             return [
                 "output.topic.v1",
                 "another.output.v1",
@@ -1582,7 +1581,7 @@ class TestStringRepresentation:
     ) -> None:
         """Test __str__ method with routes and handlers."""
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> None:
+        def handler(envelope: ModelEventEnvelope[object]) -> None:
             pass
 
         dispatch_engine.register_dispatcher(
@@ -1648,7 +1647,7 @@ class TestProperties:
     def test_handler_count(self, dispatch_engine: MessageDispatchEngine) -> None:
         """Test handler_count property."""
 
-        def handler(envelope: ModelEventEnvelope[Any]) -> None:
+        def handler(envelope: ModelEventEnvelope[object]) -> None:
             pass
 
         assert dispatch_engine.handler_count == 0
@@ -1792,7 +1791,7 @@ class TestDispatchResultRetryScenarios:
 def _dispatch_in_thread_helper(
     dispatch_engine: MessageDispatchEngine,
     topic: str,
-    envelope: ModelEventEnvelope[Any],
+    envelope: ModelEventEnvelope[object],
 ) -> ModelDispatchResult:
     """Run async dispatch from a synchronous thread context.
 
@@ -1822,8 +1821,8 @@ def _dispatch_in_thread_helper(
 
 
 def _create_envelope_with_category(
-    payload: Any, category: EnumMessageCategory
-) -> ModelEventEnvelope[Any]:
+    payload: object, category: EnumMessageCategory
+) -> ModelEventEnvelope[object]:
     """Create an envelope with infer_category method for testing.
 
     This helper adds the infer_category method that the MessageDispatchEngine
@@ -1862,7 +1861,7 @@ class TestMessageDispatchEngineConcurrency:
         results: list[str] = []
         results_lock = threading.Lock()  # Protect the results list
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler(envelope: ModelEventEnvelope[object]) -> str:
             # Thread-safe append to results
             with results_lock:
                 results.append(f"handled-{envelope.payload.user_id}")
@@ -1940,12 +1939,12 @@ class TestMessageDispatchEngineConcurrency:
         handler2_results: list[str] = []
         lock = threading.Lock()
 
-        async def handler1(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler1(envelope: ModelEventEnvelope[object]) -> str:
             with lock:
                 handler1_results.append(f"h1-{envelope.payload.user_id}")
             return "output1.v1"
 
-        async def handler2(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler2(envelope: ModelEventEnvelope[object]) -> str:
             with lock:
                 handler2_results.append(f"h2-{envelope.payload.user_id}")
             return "output2.v1"
@@ -2036,12 +2035,12 @@ class TestMessageDispatchEngineConcurrency:
         failure_results: list[str] = []
         lock = threading.Lock()
 
-        async def success_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def success_handler(envelope: ModelEventEnvelope[object]) -> str:
             with lock:
                 success_results.append(f"success-{envelope.payload.user_id}")
             return "success.output.v1"
 
-        async def failing_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def failing_handler(envelope: ModelEventEnvelope[object]) -> str:
             with lock:
                 failure_results.append(f"failed-{envelope.payload.user_id}")
             raise RuntimeError("Simulated handler failure")
@@ -2139,7 +2138,7 @@ class TestMessageDispatchEngineConcurrency:
         dispatch_engine = MessageDispatchEngine()
         dispatch_count = 50  # Higher count to stress test metrics
 
-        async def handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def handler(envelope: ModelEventEnvelope[object]) -> str:
             return "output.v1"
 
         dispatch_engine.register_dispatcher(
@@ -2229,7 +2228,7 @@ class TestConcurrentDispatchAdvanced:
         execution_order: list[str] = []
         lock = threading.Lock()
 
-        async def variable_delay_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def variable_delay_handler(envelope: ModelEventEnvelope[object]) -> str:
             """Handler with random delay to simulate varying workloads."""
             user_id = envelope.payload.user_id
             # Random delay between 1-50ms
@@ -2306,7 +2305,7 @@ class TestConcurrentDispatchAdvanced:
         dispatch_count = 100  # High count for stress testing
         thread_count = 30  # More threads than typical
 
-        async def fast_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def fast_handler(envelope: ModelEventEnvelope[object]) -> str:
             # Minimal work to maximize contention on metrics lock
             return "output.v1"
 
@@ -2385,12 +2384,12 @@ class TestConcurrentDispatchAdvanced:
         updated_results: list[str] = []
         lock = threading.Lock()
 
-        async def created_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def created_handler(envelope: ModelEventEnvelope[object]) -> str:
             with lock:
                 created_results.append(f"created-{envelope.payload.user_id}")
             return "created.output"
 
-        async def updated_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def updated_handler(envelope: ModelEventEnvelope[object]) -> str:
             with lock:
                 updated_results.append(f"updated-{envelope.payload.data}")
             return "updated.output"
@@ -2491,7 +2490,7 @@ class TestConcurrentDispatchAdvanced:
         results_count = 0
         lock = threading.Lock()
 
-        async def stable_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def stable_handler(envelope: ModelEventEnvelope[object]) -> str:
             nonlocal results_count
             with lock:
                 results_count += 1
@@ -2571,13 +2570,13 @@ class TestConcurrentDispatchAdvanced:
         lock = threading.Lock()
 
         # Sync handler (will be run in executor)
-        def sync_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        def sync_handler(envelope: ModelEventEnvelope[object]) -> str:
             with lock:
                 sync_results.append(f"sync-{envelope.payload.user_id}")
             return "sync.output"
 
         # Async handler
-        async def async_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def async_handler(envelope: ModelEventEnvelope[object]) -> str:
             await asyncio.sleep(0.001)  # Small delay
             with lock:
                 async_results.append(f"async-{envelope.payload.user_id}")
@@ -2657,7 +2656,7 @@ class TestConcurrentDispatchAdvanced:
         received_correlation_ids: list[tuple[str, UUID]] = []
         lock = threading.Lock()
 
-        async def tracking_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def tracking_handler(envelope: ModelEventEnvelope[object]) -> str:
             with lock:
                 received_correlation_ids.append(
                     (envelope.payload.user_id, envelope.correlation_id)
@@ -2680,7 +2679,7 @@ class TestConcurrentDispatchAdvanced:
         dispatch_engine.freeze()
 
         # Create envelopes with unique correlation IDs
-        envelopes_with_ids: list[tuple[ModelEventEnvelope[Any], UUID]] = []
+        envelopes_with_ids: list[tuple[ModelEventEnvelope[object], UUID]] = []
         for i in range(dispatch_count):
             correlation_id = uuid4()
             envelope = ModelEventEnvelope(
@@ -2733,7 +2732,7 @@ class TestConcurrentDispatchAdvanced:
         received_payloads: list[tuple[str, str]] = []
         lock = threading.Lock()
 
-        async def verifying_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def verifying_handler(envelope: ModelEventEnvelope[object]) -> str:
             user_id = envelope.payload.user_id
             name = envelope.payload.name
             with lock:
@@ -2810,7 +2809,7 @@ class TestCommandAndIntentDispatch:
         """Test successful command dispatch."""
         results: list[str] = []
 
-        async def command_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def command_handler(envelope: ModelEventEnvelope[object]) -> str:
             results.append("command_handled")
             return "result.events.v1"
 
@@ -2846,7 +2845,7 @@ class TestCommandAndIntentDispatch:
         """Test successful intent dispatch."""
         results: list[str] = []
 
-        async def intent_handler(envelope: ModelEventEnvelope[Any]) -> str:
+        async def intent_handler(envelope: ModelEventEnvelope[object]) -> str:
             results.append("intent_handled")
             return "user.commands.v1"
 
@@ -2913,7 +2912,7 @@ class TestErrorSanitization:
         """Test that connection strings with passwords are sanitized."""
 
         async def failing_handler(
-            envelope: ModelEventEnvelope[Any],
+            envelope: ModelEventEnvelope[object],
         ) -> None:
             # Simulate a database driver error that includes connection string
             raise ConnectionError(
@@ -2954,7 +2953,7 @@ class TestErrorSanitization:
         """Test that errors mentioning passwords are sanitized."""
 
         async def failing_handler(
-            envelope: ModelEventEnvelope[Any],
+            envelope: ModelEventEnvelope[object],
         ) -> None:
             raise ValueError("Authentication failed with password=secret123")
 
@@ -2992,7 +2991,7 @@ class TestErrorSanitization:
         """Test that API keys in errors are sanitized."""
 
         async def failing_handler(
-            envelope: ModelEventEnvelope[Any],
+            envelope: ModelEventEnvelope[object],
         ) -> None:
             raise RuntimeError("API call failed with api_key=sk-1234567890abcdef")
 
@@ -3030,7 +3029,7 @@ class TestErrorSanitization:
         """Test that safe error messages are passed through (not redacted)."""
 
         async def failing_handler(
-            envelope: ModelEventEnvelope[Any],
+            envelope: ModelEventEnvelope[object],
         ) -> None:
             raise ValueError("User with ID 12345 not found in database")
 
@@ -3067,7 +3066,7 @@ class TestErrorSanitization:
         """Test that very long error messages are truncated."""
 
         async def failing_handler(
-            envelope: ModelEventEnvelope[Any],
+            envelope: ModelEventEnvelope[object],
         ) -> None:
             # Create a very long error message (over 500 chars)
             long_message = "Error: " + "x" * 600
@@ -3109,7 +3108,7 @@ class TestErrorSanitization:
         """Test that MongoDB connection strings are sanitized."""
 
         async def failing_handler(
-            envelope: ModelEventEnvelope[Any],
+            envelope: ModelEventEnvelope[object],
         ) -> None:
             raise ConnectionError(
                 "Failed: mongodb://admin:password123@mongo.example.com:27017/db"
@@ -3148,7 +3147,7 @@ class TestErrorSanitization:
         """Test that per-dispatcher metrics also use sanitized error messages."""
 
         async def failing_handler(
-            envelope: ModelEventEnvelope[Any],
+            envelope: ModelEventEnvelope[object],
         ) -> None:
             raise ConnectionError("redis://user:secret_token@redis.example.com:6379")
 

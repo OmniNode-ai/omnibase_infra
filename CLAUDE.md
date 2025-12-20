@@ -472,15 +472,18 @@ class CircuitBreaker:
 Use graceful degradation for `InfraTimeoutError` to maintain service availability with reduced functionality:
 
 ```python
+from collections.abc import Callable
+from uuid import UUID
+
 from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
 from omnibase_infra.enums import EnumInfraTransportType
 
 def fetch_with_timeout_fallback(
-    primary_func,
-    fallback_func,
+    primary_func: Callable[[], object],
+    fallback_func: Callable[[], object],
     timeout_seconds: float = 5.0,
-    correlation_id = None,
-) -> dict:
+    correlation_id: UUID | None = None,
+) -> dict[str, object]:
     """Fetch from primary source with graceful degradation to fallback."""
     import signal
 
@@ -726,7 +729,9 @@ self._init_circuit_breaker(
 
 **Integration with Error Recovery**:
 ```python
-async def publish_with_retry(self, message: dict) -> None:
+from pydantic import BaseModel
+
+async def publish_with_retry(self, message: BaseModel) -> None:
     """Publish message with circuit breaker and retry logic."""
     correlation_id = uuid4()
     max_retries = 3
@@ -820,6 +825,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.models.dispatch import ModelDispatchResult
 from omnibase_infra.runtime import ProtocolMessageDispatcher
 
+
 class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
     """Dispatcher with built-in circuit breaker resilience."""
 
@@ -831,6 +837,9 @@ class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
             transport_type=config.transport_type,
         )
 
+    # NOTE: ModelEventEnvelope[Any] is an intentional exception to the "no Any types"
+    # rule. Dispatchers must accept envelopes with any payload type since the dispatch
+    # engine routes based on topic/category, not payload shape.
     async def handle(self, envelope: ModelEventEnvelope[Any]) -> ModelDispatchResult:
         """Handle message with circuit breaker protection."""
         async with self._circuit_breaker_lock:
@@ -904,20 +913,36 @@ The mixin includes several filtering mechanisms to limit exposure:
 
 **Example - Reviewing Exposed Capabilities**:
 ```python
+from pydantic import BaseModel
+
 from omnibase_infra.mixins import MixinNodeIntrospection
 
+
+class NodeInput(BaseModel):
+    """Input model for node operation."""
+
+    value: str
+
+
+class NodeOutput(BaseModel):
+    """Output model for node operation."""
+
+    processed: bool
+
+
 class MyNode(MixinNodeIntrospection):
-    def execute_operation(self, data: dict) -> dict:
+    def execute_operation(self, data: NodeInput) -> NodeOutput:
         """Public operation - WILL be exposed."""
         return self._internal_process(data)
 
-    def _internal_process(self, data: dict) -> dict:
+    def _internal_process(self, data: NodeInput) -> NodeOutput:
         """Private method - will NOT be exposed."""
-        return {"processed": True}
+        return NodeOutput(processed=True)
 
     def get_status(self) -> str:
         """Utility method - will NOT be exposed (get_* prefix filtered)."""
         return "healthy"
+
 
 # Review what gets exposed
 node = MyNode()

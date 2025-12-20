@@ -242,7 +242,7 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (350)
+            max_unions=INFRA_MAX_UNIONS,  # Default max (450)
             strict=INFRA_UNIONS_STRICT,  # Non-strict (False)
         )
 

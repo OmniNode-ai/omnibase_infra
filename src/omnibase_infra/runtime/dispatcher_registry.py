@@ -42,7 +42,7 @@ __all__ = [
 import logging
 import threading
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -111,7 +111,7 @@ class ProtocolMessageDispatcher(Protocol):
                     return EnumNodeKind.REDUCER
 
                 async def handle(
-                    self, envelope: ModelEventEnvelope[Any]
+                    self, envelope: ModelEventEnvelope[object]
                 ) -> ModelDispatchResult:
                     # Process the event
                     return ModelDispatchResult(
@@ -236,7 +236,7 @@ class ProtocolMessageDispatcher(Protocol):
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[Any],
+        envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult:
         """
         Handle the given envelope and return a dispatch result.
@@ -260,7 +260,7 @@ class ProtocolMessageDispatcher(Protocol):
             .. code-block:: python
 
                 async def handle(
-                    self, envelope: ModelEventEnvelope[Any]
+                    self, envelope: ModelEventEnvelope[object]
                 ) -> ModelDispatchResult:
                     try:
                         # Process the event
