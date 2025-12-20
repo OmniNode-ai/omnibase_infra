@@ -174,6 +174,26 @@ def extract_domain_from_topic(topic: str | None) -> str | None:
         >>> extract_domain_from_topic("   ")
         None
 
+    Design Note:
+        **Pattern Matching Order is Critical for Correctness**
+
+        The ONEX pattern MUST be checked BEFORE the environment-aware pattern.
+        This ordering is intentional and required to correctly handle topics
+        where "onex" appears as the first segment.
+
+        Consider the ambiguous topic ``onex.prod.events``:
+
+        - **If env pattern checked first (WRONG)**:
+          ``<env>.<domain>.<rest>`` would match with env="onex", domain="prod"
+          This incorrectly interprets "onex" as an environment name.
+
+        - **With ONEX pattern first (CORRECT)**:
+          ``onex.<domain>.<type>`` matches with domain="prod"
+          This correctly recognizes "onex" as the ONEX namespace prefix.
+
+        The ONEX pattern is more specific (requires literal "onex" prefix),
+        so it must take precedence over the generic environment pattern.
+
     .. versionadded:: 0.5.0
     """
     # Handle None, empty string, and whitespace-only inputs
@@ -183,13 +203,35 @@ def extract_domain_from_topic(topic: str | None) -> str | None:
     # Strip whitespace for consistent matching
     topic = topic.strip()
 
-    # Try ONEX format first: onex.<domain>.<type>
-    # This must be checked first since "onex" could look like an environment
+    # -------------------------------------------------------------------------
+    # CRITICAL: Pattern matching order matters!
+    # -------------------------------------------------------------------------
+    # The ONEX pattern MUST be checked BEFORE the environment-aware pattern.
+    # Both patterns would match topics like "onex.prod.events", but with
+    # different (and conflicting) domain extraction:
+    #
+    #   Topic: "onex.prod.events"
+    #   - ONEX pattern:  domain = "prod"  (CORRECT - "onex" is namespace)
+    #   - Env pattern:   domain = "prod"  (WRONG - "onex" treated as env)
+    #
+    # Wait, in this case both extract "prod"! The issue is with interpretation:
+    # The env pattern would set env="onex", which is semantically wrong.
+    # More critically, consider "onex.user.events" vs "prod.user.events":
+    # - "onex.user.events" -> ONEX format, domain="user"
+    # - "prod.user.events" -> Env format, env="prod", domain="user"
+    #
+    # If we checked env pattern first, "onex" would be misclassified as an
+    # environment, breaking any code that relies on detecting ONEX-namespaced
+    # topics. The ONEX pattern is more specific, so it takes precedence.
+    # -------------------------------------------------------------------------
+
+    # Step 1: Try ONEX format first: onex.<domain>.<type>
     match = _ONEX_TOPIC_PATTERN.match(topic)
     if match:
         return match.group("domain")
 
-    # Try environment-aware format: <env>.<domain>.<category>.<version>
+    # Step 2: Try environment-aware format: <env>.<domain>.<category>.<version>
+    # Only reached if ONEX pattern did not match (topic doesn't start with "onex.")
     match = _ENV_TOPIC_PATTERN.match(topic)
     if match:
         return match.group("domain")

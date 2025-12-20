@@ -83,6 +83,101 @@ class TestExtractDomainFromTopic:
         assert extract_domain_from_topic("env.domain") == "domain"
         assert extract_domain_from_topic("onex.user") == "user"
 
+    def test_completely_invalid_topic_formats(self) -> None:
+        """Test completely invalid topic formats that should be handled gracefully.
+
+        These tests document the expected behavior for malformed topic strings.
+        The function should not crash and should return predictable results.
+        """
+        # Topic with only dots - results in empty segments
+        # "..." splits to ["", "", "", ""], second segment is empty string
+        result = extract_domain_from_topic("...")
+        assert result == ""  # Returns empty string (second segment is empty)
+
+        # Topic with leading dot - first segment is empty
+        # ".user.events" splits to ["", "user", "events"]
+        assert extract_domain_from_topic(".user.events") == "user"
+
+        # Topic with trailing dot - doesn't affect domain extraction
+        # "user.events." splits to ["user", "events", ""]
+        assert extract_domain_from_topic("user.events.") == "events"
+
+        # Topic with both leading and trailing dots
+        # ".user.events." splits to ["", "user", "events", ""]
+        assert extract_domain_from_topic(".user.events.") == "user"
+
+        # Topic with consecutive dots (empty segments)
+        # "dev..events.v1" splits to ["dev", "", "events", "v1"]
+        # Matches env pattern: env="dev", domain=""
+        assert extract_domain_from_topic("dev..events.v1") == ""
+
+        # Topic with special characters only (no dots)
+        # No dots means split returns single segment, len < 2
+        assert extract_domain_from_topic("@#$%^&*") is None
+
+        # Topic with spaces between segments (no dots)
+        # Spaces are not separators, so this is a single segment
+        assert extract_domain_from_topic("dev user events") is None
+
+        # Topic with mixed spaces and dots
+        # "dev .user.events" - first segment is "dev " with trailing space
+        result = extract_domain_from_topic("dev .user.events")
+        assert result == "user"  # Second segment after split
+
+        # Topic with unicode/non-ASCII characters
+        # Unicode should be handled - regex uses [a-zA-Z0-9_-] so won't match
+        # Falls back to split, returns second segment
+        assert extract_domain_from_topic("dev.ユーザー.events") == "ユーザー"
+
+        # Topic with numeric-only segments
+        # Falls back to split since numbers alone don't match env pattern
+        # Actually, [a-zA-Z0-9_-] DOES match numbers
+        assert extract_domain_from_topic("123.456.789") == "456"
+
+        # Single dot only
+        # "." splits to ["", ""], second segment is empty string
+        assert extract_domain_from_topic(".") == ""
+
+        # Topic starting with number (valid for regex pattern)
+        assert extract_domain_from_topic("1.domain.events") == "domain"
+
+        # Very long topic with many segments
+        long_topic = ".".join(["segment"] * 100)
+        assert extract_domain_from_topic(long_topic) == "segment"
+
+    def test_edge_case_empty_segment_topics(self) -> None:
+        """Test topics with empty segments created by consecutive or edge dots."""
+        # Double dots at start
+        assert extract_domain_from_topic("..user.events") == ""
+
+        # Double dots in middle
+        assert extract_domain_from_topic("dev..user.events") == ""
+
+        # Triple dots
+        assert extract_domain_from_topic("dev...events") == ""
+
+        # Many dots only
+        assert extract_domain_from_topic(".....") == ""
+
+    def test_special_character_topics(self) -> None:
+        """Test topics containing various special characters."""
+        # Characters that are allowed in domain names (underscore, hyphen)
+        assert extract_domain_from_topic("dev.user_service.events") == "user_service"
+        assert extract_domain_from_topic("dev.order-mgmt.events") == "order-mgmt"
+
+        # Characters NOT in regex pattern - falls back to split
+        # Colon in domain segment
+        assert extract_domain_from_topic("dev.user:v1.events") == "user:v1"
+
+        # At sign in domain segment
+        assert extract_domain_from_topic("dev.user@domain.events") == "user@domain"
+
+        # Slash in domain segment (URL-like)
+        assert extract_domain_from_topic("dev.user/admin.events") == "user/admin"
+
+        # Equals sign
+        assert extract_domain_from_topic("dev.key=value.events") == "key=value"
+
 
 class TestMessageTypeRegistryRegistration:
     """Tests for registration functionality."""
@@ -148,6 +243,50 @@ class TestMessageTypeRegistryRegistration:
         assert len(handlers) == 2
         assert "user-handler" in handlers
         assert "audit-handler" in handlers
+
+    def test_register_duplicate_handler_idempotent(self) -> None:
+        """Test that registering the same handler twice is idempotent (no duplicates)."""
+        registry = MessageTypeRegistry()
+
+        # First registration with handler-a
+        entry1 = ModelMessageTypeEntry(
+            message_type="UserCreated",
+            handler_ids=("handler-a",),
+            allowed_categories=frozenset([EnumMessageCategory.EVENT]),
+            domain_constraint=ModelDomainConstraint(owning_domain="user"),
+        )
+        registry.register_message_type(entry1)
+
+        # Second registration with the SAME handler-a (should be idempotent)
+        entry2 = ModelMessageTypeEntry(
+            message_type="UserCreated",
+            handler_ids=("handler-a",),
+            allowed_categories=frozenset([EnumMessageCategory.EVENT]),
+            domain_constraint=ModelDomainConstraint(owning_domain="user"),
+        )
+        registry.register_message_type(entry2)
+
+        # Registry should still have exactly one entry for UserCreated
+        assert registry.entry_count == 1
+        assert "UserCreated" in registry
+
+        # Freeze to enable queries
+        registry.freeze()
+
+        # Verify handler list contains handler-a only ONCE (not duplicated)
+        entry = registry.get_entry("UserCreated")
+        assert entry is not None
+        assert entry.handler_ids == ("handler-a",)
+        assert len(entry.handler_ids) == 1
+
+        # Verify get_handlers returns single handler instance
+        handlers = registry.get_handlers(
+            message_type="UserCreated",
+            topic_category=EnumMessageCategory.EVENT,
+            topic_domain="user",
+        )
+        assert handlers == ["handler-a"]
+        assert len(handlers) == 1
 
     def test_register_after_freeze_fails(self) -> None:
         """Test that registration fails after freeze."""
