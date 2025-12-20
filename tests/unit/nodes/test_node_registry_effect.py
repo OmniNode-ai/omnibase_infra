@@ -48,8 +48,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
-
-from omnibase_infra.errors import InfraUnavailableError, RuntimeHostError
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
     ModelNodeIntrospectionPayload,
     ModelNodeRegistryEffectConfig,
@@ -60,6 +58,8 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models.model_node_registra
     ModelNodeRegistrationMetadata,
 )
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.node import NodeRegistryEffect
+
+from omnibase_infra.errors import InfraUnavailableError, RuntimeHostError
 
 # Fixed timestamp for deterministic test results.
 # Using a specific point in time avoids flaky CI tests due to timing variations.

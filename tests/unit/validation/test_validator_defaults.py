@@ -38,24 +38,17 @@ class TestInfraValidatorConstants:
     def test_infra_max_unions_constant(self) -> None:
         """Verify INFRA_MAX_UNIONS constant has expected value.
 
-        TECH DEBT (OMN-934): Baseline of 406 unions as of 2025-12-20.
-        Target: Reduce incrementally through refactoring.
+        OMN-983: Strict validation mode enabled.
 
-        Current count breakdown (~406 unions as of 2025-12-20):
-        - Infrastructure handlers (~90): Consul, Kafka, Vault, PostgreSQL adapters
-        - Runtime components (~40): RuntimeHostProcess, handler/policy registries
-        - Models (~24): Event bus models, error context, runtime config
-        - Registration models (~41): ModelNodeCapabilities, ModelNodeMetadata
-        - Dispatch models (~148): OMN-934 message dispatch engine models
-        - JsonValue types (~44): Recursive JSON value type definitions (PR #61)
-        - Registry Effect models (~19): Node registration metadata models (restored)
+        Current baseline (~353 unions as of 2025-12-20):
+        - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
+        - These are counted but NOT flagged as violations
+        - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        The validator counts X | None (PEP 604) patterns as unions, which is
-        the ONEX-preferred syntax per CLAUDE.md. Threshold set to 450 to provide
-        a small buffer above current baseline while maintaining awareness.
+        Threshold set to 400 to provide headroom above baseline.
         """
-        assert INFRA_MAX_UNIONS == 450, (
-            "INFRA_MAX_UNIONS should be 450 (current baseline per OMN-934, PR #61)"
+        assert INFRA_MAX_UNIONS == 400, (
+            "INFRA_MAX_UNIONS should be 400 (strict mode per OMN-983)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -65,25 +58,28 @@ class TestInfraValidatorConstants:
     def test_infra_patterns_strict_constant(self) -> None:
         """Verify INFRA_PATTERNS_STRICT constant has expected value.
 
-        TECH DEBT (OMN-934): Set to False to allow incremental pattern compliance.
-        Target: Re-enable strict mode after addressing pre-existing violations.
-        Date: 2025-12-19
+        OMN-983: Strict validation mode enabled.
 
-        Pre-existing violations include:
-        - node.py, mixin_node_introspection.py: Structural patterns from core architecture
-        - Method/parameter count warnings: Style suggestions for infrastructure components
-        - UUID field suggestions: False positives on semantic identifiers
+        All violations must be either:
+        - Fixed (code corrected to pass validation)
+        - Exempted (added to exempted_patterns list with documented rationale)
 
-        Specific documented exemptions (KafkaEventBus, RuntimeHostProcess) are handled
-        via the exempted_patterns list in validate_infra_patterns(), NOT via this flag.
+        Documented exemptions (KafkaEventBus, RuntimeHostProcess, etc.) are handled
+        via the exempted_patterns list in validate_infra_patterns().
         """
-        assert INFRA_PATTERNS_STRICT is False, (
-            "INFRA_PATTERNS_STRICT should be False (tech debt per OMN-934)"
+        assert INFRA_PATTERNS_STRICT is True, (
+            "INFRA_PATTERNS_STRICT should be True (strict mode per OMN-983)"
         )
 
     def test_infra_unions_strict_constant(self) -> None:
-        """Verify INFRA_UNIONS_STRICT constant has expected value."""
-        assert INFRA_UNIONS_STRICT is False, "INFRA_UNIONS_STRICT should be False"
+        """Verify INFRA_UNIONS_STRICT constant has expected value.
+
+        OMN-983: Strict validation mode enabled.
+        The validator flags actual violations (not just counting unions).
+        """
+        assert INFRA_UNIONS_STRICT is True, (
+            "INFRA_UNIONS_STRICT should be True (strict mode per OMN-983)"
+        )
 
     def test_infra_src_path_constant(self) -> None:
         """Verify INFRA_SRC_PATH constant has expected value."""
@@ -161,12 +157,11 @@ class TestValidateInfraPatternsDefaults:
         directory_param = sig.parameters["directory"]
         assert directory_param.default == INFRA_SRC_PATH
 
-        # Check strict default - False for incremental pattern compliance (OMN-934 tech debt)
-        # Target: Re-enable strict mode after addressing pre-existing violations
+        # Check strict default - True for strict mode (OMN-983)
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_PATTERNS_STRICT
-        assert strict_param.default is False, (
-            "Should default to non-strict mode via INFRA_PATTERNS_STRICT (False) per OMN-934"
+        assert strict_param.default is True, (
+            "Should default to strict mode via INFRA_PATTERNS_STRICT (True) per OMN-983"
         )
 
     @patch("omnibase_infra.validation.infra_validators.validate_patterns")
@@ -212,11 +207,11 @@ class TestValidateInfraUnionUsageDefaults:
             f"Should default to INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS})"
         )
 
-        # Check strict default
+        # Check strict default - True for strict mode (OMN-983)
         strict_param = sig.parameters["strict"]
         assert strict_param.default == INFRA_UNIONS_STRICT
-        assert strict_param.default is False, (
-            "Should default to non-strict mode via INFRA_UNIONS_STRICT (False)"
+        assert strict_param.default is True, (
+            "Should default to strict mode via INFRA_UNIONS_STRICT (True) per OMN-983"
         )
 
     @patch("omnibase_infra.validation.infra_validators.validate_union_usage")

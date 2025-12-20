@@ -18,8 +18,6 @@ from uuid import uuid4
 
 import pytest
 from omnibase_core.models.node_metadata import ModelNodeCapabilitiesInfo
-
-from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.models import (
     ModelNodeIntrospectionPayload,
     ModelNodeRegistryEffectConfig,
@@ -30,6 +28,8 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.models.model_node_registra
     ModelNodeRegistrationMetadata,
 )
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.node import NodeRegistryEffect
+
+from omnibase_infra.errors import RuntimeHostError
 
 
 def create_mock_container(
@@ -555,13 +555,14 @@ class TestNodeRegistryEffectResolveRequiredHandler:
 
         Verifies the KeyError/LookupError/ServiceResolutionError path.
         """
-        from omnibase_infra.errors import ServiceResolutionError
         from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
         from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
+
+        from omnibase_infra.errors import ServiceResolutionError
 
         container = Mock()
         container.service_registry = Mock()
@@ -603,13 +604,14 @@ class TestNodeRegistryEffectResolveRequiredHandler:
 
         Verifies the KeyError/LookupError/ServiceResolutionError path.
         """
-        from omnibase_infra.errors import ServiceResolutionError
         from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
         from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
+
+        from omnibase_infra.errors import ServiceResolutionError
 
         container = Mock()
         container.service_registry = Mock()
@@ -648,13 +650,14 @@ class TestNodeRegistryEffectResolveRequiredHandler:
         self,
     ) -> None:
         """Test that ServiceResolutionError is properly wrapped in RuntimeError."""
-        from omnibase_infra.errors import ServiceResolutionError
         from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_envelope_executor import (
             ProtocolEnvelopeExecutor,
         )
         from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import (
             ProtocolEventBus,
         )
+
+        from omnibase_infra.errors import ServiceResolutionError
 
         container = Mock()
         container.service_registry = Mock()
