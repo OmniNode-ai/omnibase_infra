@@ -9,7 +9,7 @@ to return, whether it can publish directly, and other constraints.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -108,6 +108,26 @@ class ModelExecutionShapeRule(BaseModel):
         str_strip_whitespace=True,
         use_enum_values=False,  # Keep enum objects for type safety
     )
+
+    @field_validator("allowed_return_types")
+    @classmethod
+    def validate_no_duplicates_allowed(
+        cls, v: list[EnumNodeOutputType]
+    ) -> list[EnumNodeOutputType]:
+        """Ensure no duplicate output types in allowed_return_types."""
+        if len(v) != len(set(v)):
+            raise ValueError("Duplicate output types in allowed_return_types")
+        return v
+
+    @field_validator("forbidden_return_types")
+    @classmethod
+    def validate_no_duplicates_forbidden(
+        cls, v: list[EnumNodeOutputType]
+    ) -> list[EnumNodeOutputType]:
+        """Ensure no duplicate output types in forbidden_return_types."""
+        if len(v) != len(set(v)):
+            raise ValueError("Duplicate output types in forbidden_return_types")
+        return v
 
     def is_return_type_allowed(self, output_type: EnumNodeOutputType) -> bool:
         """Check if a node output type is allowed as a return type.

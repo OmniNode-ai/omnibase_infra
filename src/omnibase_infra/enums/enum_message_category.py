@@ -58,6 +58,18 @@ class EnumMessageCategory(str, Enum):
         node output types (see EnumNodeOutputType), not routable message
         categories. REDUCERs produce projections as state outputs.
 
+    Maintainer Note:
+        When adding new values to this enum, you MUST update the following:
+
+        1. ``_MESSAGE_CATEGORY_TO_OUTPUT_TYPE`` mapping in
+           ``omnibase_infra/validation/execution_shape_validator.py``
+        2. ``_CATEGORY_TO_SUFFIX`` and ``_SUFFIX_TO_CATEGORY`` mappings
+           at the bottom of this file (see module-level constants)
+        3. Topic routing logic in ``topic_category_validator.py`` and
+           any pattern matching that uses category suffixes
+        4. The ``from_topic()`` method if the new category uses a
+           different topic naming convention
+
     Attributes:
         topic_suffix: The plural suffix used in topic names (e.g., "events")
 
