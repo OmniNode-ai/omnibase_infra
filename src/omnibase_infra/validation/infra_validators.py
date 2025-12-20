@@ -25,12 +25,16 @@ Exemption System:
     4. Run tests to verify the exemption works
 """
 
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, TypedDict
 
 import yaml
+
+# Module-level logger for validation operations
+logger = logging.getLogger(__name__)
 from omnibase_core.validation import (
     CircularImportValidationResult,
     CircularImportValidator,
@@ -124,8 +128,13 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
             "pattern_exemptions": pattern_exemptions,
             "union_exemptions": union_exemptions,
         }
-    except (yaml.YAMLError, OSError):
-        # Return empty exemptions on any loading error
+    except (yaml.YAMLError, OSError) as e:
+        # Log warning but continue with empty exemptions
+        logger.warning(
+            "Failed to load validation exemptions from %s: %s. Using empty exemptions.",
+            EXEMPTIONS_YAML_PATH,
+            e,
+        )
         return {"pattern_exemptions": [], "union_exemptions": []}
 
 
@@ -137,11 +146,36 @@ def _convert_yaml_exemptions(yaml_list: list[dict]) -> list[ExemptionPattern]:
     for documentation but not for pattern matching. This function extracts only
     the pattern fields needed for matching.
 
+    Regex patterns are validated at load time to prevent runtime errors during
+    validation. Entries with invalid regex patterns are skipped with a warning.
+
     Args:
         yaml_list: List of exemption entries from YAML.
 
     Returns:
         List of ExemptionPattern dictionaries with only pattern fields.
+        Entries with invalid regex patterns are excluded.
+
+    Invalid Entry Handling:
+        This function is defensive and skips invalid entries to ensure
+        validation continues even with malformed exemption configuration:
+
+        - If yaml_list is not a list: returns empty list (no exemptions applied)
+        - If an entry is not a dict: entry is skipped silently
+        - If entry lacks required fields (file_pattern AND violation_pattern):
+          entry is skipped silently (both fields are required for meaningful matching)
+        - If any pattern field contains an invalid regex: entry is skipped
+          with a warning log (prevents runtime errors during pattern matching)
+        - All pattern field values are coerced to str via str() to handle
+          non-string values gracefully
+
+    Design Rationale:
+        Skipping invalid entries (rather than raising exceptions) is intentional:
+        1. Validation should not fail due to exemption configuration issues
+        2. Missing exemptions result in stricter validation (safer default)
+        3. Errors in exemption config are detected during exemption testing
+        4. Production validation continues even with partial exemption config
+        5. Invalid regex patterns are logged to aid debugging
     """
     if not isinstance(yaml_list, list):
         return []
@@ -152,18 +186,64 @@ def _convert_yaml_exemptions(yaml_list: list[dict]) -> list[ExemptionPattern]:
             continue
 
         # Extract only pattern fields (ignore reason, ticket metadata)
+        # Validate each regex pattern before adding to prevent runtime errors
         pattern: ExemptionPattern = {}
-        if "file_pattern" in entry:
-            pattern["file_pattern"] = str(entry["file_pattern"])
-        if "class_pattern" in entry:
-            pattern["class_pattern"] = str(entry["class_pattern"])
-        if "method_pattern" in entry:
-            pattern["method_pattern"] = str(entry["method_pattern"])
-        if "violation_pattern" in entry:
-            pattern["violation_pattern"] = str(entry["violation_pattern"])
+        entry_valid = True
 
-        # Only include if at least file_pattern and violation_pattern are present
-        if "file_pattern" in pattern and "violation_pattern" in pattern:
+        if "file_pattern" in entry:
+            file_pattern = str(entry["file_pattern"])
+            try:
+                re.compile(file_pattern)
+                pattern["file_pattern"] = file_pattern
+            except re.error as e:
+                logger.warning(
+                    "Invalid regex in file_pattern '%s': %s. Skipping exemption entry.",
+                    file_pattern,
+                    e,
+                )
+                entry_valid = False
+
+        if entry_valid and "class_pattern" in entry:
+            class_pattern = str(entry["class_pattern"])
+            try:
+                re.compile(class_pattern)
+                pattern["class_pattern"] = class_pattern
+            except re.error as e:
+                logger.warning(
+                    "Invalid regex in class_pattern '%s': %s. Skipping exemption entry.",
+                    class_pattern,
+                    e,
+                )
+                entry_valid = False
+
+        if entry_valid and "method_pattern" in entry:
+            method_pattern = str(entry["method_pattern"])
+            try:
+                re.compile(method_pattern)
+                pattern["method_pattern"] = method_pattern
+            except re.error as e:
+                logger.warning(
+                    "Invalid regex in method_pattern '%s': %s. Skipping exemption entry.",
+                    method_pattern,
+                    e,
+                )
+                entry_valid = False
+
+        if entry_valid and "violation_pattern" in entry:
+            violation_pattern = str(entry["violation_pattern"])
+            try:
+                re.compile(violation_pattern)
+                pattern["violation_pattern"] = violation_pattern
+            except re.error as e:
+                logger.warning(
+                    "Invalid regex in violation_pattern '%s': %s. Skipping exemption entry.",
+                    violation_pattern,
+                    e,
+                )
+                entry_valid = False
+
+        # Only include if entry is valid and has required patterns
+        if entry_valid and "file_pattern" in pattern and "violation_pattern" in pattern:
             result.append(pattern)
 
     return result

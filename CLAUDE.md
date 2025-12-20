@@ -956,8 +956,6 @@ if is_open:
 
 **Dispatcher Implementation Pattern**:
 ```python
-from typing import Any
-
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.enums import EnumInfraTransportType
