@@ -74,76 +74,15 @@ __all__ = [
 from typing import cast
 from uuid import UUID
 
-from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.models.errors.model_onex_error import ModelOnexError
-
 # ModelEventEnvelope is used at runtime in function parameter types, not just for type hints
 from omnibase_core.models.events.model_event_envelope import (  # noqa: TC002
     ModelEventEnvelope,
 )
 
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
+from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
+from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
-
-# ==============================================================================
-# Exception Class
-# ==============================================================================
-
-
-class ChainPropagationError(ModelOnexError):
-    """Raised when chain propagation validation fails.
-
-    This error is raised when enforce_chain_propagation() detects violations
-    in correlation or causation chain propagation between parent and child
-    messages.
-
-    Attributes:
-        violations: List of chain violations detected.
-
-    Example:
-        >>> try:
-        ...     enforce_chain_propagation(parent, child)
-        ... except ChainPropagationError as e:
-        ...     for v in e.violations:
-        ...         print(v.format_for_logging())
-
-    Correlation ID Support:
-        When a correlation_id is provided, it is included in the error context
-        for distributed tracing. This enables tracking validation failures back
-        to specific requests in multi-service architectures.
-    """
-
-    def __init__(
-        self,
-        violations: list[ModelChainViolation],
-        correlation_id: UUID | None = None,
-    ) -> None:
-        """Initialize ChainPropagationError.
-
-        Args:
-            violations: List of chain violations detected.
-            correlation_id: Optional correlation ID for distributed tracing.
-        """
-        self.violations = violations
-
-        # Build error message from violations
-        violation_count = len(violations)
-        violation_types = {v.violation_type.value for v in violations}
-        violation_summary = ", ".join(sorted(violation_types))
-
-        message = (
-            f"Chain propagation validation failed with {violation_count} "
-            f"violation(s): {violation_summary}"
-        )
-
-        super().__init__(
-            message=message,
-            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
-            correlation_id=correlation_id,
-            violation_count=violation_count,
-            violation_types=list(violation_types),
-        )
-
 
 # ==============================================================================
 # Helper Functions for Envelope Field Access
@@ -444,11 +383,17 @@ class ChainPropagationValidator:
 
         Validates that:
         1. All messages share the same correlation_id (if first message has one)
-        2. Each message's causation_id references its direct predecessor's
-           message_id in the chain
-        3. No ancestors are skipped in the causation chain
+        2. Each message's causation_id references an ancestor message within
+           the provided chain (not necessarily the direct predecessor)
+        3. Parent messages appear before child messages in the list order
 
         The envelopes list should be ordered by causation (parent before child).
+
+        NOTE: This method validates that causation_ids reference messages within
+        the chain, but does NOT enforce direct parent-child ordering. A message
+        may reference any ancestor in the chain (e.g., msg3 can reference msg1
+        even if msg2 exists between them). For strict direct parent validation,
+        use pairwise validate_chain() calls.
 
         Args:
             envelopes: Ordered list of message envelopes in the workflow.
@@ -662,5 +607,12 @@ def enforce_chain_propagation(
 
     if violations:
         # Use parent's correlation_id for error tracking
-        correlation_id = _get_correlation_id(parent_envelope)
-        raise ChainPropagationError(violations, correlation_id=correlation_id)
+        context = ModelInfraErrorContext(
+            operation="enforce_chain_propagation",
+            correlation_id=_get_correlation_id(parent_envelope),
+        )
+        raise ChainPropagationError(
+            message="Chain propagation validation failed",
+            violations=violations,
+            context=context,
+        )

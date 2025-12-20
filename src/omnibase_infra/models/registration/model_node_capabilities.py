@@ -8,28 +8,30 @@ in the ONEX 2-way registration pattern.
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# JSON-serializable value type for configuration.
-# Using explicit union instead of Any for ONEX coding guidelines compliance.
+from omnibase_infra.models.types.json_types import JsonPrimitive
+
+# JSON-serializable value types for configuration with explicit depth limits.
+# Imports JsonPrimitive from central json_types.py for consistency.
 #
 # Supported value types:
-# - Primitives: str, int, float, bool, None
-# - Lists of primitives: list[str | int | float | bool | None]
+# - Primitives: str, int, float, bool, None (via JsonPrimitive)
+# - Lists of primitives: list[JsonPrimitive]
 # - Dicts with up to 2 levels of nesting (keys map to primitive/list values)
 #
 # Type hierarchy:
-#   JsonPrimitive: Terminal values (str, int, float, bool, None)
+#   JsonPrimitive: Terminal values (imported from json_types.py)
 #   JsonList: list[JsonPrimitive]
 #   JsonNestedDict: dict[str, JsonPrimitive | JsonList]  # 1 dict level
-#   JsonValue: JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
+#   ConfigValue: JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
 #
 # Maximum nesting depth analysis:
-#   The deepest JsonValue is dict[str, JsonNestedDict], which expands to:
+#   The deepest ConfigValue is dict[str, JsonNestedDict], which expands to:
 #   dict[str, dict[str, JsonPrimitive | JsonList]]
 #
 #   This gives 2 levels of dict nesting with primitive/list leaf values:
 #     {"outer_key": {"inner_key": "primitive_value"}}
 #
-# When used in config field (dict[str, JsonValue]), total key depth is 3:
+# When used in config field (dict[str, ConfigValue]), total key depth is 3:
 #   config["key1"]["key2"]["key3"] -> primitive
 #
 # Examples:
@@ -38,10 +40,9 @@ from pydantic import BaseModel, ConfigDict, Field
 #   {"outer": {"inner": [1, 2, 3]}}        # 2 dict levels with list leaf
 #
 # For structures requiring deeper nesting, use a dedicated Pydantic model.
-JsonPrimitive = str | int | float | bool | None
 JsonList = list[JsonPrimitive]
 JsonNestedDict = dict[str, JsonPrimitive | JsonList]
-JsonValue = JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
+ConfigValue = JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
 
 
 class ModelNodeCapabilities(BaseModel):
@@ -114,9 +115,9 @@ class ModelNodeCapabilities(BaseModel):
     # Generic feature flag (used in tests)
     feature: bool = Field(default=False, description="Generic feature flag")
 
-    # Configuration (nested) - uses JsonValue for strongly-typed JSON-serializable values.
+    # Configuration (nested) - uses ConfigValue for strongly-typed JSON-serializable values.
     # Supports primitives (str, int, float, bool, None), lists, and nested dicts.
-    config: dict[str, JsonValue] = Field(
+    config: dict[str, ConfigValue] = Field(
         default_factory=dict,
         description="Nested configuration (JSON-serializable values)",
     )
@@ -202,9 +203,9 @@ class ModelNodeCapabilities(BaseModel):
 
 
 __all__ = [
+    "ConfigValue",
     "JsonList",
     "JsonNestedDict",
-    "JsonPrimitive",
-    "JsonValue",
+    "JsonPrimitive",  # Re-exported from omnibase_infra.models.types.json_types
     "ModelNodeCapabilities",
 ]

@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 import pytest
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from pydantic import BaseModel, Field
 
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
@@ -78,6 +79,38 @@ class SendWelcomeEmailCommand:
     def __init__(self, user_id: str, email: str) -> None:
         self.user_id = user_id
         self.email = email
+
+
+# =============================================================================
+# Pydantic Test Models (ONEX-Compliant)
+# =============================================================================
+
+
+class ModelTestOrderIntent(BaseModel):
+    """Pydantic model for order intent in workflow tests.
+
+    Demonstrates ONEX-compliant Pydantic model usage in chain validation.
+    """
+
+    order_id: str = Field(..., description="Unique order identifier")
+    customer_email: str = Field(..., description="Customer email address")
+    total_amount: float = Field(..., ge=0, description="Order total amount")
+
+
+class ModelTestOrderCommand(BaseModel):
+    """Pydantic model for order processing command."""
+
+    order_id: str = Field(..., description="Order to process")
+    customer_email: str = Field(..., description="Customer email")
+    items_count: int = Field(..., ge=1, description="Number of items")
+
+
+class ModelTestOrderEvent(BaseModel):
+    """Pydantic model for order completed event."""
+
+    order_id: str = Field(..., description="Completed order ID")
+    confirmation_number: str = Field(..., description="Order confirmation number")
+    processed_at: str = Field(..., description="ISO timestamp of processing")
 
 
 # =============================================================================
@@ -757,3 +790,128 @@ class TestConvenienceFunctions:
 
         assert isinstance(violations, list)
         assert len(violations) == 0
+
+
+# =============================================================================
+# Pydantic Model Integration Test Cases
+# =============================================================================
+
+
+class TestPydanticModelChainValidation:
+    """Tests using Pydantic models for real-world ONEX compliance validation.
+
+    These tests verify that chain validation works correctly with proper
+    Pydantic models as required by ONEX guidelines, not just plain classes.
+    """
+
+    def test_pydantic_model_workflow_chain_valid(
+        self,
+        correlation_id: UUID,
+    ) -> None:
+        """Validate workflow chain using Pydantic models.
+
+        Tests a complete order workflow with proper ONEX-compliant Pydantic models:
+        OrderIntent -> OrderCommand -> OrderEvent
+        All share same correlation_id, each references its direct parent.
+        """
+        validator = ChainPropagationValidator()
+
+        # Step 1: OrderIntent (root message with Pydantic model)
+        order_intent = ModelEventEnvelope(
+            payload=ModelTestOrderIntent(
+                order_id="order-789",
+                customer_email="customer@example.com",
+                total_amount=99.99,
+            ),
+            correlation_id=correlation_id,
+        )
+
+        # Step 2: OrderCommand (caused by intent)
+        order_command_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(order_intent.envelope_id)},
+        )
+        order_command = ModelEventEnvelope(
+            payload=ModelTestOrderCommand(
+                order_id="order-789",
+                customer_email="customer@example.com",
+                items_count=3,
+            ),
+            correlation_id=correlation_id,
+            metadata=order_command_metadata,
+        )
+
+        # Step 3: OrderEvent (caused by command)
+        order_event_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(order_command.envelope_id)},
+        )
+        order_event = ModelEventEnvelope(
+            payload=ModelTestOrderEvent(
+                order_id="order-789",
+                confirmation_number="CONF-12345",
+                processed_at="2025-12-20T12:00:00Z",
+            ),
+            correlation_id=correlation_id,
+            metadata=order_event_metadata,
+        )
+
+        # Validate pairwise chains
+        violations_1_2 = validator.validate_chain(order_intent, order_command)
+        assert len(violations_1_2) == 0, f"Intent->Command failed: {violations_1_2}"
+
+        violations_2_3 = validator.validate_chain(order_command, order_event)
+        assert len(violations_2_3) == 0, f"Command->Event failed: {violations_2_3}"
+
+        # Validate entire workflow
+        all_messages = [order_intent, order_command, order_event]
+        workflow_violations = validator.validate_workflow_chain(all_messages)
+        assert len(workflow_violations) == 0, f"Workflow failed: {workflow_violations}"
+
+        # Verify Pydantic model payloads are accessible
+        assert order_intent.payload.order_id == "order-789"
+        assert order_command.payload.items_count == 3
+        assert order_event.payload.confirmation_number == "CONF-12345"
+
+    def test_pydantic_model_chain_violation_detected(
+        self,
+        correlation_id: UUID,
+    ) -> None:
+        """Verify chain violations are detected with Pydantic model payloads.
+
+        Tests that validation correctly detects correlation mismatch even when
+        using proper Pydantic models as payloads.
+        """
+        validator = ChainPropagationValidator()
+
+        # Parent with Pydantic model
+        parent = ModelEventEnvelope(
+            payload=ModelTestOrderIntent(
+                order_id="order-999",
+                customer_email="test@example.com",
+                total_amount=50.00,
+            ),
+            correlation_id=correlation_id,
+        )
+
+        # Child with wrong correlation_id
+        child_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(parent.envelope_id)},
+        )
+        child = ModelEventEnvelope(
+            payload=ModelTestOrderCommand(
+                order_id="order-999",
+                customer_email="test@example.com",
+                items_count=1,
+            ),
+            correlation_id=uuid4(),  # Wrong correlation_id!
+            metadata=child_metadata,
+        )
+
+        violations = validator.validate_chain(parent, child)
+
+        assert len(violations) >= 1
+        correlation_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumChainViolationType.CORRELATION_MISMATCH
+        ]
+        assert len(correlation_violations) == 1
