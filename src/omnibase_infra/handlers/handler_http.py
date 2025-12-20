@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
@@ -17,6 +18,9 @@ from omnibase_core.enums.enum_handler_type import EnumHandlerType
 from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -89,7 +93,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         """Return EnumHandlerType.HTTP."""
         return EnumHandlerType.HTTP
 
-    async def initialize(self, config: dict[str, object]) -> None:
+    async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize HTTP client with configurable timeout and size limits.
 
         Args:
@@ -190,8 +194,8 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         logger.info("HttpRestAdapter shutdown complete")
 
     async def execute(
-        self, envelope: dict[str, object]
-    ) -> ModelHandlerOutput[dict[str, object]]:
+        self, envelope: dict[str, JsonValue]
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute HTTP operation (http.get or http.post) from envelope.
 
         Args:
@@ -202,7 +206,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
                 - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelHandlerOutput[dict[str, object]] containing:
+            ModelHandlerOutput[dict[str, JsonValue]] containing:
                 - result: dict with status, payload (status_code, headers, body), and correlation_id
                 - input_envelope_id: UUID for causality tracking
                 - correlation_id: UUID for request/response correlation
@@ -293,7 +297,11 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             )
 
     def _extract_headers(
-        self, payload: dict[str, object], operation: str, url: str, correlation_id: UUID
+        self,
+        payload: dict[str, JsonValue],
+        operation: str,
+        url: str,
+        correlation_id: UUID,
     ) -> dict[str, str]:
         """Extract and validate headers from payload."""
         headers_raw = payload.get("headers")
@@ -526,7 +534,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         correlation_id: UUID,
         input_envelope_id: UUID,
         pre_serialized: bytes | None = None,
-    ) -> ModelHandlerOutput[dict[str, object]]:
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute HTTP request with pre-read response size validation.
 
         Uses httpx streaming to validate Content-Length header BEFORE reading
@@ -544,7 +552,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
                 instead of re-serializing the body, avoiding double serialization.
 
         Returns:
-            ModelHandlerOutput[dict[str, object]] with wrapped response data
+            ModelHandlerOutput[dict[str, JsonValue]] with wrapped response data
         """
         if self._client is None:
             ctx = ModelInfraErrorContext(
@@ -566,7 +574,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
 
         # Prepare request content for POST
         request_content: bytes | str | None = None
-        request_json: dict[str, object] | None = None
+        request_json: dict[str, JsonValue] | None = None
         request_headers = dict(headers)  # Copy to avoid mutating caller's headers
 
         if method == "POST" and body is not None:
@@ -637,7 +645,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
         body_bytes: bytes,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, object]]:
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Build response envelope from httpx Response and pre-read body bytes.
 
         This method is used with streaming responses where the body has already
@@ -707,7 +715,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             },
         )
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(self) -> dict[str, JsonValue]:
         """Return adapter health status."""
         correlation_id = uuid4()
         return {
@@ -720,7 +728,7 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             "correlation_id": str(correlation_id),
         }
 
-    def describe(self) -> dict[str, object]:
+    def describe(self) -> dict[str, JsonValue]:
         """Return adapter metadata and capabilities."""
         return {
             "adapter_type": self.handler_type.value,

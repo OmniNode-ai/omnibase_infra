@@ -24,8 +24,11 @@ import asyncio
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 import consul
 from omnibase_core.models.dispatch import ModelHandlerOutput
@@ -195,7 +198,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
 
-    async def initialize(self, config: dict[str, object]) -> None:
+    async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize Consul client with configuration.
 
         Args:
@@ -408,8 +411,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         )
 
     async def execute(
-        self, envelope: dict[str, object]
-    ) -> ModelHandlerOutput[dict[str, object]]:
+        self, envelope: dict[str, JsonValue]
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute Consul operation from envelope.
 
         Args:
@@ -696,10 +699,10 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _kv_get(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, object]]:
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Get value from Consul KV store.
 
         Args:
@@ -732,7 +735,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             raise RuntimeError("Client not initialized")
 
         def get_func() -> tuple[
-            int, list[dict[str, object]] | dict[str, object] | None
+            int, list[dict[str, JsonValue]] | dict[str, JsonValue] | None
         ]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
@@ -747,7 +750,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
         # Handle response - data can be None if key doesn't exist
         if data is None:
-            result: dict[str, object] = {
+            result: dict[str, JsonValue] = {
                 "status": "success",
                 "payload": {
                     "found": False,
@@ -822,10 +825,10 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _kv_put(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, object]]:
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Put value to Consul KV store.
 
         Args:
@@ -887,7 +890,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             correlation_id,
         )
 
-        result: dict[str, object] = {
+        result: dict[str, JsonValue] = {
             "status": "success",
             "payload": {
                 "success": success,
@@ -904,10 +907,10 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _register_service(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, object]]:
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Register service with Consul agent.
 
         Args:
@@ -952,7 +955,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             tags_list = [str(t) for t in tags]
 
         check = payload.get("check")
-        check_dict: dict[str, object] | None = (
+        check_dict: dict[str, JsonValue] | None = (
             check if isinstance(check, dict) else None
         )
 
@@ -978,7 +981,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             correlation_id,
         )
 
-        result: dict[str, object] = {
+        result: dict[str, JsonValue] = {
             "status": "success",
             "payload": {
                 "registered": True,
@@ -996,10 +999,10 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def _deregister_service(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, object]]:
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Deregister service from Consul agent.
 
         Args:
@@ -1039,7 +1042,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             correlation_id,
         )
 
-        result: dict[str, object] = {
+        result: dict[str, JsonValue] = {
             "status": "success",
             "payload": {
                 "deregistered": True,
@@ -1056,7 +1059,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
     async def health_check(
         self, correlation_id: UUID | None = None
-    ) -> dict[str, object]:
+    ) -> dict[str, JsonValue]:
         """Return handler health status with operational metrics.
 
         Uses thread pool executor and retry logic for consistency with other operations.
@@ -1157,7 +1160,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         self,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, object]]:
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute health check operation from envelope.
 
         This method wraps the core health_check() functionality in a ModelHandlerOutput
@@ -1196,7 +1199,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         """
         health_status = await self.health_check(correlation_id=correlation_id)
 
-        result: dict[str, object] = {
+        result: dict[str, JsonValue] = {
             "status": "success",
             "payload": health_status,
             "correlation_id": str(correlation_id),
@@ -1208,7 +1211,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             result=result,
         )
 
-    def describe(self) -> dict[str, object]:
+    def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities.
 
         Returns:

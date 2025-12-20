@@ -6,42 +6,8 @@ This module provides ModelNodeCapabilities for strongly-typed node capabilities
 in the ONEX 2-way registration pattern.
 """
 
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
-
-# JSON-serializable value type for configuration.
-# Using explicit union instead of Any for ONEX coding guidelines compliance.
-#
-# Supported value types:
-# - Primitives: str, int, float, bool, None
-# - Lists of primitives: list[str | int | float | bool | None]
-# - Dicts with up to 2 levels of nesting (keys map to primitive/list values)
-#
-# Type hierarchy:
-#   JsonPrimitive: Terminal values (str, int, float, bool, None)
-#   JsonList: list[JsonPrimitive]
-#   JsonNestedDict: dict[str, JsonPrimitive | JsonList]  # 1 dict level
-#   JsonValue: JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
-#
-# Maximum nesting depth analysis:
-#   The deepest JsonValue is dict[str, JsonNestedDict], which expands to:
-#   dict[str, dict[str, JsonPrimitive | JsonList]]
-#
-#   This gives 2 levels of dict nesting with primitive/list leaf values:
-#     {"outer_key": {"inner_key": "primitive_value"}}
-#
-# When used in config field (dict[str, JsonValue]), total key depth is 3:
-#   config["key1"]["key2"]["key3"] -> primitive
-#
-# Examples:
-#   {"key": "value"}                       # 1 dict level
-#   {"outer": {"inner": "value"}}          # 2 dict levels (maximum)
-#   {"outer": {"inner": [1, 2, 3]}}        # 2 dict levels with list leaf
-#
-# For structures requiring deeper nesting, use a dedicated Pydantic model.
-JsonPrimitive = str | int | float | bool | None
-JsonList = list[JsonPrimitive]
-JsonNestedDict = dict[str, JsonPrimitive | JsonList]
-JsonValue = JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
 
 
 class ModelNodeCapabilities(BaseModel):
@@ -202,9 +168,5 @@ class ModelNodeCapabilities(BaseModel):
 
 
 __all__ = [
-    "JsonList",
-    "JsonNestedDict",
-    "JsonPrimitive",
-    "JsonValue",
     "ModelNodeCapabilities",
 ]
