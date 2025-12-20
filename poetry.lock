@@ -3283,7 +3283,7 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.5.3"
+version = "0.5.4"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = "^3.12"
@@ -3316,7 +3316,7 @@ full = ["psutil"]
 type = "git"
 url = "https://github.com/OmniNode-ai/omnibase_core.git"
 reference = "main"
-resolved_reference = "eff3d3c05a0c8c950a2e64dfd9afd8a735aad7ef"
+resolved_reference = "006c4592066d9b186c55b697f4e394ad87b32771"
 
 [[package]]
 name = "omnibase-spi"

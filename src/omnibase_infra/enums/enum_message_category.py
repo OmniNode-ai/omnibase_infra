@@ -7,11 +7,22 @@ Defines the fundamental message categories in ONEX event-driven architecture:
 - EVENT: Domain events representing facts that have occurred
 - COMMAND: Instructions to perform an action
 - INTENT: User intents requiring interpretation and routing
-- PROJECTION: State projections for optimized read models
+
+IMPORTANT: PROJECTION is NOT a message category. Projections are node output types
+used for execution shape validation (see EnumNodeOutputType). Projections are
+state outputs produced by REDUCER nodes and are not routed via Kafka topics.
+
+Topic Naming Conventions:
+    - EVENT: Read from `*.events` topics (e.g., `order.events`, `user.events`)
+    - COMMAND: Read from `*.commands` topics (e.g., `order.commands`)
+    - INTENT: Read from `*.intents` topics (e.g., `checkout.intents`)
 
 Thread Safety:
     All enums in this module are immutable and thread-safe.
     Enum values can be safely shared across threads without synchronization.
+
+See Also:
+    EnumNodeOutputType: For node output types including PROJECTION
 """
 
 from __future__ import annotations
@@ -24,7 +35,7 @@ class EnumMessageCategory(str, Enum):
     """
     Message category classification for ONEX event-driven routing.
 
-    The four fundamental message categories determine how messages are
+    The three fundamental message categories determine how messages are
     processed and routed through the system:
 
     - **EVENT**: Facts that have occurred (past tense, immutable)
@@ -42,9 +53,22 @@ class EnumMessageCategory(str, Enum):
       - Consumed by orchestrators for routing decisions
       - Example: UserWantsToCheckoutIntent, RequestPasswordResetIntent
 
-    - **PROJECTION**: State projections for optimized read models
-      - Used by reducers for state consolidation
-      - Example: OrderSummaryProjection, UserProfileProjection
+    Note:
+        PROJECTION is intentionally NOT included here. Projections are
+        node output types (see EnumNodeOutputType), not routable message
+        categories. REDUCERs produce projections as state outputs.
+
+    Maintainer Note:
+        When adding new values to this enum, you MUST update the following:
+
+        1. ``_MESSAGE_CATEGORY_TO_OUTPUT_TYPE`` mapping in
+           ``omnibase_infra/validation/execution_shape_validator.py``
+        2. ``_CATEGORY_TO_SUFFIX`` and ``_SUFFIX_TO_CATEGORY`` mappings
+           at the bottom of this file (see module-level constants)
+        3. Topic routing logic in ``topic_category_validator.py`` and
+           any pattern matching that uses category suffixes
+        4. The ``from_topic()`` method if the new category uses a
+           different topic naming convention
 
     Attributes:
         topic_suffix: The plural suffix used in topic names (e.g., "events")
@@ -68,9 +92,6 @@ class EnumMessageCategory(str, Enum):
     INTENT = "intent"
     """User intents requiring interpretation and routing."""
 
-    PROJECTION = "projection"
-    """State projections for optimized read models."""
-
     def __str__(self) -> str:
         """Return the string value for serialization."""
         return self.value
@@ -84,7 +105,6 @@ class EnumMessageCategory(str, Enum):
         - EVENT -> "events" (e.g., onex.user.events)
         - COMMAND -> "commands" (e.g., onex.order.commands)
         - INTENT -> "intents" (e.g., onex.checkout.intents)
-        - PROJECTION -> "projections" (e.g., onex.order.projections)
 
         Returns:
             The plural suffix string for topic names
@@ -102,7 +122,7 @@ class EnumMessageCategory(str, Enum):
         """
         Infer the message category from a topic string.
 
-        Examines the topic for category keywords (events, commands, intents, projections)
+        Examines the topic for category keywords (events, commands, intents)
         as complete segments and returns the corresponding category. Handles both
         ONEX Kafka format (onex.<domain>.<type>) and Environment-Aware format
         (<env>.<domain>.<category>.<version>).
@@ -148,7 +168,7 @@ class EnumMessageCategory(str, Enum):
         Get the category from a topic suffix.
 
         Args:
-            suffix: The suffix to look up (e.g., "events", "commands", "intents", "projections")
+            suffix: The suffix to look up (e.g., "events", "commands", "intents")
 
         Returns:
             EnumMessageCategory if the suffix is valid, None otherwise
@@ -175,10 +195,6 @@ class EnumMessageCategory(str, Enum):
         """Check if this is an intent category."""
         return self == EnumMessageCategory.INTENT
 
-    def is_projection(self) -> bool:
-        """Check if this is a projection category."""
-        return self == EnumMessageCategory.PROJECTION
-
 
 # Module-level constant mappings for better performance (avoid dict creation per call)
 # Defined after enum class to enable proper type resolution
@@ -186,13 +202,11 @@ _CATEGORY_TO_SUFFIX: dict[EnumMessageCategory, str] = {
     EnumMessageCategory.EVENT: "events",
     EnumMessageCategory.COMMAND: "commands",
     EnumMessageCategory.INTENT: "intents",
-    EnumMessageCategory.PROJECTION: "projections",
 }
 _SUFFIX_TO_CATEGORY: dict[str, EnumMessageCategory] = {
     "events": EnumMessageCategory.EVENT,
     "commands": EnumMessageCategory.COMMAND,
     "intents": EnumMessageCategory.INTENT,
-    "projections": EnumMessageCategory.PROJECTION,
 }
 
 

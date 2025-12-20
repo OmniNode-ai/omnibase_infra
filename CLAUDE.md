@@ -103,6 +103,78 @@ Domain grouping is preferred when:
 - Protocols define the complete interface for a single node or module
 - Protocols share common type dependencies within the same bounded context
 
+### Enum Usage: Message Routing vs Node Validation
+
+ONEX uses two distinct enums for message categorization with different purposes:
+
+| Enum | Values | Purpose | Location |
+|------|--------|---------|----------|
+| `EnumMessageCategory` | `EVENT`, `COMMAND`, `INTENT` | Message routing, topic parsing, dispatcher selection | `omnibase_core.enums` |
+| `EnumNodeOutputType` | `EVENT`, `COMMAND`, `INTENT`, `PROJECTION` | Execution shape validation, handler return type validation | `omnibase_core.enums` |
+
+**Quick Decision Guide**:
+- **Routing a message?** Use `EnumMessageCategory`
+- **Validating node output?** Use `EnumNodeOutputType`
+
+**Key Difference - PROJECTION**:
+- `PROJECTION` exists **only** in `EnumNodeOutputType`
+- `PROJECTION` is **only valid for REDUCER nodes** (state aggregation outputs)
+- Message routing never uses `PROJECTION` because projections are not routable messages
+
+**Usage Examples**:
+
+```python
+from omnibase_core.enums import EnumMessageCategory, EnumNodeOutputType
+
+# MESSAGE ROUTING - Use EnumMessageCategory
+def parse_topic(topic: str) -> EnumMessageCategory:
+    """Parse topic to determine message category for routing."""
+    if ".event." in topic:
+        return EnumMessageCategory.EVENT
+    elif ".command." in topic:
+        return EnumMessageCategory.COMMAND
+    return EnumMessageCategory.INTENT
+
+def select_dispatcher(category: EnumMessageCategory) -> ProtocolMessageDispatcher:
+    """Select dispatcher based on message category."""
+    return dispatcher_registry[category]
+
+# NODE VALIDATION - Use EnumNodeOutputType
+def validate_reducer_output(node_type: str, output_type: EnumNodeOutputType) -> bool:
+    """Validate that output type is valid for node type."""
+    if output_type == EnumNodeOutputType.PROJECTION:
+        # PROJECTION only valid for REDUCER nodes
+        return node_type == "REDUCER"
+    return True
+
+def get_handler_output_type(handler: ProtocolHandler) -> EnumNodeOutputType:
+    """Get the declared output type for handler validation."""
+    return handler.output_type  # May include PROJECTION for reducers
+```
+
+**Mapping Between Enums**:
+
+`EnumNodeOutputType` provides helper methods for safe conversion:
+
+```python
+from omnibase_core.enums import EnumNodeOutputType, EnumMessageCategory
+
+# Convert node output type to message category (for routing after validation)
+output_type = EnumNodeOutputType.EVENT
+category = output_type.to_message_category()  # Returns EnumMessageCategory.EVENT
+
+# PROJECTION cannot be converted - raises ValueError
+projection = EnumNodeOutputType.PROJECTION
+projection.to_message_category()  # Raises ValueError: PROJECTION has no message category
+
+# Check if output type is routable
+output_type.is_routable()  # True for EVENT, COMMAND, INTENT; False for PROJECTION
+```
+
+**Related**:
+- ADR: `docs/decisions/adr-enum-message-category-vs-node-output-type.md`
+- Ticket: OMN-974
+
 ### Registry Naming Conventions
 
 **Node-Specific Registries** (`nodes/<name>/registry/`):
