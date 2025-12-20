@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
+from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -24,6 +25,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.mixins import MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,9 @@ _DEFAULT_MAX_RESPONSE_SIZE: int = 50 * 1024 * 1024  # 50 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
+
+# Handler ID for ModelHandlerOutput
+HANDLER_ID_HTTP: str = "http-handler"
 
 # Size category thresholds for sanitized logging
 _SIZE_THRESHOLD_KB: int = 1024  # 1 KB
@@ -62,7 +67,7 @@ def _categorize_size(size: int) -> str:
         return "very_large"
 
 
-class HttpRestAdapter:
+class HttpRestAdapter(MixinEnvelopeExtraction):
     """HTTP REST protocol adapter using httpx async client (MVP: GET, POST only).
 
     Security Features:
@@ -184,9 +189,27 @@ class HttpRestAdapter:
         self._initialized = False
         logger.info("HttpRestAdapter shutdown complete")
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
-        """Execute HTTP operation (http.get or http.post) from envelope."""
+    async def execute(
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[dict[str, object]]:
+        """Execute HTTP operation (http.get or http.post) from envelope.
+
+        Args:
+            envelope: Request envelope containing:
+                - operation: "http.get" or "http.post"
+                - payload: dict with "url" (required), "headers" (optional), "body" (optional for POST)
+                - correlation_id: Optional correlation ID for tracing
+                - envelope_id: Optional envelope ID for causality tracking
+
+        Returns:
+            ModelHandlerOutput[dict[str, object]] containing:
+                - result: dict with status, payload (status_code, headers, body), and correlation_id
+                - input_envelope_id: UUID for causality tracking
+                - correlation_id: UUID for request/response correlation
+                - handler_id: "http-handler"
+        """
         correlation_id = self._extract_correlation_id(envelope)
+        input_envelope_id = self._extract_envelope_id(envelope)
 
         if not self._initialized or self._client is None:
             ctx = ModelInfraErrorContext(
@@ -251,7 +274,7 @@ class HttpRestAdapter:
 
         if operation == "http.get":
             return await self._execute_request(
-                "GET", url, headers, None, correlation_id, None
+                "GET", url, headers, None, correlation_id, input_envelope_id, None
             )
         else:  # http.post
             body = payload.get("body")
@@ -260,20 +283,8 @@ class HttpRestAdapter:
             # and the cached bytes are passed to _execute_request().
             pre_serialized = self._validate_request_size(body, correlation_id)
             return await self._execute_request(
-                "POST", url, headers, body, correlation_id, pre_serialized
+                "POST", url, headers, body, correlation_id, input_envelope_id, pre_serialized
             )
-
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate correlation ID from envelope."""
-        raw = envelope.get("correlation_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
 
     def _extract_headers(
         self, payload: dict[str, object], operation: str, url: str, correlation_id: UUID
@@ -507,8 +518,9 @@ class HttpRestAdapter:
         headers: dict[str, str],
         body: object,
         correlation_id: UUID,
+        input_envelope_id: UUID,
         pre_serialized: bytes | None = None,
-    ) -> dict[str, object]:
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Execute HTTP request with pre-read response size validation.
 
         Uses httpx streaming to validate Content-Length header BEFORE reading
@@ -520,9 +532,13 @@ class HttpRestAdapter:
             headers: Request headers
             body: Request body (used only if pre_serialized is None)
             correlation_id: Correlation ID for tracing
+            input_envelope_id: Envelope ID for causality tracking
             pre_serialized: Pre-serialized JSON bytes for dict bodies (from
                 _validate_request_size). When provided, this is used directly
                 instead of re-serializing the body, avoiding double serialization.
+
+        Returns:
+            ModelHandlerOutput[dict[str, object]] with wrapped response data
         """
         if self._client is None:
             ctx = ModelInfraErrorContext(
@@ -591,7 +607,7 @@ class HttpRestAdapter:
                 )
 
                 return self._build_response_from_bytes(
-                    response, response_body_bytes, correlation_id
+                    response, response_body_bytes, correlation_id, input_envelope_id
                 )
 
         except httpx.TimeoutException as e:
@@ -614,7 +630,8 @@ class HttpRestAdapter:
         response: httpx.Response,
         body_bytes: bytes,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, object]]:
         """Build response envelope from httpx Response and pre-read body bytes.
 
         This method is used with streaming responses where the body has already
@@ -624,9 +641,10 @@ class HttpRestAdapter:
             response: The httpx Response object (headers already available)
             body_bytes: The pre-read response body bytes
             correlation_id: Correlation ID for tracing
+            input_envelope_id: Envelope ID for causality tracking
 
         Returns:
-            Response envelope dict with status, payload, and correlation_id
+            ModelHandlerOutput wrapping response dict with status, payload, and correlation_id
         """
         content_type = response.headers.get("content-type", "")
         body: object
@@ -668,18 +686,24 @@ class HttpRestAdapter:
         else:
             body = body_text
 
-        return {
-            "status": "success",
-            "payload": {
-                "status_code": response.status_code,
-                "headers": dict(response.headers),
-                "body": body,
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_HTTP,
+            result={
+                "status": "success",
+                "payload": {
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers),
+                    "body": body,
+                },
+                "correlation_id": str(correlation_id),
             },
-            "correlation_id": correlation_id,
-        }
+        )
 
     async def health_check(self) -> dict[str, object]:
         """Return adapter health status."""
+        correlation_id = uuid4()
         return {
             "healthy": self._initialized and self._client is not None,
             "initialized": self._initialized,
@@ -687,6 +711,7 @@ class HttpRestAdapter:
             "timeout_seconds": self._timeout,
             "max_request_size": self._max_request_size,
             "max_response_size": self._max_response_size,
+            "correlation_id": str(correlation_id),
         }
 
     def describe(self) -> dict[str, object]:
