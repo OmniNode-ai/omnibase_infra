@@ -1050,27 +1050,36 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             result=result,
         )
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(
+        self, correlation_id: UUID | None = None
+    ) -> dict[str, object]:
         """Return handler health status with operational metrics.
 
         Uses thread pool executor and retry logic for consistency with other operations.
         Includes circuit breaker protection and exponential backoff on transient failures.
 
         This is the standalone health check method intended for direct invocation by
-        monitoring systems, health check endpoints, or diagnostic tools. It generates
-        its own correlation_id for tracing purposes.
+        monitoring systems, health check endpoints, or diagnostic tools.
 
         Envelope-Based vs Direct Invocation:
-            - Direct: Call health_check() for monitoring/diagnostics. A new correlation_id
-              is generated internally for tracing the health check operation.
+            - Direct: Call health_check() for monitoring/diagnostics. If no correlation_id
+              is provided, a new one is generated internally for tracing.
             - Envelope: Use execute() with operation="consul.health_check" for dispatch.
-              The envelope's correlation_id and envelope_id are preserved for causality.
+              The envelope's correlation_id is propagated to this method via
+              _health_check_operation() for consistent tracing.
 
         Note:
             This method does not accept envelope_id because it's designed for direct
             invocation outside the envelope dispatch context. For envelope-based health
             checks that preserve causality tracking, use _health_check_operation() via
             the execute() method.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing. When called via
+                envelope dispatch (through _health_check_operation), this preserves
+                the request's correlation_id for consistent distributed tracing.
+                When called directly (e.g., by monitoring systems), a new ID is
+                generated if not provided.
 
         Returns:
             Health status dict with handler state information including:
@@ -1082,7 +1091,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             RuntimeHostError: If health check fails (errors are propagated, not swallowed)
         """
         healthy = False
-        correlation_id = uuid4()
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         # Calculate operational metrics (safe even if not initialized)
         circuit_state: str | None = None
@@ -1152,11 +1162,13 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         1. It accepts pre-extracted IDs from the request envelope
         2. It returns ModelHandlerOutput (suitable for envelope dispatch)
         3. It preserves causality tracking via input_envelope_id
+        4. It propagates correlation_id to health_check() for consistent tracing
 
         ID Semantics:
             correlation_id: Groups related operations across distributed services.
                 Used for filtering logs, tracing request flows, and debugging.
-                Propagated from the request envelope or auto-generated if missing.
+                Propagated from the request envelope to health_check() for consistent
+                distributed tracing across the entire request lifecycle.
 
             input_envelope_id: Links this response to the originating request envelope.
                 Enables request/response correlation in observability systems.
@@ -1164,11 +1176,13 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 Auto-generated if not provided, ensuring all responses have valid
                 causality tracking IDs.
 
-        The standalone health_check() method generates its own correlation_id since
-        it may be called directly (not via envelope dispatch) for monitoring purposes.
+        When health_check() is called directly (not via envelope dispatch), it generates
+        its own correlation_id for monitoring purposes. This method ensures envelope-based
+        calls use the request's correlation_id for end-to-end tracing consistency.
 
         Args:
             correlation_id: Correlation ID for distributed tracing across services.
+                Propagated to health_check() to ensure consistent tracing.
             input_envelope_id: Envelope ID for causality tracking. Links this health
                 check response to the original request envelope, enabling end-to-end
                 request/response correlation in observability systems.
@@ -1176,7 +1190,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         Returns:
             ModelHandlerOutput wrapping the health check information with correlation tracking
         """
-        health_status = await self.health_check()
+        health_status = await self.health_check(correlation_id=correlation_id)
 
         result: dict[str, object] = {
             "status": "success",

@@ -561,7 +561,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                     "correlation_id": str(correlation_id),
                 },
             )
-            await self.renew_token()
+            await self.renew_token(correlation_id=correlation_id)
             logger.debug(
                 "Token renewal completed successfully",
                 extra={
@@ -1061,7 +1061,9 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             },
         )
 
-    async def renew_token(self) -> dict[str, object]:
+    async def renew_token(
+        self, correlation_id: UUID | None = None
+    ) -> dict[str, object]:
         """Renew Vault authentication token.
 
         Token TTL Extraction Logic:
@@ -1070,13 +1072,19 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             3. Update _token_expires_at = current_time + extracted_ttl
             4. Log warning when falling back to default TTL
 
+        Args:
+            correlation_id: Optional correlation ID for tracing. When called via
+                envelope dispatch, this preserves the request's correlation_id.
+                When called directly (e.g., by monitoring), a new ID is generated.
+
         Returns:
             Token renewal information including new TTL
 
         Raises:
             InfraAuthenticationError: If token renewal fails
         """
-        correlation_id = uuid4()
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         if self._client is None or self._config is None:
             ctx = ModelInfraErrorContext(
@@ -1193,7 +1201,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         Returns:
             ModelHandlerOutput with renewal information
         """
-        result = await self.renew_token()
+        result = await self.renew_token(correlation_id=correlation_id)
 
         # Extract nested auth data with type checking
         auth_obj = result.get("auth", {})
@@ -1213,19 +1221,21 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             },
         )
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(
+        self, correlation_id: UUID | None = None
+    ) -> dict[str, object]:
         """Return handler health status with operational metrics.
 
         Uses thread pool executor and retry logic for consistency with other operations.
         Includes circuit breaker protection and exponential backoff on transient failures.
 
         This is the standalone health check method intended for direct invocation by
-        monitoring systems, health check endpoints, or diagnostic tools. It generates
-        its own correlation_id for tracing purposes.
+        monitoring systems, health check endpoints, or diagnostic tools. When called
+        directly, a new correlation_id is generated for tracing purposes.
 
         Envelope-Based vs Direct Invocation:
-            - Direct: Call health_check() for monitoring/diagnostics. A new correlation_id
-              is generated internally for tracing the health check operation.
+            - Direct: Call health_check() for monitoring/diagnostics. If no correlation_id
+              is provided, a new one is generated internally for tracing.
             - Envelope: Use execute() with operation="vault.health_check" for dispatch.
               The envelope's correlation_id and envelope_id are preserved for causality.
 
@@ -1234,6 +1244,11 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             invocation outside the envelope dispatch context. For envelope-based health
             checks that preserve causality tracking, use _health_check_operation() via
             the execute() method.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing. When called via
+                envelope dispatch, this preserves the request's correlation_id.
+                When called directly (e.g., by monitoring), a new ID is generated.
 
         Returns:
             Health status dict with handler state information including:
@@ -1246,7 +1261,8 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             RuntimeHostError: If health check fails (errors are propagated, not swallowed)
         """
         healthy = False
-        correlation_id = uuid4()
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         # Calculate operational metrics (safe even if not initialized)
         token_ttl_remaining: int | None = None
@@ -1350,7 +1366,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         Returns:
             ModelHandlerOutput with health check information
         """
-        health_status = await self.health_check()
+        health_status = await self.health_check(correlation_id=correlation_id)
 
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
