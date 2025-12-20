@@ -283,7 +283,13 @@ class HttpRestAdapter(MixinEnvelopeExtraction):
             # and the cached bytes are passed to _execute_request().
             pre_serialized = self._validate_request_size(body, correlation_id)
             return await self._execute_request(
-                "POST", url, headers, body, correlation_id, input_envelope_id, pre_serialized
+                "POST",
+                url,
+                headers,
+                body,
+                correlation_id,
+                input_envelope_id,
+                pre_serialized,
             )
 
     def _extract_headers(
