@@ -223,6 +223,73 @@ class DispatchContextEnforcer:
                 error_code=EnumCoreErrorCode.VALIDATION_FAILED,
             )
 
+    def validate_no_time_injection_for_compute(
+        self,
+        context: ModelDispatchContext,
+    ) -> None:
+        """
+        Validate that a compute context does not have time injection.
+
+        This method provides an explicit validation checkpoint that can be
+        called before dispatching to a compute node to ensure no time injection
+        has occurred (e.g., via manual context construction).
+
+        Args:
+            context: The dispatch context to validate.
+
+        Raises:
+            ModelOnexError: If context has time injection for a compute node
+                (VALIDATION_FAILED).
+
+        Example:
+            >>> # This will raise if context has now != None
+            >>> enforcer.validate_no_time_injection_for_compute(compute_ctx)
+
+        .. versionadded:: 0.5.0
+        """
+        if context.node_kind == EnumNodeKind.COMPUTE and context.now is not None:
+            raise ModelOnexError(
+                message="COMPUTE nodes cannot receive time injection. "
+                f"Dispatch context has now={context.now} but compute nodes must be "
+                "deterministic. This is an ONEX architectural violation.",
+                error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+            )
+
+    def validate_no_time_injection_for_deterministic_node(
+        self,
+        context: ModelDispatchContext,
+    ) -> None:
+        """
+        Validate that a deterministic node context does not have time injection.
+
+        This method provides an explicit validation checkpoint that can be
+        called before dispatching to a REDUCER or COMPUTE node to ensure no
+        time injection has occurred (e.g., via manual context construction).
+
+        Args:
+            context: The dispatch context to validate.
+
+        Raises:
+            ModelOnexError: If context has time injection for a REDUCER or COMPUTE
+                node (VALIDATION_FAILED).
+
+        Example:
+            >>> # This will raise if context has now != None for deterministic nodes
+            >>> enforcer.validate_no_time_injection_for_deterministic_node(ctx)
+
+        .. versionadded:: 0.5.0
+        """
+        if (
+            context.node_kind in (EnumNodeKind.REDUCER, EnumNodeKind.COMPUTE)
+            and context.now is not None
+        ):
+            raise ModelOnexError(
+                message=f"{context.node_kind.value.upper()} nodes cannot receive time injection. "
+                f"Dispatch context has now={context.now} but {context.node_kind.value.lower()} "
+                "nodes must be deterministic. This is an ONEX architectural violation.",
+                error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+            )
+
     def requires_time_injection(self, node_kind: EnumNodeKind) -> bool:
         """
         Check if a node kind requires time injection.

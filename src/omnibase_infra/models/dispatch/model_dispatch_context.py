@@ -119,7 +119,7 @@ class ModelDispatchContext(BaseModel):
         default=None,
         description=(
             "Injected current time for time-dependent operations. "
-            "Must be None for REDUCER nodes to ensure deterministic execution."
+            "Must be None for REDUCER and COMPUTE nodes to ensure deterministic execution."
         ),
     )
 
@@ -136,22 +136,26 @@ class ModelDispatchContext(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _validate_reducer_no_time(self) -> "ModelDispatchContext":
-        """Validate that reducers do not receive time injection.
+    def _validate_deterministic_node_no_time(self) -> "ModelDispatchContext":
+        """Validate that deterministic nodes do not receive time injection.
 
-        This validator enforces the ONEX architecture rule that reducers
-        must be deterministic and therefore cannot receive `now`.
+        This validator enforces the ONEX architecture rule that REDUCER and
+        COMPUTE nodes must be deterministic and therefore cannot receive `now`.
 
         Raises:
-            ValueError: If node_kind is REDUCER and now is not None.
+            ValueError: If node_kind is REDUCER or COMPUTE and now is not None.
 
         Returns:
             Self if validation passes.
         """
-        if self.node_kind == EnumNodeKind.REDUCER and self.now is not None:
+        if (
+            self.node_kind in (EnumNodeKind.REDUCER, EnumNodeKind.COMPUTE)
+            and self.now is not None
+        ):
             msg = (
-                "Reducer nodes cannot receive time injection. "
-                "Reducers must be deterministic - use for_reducer() factory method."
+                f"{self.node_kind.value.upper()} nodes cannot receive time injection. "
+                f"{self.node_kind.value.capitalize()} nodes must be deterministic - "
+                f"use for_{self.node_kind.value.lower()}() factory method."
             )
             raise ValueError(msg)
         return self
@@ -182,7 +186,7 @@ class ModelDispatchContext(BaseModel):
         This method provides explicit validation that can be called
         at dispatch time to ensure time injection rules are enforced.
 
-        For reducers, this validates that `now` is None.
+        For REDUCER and COMPUTE nodes, this validates that `now` is None.
         For other node types, this always returns True.
 
         The return type `Literal[True]` signals that this method either
@@ -192,7 +196,7 @@ class ModelDispatchContext(BaseModel):
             Literal[True]: Always returns True if validation passes.
 
         Raises:
-            ValueError: If node_kind is REDUCER and now is not None.
+            ValueError: If node_kind is REDUCER or COMPUTE and now is not None.
 
         Example:
             >>> ctx = ModelDispatchContext.for_reducer(correlation_id=uuid4())
@@ -200,11 +204,14 @@ class ModelDispatchContext(BaseModel):
             True
             >>> # Invalid context would raise ValueError
         """
-        if self.node_kind == EnumNodeKind.REDUCER and self.now is not None:
+        if (
+            self.node_kind in (EnumNodeKind.REDUCER, EnumNodeKind.COMPUTE)
+            and self.now is not None
+        ):
             msg = (
                 f"Dispatch context validation failed: "
-                f"REDUCER nodes cannot receive time injection (now={self.now}). "
-                f"Reducers must be deterministic."
+                f"{self.node_kind.value.upper()} nodes cannot receive time injection "
+                f"(now={self.now}). {self.node_kind.value.capitalize()} nodes must be deterministic."
             )
             raise ValueError(msg)
         return True

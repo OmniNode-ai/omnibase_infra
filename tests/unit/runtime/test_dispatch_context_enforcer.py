@@ -685,6 +685,114 @@ class TestOMN973ReducerCannotAccessNow:
         # behavior - the system should prevent invalid states from existing.
 
 
+class TestOMN973ComputeCannotAccessNow:
+    """
+    OMN-973 Acceptance Criteria: Tests proving COMPUTE nodes cannot access `now`.
+
+    COMPUTE nodes are pure transformations that must be deterministic,
+    just like reducers. This class tests the Pydantic model validation
+    that blocks time injection for COMPUTE nodes.
+    """
+
+    def test_cannot_manually_inject_time_into_compute_via_model(self) -> None:
+        """
+        CRITICAL: Attempting to create compute context with `now` parameter raises error.
+
+        Even if someone tries to bypass the enforcer and construct a context
+        directly, the model validator MUST reject time injection for compute nodes.
+        """
+        with pytest.raises(ValueError) as exc_info:
+            ModelDispatchContext(
+                correlation_id=uuid4(),
+                node_kind=EnumNodeKind.COMPUTE,
+                now=datetime.now(UTC),  # This MUST be rejected
+            )
+
+        error_message = str(exc_info.value).lower()
+        assert "compute" in error_message, "Error should mention compute violation"
+
+    def test_compute_factory_enforces_no_time(self) -> None:
+        """
+        CRITICAL: ModelDispatchContext.for_compute() MUST create context without time.
+
+        The factory method is the primary API for creating compute contexts
+        and must enforce the no-time-injection rule.
+        """
+        context = ModelDispatchContext.for_compute(correlation_id=uuid4())
+
+        assert context.now is None, "for_compute() created context with time injection"
+        assert context.has_time_injection is False
+        assert context.node_kind == EnumNodeKind.COMPUTE
+
+    def test_compute_context_validation_rejects_time(self) -> None:
+        """
+        CRITICAL: validate_for_node_kind() must reject compute contexts with time.
+
+        This explicit validation method provides an additional safety check
+        that can be called at dispatch time.
+        """
+        # Valid compute context should pass validation
+        valid_context = ModelDispatchContext.for_compute(correlation_id=uuid4())
+        assert valid_context.validate_for_node_kind() is True
+
+    def test_enforcer_validate_method_rejects_compute_with_time(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        CRITICAL: validate_no_time_injection_for_compute() raises for invalid context.
+
+        This tests the enforcer's explicit validation that can be called
+        as an additional safety check before dispatching.
+        """
+        # Create a valid compute context
+        valid_context = ModelDispatchContext.for_compute(correlation_id=uuid4())
+
+        # Should NOT raise for valid context
+        enforcer.validate_no_time_injection_for_compute(valid_context)
+
+    def test_enforcer_deterministic_validation_covers_compute(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        CRITICAL: validate_no_time_injection_for_deterministic_node() covers compute.
+
+        The generic deterministic node validation method should also work
+        for compute nodes.
+        """
+        # Create a valid compute context
+        valid_context = ModelDispatchContext.for_compute(correlation_id=uuid4())
+
+        # Should NOT raise for valid context
+        enforcer.validate_no_time_injection_for_deterministic_node(valid_context)
+
+    def test_compute_context_has_no_time_via_dispatch(
+        self,
+        enforcer: DispatchContextEnforcer,
+        compute_dispatcher: MockMessageDispatcher,
+        envelope_with_ids: MockEnvelope,
+    ) -> None:
+        """
+        CRITICAL: Compute nodes must NEVER receive `now` in their context via dispatch.
+        """
+        context = enforcer.create_context_for_dispatcher(
+            compute_dispatcher, envelope_with_ids
+        )
+
+        # PRIMARY ASSERTION: now MUST be None for compute
+        assert context.now is None, (
+            "CRITICAL VIOLATION: Compute node received time injection via dispatch! "
+            "This violates ONEX architecture - compute nodes must be deterministic. "
+            f"Got now={context.now}"
+        )
+
+        # SECONDARY ASSERTION: has_time_injection property must be False
+        assert context.has_time_injection is False, (
+            "has_time_injection reports True despite now=None"
+        )
+
+
 class TestOMN973OrchestratorReceivesTime:
     """
     OMN-973: Tests proving orchestrators DO receive `now` from dispatch.
