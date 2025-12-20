@@ -52,15 +52,11 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-
-# JSON-serializable types for error details (no Any usage per ONEX guidelines)
-# Using PEP 695 type aliases for Pydantic recursive type support
-type JsonPrimitive = str | int | float | bool | None
-type JsonValue = JsonPrimitive | list[JsonValue] | dict[str, JsonValue]
 
 
 class ModelDispatchResult(BaseModel):
@@ -382,4 +378,4 @@ class ModelDispatchResult(BaseModel):
         )
 
 
-__all__ = ["ModelDispatchResult", "JsonPrimitive", "JsonValue"]
+__all__ = ["ModelDispatchResult"]

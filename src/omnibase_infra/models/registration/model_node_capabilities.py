@@ -6,21 +6,8 @@ This module provides ModelNodeCapabilities for strongly-typed node capabilities
 in the ONEX 2-way registration pattern.
 """
 
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
-
-# JSON-serializable value type for configuration.
-# Using explicit union instead of Any for ONEX coding guidelines compliance.
-#
-# This type supports:
-# - Primitives: str, int, float, bool, None
-# - Lists of primitives: list[str | int | float | bool | None]
-# - Nested dicts up to 2 levels deep with primitive values
-#
-# For deeply nested structures, consider using a dedicated Pydantic model.
-JsonPrimitive = str | int | float | bool | None
-JsonList = list[JsonPrimitive]
-JsonNestedDict = dict[str, JsonPrimitive | JsonList]
-JsonValue = JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
 
 
 class ModelNodeCapabilities(BaseModel):
@@ -181,9 +168,5 @@ class ModelNodeCapabilities(BaseModel):
 
 
 __all__ = [
-    "JsonList",
-    "JsonNestedDict",
-    "JsonPrimitive",
-    "JsonValue",
     "ModelNodeCapabilities",
 ]

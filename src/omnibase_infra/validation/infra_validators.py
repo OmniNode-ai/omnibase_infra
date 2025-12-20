@@ -114,34 +114,17 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # See exempted_patterns list in validate_infra_patterns() for complete definitions.
 # ============================================================================
 
-# Maximum allowed complex union types in infrastructure code.
-# TECH DEBT (OMN-934): Baseline of 406 unions as of 2025-12-20
-# Target: Reduce incrementally through refactoring
+# Maximum allowed union count in infrastructure code.
+# This is a COUNT threshold, not a violation threshold. The validator counts all
+# unions including the ONEX-preferred `X | None` patterns, which are valid.
 #
-# Current count breakdown (~406 unions as of 2025-12-20):
-# - Infrastructure handlers (~90): Consul, Kafka, Vault, PostgreSQL adapters
-# - Runtime components (~40): RuntimeHostProcess, handler/policy registries, wiring
-# - Models (~24): Event bus models, error context, runtime config, registration events
-# - Registration models (~41): ModelNodeCapabilities, ModelNodeMetadata with nullable fields
-# - Dispatch models (~148): OMN-934 message dispatch engine models with nullable fields
-# - JsonValue types (~44): Recursive JSON value type definitions for type-safe JSON handling
+# Current baseline (353 unions as of 2025-12-20):
+# - Most unions are legitimate `X | None` nullable patterns
+# - These are NOT flagged as violations, just counted
+# - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 #
-# OMN-891 registration event models contribute unions:
-# - model_node_heartbeat_event.py (3): memory_usage_mb, cpu_usage_percent, correlation_id
-# - model_node_introspection_event.py (5): node_role, correlation_id, network_id,
-#     deployment_id, epoch
-# - model_node_registration.py (2): health_endpoint, last_heartbeat
-# - model_node_capabilities.py (~18): nullable fields for optional capability flags
-# - model_node_metadata.py (~13): nullable fields for optional metadata
-#
-# PR #61 (OMN-934) JsonValue type definitions contribute ~44 unions:
-# - JsonValue recursive type aliases for type-safe JSON serialization
-# - Required for proper typing in message dispatch models
-#
-# Note: The validator counts X | None (PEP 604) patterns as unions, which is
-# the ONEX-preferred syntax per CLAUDE.md. Threshold set to 450 to provide a
-# small buffer above the current baseline while maintaining awareness of union complexity.
-INFRA_MAX_UNIONS = 450
+# Threshold set to 400 to provide headroom above baseline.
+INFRA_MAX_UNIONS = 400
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -149,70 +132,14 @@ INFRA_MAX_UNIONS = 450
 # contract-driven code generation.
 INFRA_MAX_VIOLATIONS = 0
 
-# ============================================================================
-# TECH DEBT: Strict Pattern Validation Disabled
-# ============================================================================
-# Status: DISABLED (False)
-# Created: 2025-12-19
-# Target Re-enable Date: 2026-03-01 (Q1 2026)
-# Tracking Ticket: OMN-1001 (to be created)
-#
-# Prerequisites for Re-enabling Strict Mode:
-# ------------------------------------------
-# 1. Complete OMN-934 (Message Dispatch Engine) - addresses ~148 dispatch model unions
-# 2. Complete H1 Legacy Migration - migrate v1_0_0 directories to flat structure
-# 3. Reduce INFRA_MAX_UNIONS from 450 to <200 through targeted refactoring
-# 4. Add remaining infrastructure components to exempted_patterns list
-# 5. Validate all infrastructure nodes pass strict mode or have documented exemptions
-#
-# Pre-existing Violations (to be addressed or exempted):
-# ------------------------------------------------------
-# - node.py: Core architecture patterns (may need exemption)
-# - mixin_node_introspection.py: Introspection mixin patterns (exempted)
-# - Method/parameter count warnings: Style suggestions for infrastructure components
-# - UUID field suggestions: False positives on semantic identifiers (e.g., policy_id)
-#
-# Documented Exemptions (handled via exempted_patterns list):
-# -----------------------------------------------------------
-# - KafkaEventBus: Event bus pattern requires many methods and params (14 methods, 10 params)
-# - RuntimeHostProcess: Central coordinator pattern (11+ methods, 6+ params)
-# - PolicyRegistry: Domain registry pattern (many methods)
-# - MixinNodeIntrospection: Introspection mixin pattern (many methods)
-# - ExecutionShapeValidator: AST analysis pattern (many methods)
-#
-# See validate_infra_patterns() exempted_patterns list for complete definitions.
-# See CLAUDE.md "Accepted Pattern Exceptions" section for full rationale.
-#
-# Review Cadence: Monthly review until re-enabled
-# Last Review: 2025-12-20
-# Next Review: 2026-01-20
-# ============================================================================
-INFRA_PATTERNS_STRICT = False
+# Strict mode for pattern validation.
+# Enabled: All violations must be exempted or fixed.
+# See validate_infra_patterns() exempted_patterns list for documented exemptions.
+INFRA_PATTERNS_STRICT = True
 
-# ============================================================================
-# TECH DEBT: Strict Union Validation Disabled
-# ============================================================================
-# Status: DISABLED (False)
-# Created: 2025-12-20
-# Target Re-enable Date: 2026-03-01 (Q1 2026)
-# Tracking Ticket: OMN-1002 (to be created)
-#
-# Strict mode for union usage validation in infrastructure code.
-# Set to False to allow necessary unions for protocol implementations and service adapters
-# while still preventing overly complex union types via INFRA_MAX_UNIONS limit.
-#
-# Prerequisites for Re-enabling Strict Mode:
-# ------------------------------------------
-# 1. Complete OMN-934 (Message Dispatch Engine) - addresses dispatch model unions
-# 2. Reduce INFRA_MAX_UNIONS from 450 to <200 through targeted refactoring
-# 3. Document remaining necessary unions in exempted_patterns
-# 4. Coordinate with INFRA_PATTERNS_STRICT re-enablement (OMN-1001)
-#
-# Review Cadence: Monthly review until re-enabled
-# Last Review: 2025-12-20
-# Next Review: 2026-01-20
-# ============================================================================
-INFRA_UNIONS_STRICT = False
+# Strict mode for union usage validation.
+# Enabled: The validator will flag actual violations (not just count unions).
+INFRA_UNIONS_STRICT = True
 
 
 def validate_infra_architecture(
@@ -472,6 +399,76 @@ def validate_infra_patterns(
             "class_pattern": r"Class 'MixinNodeIntrospection'",
             "violation_pattern": r"has \d+ methods",
         },
+        # ================================================================================
+        # Message Dispatch Engine Exemptions (OMN-934, OMN-983)
+        # ================================================================================
+        # MessageDispatchEngine method count exemption
+        # Central dispatch coordinator requires comprehensive routing capabilities:
+        # - Registration (register_dispatcher, register_route)
+        # - Routing (dispatch, get_dispatchers_for_message)
+        # - Metrics (get_dispatcher_metrics, get_dispatch_metrics)
+        # - Lifecycle (start, stop, health_check)
+        # This is a central coordinator pattern, not a code smell.
+        {
+            "file_pattern": r"message_dispatch_engine\.py",
+            "class_pattern": r"Class 'MessageDispatchEngine'",
+            "violation_pattern": r"has \d+ methods",
+        },
+        # _build_log_context parameter count exemption
+        # Log context builder intentionally takes many optional parameters to build
+        # structured log context. Each parameter is a distinct log field.
+        {
+            "file_pattern": r"message_dispatch_engine\.py",
+            "method_pattern": r"Function '_build_log_context'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # DispatcherRegistry method count exemption
+        # Domain registry pattern requires CRUD + query operations:
+        # - Registration (register, unregister)
+        # - Lookup (get_by_id, get_by_type, get_all)
+        # - Metrics (get_metrics)
+        # This is an established domain registry pattern.
+        {
+            "file_pattern": r"dispatcher_registry\.py",
+            "class_pattern": r"Class 'DispatcherRegistry'",
+            "violation_pattern": r"has \d+ methods",
+        },
+        # record_dispatch parameter count exemption
+        # Metrics recording requires multiple parameters for complete dispatch tracking:
+        # - Identifiers (dispatcher_id, route_id, topic, message_type)
+        # - Timing (start_time, end_time, duration_ms)
+        # - Status (success, error_code, error_message)
+        {
+            "file_pattern": r"model_dispatch_metrics\.py",
+            "method_pattern": r"Function 'record_dispatch'",
+            "violation_pattern": r"has \d+ parameters",
+        },
+        # ================================================================================
+        # Dispatch Model Semantic Identifier Exemptions (OMN-983)
+        # ================================================================================
+        # dispatcher_id, route_id are semantic identifiers (like policy_id), NOT UUIDs.
+        # They are human-readable strings that identify dispatchers/routes by name.
+        # Example: "kafka-main-dispatcher", "default-route"
+        {
+            "file_pattern": r"model_dispatcher_registration\.py",
+            "violation_pattern": r"Field 'dispatcher_id' should use UUID",
+        },
+        {
+            "file_pattern": r"model_dispatcher_registration\.py",
+            "violation_pattern": r"dispatcher_name.*entity",
+        },
+        {
+            "file_pattern": r"model_dispatcher_metrics\.py",
+            "violation_pattern": r"Field 'dispatcher_id' should use UUID",
+        },
+        {
+            "file_pattern": r"model_dispatch_route\.py",
+            "violation_pattern": r"Field 'route_id' should use UUID",
+        },
+        {
+            "file_pattern": r"model_dispatch_route\.py",
+            "violation_pattern": r"Field 'dispatcher_id' should use UUID",
+        },
     ]
 
     # Filter errors using regex-based pattern matching
@@ -651,49 +648,21 @@ def validate_infra_union_usage(
     """
     Validate Union type usage in infrastructure code.
 
-    Prevents overly complex union types that complicate infrastructure code.
-
-    Exemptions:
-        ModelNodeCapabilities.config (model_node_capabilities.py) - Documented infrastructure pattern:
-        - The `config` field uses `dict[str, int | str | bool | float]` for nested configuration.
-        - This is a standard JSON-like configuration pattern where config values can be
-          any primitive type (similar to JSON's null, boolean, number, string).
-        - Creating a `ModelConfigValue` wrapper would add unnecessary complexity without benefit.
-        - This pattern is intentional and documented per ONEX infrastructure guidelines.
+    Uses the core validator directly. The ONEX-preferred `X | None` pattern is
+    counted but NOT flagged as a violation. Only problematic patterns are flagged:
+    - Primitive overload (4+ primitives like str | int | bool | float)
+    - Mixed primitive/complex unions
+    - Using Union[X, None] instead of X | None
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum allowed complex unions. Defaults to INFRA_MAX_UNIONS (450).
-        strict: Enable strict mode for union validation. Defaults to INFRA_UNIONS_STRICT (False).
+        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS (350).
+        strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
 
     Returns:
-        ModelValidationResult with validation status and filtered errors.
-        Documented exemptions are filtered from error list.
+        ModelValidationResult with validation status and any errors.
     """
-    # Run base validation
-    base_result = validate_union_usage(
-        str(directory), max_unions=max_unions, strict=strict
-    )
-
-    # Filter known infrastructure union exemptions using regex-based matching
-    # Patterns match file names and violation types without hardcoded line numbers
-    exempted_patterns: list[ExemptionPattern] = [
-        # ModelNodeCapabilities.config field exemption
-        # The config field uses dict[str, int | str | bool | float] for nested configuration
-        # values. This is a standard JSON-like config pattern where values can be any
-        # primitive type. Creating a ModelConfigValue wrapper would add unnecessary
-        # complexity without real benefit for this infrastructure domain.
-        {
-            "file_pattern": r"model_node_capabilities\.py",
-            "violation_pattern": r"Union with 4\+ primitive types.*bool.*float.*int.*str",
-        },
-    ]
-
-    # Filter errors using regex-based pattern matching
-    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
-
-    # Create wrapper result (avoid mutation)
-    return _create_filtered_result(base_result, filtered_errors)
+    return validate_union_usage(str(directory), max_unions=max_unions, strict=strict)
 
 
 def validate_infra_circular_imports(
