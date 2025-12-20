@@ -74,6 +74,10 @@ See Also:
         with extracted components and validation status.
     omnibase_infra.runtime.MessageDispatchEngine: Uses topic parsing for
         deterministic message routing to registered dispatchers.
+    CLAUDE.md "Enum Usage: Message Routing vs Node Validation": Project-level
+        documentation explaining when to use EnumMessageCategory (for message
+        routing, topic parsing, dispatcher selection) vs EnumNodeOutputType
+        (for execution shape validation, handler return type validation).
 
 Topic Taxonomy Reference:
     The ONEX topic naming taxonomy defines standardized patterns for message
@@ -118,9 +122,10 @@ import re
 from functools import lru_cache
 from typing import NamedTuple
 
+from omnibase_core.enums.enum_topic_taxonomy import EnumTopicType
+
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
-from omnibase_infra.enums.enum_topic_type import EnumTopicType
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 
 

@@ -142,13 +142,75 @@ def intent_orchestrator_dispatcher() -> MockMessageDispatcher:
 
 
 class TestProtocolMessageDispatcher:
-    """Tests for ProtocolMessageDispatcher protocol."""
+    """Tests for ProtocolMessageDispatcher protocol.
+
+    These tests demonstrate protocol validation patterns for dispatchers.
+    The ProtocolMessageDispatcher is marked @runtime_checkable, enabling
+    isinstance() checks for structural type verification.
+
+    Validation Approaches:
+        1. isinstance(obj, ProtocolMessageDispatcher): Quick structural check
+           that verifies required attributes exist. Useful for type guards
+           or early rejection of invalid objects.
+
+        2. DispatcherRegistry.register_dispatcher(): Comprehensive validation
+           including property type checking, execution shape validation,
+           and detailed error messages for debugging.
+    """
 
     def test_mock_dispatcher_implements_protocol(
         self, event_reducer_dispatcher: MockMessageDispatcher
     ) -> None:
-        """MockMessageDispatcher should implement ProtocolMessageDispatcher."""
+        """MockMessageDispatcher should implement ProtocolMessageDispatcher.
+
+        This test demonstrates using isinstance() for protocol validation.
+        The @runtime_checkable decorator on ProtocolMessageDispatcher enables
+        this structural type checking at runtime.
+        """
+        # Quick structural check - verifies required attributes exist
         assert isinstance(event_reducer_dispatcher, ProtocolMessageDispatcher)
+
+    def test_isinstance_rejects_non_dispatcher(self) -> None:
+        """isinstance() should reject objects that don't implement the protocol.
+
+        This demonstrates using isinstance() as a type guard to reject
+        objects that don't have the required dispatcher interface.
+        """
+
+        # A plain object without dispatcher properties should fail isinstance check
+        class NotADispatcher:
+            pass
+
+        assert not isinstance(NotADispatcher(), ProtocolMessageDispatcher)
+
+        # An object with some but not all properties should also fail
+        class PartialDispatcher:
+            @property
+            def dispatcher_id(self) -> str:
+                return "partial"
+
+            # Missing: category, message_types, node_kind, handle
+
+        assert not isinstance(PartialDispatcher(), ProtocolMessageDispatcher)
+
+    def test_isinstance_for_protocol_validation_pattern(
+        self, event_reducer_dispatcher: MockMessageDispatcher
+    ) -> None:
+        """Demonstrate the recommended pattern for protocol validation.
+
+        Use isinstance() for quick structural checks, then let
+        DispatcherRegistry.register_dispatcher() perform comprehensive
+        validation including execution shape checking.
+        """
+        # Pattern: Quick isinstance check before registration
+        if isinstance(event_reducer_dispatcher, ProtocolMessageDispatcher):
+            # Proceed with registration - comprehensive validation happens here
+            registry = DispatcherRegistry()
+            registry.register_dispatcher(event_reducer_dispatcher)
+            assert registry.dispatcher_count == 1
+        else:
+            # This branch would handle non-compliant objects
+            pytest.fail("Dispatcher should implement ProtocolMessageDispatcher")
 
     def test_dispatcher_has_required_properties(
         self, event_reducer_dispatcher: MockMessageDispatcher
