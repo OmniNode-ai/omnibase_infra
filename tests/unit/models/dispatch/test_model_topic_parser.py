@@ -612,14 +612,8 @@ class TestThreadSafety:
         assert result1.domain == result2.domain
         assert result1.category == result2.category
 
-    def test_parsed_topic_immutable(self) -> None:
-        """Test that ModelParsedTopic is immutable."""
-        parser = ModelTopicParser()
-        result = parser.parse("onex.user.events")
-
-        # Attempting to modify should raise
-        with pytest.raises(Exception):  # ValidationError
-            result.domain = "modified"  # type: ignore[misc]
+    # NOTE: ModelParsedTopic immutability is tested in TestModelParsedTopic.test_parsed_topic_immutable
+    # Immutability contributes to thread-safety by preventing concurrent modification issues
 
 
 # ============================================================================

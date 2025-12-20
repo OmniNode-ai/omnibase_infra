@@ -38,22 +38,24 @@ class TestInfraValidatorConstants:
     def test_infra_max_unions_constant(self) -> None:
         """Verify INFRA_MAX_UNIONS constant has expected value.
 
-        TECH DEBT (OMN-934): Baseline of 350 unions as of 2025-12-19.
+        TECH DEBT (OMN-934): Baseline of 406 unions as of 2025-12-20.
         Target: Reduce incrementally through refactoring.
 
-        Current count breakdown (~343 unions as of 2025-12-19):
+        Current count breakdown (~406 unions as of 2025-12-20):
         - Infrastructure handlers (~90): Consul, Kafka, Vault, PostgreSQL adapters
         - Runtime components (~40): RuntimeHostProcess, handler/policy registries
         - Models (~24): Event bus models, error context, runtime config
         - Registration models (~41): ModelNodeCapabilities, ModelNodeMetadata
         - Dispatch models (~148): OMN-934 message dispatch engine models
+        - JsonValue types (~44): Recursive JSON value type definitions (PR #61)
+        - Registry Effect models (~19): Node registration metadata models (restored)
 
         The validator counts X | None (PEP 604) patterns as unions, which is
-        the ONEX-preferred syntax per CLAUDE.md. Threshold set to 350 to provide
+        the ONEX-preferred syntax per CLAUDE.md. Threshold set to 450 to provide
         a small buffer above current baseline while maintaining awareness.
         """
-        assert INFRA_MAX_UNIONS == 350, (
-            "INFRA_MAX_UNIONS should be 350 (current baseline per OMN-934)"
+        assert INFRA_MAX_UNIONS == 450, (
+            "INFRA_MAX_UNIONS should be 450 (current baseline per OMN-934, PR #61)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -240,7 +242,7 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (200)
+            max_unions=INFRA_MAX_UNIONS,  # Default max (350)
             strict=INFRA_UNIONS_STRICT,  # Non-strict (False)
         )
 

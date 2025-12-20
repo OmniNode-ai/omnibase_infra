@@ -94,13 +94,10 @@ from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_event_bus import 
 )
 from omnibase_infra.nodes.node_registry_effect.v1_0_0.protocol_types import (
     EnvelopeDict,
+    JsonPrimitive,
+    JsonValue,
     ResultDict,
 )
-
-# Type alias for JSON-serializable values using recursive union pattern.
-# This is the ONEX-compliant alternative to Any for JSON containers.
-JsonPrimitive = str | int | float | bool | None
-JsonValue = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
 
 logger = logging.getLogger(__name__)
 

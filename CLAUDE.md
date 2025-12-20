@@ -812,8 +812,13 @@ if is_open:
 
 **Dispatcher Implementation Pattern**:
 ```python
+from typing import Any
+
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.models.dispatch import ModelDispatchResult
+from omnibase_infra.runtime import ProtocolMessageDispatcher
 
 class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
     """Dispatcher with built-in circuit breaker resilience."""
@@ -826,19 +831,19 @@ class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
             transport_type=config.transport_type,
         )
 
-    async def dispatch(self, message: ModelDispatchableMessage) -> ModelDispatchResult:
-        """Dispatch with circuit breaker protection."""
+    async def handle(self, envelope: ModelEventEnvelope[Any]) -> ModelDispatchResult:
+        """Handle message with circuit breaker protection."""
         async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker("dispatch", message.correlation_id)
+            await self._check_circuit_breaker("handle", envelope.correlation_id)
 
         try:
-            result = await self._do_dispatch(message)
+            result = await self._do_handle(envelope)
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
             return result
         except Exception as e:
             async with self._circuit_breaker_lock:
-                await self._record_circuit_failure("dispatch", message.correlation_id)
+                await self._record_circuit_failure("handle", envelope.correlation_id)
             raise
 ```
 

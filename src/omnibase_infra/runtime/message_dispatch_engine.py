@@ -92,7 +92,7 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
@@ -194,7 +194,10 @@ _module_logger = logging.getLogger(__name__)
 
 # Type alias for dispatcher functions
 #
-# ONEX Pattern Exception (Documented):
+# ONEX Pattern Exception (Documented - PR #61 Review):
+# ModelEventEnvelope[Any] is an intentional exception to the "no Any types" rule.
+#
+# Rationale:
 # - Input: ModelEventEnvelope[Any] is intentionally generic because dispatchers
 #   must accept envelopes with any payload type. The dispatch engine routes based
 #   on topic/category/message_type, not payload shape. Using a TypeVar would require
@@ -203,6 +206,11 @@ _module_logger = logging.getLogger(__name__)
 # - Output: DispatcherOutput | Awaitable[DispatcherOutput] defines the valid return
 #   types: str (single topic), list[str] (multiple topics), or None (no output).
 #   Dispatchers can be sync or async.
+#
+# Alternative considered:
+# - TypeVar[T] with Generic dispatcher interface - rejected because it would require
+#   all dispatcher registrations to specify payload types at registration time,
+#   defeating the purpose of runtime type-based routing.
 #
 # See also: ProtocolMessageDispatcher in dispatcher_registry.py for protocol-based
 # dispatchers that return ModelDispatchResult.
@@ -363,7 +371,8 @@ class MessageDispatchEngine:
         self._structured_metrics: ModelDispatchMetrics = ModelDispatchMetrics()
 
         # Legacy metrics dict (for backwards compatibility)
-        self._metrics: dict[str, Any] = {
+        # Type: int | float covers all metric values (counts are int, latency is float)
+        self._metrics: dict[str, int | float] = {
             "dispatch_count": 0,
             "dispatch_success_count": 0,
             "dispatch_error_count": 0,
@@ -604,10 +613,10 @@ class MessageDispatchEngine:
         dispatcher_id: str | None = None,
         dispatcher_count: int | None = None,
         duration_ms: float | None = None,
-        correlation_id: str | None = None,
-        trace_id: str | None = None,
+        correlation_id: UUID | None = None,
+        trace_id: UUID | None = None,
         error_code: EnumCoreErrorCode | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, str | int | float]:
         """
         Build structured log context dictionary.
 
@@ -618,14 +627,15 @@ class MessageDispatchEngine:
             dispatcher_id: Dispatcher ID (or comma-separated list).
             dispatcher_count: Number of dispatchers matched.
             duration_ms: Dispatch duration in milliseconds.
-            correlation_id: Correlation ID from envelope.
-            trace_id: Trace ID from envelope.
+            correlation_id: Correlation ID from envelope (UUID).
+            trace_id: Trace ID from envelope (UUID).
             error_code: Error code if dispatch failed.
 
         Returns:
             Dictionary with non-None values for structured logging.
+            UUID values are converted to strings at serialization time.
         """
-        context: dict[str, Any] = {}
+        context: dict[str, str | int | float] = {}
         if topic is not None:
             context["topic"] = topic
         if category is not None:
@@ -639,9 +649,9 @@ class MessageDispatchEngine:
         if duration_ms is not None:
             context["duration_ms"] = round(duration_ms, 3)
         if correlation_id is not None:
-            context["correlation_id"] = correlation_id
+            context["correlation_id"] = str(correlation_id)
         if trace_id is not None:
-            context["trace_id"] = trace_id
+            context["trace_id"] = str(trace_id)
         if error_code is not None:
             context["error_code"] = error_code.name
         return context
@@ -718,11 +728,9 @@ class MessageDispatchEngine:
         dispatch_id = uuid4()
         started_at = datetime.now(UTC)
 
-        # Extract correlation/trace IDs for logging
-        correlation_id_str = (
-            str(envelope.correlation_id) if envelope.correlation_id else None
-        )
-        trace_id_str = str(envelope.trace_id) if envelope.trace_id else None
+        # Extract correlation/trace IDs for logging (kept as UUID, converted to string at serialization)
+        correlation_id = envelope.correlation_id
+        trace_id = envelope.trace_id
 
         # Update dispatch count (protected by lock for thread safety)
         with self._metrics_lock:
@@ -752,8 +760,8 @@ class MessageDispatchEngine:
                 extra=self._build_log_context(
                     topic=topic,
                     duration_ms=duration_ms,
-                    correlation_id=correlation_id_str,
-                    trace_id=trace_id_str,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
                     error_code=EnumCoreErrorCode.VALIDATION_ERROR,
                 ),
             )
@@ -777,8 +785,8 @@ class MessageDispatchEngine:
             extra=self._build_log_context(
                 topic=topic,
                 category=topic_category,
-                correlation_id=correlation_id_str,
-                trace_id=trace_id_str,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
             ),
         )
 
@@ -815,8 +823,8 @@ class MessageDispatchEngine:
                 category=topic_category,
                 message_type=message_type,
                 dispatcher_count=len(matching_dispatchers),
-                correlation_id=correlation_id_str,
-                trace_id=trace_id_str,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
             ),
         )
 
@@ -847,8 +855,8 @@ class MessageDispatchEngine:
                     message_type=message_type,
                     dispatcher_count=0,
                     duration_ms=duration_ms,
-                    correlation_id=correlation_id_str,
-                    trace_id=trace_id_str,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
                     error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
                 ),
             )
@@ -888,8 +896,8 @@ class MessageDispatchEngine:
                     category=topic_category,
                     message_type=message_type,
                     dispatcher_id=dispatcher_entry.dispatcher_id,
-                    correlation_id=correlation_id_str,
-                    trace_id=trace_id_str,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
                 ),
             )
 
@@ -951,8 +959,8 @@ class MessageDispatchEngine:
                         message_type=message_type,
                         dispatcher_id=dispatcher_entry.dispatcher_id,
                         duration_ms=dispatcher_duration_ms,
-                        correlation_id=correlation_id_str,
-                        trace_id=trace_id_str,
+                        correlation_id=correlation_id,
+                        trace_id=trace_id,
                     ),
                 )
 
@@ -1042,8 +1050,8 @@ class MessageDispatchEngine:
                         message_type=message_type,
                         dispatcher_id=dispatcher_entry.dispatcher_id,
                         duration_ms=dispatcher_duration_ms,
-                        correlation_id=correlation_id_str,
-                        trace_id=trace_id_str,
+                        correlation_id=correlation_id,
+                        trace_id=trace_id,
                         error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
                     ),
                 )
@@ -1102,8 +1110,8 @@ class MessageDispatchEngine:
                     dispatcher_id=dispatcher_ids_str,
                     dispatcher_count=len(executed_dispatcher_ids),
                     duration_ms=duration_ms,
-                    correlation_id=correlation_id_str,
-                    trace_id=trace_id_str,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
                 ),
             )
         else:
@@ -1116,8 +1124,8 @@ class MessageDispatchEngine:
                     dispatcher_id=dispatcher_ids_str,
                     dispatcher_count=len(matching_dispatchers),
                     duration_ms=duration_ms,
-                    correlation_id=correlation_id_str,
-                    trace_id=trace_id_str,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
                     error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
                 ),
             )
@@ -1274,7 +1282,7 @@ class MessageDispatchEngine:
                 envelope,  # type: ignore[arg-type]
             )
 
-    def get_metrics(self) -> dict[str, Any]:
+    def get_metrics(self) -> dict[str, int | float]:
         """
         Get dispatch metrics for observability (legacy format).
 

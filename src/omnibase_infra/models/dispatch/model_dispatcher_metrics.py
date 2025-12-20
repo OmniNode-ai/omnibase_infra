@@ -219,18 +219,20 @@ class ModelDispatcherMetrics(BaseModel):
             else max(self.max_latency_ms, duration_ms)
         )
 
-        return ModelDispatcherMetrics(
-            dispatcher_id=self.dispatcher_id,
-            execution_count=self.execution_count + 1,
-            success_count=self.success_count + (1 if success else 0),
-            error_count=self.error_count + (0 if success else 1),
-            total_latency_ms=self.total_latency_ms + duration_ms,
-            min_latency_ms=new_min,
-            max_latency_ms=new_max,
-            last_error_message=error_message
-            if not success
-            else self.last_error_message,
-            last_execution_topic=topic if topic else self.last_execution_topic,
+        # Use model_copy to prevent field drift when new fields are added
+        return self.model_copy(
+            update={
+                "execution_count": self.execution_count + 1,
+                "success_count": self.success_count + (1 if success else 0),
+                "error_count": self.error_count + (0 if success else 1),
+                "total_latency_ms": self.total_latency_ms + duration_ms,
+                "min_latency_ms": new_min,
+                "max_latency_ms": new_max,
+                "last_error_message": error_message
+                if not success
+                else self.last_error_message,
+                "last_execution_topic": topic if topic else self.last_execution_topic,
+            }
         )
 
     def to_dict(self) -> dict[str, float | int | str | None]:

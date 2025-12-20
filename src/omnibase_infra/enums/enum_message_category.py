@@ -14,6 +14,8 @@ Thread Safety:
     Enum values can be safely shared across threads without synchronization.
 """
 
+from __future__ import annotations
+
 from enum import Enum, unique
 
 
@@ -93,16 +95,10 @@ class EnumMessageCategory(str, Enum):
             >>> EnumMessageCategory.COMMAND.topic_suffix
             'commands'
         """
-        suffix_map = {
-            EnumMessageCategory.EVENT: "events",
-            EnumMessageCategory.COMMAND: "commands",
-            EnumMessageCategory.INTENT: "intents",
-            EnumMessageCategory.PROJECTION: "projections",
-        }
-        return suffix_map[self]
+        return _CATEGORY_TO_SUFFIX[self]
 
     @classmethod
-    def from_topic(cls, topic: str) -> "EnumMessageCategory | None":
+    def from_topic(cls, topic: str) -> EnumMessageCategory | None:
         """
         Infer the message category from a topic string.
 
@@ -145,7 +141,7 @@ class EnumMessageCategory(str, Enum):
         return None
 
     @classmethod
-    def from_suffix(cls, suffix: str) -> "EnumMessageCategory | None":
+    def from_suffix(cls, suffix: str) -> EnumMessageCategory | None:
         """
         Get the category from a topic suffix.
 
@@ -163,13 +159,7 @@ class EnumMessageCategory(str, Enum):
             >>> EnumMessageCategory.from_suffix("unknown")
             None
         """
-        suffix_map = {
-            "events": cls.EVENT,
-            "commands": cls.COMMAND,
-            "intents": cls.INTENT,
-            "projections": cls.PROJECTION,
-        }
-        return suffix_map.get(suffix.lower())
+        return _SUFFIX_TO_CATEGORY.get(suffix.lower())
 
     def is_event(self) -> bool:
         """Check if this is an event category."""
@@ -186,6 +176,22 @@ class EnumMessageCategory(str, Enum):
     def is_projection(self) -> bool:
         """Check if this is a projection category."""
         return self == EnumMessageCategory.PROJECTION
+
+
+# Module-level constant mappings for better performance (avoid dict creation per call)
+# Defined after enum class to enable proper type resolution
+_CATEGORY_TO_SUFFIX: dict[EnumMessageCategory, str] = {
+    EnumMessageCategory.EVENT: "events",
+    EnumMessageCategory.COMMAND: "commands",
+    EnumMessageCategory.INTENT: "intents",
+    EnumMessageCategory.PROJECTION: "projections",
+}
+_SUFFIX_TO_CATEGORY: dict[str, EnumMessageCategory] = {
+    "events": EnumMessageCategory.EVENT,
+    "commands": EnumMessageCategory.COMMAND,
+    "intents": EnumMessageCategory.INTENT,
+    "projections": EnumMessageCategory.PROJECTION,
+}
 
 
 __all__ = ["EnumMessageCategory"]

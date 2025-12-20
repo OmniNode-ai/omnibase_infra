@@ -31,7 +31,9 @@ class ModelParsedTopic(BaseModel):
         topic_type: The topic type (events, commands, intents, snapshots) if detected.
         environment: The environment prefix (e.g., 'dev', 'prod') if present.
         version: The version suffix (e.g., 'v1', 'v2') if present.
-        is_valid: Whether the topic successfully parsed according to its standard.
+        is_valid: Whether the topic successfully parsed. For UNKNOWN-standard topics,
+            is_valid=True indicates a message category could be extracted (sufficient
+            for routing), even if the topic doesn't match a known standard exactly.
         validation_error: Error message if parsing failed.
 
     Example:
@@ -96,7 +98,13 @@ class ModelParsedTopic(BaseModel):
     # ---- Validation Status ----
     is_valid: bool = Field(
         default=False,
-        description="Whether the topic successfully parsed according to its standard.",
+        description=(
+            "Whether the topic successfully parsed according to its standard. "
+            "For UNKNOWN-standard topics, is_valid=True indicates that a message "
+            "category could be extracted (enabling routing), even though the topic "
+            "does not match a known standard exactly. Use is_routable() to check "
+            "if the topic has sufficient information for dispatch routing."
+        ),
     )
     validation_error: str | None = Field(
         default=None,
@@ -108,7 +116,7 @@ class ModelParsedTopic(BaseModel):
         Check if this parsed topic has sufficient information for routing.
 
         A topic is routable if it has a valid category, which enables
-        deterministic routing to the appropriate handler type.
+        deterministic routing to the appropriate dispatcher type.
 
         Returns:
             True if the topic can be used for routing, False otherwise

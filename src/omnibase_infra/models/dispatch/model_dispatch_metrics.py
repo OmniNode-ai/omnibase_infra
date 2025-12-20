@@ -13,12 +13,26 @@ Design Pattern:
     - Per-category metrics (event, command, intent counts)
     - Latency histogram buckets for distribution analysis
 
-    Unlike most ONEX models, this is NOT frozen because metrics accumulate
-    during dispatch engine operation.
+    Copy-on-Write Pattern:
+        Unlike most ONEX models, this model is NOT frozen (no `frozen=True` in
+        model_config) to allow Pydantic validation of nested dictionary updates.
+        However, update methods like `record_dispatch()` return NEW instances
+        rather than mutating in place, following the copy-on-write pattern:
+
+        ```python
+        # Copy-on-write: returns new instance, does not mutate
+        metrics = metrics.record_dispatch(duration_ms=45.2, success=True)
+        ```
+
+        This provides the benefits of immutability (predictable state, thread-safe
+        sharing of snapshots) while still allowing the model to be non-frozen for
+        Pydantic's internal validation requirements.
 
 Thread Safety:
-    This model is NOT thread-safe on its own. The MessageDispatchEngine provides
-    thread-safety guarantees during metrics collection.
+    Individual ModelDispatchMetrics instances are safe to share across threads
+    since update operations return new instances. The MessageDispatchEngine
+    uses a lock (`_metrics_lock`) to ensure atomic read-modify-write cycles
+    when updating the shared metrics reference.
 
 Example:
     >>> from omnibase_infra.models.dispatch import ModelDispatchMetrics
@@ -268,33 +282,17 @@ class ModelDispatchMetrics(BaseModel):
         return self.failed_dispatches / self.total_dispatches
 
     def _get_histogram_bucket(self, duration_ms: float) -> str:
-        """Get the histogram bucket key for a given latency."""
-        if duration_ms <= 1.0:
-            return "le_1ms"
-        elif duration_ms <= 5.0:
-            return "le_5ms"
-        elif duration_ms <= 10.0:
-            return "le_10ms"
-        elif duration_ms <= 25.0:
-            return "le_25ms"
-        elif duration_ms <= 50.0:
-            return "le_50ms"
-        elif duration_ms <= 100.0:
-            return "le_100ms"
-        elif duration_ms <= 250.0:
-            return "le_250ms"
-        elif duration_ms <= 500.0:
-            return "le_500ms"
-        elif duration_ms <= 1000.0:
-            return "le_1000ms"
-        elif duration_ms <= 2500.0:
-            return "le_2500ms"
-        elif duration_ms <= 5000.0:
-            return "le_5000ms"
-        elif duration_ms <= 10000.0:
-            return "le_10000ms"
-        else:
-            return "gt_10000ms"
+        """Get the histogram bucket key for a given latency.
+
+        Uses LATENCY_HISTOGRAM_BUCKETS to ensure consistency between
+        bucket thresholds and bucket key generation.
+        """
+        # Iterate through bucket thresholds in order
+        for threshold in LATENCY_HISTOGRAM_BUCKETS:
+            if duration_ms <= threshold:
+                return f"le_{int(threshold)}ms"
+        # Exceeds all bucket thresholds
+        return f"gt_{int(LATENCY_HISTOGRAM_BUCKETS[-1])}ms"
 
     def record_dispatch(
         self,

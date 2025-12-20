@@ -1669,8 +1669,156 @@ class TestProperties:
 
 
 # ============================================================================
+# ModelDispatchResult Retry Scenario Tests
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestDispatchResultRetryScenarios:
+    """Tests for ModelDispatchResult.requires_retry() method.
+
+    These tests verify that the requires_retry() method correctly identifies
+    which dispatch statuses should trigger retry attempts:
+    - TIMEOUT: Transient failure, should retry
+    - PUBLISH_FAILED: Transient failure, should retry
+    - SUCCESS: Not an error, should NOT retry
+    - HANDLER_ERROR: Permanent failure, should NOT retry
+    - NO_HANDLER: Configuration error, should NOT retry
+    - INVALID_MESSAGE: Validation error, should NOT retry
+    - SKIPPED: Intentional skip, should NOT retry
+    - ROUTED: Intermediate state, should NOT retry
+    """
+
+    def test_timeout_requires_retry(self) -> None:
+        """Test that TIMEOUT status requires retry (transient failure)."""
+        result = ModelDispatchResult(
+            status=EnumDispatchStatus.TIMEOUT,
+            topic="dev.user.events.v1",
+            error_message="Handler execution timed out after 30s",
+        )
+
+        assert result.requires_retry() is True
+        assert result.is_error() is True
+        assert result.is_successful() is False
+
+    def test_publish_failed_requires_retry(self) -> None:
+        """Test that PUBLISH_FAILED status requires retry (transient failure)."""
+        result = ModelDispatchResult(
+            status=EnumDispatchStatus.PUBLISH_FAILED,
+            topic="dev.user.events.v1",
+            error_message="Failed to publish to output topic",
+        )
+
+        assert result.requires_retry() is True
+        assert result.is_error() is True
+        assert result.is_successful() is False
+
+    def test_success_does_not_require_retry(self) -> None:
+        """Test that SUCCESS status does NOT require retry."""
+        result = ModelDispatchResult(
+            status=EnumDispatchStatus.SUCCESS,
+            topic="dev.user.events.v1",
+            outputs=["dev.notification.events.v1"],
+        )
+
+        assert result.requires_retry() is False
+        assert result.is_error() is False
+        assert result.is_successful() is True
+
+    def test_handler_error_does_not_require_retry(self) -> None:
+        """Test that HANDLER_ERROR status does NOT require retry (permanent failure)."""
+        result = ModelDispatchResult(
+            status=EnumDispatchStatus.HANDLER_ERROR,
+            topic="dev.user.events.v1",
+            error_message="ValueError: Invalid user data",
+        )
+
+        assert result.requires_retry() is False
+        assert result.is_error() is True
+        assert result.is_successful() is False
+
+    def test_no_handler_does_not_require_retry(self) -> None:
+        """Test that NO_HANDLER status does NOT require retry (configuration error)."""
+        result = ModelDispatchResult(
+            status=EnumDispatchStatus.NO_HANDLER,
+            topic="dev.unknown.events.v1",
+            error_message="No dispatcher registered for topic",
+        )
+
+        assert result.requires_retry() is False
+        assert result.is_error() is True
+
+    def test_invalid_message_does_not_require_retry(self) -> None:
+        """Test that INVALID_MESSAGE status does NOT require retry (validation error)."""
+        result = ModelDispatchResult(
+            status=EnumDispatchStatus.INVALID_MESSAGE,
+            topic="dev.user.events.v1",
+            error_message="Message failed schema validation",
+        )
+
+        assert result.requires_retry() is False
+        assert result.is_error() is True
+
+    def test_skipped_does_not_require_retry(self) -> None:
+        """Test that SKIPPED status does NOT require retry (intentional skip)."""
+        result = ModelDispatchResult(
+            status=EnumDispatchStatus.SKIPPED,
+            topic="dev.user.events.v1",
+        )
+
+        assert result.requires_retry() is False
+        assert result.is_error() is False  # SKIPPED is not an error
+        assert result.is_successful() is False
+
+    def test_routed_does_not_require_retry(self) -> None:
+        """Test that ROUTED status does NOT require retry (intermediate state)."""
+        result = ModelDispatchResult(
+            status=EnumDispatchStatus.ROUTED,
+            topic="dev.user.events.v1",
+            route_id="user-events-route",
+        )
+
+        assert result.requires_retry() is False
+        assert result.is_error() is False
+        assert result.is_successful() is False
+        assert result.is_terminal() is False  # ROUTED is not terminal
+
+
+# ============================================================================
 # Concurrency Tests
 # ============================================================================
+
+
+def _dispatch_in_thread_helper(
+    dispatch_engine: MessageDispatchEngine,
+    topic: str,
+    envelope: ModelEventEnvelope[Any],
+) -> ModelDispatchResult:
+    """Run async dispatch from a synchronous thread context.
+
+    This helper function enables running async dispatch operations from
+    synchronous threads in concurrent test scenarios. It creates a new
+    event loop for each thread and properly cleans up afterward.
+
+    Args:
+        dispatch_engine: The dispatch engine to use for dispatching.
+        topic: The topic to dispatch to.
+        envelope: The envelope containing the message to dispatch.
+
+    Returns:
+        The dispatch result from the engine.
+
+    Note:
+        This is a shared helper to avoid code duplication in concurrency tests.
+        Each thread gets its own event loop to ensure isolation.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(dispatch_engine.dispatch(topic, envelope))
+        return result
+    finally:
+        loop.close()
 
 
 def _create_envelope_with_category(
@@ -1744,26 +1892,18 @@ class TestMessageDispatchEngineConcurrency:
             for i in range(dispatch_count)
         ]
 
-        # Function to run dispatch in a thread
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            """Run async dispatch from a synchronous thread context."""
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-                return result
-            finally:
-                loop.close()
-
         # Execute concurrent dispatches using ThreadPoolExecutor
+        # Uses shared helper _dispatch_in_thread_helper
         dispatch_results: list[ModelDispatchResult] = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
+                for envelope in envelopes
             ]
             for future in concurrent.futures.as_completed(futures):
                 dispatch_results.append(future.result())
@@ -1850,23 +1990,17 @@ class TestMessageDispatchEngineConcurrency:
             for i in range(dispatch_count)
         ]
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
-        # Execute concurrent dispatches
+        # Execute concurrent dispatches using shared helper
         dispatch_results: list[ModelDispatchResult] = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
+                for envelope in envelopes
             ]
             for future in concurrent.futures.as_completed(futures):
                 dispatch_results.append(future.result())
@@ -1952,23 +2086,17 @@ class TestMessageDispatchEngineConcurrency:
             for i in range(dispatch_count)
         ]
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
-        # Execute concurrent dispatches
+        # Execute concurrent dispatches using shared helper
         dispatch_results: list[ModelDispatchResult] = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
+                for envelope in envelopes
             ]
             for future in concurrent.futures.as_completed(futures):
                 dispatch_results.append(future.result())
@@ -2038,22 +2166,16 @@ class TestMessageDispatchEngineConcurrency:
             for i in range(dispatch_count)
         ]
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
         # Use more workers than dispatches to maximize concurrency
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
+                for envelope in envelopes
             ]
             concurrent.futures.wait(futures)
 
@@ -2141,23 +2263,17 @@ class TestConcurrentDispatchAdvanced:
             for i in range(dispatch_count)
         ]
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
-        # Execute concurrent dispatches
+        # Execute concurrent dispatches using shared helper
         dispatch_results: list[ModelDispatchResult] = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
+                for envelope in envelopes
             ]
             for future in concurrent.futures.as_completed(futures):
                 dispatch_results.append(future.result())
@@ -2218,24 +2334,18 @@ class TestConcurrentDispatchAdvanced:
             for i in range(dispatch_count)
         ]
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
-        # Execute with high thread count
+        # Execute with high thread count using shared helper
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=thread_count
         ) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
+                for envelope in envelopes
             ]
             concurrent.futures.wait(futures)
 
@@ -2339,22 +2449,15 @@ class TestConcurrentDispatchAdvanced:
             all_envelopes.append(created_envelopes[i])
             all_envelopes.append(updated_envelopes[i])
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
-        # Execute concurrent dispatches
+        # Execute concurrent dispatches using shared helper
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope)
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
                 for envelope in all_envelopes
             ]
             concurrent.futures.wait(futures)
@@ -2409,19 +2512,7 @@ class TestConcurrentDispatchAdvanced:
         )
         dispatch_engine.freeze()
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
-        # Process in batches to simulate sustained load
+        # Process in batches to simulate sustained load using shared helper
         all_results: list[ModelDispatchResult] = []
         for batch_num in range(dispatch_count // batch_size):
             envelopes = [
@@ -2436,7 +2527,12 @@ class TestConcurrentDispatchAdvanced:
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 futures = [
-                    executor.submit(dispatch_in_thread, envelope)
+                    executor.submit(
+                        _dispatch_in_thread_helper,
+                        dispatch_engine,
+                        "dev.user.events.v1",
+                        envelope,
+                    )
                     for envelope in envelopes
                 ]
                 for future in concurrent.futures.as_completed(futures):
@@ -2525,21 +2621,16 @@ class TestConcurrentDispatchAdvanced:
             for i in range(dispatch_count)
         ]
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
+        # Execute concurrent dispatches using shared helper
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
+                for envelope in envelopes
             ]
             concurrent.futures.wait(futures)
 
@@ -2601,23 +2692,16 @@ class TestConcurrentDispatchAdvanced:
             )
             envelopes_with_ids.append((envelope, correlation_id))
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
         # Execute concurrent dispatches and collect results with original correlation IDs
         results_with_expected: list[tuple[ModelDispatchResult, UUID]] = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = {
-                executor.submit(dispatch_in_thread, envelope): expected_id
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                ): expected_id
                 for envelope, expected_id in envelopes_with_ids
             }
             for future in concurrent.futures.as_completed(futures):
@@ -2683,21 +2767,16 @@ class TestConcurrentDispatchAdvanced:
             for i in range(dispatch_count)
         ]
 
-        def dispatch_in_thread(
-            envelope: ModelEventEnvelope[Any],
-        ) -> ModelDispatchResult:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    dispatch_engine.dispatch("dev.user.events.v1", envelope)
-                )
-            finally:
-                loop.close()
-
+        # Execute concurrent dispatches using shared helper
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             futures = [
-                executor.submit(dispatch_in_thread, envelope) for envelope in envelopes
+                executor.submit(
+                    _dispatch_in_thread_helper,
+                    dispatch_engine,
+                    "dev.user.events.v1",
+                    envelope,
+                )
+                for envelope in envelopes
             ]
             concurrent.futures.wait(futures)
 

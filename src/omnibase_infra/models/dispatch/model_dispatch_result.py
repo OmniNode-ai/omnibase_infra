@@ -4,7 +4,7 @@
 Dispatch Result Model.
 
 Represents the result of a dispatch operation, including status, timing metrics,
-and any outputs produced by the handler. Used for observability, debugging,
+and any outputs produced by the dispatcher. Used for observability, debugging,
 and result propagation in the dispatch engine.
 
 Design Pattern:
@@ -12,7 +12,7 @@ Design Pattern:
     of a dispatch operation:
     - Status (success, error, timeout, etc.)
     - Timing metrics (duration, timestamps)
-    - Handler outputs (for successful dispatches)
+    - Dispatcher outputs (for successful dispatches)
     - Error information (for failed dispatches)
     - Tracing context (correlation IDs, trace IDs)
 
@@ -67,7 +67,7 @@ class ModelDispatchResult(BaseModel):
     """
     Result of a dispatch operation.
 
-    Captures the complete outcome of routing a message to a handler,
+    Captures the complete outcome of routing a message to a dispatcher,
     including status, timing, outputs, and error information.
 
     Attributes:
@@ -81,8 +81,8 @@ class ModelDispatchResult(BaseModel):
         duration_ms: Time taken for the dispatch operation in milliseconds.
         started_at: Timestamp when the dispatch started.
         completed_at: Timestamp when the dispatch completed.
-        outputs: List of topics where handler outputs were published.
-        output_count: Number of outputs produced by the handler.
+        outputs: List of topics where dispatcher outputs were published.
+        output_count: Number of outputs produced by the dispatcher.
         error_message: Error message if the dispatch failed.
         error_code: Error code if the dispatch failed.
         error_details: Additional JSON-serializable error details for debugging.
@@ -168,14 +168,14 @@ class ModelDispatchResult(BaseModel):
         description="Timestamp when the dispatch completed (UTC).",
     )
 
-    # ---- Handler Outputs ----
+    # ---- Dispatcher Outputs ----
     outputs: list[str] | None = Field(
         default=None,
-        description="List of topics where handler outputs were published.",
+        description="List of topics where dispatcher outputs were published.",
     )
     output_count: int = Field(
         default=0,
-        description="Number of outputs produced by the handler.",
+        description="Number of outputs produced by the dispatcher.",
         ge=0,
     )
 
@@ -250,7 +250,7 @@ class ModelDispatchResult(BaseModel):
             ...     dispatch_id=uuid4(),
             ...     status=EnumDispatchStatus.HANDLER_ERROR,
             ...     topic="test.events",
-            ...     error_message="Handler failed",
+            ...     error_message="Dispatcher failed",
             ... )
             >>> result.is_error()
             True
@@ -311,7 +311,7 @@ class ModelDispatchResult(BaseModel):
             ... )
             >>> error_result = result.with_error(
             ...     EnumDispatchStatus.HANDLER_ERROR,
-            ...     "Handler failed",
+            ...     "Dispatcher failed",
             ...     code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR,
             ... )
         """
