@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from omnibase_core.enums.enum_handler_type import EnumHandlerType
+from omnibase_core.models.dispatch import ModelHandlerOutput
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -175,7 +176,9 @@ class DbAdapter:
         self._initialized = False
         logger.info("DbAdapter shutdown complete")
 
-    async def execute(self, envelope: dict[str, object]) -> ModelDbQueryResponse:
+    async def execute(
+        self, envelope: dict[str, object]
+    ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute database operation (db.query or db.execute) from envelope.
 
         Args:
@@ -183,12 +186,14 @@ class DbAdapter:
                 - operation: "db.query" or "db.execute"
                 - payload: dict with "sql" (required) and "parameters" (optional list)
                 - correlation_id: Optional correlation ID for tracing
+                - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            ModelDbQueryResponse containing:
-                - status: "success"
-                - payload: ModelDbQueryPayload with rows and row_count
+            ModelHandlerOutput[ModelDbQueryResponse] containing:
+                - result: ModelDbQueryResponse with status, payload, and correlation_id
+                - input_envelope_id: UUID for causality tracking
                 - correlation_id: UUID for request/response correlation
+                - handler_id: "db-handler"
 
         Raises:
             RuntimeHostError: If adapter not initialized or invalid input.
@@ -196,6 +201,7 @@ class DbAdapter:
             InfraTimeoutError: If query times out.
         """
         correlation_id = self._extract_correlation_id(envelope)
+        input_envelope_id = self._extract_envelope_id(envelope)
 
         if not self._initialized or self._pool is None:
             ctx = ModelInfraErrorContext(
@@ -257,13 +263,29 @@ class DbAdapter:
         parameters = self._extract_parameters(payload, operation, correlation_id)
 
         if operation == "db.query":
-            return await self._execute_query(sql, parameters, correlation_id)
+            return await self._execute_query(
+                sql, parameters, correlation_id, input_envelope_id
+            )
         else:  # db.execute
-            return await self._execute_statement(sql, parameters, correlation_id)
+            return await self._execute_statement(
+                sql, parameters, correlation_id, input_envelope_id
+            )
 
     def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
         """Extract or generate correlation ID from envelope."""
         raw = envelope.get("correlation_id")
+        if isinstance(raw, UUID):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return UUID(raw)
+            except ValueError:
+                pass
+        return uuid4()
+
+    def _extract_envelope_id(self, envelope: dict[str, object]) -> UUID:
+        """Extract or generate envelope ID for causality tracking."""
+        raw = envelope.get("envelope_id")
         if isinstance(raw, UUID):
             return raw
         if isinstance(raw, str):
@@ -327,7 +349,8 @@ class DbAdapter:
         sql: str,
         parameters: list[object],
         correlation_id: UUID,
-    ) -> ModelDbQueryResponse:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute SELECT query and return rows."""
         if self._pool is None:
             ctx = ModelInfraErrorContext(
@@ -351,7 +374,10 @@ class DbAdapter:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(sql, *parameters)
                 return self._build_response(
-                    [dict(row) for row in rows], len(rows), correlation_id
+                    [dict(row) for row in rows],
+                    len(rows),
+                    correlation_id,
+                    input_envelope_id,
                 )
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
@@ -379,7 +405,8 @@ class DbAdapter:
         sql: str,
         parameters: list[object],
         correlation_id: UUID,
-    ) -> ModelDbQueryResponse:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelDbQueryResponse]:
         """Execute INSERT/UPDATE/DELETE statement and return affected row count."""
         if self._pool is None:
             ctx = ModelInfraErrorContext(
@@ -404,7 +431,9 @@ class DbAdapter:
                 result = await conn.execute(sql, *parameters)
                 # asyncpg returns string like "INSERT 0 1" or "UPDATE 5"
                 row_count = self._parse_row_count(result)
-                return self._build_response([], row_count, correlation_id)
+                return self._build_response(
+                    [], row_count, correlation_id, input_envelope_id
+                )
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
                 f"Statement timed out after {self._timeout}s",
@@ -459,13 +488,23 @@ class DbAdapter:
         return 0
 
     def _build_response(
-        self, rows: list[dict[str, object]], row_count: int, correlation_id: UUID
-    ) -> ModelDbQueryResponse:
-        """Build response envelope from query/execute result."""
-        return ModelDbQueryResponse(
+        self,
+        rows: list[dict[str, object]],
+        row_count: int,
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelDbQueryResponse]:
+        """Build response wrapped in ModelHandlerOutput from query/execute result."""
+        result = ModelDbQueryResponse(
             status="success",
             payload=ModelDbQueryPayload(rows=rows, row_count=row_count),
             correlation_id=correlation_id,
+        )
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id="db-handler",
+            result=result,
         )
 
     async def health_check(self) -> ModelDbHealthResponse:
