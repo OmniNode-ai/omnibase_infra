@@ -61,12 +61,12 @@ and configuring the handler and policy ecosystem.
 
 from __future__ import annotations
 
-# Chain-aware dispatch (OMN-951)
-from omnibase_infra.runtime.chain_aware_dispatch import (
-    ChainAwareDispatcher,
-    propagate_chain_context,
-    validate_dispatch_chain,
-)
+# isort: off
+# NOTE: Import order matters here to avoid circular import in omnibase_core.
+# The chain_aware_dispatch module imports ModelEventEnvelope which triggers complex
+# import chains in omnibase_core. By importing message_dispatch_engine first via
+# DispatchContextEnforcer, we warm the sys.modules cache before chain_aware_dispatch.
+
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatcher_registry import (
     DispatcherRegistry,
@@ -122,6 +122,15 @@ from omnibase_infra.runtime.wiring import (
     wire_default_handlers,
     wire_handlers_from_contract,
 )
+
+# Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
+from omnibase_infra.runtime.chain_aware_dispatch import (
+    ChainAwareDispatcher,
+    propagate_chain_context,
+    validate_dispatch_chain,
+)
+
+# isort: on
 
 __all__: list[str] = [
     # Kernel entrypoint

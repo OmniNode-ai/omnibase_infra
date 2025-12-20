@@ -59,12 +59,14 @@ __all__ = [
     "validate_dispatch_chain",
 ]
 
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
+
+if TYPE_CHECKING:
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
 from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
@@ -421,6 +423,11 @@ class ChainAwareDispatcher:
             provides workflow-level correlation, while trace_id is for
             span-level tracing.
         """
+        # Local import to avoid circular import issues with omnibase_core
+        from omnibase_core.models.events.model_event_envelope import (
+            ModelEventEnvelope as EnvelopeClass,
+        )
+
         # Get parent chain context
         parent_message_id = _get_message_id(parent_envelope)
         parent_correlation_id = _get_correlation_id(parent_envelope)
@@ -436,7 +443,7 @@ class ChainAwareDispatcher:
         # Create child envelope with proper chain context
         # Note: ModelEventEnvelope[T] is only valid as a type annotation, not as a constructor.
         # The runtime envelope object accepts any payload type; the generic is for static typing.
-        envelope: ModelEventEnvelope[T] = ModelEventEnvelope(
+        envelope: ModelEventEnvelope[T] = EnvelopeClass(
             envelope_id=child_envelope_id,
             payload=payload,
             message_type=effective_message_type,
