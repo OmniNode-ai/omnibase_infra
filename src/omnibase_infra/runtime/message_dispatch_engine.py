@@ -405,11 +405,13 @@ class MessageDispatchEngine:
 
         # Index for fast dispatcher lookup by category
         # category -> list of dispatcher_ids
+        # NOTE: Only routable message categories are indexed here.
+        # PROJECTION is NOT included because projections are reducer outputs,
+        # not routable messages. See CLAUDE.md "Enum Usage" section.
         self._dispatchers_by_category: dict[EnumMessageCategory, list[str]] = {
             EnumMessageCategory.EVENT: [],
             EnumMessageCategory.COMMAND: [],
             EnumMessageCategory.INTENT: [],
-            EnumMessageCategory.PROJECTION: [],
         }
 
         # Freeze state
