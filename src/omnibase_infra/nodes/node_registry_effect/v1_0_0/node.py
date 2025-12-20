@@ -1789,7 +1789,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 {
                     "operation": "consul.register",
                     "payload": consul_payload,
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id),
                 }
             )
 
@@ -1905,7 +1905,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                             introspection.health_endpoint,
                         ],
                     },
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id),
                 }
             )
 
@@ -2054,7 +2054,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                 {
                     "operation": "consul.deregister",
                     "payload": {"service_id": node_id},
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id),
                 }
             )
             return ModelConsulOperationResult(
@@ -2122,7 +2122,7 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                         "sql": "DELETE FROM node_registrations WHERE node_id = $1",
                         "params": [node_id],
                     },
-                    "correlation_id": correlation_id,
+                    "correlation_id": str(correlation_id),
                 }
             )
             payload = result.get("payload", {})
@@ -2282,11 +2282,13 @@ class NodeRegistryEffect(MixinAsyncCircuitBreaker):
                     sql += " WHERE " + " AND ".join(conditions)
 
             # Execute via db handler (Protocol-typed)
+            # Cast params to list[JsonValue] for type safety (list[str] is a subset)
+            params_json: list[JsonValue] = cast(list[JsonValue], params)
             result = await self.db_handler.execute(
                 {
                     "operation": "db.query",
-                    "payload": {"sql": sql, "params": params},
-                    "correlation_id": request.correlation_id,
+                    "payload": {"sql": sql, "params": params_json},
+                    "correlation_id": str(request.correlation_id),
                 }
             )
 

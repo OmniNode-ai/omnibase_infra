@@ -91,7 +91,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -217,6 +217,10 @@ _module_logger = logging.getLogger(__name__)
 DispatcherFunc = Callable[
     [ModelEventEnvelope[Any]], DispatcherOutput | Awaitable[DispatcherOutput]
 ]
+
+# Sync-only dispatcher type for use with run_in_executor
+# Used internally after runtime type narrowing via inspect.iscoroutinefunction
+_SyncDispatcherFunc = Callable[[ModelEventEnvelope[Any]], DispatcherOutput]
 
 
 class DispatchEntryInternal:
@@ -1276,9 +1280,12 @@ class MessageDispatchEngine:
             #
             # For blocking I/O operations, use async dispatchers instead.
             loop = asyncio.get_running_loop()
+            # Cast to sync-only type - safe because iscoroutinefunction check above
+            # guarantees this branch only executes for non-async callables
+            sync_dispatcher = cast(_SyncDispatcherFunc, dispatcher)
             return await loop.run_in_executor(
                 None,
-                dispatcher,
+                sync_dispatcher,
                 envelope,  # type: ignore[arg-type]
             )
 
