@@ -3,12 +3,34 @@ Infrastructure-specific validation wrappers.
 
 Provides validators from omnibase_core with sensible defaults for infrastructure code.
 All wrappers maintain strong typing and follow ONEX validation patterns.
+
+Exemption System:
+    This module uses a YAML-based exemption system for managing validation exceptions.
+    Exemption patterns are defined in `validation_exemptions.yaml` alongside this module.
+
+    The exemption system provides:
+    - Centralized management of all validation exemptions
+    - Clear documentation of rationale and ticket references
+    - Regex-based matching resilient to code changes (no line numbers)
+    - Separation of exemption configuration from validation logic
+
+    See validation_exemptions.yaml for:
+    - pattern_exemptions: Method count, parameter count, naming violations
+    - union_exemptions: Complex union type violations
+
+    Adding new exemptions:
+    1. Identify the exact violation message from validator output
+    2. Add entry to appropriate section in validation_exemptions.yaml
+    3. Document the rationale and link to relevant tickets
+    4. Run tests to verify the exemption works
 """
 
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal, TypedDict
 
+import yaml
 from omnibase_core.validation import (
     CircularImportValidationResult,
     CircularImportValidator,
@@ -58,6 +80,113 @@ class ExemptionPattern(TypedDict, total=False):
     class_pattern: str
     method_pattern: str
     violation_pattern: str
+
+
+# Path to the exemptions YAML file (alongside this module)
+EXEMPTIONS_YAML_PATH = Path(__file__).parent / "validation_exemptions.yaml"
+
+
+@lru_cache(maxsize=1)
+def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
+    """
+    Load and cache exemption patterns from YAML configuration.
+
+    The exemption patterns are cached to avoid repeated file I/O during validation.
+    Cache is cleared when the module is reloaded.
+
+    Returns:
+        Dictionary with 'pattern_exemptions' and 'union_exemptions' keys,
+        each containing a list of ExemptionPattern dictionaries.
+        Returns empty lists if file is missing or malformed.
+
+    Note:
+        The YAML file is expected to be at validation_exemptions.yaml alongside
+        this module. See that file for schema documentation and exemption rationale.
+    """
+    if not EXEMPTIONS_YAML_PATH.exists():
+        # Fallback to empty exemptions if file is missing
+        return {"pattern_exemptions": [], "union_exemptions": []}
+
+    try:
+        with EXEMPTIONS_YAML_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        if not isinstance(data, dict):
+            return {"pattern_exemptions": [], "union_exemptions": []}
+
+        # Extract exemption lists, converting YAML structure to ExemptionPattern format
+        pattern_exemptions = _convert_yaml_exemptions(
+            data.get("pattern_exemptions", [])
+        )
+        union_exemptions = _convert_yaml_exemptions(data.get("union_exemptions", []))
+
+        return {
+            "pattern_exemptions": pattern_exemptions,
+            "union_exemptions": union_exemptions,
+        }
+    except (yaml.YAMLError, OSError):
+        # Return empty exemptions on any loading error
+        return {"pattern_exemptions": [], "union_exemptions": []}
+
+
+def _convert_yaml_exemptions(yaml_list: list[dict]) -> list[ExemptionPattern]:
+    """
+    Convert YAML exemption entries to ExemptionPattern format.
+
+    The YAML format includes additional metadata (reason, ticket) that is used
+    for documentation but not for pattern matching. This function extracts only
+    the pattern fields needed for matching.
+
+    Args:
+        yaml_list: List of exemption entries from YAML.
+
+    Returns:
+        List of ExemptionPattern dictionaries with only pattern fields.
+    """
+    if not isinstance(yaml_list, list):
+        return []
+
+    result: list[ExemptionPattern] = []
+    for entry in yaml_list:
+        if not isinstance(entry, dict):
+            continue
+
+        # Extract only pattern fields (ignore reason, ticket metadata)
+        pattern: ExemptionPattern = {}
+        if "file_pattern" in entry:
+            pattern["file_pattern"] = str(entry["file_pattern"])
+        if "class_pattern" in entry:
+            pattern["class_pattern"] = str(entry["class_pattern"])
+        if "method_pattern" in entry:
+            pattern["method_pattern"] = str(entry["method_pattern"])
+        if "violation_pattern" in entry:
+            pattern["violation_pattern"] = str(entry["violation_pattern"])
+
+        # Only include if at least file_pattern and violation_pattern are present
+        if "file_pattern" in pattern and "violation_pattern" in pattern:
+            result.append(pattern)
+
+    return result
+
+
+def get_pattern_exemptions() -> list[ExemptionPattern]:
+    """
+    Get pattern validator exemptions from YAML configuration.
+
+    Returns:
+        List of ExemptionPattern dictionaries for pattern validation.
+    """
+    return _load_exemptions_yaml()["pattern_exemptions"]
+
+
+def get_union_exemptions() -> list[ExemptionPattern]:
+    """
+    Get union validator exemptions from YAML configuration.
+
+    Returns:
+        List of ExemptionPattern dictionaries for union validation.
+    """
+    return _load_exemptions_yaml()["union_exemptions"]
 
 
 # Default paths for infrastructure validation
@@ -264,30 +393,19 @@ def validate_infra_patterns(
     - Anti-pattern detection (no *Manager, *Handler, *Helper)
 
     Exemptions:
-        KafkaEventBus (kafka_event_bus.py) - Documented infrastructure pattern exception:
-        - Class has many methods (threshold: 10) - Event bus lifecycle, pub/sub, circuit breaker
-        - __init__ has many parameters (threshold: 5) - Backwards compatibility during config migration
+        Exemption patterns are loaded from validation_exemptions.yaml (pattern_exemptions section).
+        See that file for the complete list of exemptions with rationale and ticket references.
 
-        RuntimeHostProcess (runtime_host_process.py) - Documented infrastructure pattern exception:
-        - Class has many methods (threshold: 10) - Lifecycle, message handling, graceful shutdown
-        - Central coordinator requiring: start/stop, health_check, _on_message, _handle_envelope,
-          shutdown_ready, register_handler, get_handler, and supporting methods (OMN-756)
-
-        These violations are intentional infrastructure patterns documented in:
-        - kafka_event_bus.py / runtime_host_process.py class/method docstrings
-        - CLAUDE.md "Accepted Pattern Exceptions" section
-        - This validator's docstring
+        Key exemption categories:
+        - KafkaEventBus: Event bus pattern with many methods/params (OMN-934)
+        - RuntimeHostProcess: Central coordinator pattern (OMN-756)
+        - PolicyRegistry: Domain registry pattern
+        - ExecutionShapeValidator: AST analysis validator pattern (OMN-958)
+        - MixinNodeIntrospection: Introspection mixin pattern (OMN-958)
 
     Exemption Pattern Format:
         Uses regex-based matching instead of hardcoded line numbers for resilience
         to code changes. See ExemptionPattern TypedDict for structure details.
-
-        Example:
-            {
-                "file_pattern": r"kafka_event_bus\\.py",
-                "class_pattern": r"Class 'KafkaEventBus'",
-                "violation_pattern": r"has \\d+ methods"
-            }
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
@@ -300,179 +418,9 @@ def validate_infra_patterns(
     # Run base validation
     base_result = validate_patterns(str(directory), strict=strict)
 
-    # Filter known infrastructure pattern exemptions using regex-based matching
-    # Patterns match class/method names and violation types without hardcoded line numbers
-    exempted_patterns: list[ExemptionPattern] = [
-        # KafkaEventBus method count exemption (OMN-934, PR #61)
-        # Threshold: 10 methods (default), KafkaEventBus has 14+ methods
-        # Rationale: Event bus pattern requires lifecycle (start/stop/health),
-        # pub/sub (subscribe/unsubscribe/publish), circuit breaker, protocol compatibility
-        # Reference: CLAUDE.md "Accepted Pattern Exceptions" section
-        {
-            "file_pattern": r"kafka_event_bus\.py",
-            "class_pattern": r"Class 'KafkaEventBus'",
-            "violation_pattern": r"has \d+ methods",
-        },
-        # KafkaEventBus __init__ parameter count exemption (OMN-934, PR #61)
-        # Threshold: 5 params (default), KafkaEventBus has 10+ params
-        # Rationale: Backwards compatibility during config migration from direct
-        # parameters to ModelKafkaConfig object
-        # Reference: CLAUDE.md "Accepted Pattern Exceptions" section
-        {
-            "file_pattern": r"kafka_event_bus\.py",
-            "method_pattern": r"Function '__init__'",
-            "violation_pattern": r"has \d+ parameters",
-        },
-        # Protocol method 'execute' exemption (standard plugin architecture pattern)
-        {
-            "file_pattern": r"protocol_plugin_compute\.py",
-            "violation_pattern": r"Function name 'execute' is too generic",
-        },
-        # Base class method 'execute' exemption (implements protocol pattern)
-        {
-            "file_pattern": r"plugin_compute_base\.py",
-            "violation_pattern": r"Function name 'execute' is too generic",
-        },
-        # RuntimeHostProcess method count exemption (OMN-756)
-        # Central coordinator class that legitimately requires multiple methods for:
-        # - Lifecycle management (start, stop, health_check)
-        # - Message handling (_on_message, _handle_envelope)
-        # - Graceful shutdown (shutdown_ready, drain logic)
-        # - Handler management (register_handler, get_handler)
-        # This complexity is intentional for the runtime coordinator pattern.
-        {
-            "file_pattern": r"runtime_host_process\.py",
-            "class_pattern": r"Class 'RuntimeHostProcess'",
-            "violation_pattern": r"has \d+ methods",
-        },
-        # RuntimeHostProcess __init__ parameter count exemption (OMN-756)
-        # Central coordinator requires multiple configuration parameters:
-        # - event_bus, input_topic, output_topic, config, handler_registry
-        # These parameters configure event routing and handler binding.
-        {
-            "file_pattern": r"runtime_host_process\.py",
-            "method_pattern": r"Function '__init__'",
-            "violation_pattern": r"has \d+ parameters",
-        },
-        # PolicyRegistry method count exemption
-        # Central registry class requires comprehensive policy management:
-        # - CRUD operations (register, get, update, remove)
-        # - Query operations (list, filter, search)
-        # - Lifecycle operations (enable, disable, validate)
-        # This is a domain registry pattern, not a code smell.
-        {
-            "file_pattern": r"policy_registry\.py",
-            "class_pattern": r"Class 'PolicyRegistry'",
-            "violation_pattern": r"has \d+ methods",
-        },
-        # PolicyRegistry.register_policy parameter count exemption
-        # Policy registration requires multiple fields for complete policy definition
-        {
-            "file_pattern": r"policy_registry\.py",
-            "method_pattern": r"Function 'register_policy'",
-            "violation_pattern": r"has \d+ parameters",
-        },
-        # ModelPolicyKey.policy_id exemption (OMN-812)
-        # policy_id is intentionally a human-readable string identifier (e.g., 'exponential_backoff'),
-        # NOT a UUID. The _id suffix triggers false positive UUID suggestions.
-        {
-            "file_pattern": r"model_policy_key\.py",
-            "violation_pattern": r"Field 'policy_id' should use UUID",
-        },
-        # ModelPolicyRegistration.policy_id exemption (OMN-812)
-        # Same rationale as ModelPolicyKey - semantic identifier, not UUID
-        {
-            "file_pattern": r"model_policy_registration\.py",
-            "violation_pattern": r"Field 'policy_id' should use UUID",
-        },
-        # ================================================================================
-        # Execution Shape Validator Exemptions (OMN-958)
-        # ================================================================================
-        # EnumHandlerType 'Handler' naming exemption
-        # The term 'Handler' is intentional here - this enum defines ONEX handler types
-        # (Effect, Compute, Reducer, Orchestrator) which are architectural concepts,
-        # not implementation classes that should avoid *Handler naming.
-        {
-            "file_pattern": r"enum_handler_type\.py",
-            "violation_pattern": r"contains anti-pattern 'Handler'",
-        },
-        # HandlerInfo 'Handler' naming exemption
-        # This is a validation data class for describing handler information during
-        # AST analysis - it describes handlers, not implements handler behavior.
-        {
-            "file_pattern": r"execution_shape_validator\.py",
-            "class_pattern": r"Class name 'HandlerInfo'",
-            "violation_pattern": r"contains anti-pattern 'Handler'",
-        },
-        # ExecutionShapeValidator method count exemption
-        # Validator class requires multiple methods for comprehensive AST analysis:
-        # - validate_file, validate_directory (entry points)
-        # - _extract_handlers, _find_handler_type (handler detection)
-        # - _detect_return_type, _analyze_return_statement (return analysis)
-        # - _check_forbidden_calls, _categorize_output (violation detection)
-        # This is a cohesive validator pattern, not class decomposition needed.
-        {
-            "file_pattern": r"execution_shape_validator\.py",
-            "class_pattern": r"Class 'ExecutionShapeValidator'",
-            "violation_pattern": r"has \d+ methods",
-        },
-        # TopicCategoryASTVisitor visit_* methods exemption
-        # These method names follow Python ast.NodeVisitor convention (PEP 8 exception)
-        # visit_ClassDef, visit_Call are standard AST visitor method names that the
-        # ast module dispatches to. Using snake_case like visit_class_def would break
-        # the ast.NodeVisitor contract.
-        {
-            "file_pattern": r"topic_category_validator\.py",
-            "violation_pattern": r"Function name 'visit_ClassDef' should use snake_case",
-        },
-        {
-            "file_pattern": r"topic_category_validator\.py",
-            "violation_pattern": r"Function name 'visit_Call' should use snake_case",
-        },
-        # RuntimeShapeValidator.validate_handler_output parameter count exemption
-        # Validation requires multiple context parameters for proper violation reporting:
-        # handler_type, output, output_category, source_file, line_number, correlation_id
-        # These are distinct required contexts, not candidates for a model wrapper.
-        {
-            "file_pattern": r"runtime_shape_validator\.py",
-            "method_pattern": r"Function 'validate_handler_output'",
-            "violation_pattern": r"has \d+ parameters",
-        },
-        # RuntimeShapeValidator.validate_and_raise parameter count exemption
-        # Same rationale as validate_handler_output - requires distinct context params
-        {
-            "file_pattern": r"runtime_shape_validator\.py",
-            "method_pattern": r"Function 'validate_and_raise'",
-            "violation_pattern": r"has \d+ parameters",
-        },
-        # ================================================================================
-        # MixinNodeIntrospection Exemptions (OMN-958)
-        # ================================================================================
-        # MixinNodeIntrospection.initialize_introspection parameter count exemption
-        # This legacy interface is kept for backward compatibility. A new preferred method
-        # initialize_introspection_from_config() was added that takes a ModelIntrospectionConfig
-        # model, reducing the parameter count to 2 (self, config). The legacy method with
-        # 8 parameters is preserved to avoid breaking existing consumers.
-        # See: ModelIntrospectionConfig in model_introspection_config.py
-        {
-            "file_pattern": r"mixin_node_introspection\.py",
-            "method_pattern": r"Function 'initialize_introspection'",
-            "violation_pattern": r"has \d+ parameters",
-        },
-        # MixinNodeIntrospection method count exemption
-        # Introspection mixin legitimately requires multiple methods for:
-        # - Lifecycle (initialize_introspection, start/stop tasks)
-        # - Capability discovery (get_capabilities, get_endpoints, get_current_state)
-        # - Caching (invalidate_introspection_cache)
-        # - Publishing (publish_introspection)
-        # - Background tasks (heartbeat, registry listener)
-        # This is an established mixin pattern, not a code smell.
-        {
-            "file_pattern": r"mixin_node_introspection\.py",
-            "class_pattern": r"Class 'MixinNodeIntrospection'",
-            "violation_pattern": r"has \d+ methods",
-        },
-    ]
+    # Load exemption patterns from YAML configuration
+    # See validation_exemptions.yaml for pattern definitions and rationale
+    exempted_patterns = get_pattern_exemptions()
 
     # Filter errors using regex-based pattern matching
     filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
@@ -669,12 +617,11 @@ def validate_infra_union_usage(
     Prevents overly complex union types that complicate infrastructure code.
 
     Exemptions:
-        ModelNodeCapabilities.config (model_node_capabilities.py) - Documented infrastructure pattern:
-        - The `config` field uses `dict[str, int | str | bool | float]` for nested configuration.
-        - This is a standard JSON-like configuration pattern where config values can be
-          any primitive type (similar to JSON's null, boolean, number, string).
-        - Creating a `ModelConfigValue` wrapper would add unnecessary complexity without benefit.
-        - This pattern is intentional and documented per ONEX infrastructure guidelines.
+        Exemption patterns are loaded from validation_exemptions.yaml (union_exemptions section).
+        See that file for the complete list of exemptions with rationale.
+
+        Key exemption categories:
+        - ModelNodeCapabilities.config: JSON-like configuration pattern with primitive unions
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
@@ -690,19 +637,9 @@ def validate_infra_union_usage(
         str(directory), max_unions=max_unions, strict=strict
     )
 
-    # Filter known infrastructure union exemptions using regex-based matching
-    # Patterns match file names and violation types without hardcoded line numbers
-    exempted_patterns: list[ExemptionPattern] = [
-        # ModelNodeCapabilities.config field exemption
-        # The config field uses dict[str, int | str | bool | float] for nested configuration
-        # values. This is a standard JSON-like config pattern where values can be any
-        # primitive type. Creating a ModelConfigValue wrapper would add unnecessary
-        # complexity without real benefit for this infrastructure domain.
-        {
-            "file_pattern": r"model_node_capabilities\.py",
-            "violation_pattern": r"Union with 4\+ primitive types.*bool.*float.*int.*str",
-        },
-    ]
+    # Load exemption patterns from YAML configuration
+    # See validation_exemptions.yaml for pattern definitions and rationale
+    exempted_patterns = get_union_exemptions()
 
     # Filter errors using regex-based pattern matching
     filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
@@ -835,6 +772,10 @@ __all__ = [
     "INFRA_MAX_VIOLATIONS",
     "INFRA_PATTERNS_STRICT",
     "INFRA_UNIONS_STRICT",
+    "EXEMPTIONS_YAML_PATH",
+    # Exemption loaders
+    "get_pattern_exemptions",
+    "get_union_exemptions",
     # Validators
     "validate_infra_architecture",
     "validate_infra_contracts",

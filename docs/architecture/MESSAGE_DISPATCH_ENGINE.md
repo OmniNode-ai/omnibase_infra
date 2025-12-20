@@ -236,6 +236,90 @@ if metrics:
     print(f"Error rate: {metrics.error_rate:.1%}")
 ```
 
+## Fan-out Pattern
+
+Fan-out allows multiple dispatchers to process the same message type. This is a core
+capability for implementing event-driven architectures where a single event triggers
+multiple independent handlers.
+
+### When to Use Fan-out
+
+| Use Case | Description |
+|----------|-------------|
+| **Event Sourcing** | Multiple projections from single event stream |
+| **Notification System** | Email, SMS, push handlers from single notification event |
+| **Analytics** | Multiple analytics processors from activity events |
+| **Audit Trail** | Separate audit logger alongside business logic |
+
+### Fan-out Registration
+
+Register multiple dispatchers and routes that match the same topic pattern:
+
+```python
+# Two independent handlers for user events
+async def send_welcome_email(envelope: ModelEventEnvelope[object]) -> str:
+    user = envelope.payload
+    await email_service.send_welcome(user.email)
+    return "dev.email.sent.v1"
+
+async def update_analytics(envelope: ModelEventEnvelope[object]) -> str:
+    user = envelope.payload
+    await analytics.track_signup(user.user_id)
+    return "dev.analytics.tracked.v1"
+
+# Register both dispatchers
+engine.register_dispatcher(
+    dispatcher_id="email-handler",
+    dispatcher=send_welcome_email,
+    category=EnumMessageCategory.EVENT,
+    message_types={"UserCreated"},
+)
+engine.register_dispatcher(
+    dispatcher_id="analytics-handler",
+    dispatcher=update_analytics,
+    category=EnumMessageCategory.EVENT,
+    message_types={"UserCreated"},
+)
+
+# Register routes - both match the same topic pattern
+engine.register_route(ModelDispatchRoute(
+    route_id="email-route",
+    topic_pattern="*.user.events.*",
+    message_category=EnumMessageCategory.EVENT,
+    dispatcher_id="email-handler",
+))
+engine.register_route(ModelDispatchRoute(
+    route_id="analytics-route",
+    topic_pattern="*.user.events.*",
+    message_category=EnumMessageCategory.EVENT,
+    dispatcher_id="analytics-handler",
+))
+engine.freeze()
+
+# Dispatch triggers BOTH handlers
+result = await engine.dispatch("dev.user.events.v1", user_created_envelope)
+assert result.output_count == 2  # Both handlers produced outputs
+```
+
+### Fan-out Execution Semantics
+
+- **All matching dispatchers execute**: Every dispatcher matching category + message type runs
+- **Independent execution**: Dispatcher failures don't prevent other dispatchers from running
+- **Output aggregation**: All dispatcher outputs are collected in `ModelDispatchResult.outputs`
+- **Error aggregation**: Individual failures are captured in `error_message`, dispatch continues
+
+### Fan-out Metrics
+
+Track fan-out behavior via structured metrics:
+
+```python
+metrics = engine.get_structured_metrics()
+# dispatcher_execution_count may exceed dispatch_count for fan-out
+print(f"Dispatches: {metrics.dispatch_count}")
+print(f"Dispatcher executions: {metrics.dispatcher_execution_count}")  # Higher with fan-out
+print(f"Fan-out ratio: {metrics.dispatcher_execution_count / metrics.dispatch_count:.1f}")
+```
+
 ## Resilience Patterns
 
 ### Dispatcher-Owned Resilience
@@ -249,7 +333,45 @@ dispatchers with circuit breakers.
 - No hidden behavior: Engine users see exactly what resilience each dispatcher provides
 - Composability: Dispatchers can combine circuit breakers with retry, backoff, degradation
 
-See `CLAUDE.md` section "Dispatcher Resilience Pattern" for implementation guidance.
+### Circuit Breaker Integration Example
+
+Dispatchers that call external services should implement `MixinAsyncCircuitBreaker`:
+
+```python
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.enums import EnumInfraTransportType
+
+class EmailDispatcher(MixinAsyncCircuitBreaker):
+    """Dispatcher with built-in circuit breaker for external email service."""
+
+    def __init__(self, config: EmailConfig):
+        self._init_circuit_breaker(
+            threshold=5,
+            reset_timeout=60.0,
+            service_name="email-service",
+            transport_type=EnumInfraTransportType.HTTP,
+        )
+
+    async def handle(self, envelope: ModelEventEnvelope[object]) -> str | None:
+        """Handle message with circuit breaker protection."""
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("send_email", envelope.correlation_id)
+
+        try:
+            await self._send_email(envelope.payload)
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+            return "dev.email.sent.v1"
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("send_email", envelope.correlation_id)
+            raise
+```
+
+For complete circuit breaker implementation details, see:
+- `CLAUDE.md` section "Dispatcher Resilience Pattern"
+- `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
+- `docs/patterns/circuit_breaker_implementation.md`
 
 ### Error Sanitization
 
@@ -309,12 +431,28 @@ Review Cadence: Monthly until re-enabled
 
 ## Related Documentation
 
-- **Implementation**: `src/omnibase_infra/runtime/message_dispatch_engine.py`
+### Implementation
+
+- **Dispatch Engine**: `src/omnibase_infra/runtime/message_dispatch_engine.py`
 - **Dispatcher Registry**: `src/omnibase_infra/runtime/dispatcher_registry.py`
 - **Runtime Host**: `src/omnibase_infra/runtime/runtime_host_process.py`
+- **Dispatch Models**: `src/omnibase_infra/models/dispatch/`
 - **Validation**: `src/omnibase_infra/validation/infra_validators.py`
-- **Circuit Breaker**: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
-- **Error Patterns**: `CLAUDE.md` - "Error Recovery Patterns" section
+
+### Resilience Patterns
+
+- **Circuit Breaker Thread Safety**: `docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`
+- **Circuit Breaker Implementation Guide**: `docs/patterns/circuit_breaker_implementation.md`
+- **Error Recovery Patterns**: `docs/patterns/error_recovery_patterns.md`
+- **Error Handling Patterns**: `docs/patterns/error_handling_patterns.md`
+- **Dispatcher Resilience Pattern**: `CLAUDE.md` - "Dispatcher Resilience Pattern" section
+
+### Testing
+
+- **Unit Tests**: `tests/unit/runtime/test_message_dispatch_engine.py`
+  - Fan-out dispatch tests: `test_dispatch_multiple_handlers_fan_out`
+  - Concurrent dispatch tests: `test_concurrent_dispatch_with_multiple_handlers`
+  - Thread safety tests: `TestConcurrentDispatchAdvanced` class
 
 ## Models Reference
 

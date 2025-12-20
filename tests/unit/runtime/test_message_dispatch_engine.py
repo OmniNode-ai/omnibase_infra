@@ -68,6 +68,23 @@ class SomeGenericPayload:
         self.data = data
 
 
+class OrderSummaryProjection:
+    """Test projection class that ends with 'Projection'.
+
+    TODO(OMN-977): Add dispatch tests for PROJECTION category routing.
+    PROJECTION messages are typically internal state representations consumed
+    by reducers. Unlike EVENT/COMMAND/INTENT, PROJECTION has no topic naming
+    constraint (can exist on any topic). Tests should verify:
+    - Dispatcher registration for PROJECTION category
+    - Routing to PROJECTION handlers
+    - Category inference from *Projection class suffix
+    """
+
+    def __init__(self, order_id: str, total: float) -> None:
+        self.order_id = order_id
+        self.total = total
+
+
 # ============================================================================
 # Fixtures
 # ============================================================================

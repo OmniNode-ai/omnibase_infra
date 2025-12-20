@@ -100,6 +100,20 @@ Related:
     - OMN-934: Message dispatch engine implementation
     - EnvelopeRouter: Transport-agnostic orchestrator (reference for freeze pattern)
 
+Category Support:
+    The engine supports all four ONEX message categories:
+    - EVENT: Domain events (e.g., UserCreatedEvent)
+    - COMMAND: Action requests (e.g., CreateUserCommand)
+    - INTENT: User intentions (e.g., ProvisionUserIntent)
+    - PROJECTION: State projections (e.g., OrderSummaryProjection)
+
+    Note: PROJECTION has no topic naming constraint (unlike EVENT/COMMAND/INTENT
+    which require *.events, *.commands, *.intents suffixes). Projections are
+    typically internal state representations consumed by reducers.
+
+    TODO(OMN-977): Add integration tests for PROJECTION category dispatch.
+    Current test coverage focuses on EVENT/COMMAND/INTENT routing.
+
 .. versionadded:: 0.4.0
 """
 
