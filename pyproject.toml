@@ -221,6 +221,7 @@ markers = [
     "slow: Tests that take a long time to run (>1s)",
     "smoke: Quick smoke tests for basic functionality",
     "performance: Performance and benchmark tests",
+    "benchmark: Benchmark tests for performance measurement",
     "infrastructure: Infrastructure-specific tests",
     "validation: Validation framework tests",
     "consul: Tests requiring real Consul instance (CONSUL_HTTP_ADDR)",
