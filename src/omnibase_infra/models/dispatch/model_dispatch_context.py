@@ -135,6 +135,17 @@ class ModelDispatchContext(BaseModel):
         description="Optional additional metadata for extensibility.",
     )
 
+    def _is_invalid_time_injection(self) -> bool:
+        """Check if this context has invalid time injection for deterministic nodes.
+
+        Returns:
+            True if this is a deterministic node (REDUCER/COMPUTE) with time injection.
+        """
+        return (
+            self.node_kind in (EnumNodeKind.REDUCER, EnumNodeKind.COMPUTE)
+            and self.now is not None
+        )
+
     @model_validator(mode="after")
     def _validate_deterministic_node_no_time(self) -> "ModelDispatchContext":
         """Validate that deterministic nodes do not receive time injection.
@@ -148,10 +159,7 @@ class ModelDispatchContext(BaseModel):
         Returns:
             Self if validation passes.
         """
-        if (
-            self.node_kind in (EnumNodeKind.REDUCER, EnumNodeKind.COMPUTE)
-            and self.now is not None
-        ):
+        if self._is_invalid_time_injection():
             msg = (
                 f"{self.node_kind.value.upper()} nodes cannot receive time injection. "
                 f"{self.node_kind.value.capitalize()} nodes must be deterministic - "
@@ -204,10 +212,7 @@ class ModelDispatchContext(BaseModel):
             True
             >>> # Invalid context would raise ValueError
         """
-        if (
-            self.node_kind in (EnumNodeKind.REDUCER, EnumNodeKind.COMPUTE)
-            and self.now is not None
-        ):
+        if self._is_invalid_time_injection():
             msg = (
                 f"Dispatch context validation failed: "
                 f"{self.node_kind.value.upper()} nodes cannot receive time injection "
