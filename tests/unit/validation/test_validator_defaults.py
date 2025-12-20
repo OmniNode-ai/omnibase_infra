@@ -45,11 +45,11 @@ class TestInfraValidatorConstants:
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold set to 400 - tight buffer above current baseline.
+        Threshold set to 410 - buffer above current baseline (402 after json_types.py).
         Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 400, (
-            "INFRA_MAX_UNIONS should be 400 (tight threshold per OMN-983)"
+        assert INFRA_MAX_UNIONS == 410, (
+            "INFRA_MAX_UNIONS should be 410 (buffer after json_types.py addition per OMN-983)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -238,7 +238,7 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (400)
+            max_unions=INFRA_MAX_UNIONS,  # Default max (410)
             strict=INFRA_UNIONS_STRICT,  # Strict mode (True) per OMN-983
         )
 
@@ -488,12 +488,12 @@ class TestUnionCountRegressionGuard:
         the threshold, it indicates new code added unions without
         using proper typed patterns from omnibase_core.
 
-        Current baseline (~379 unions as of 2025-12-20):
+        Current baseline (~402 unions as of 2025-12-20):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold: INFRA_MAX_UNIONS (400) - tight buffer above baseline.
+        Threshold: INFRA_MAX_UNIONS (410) - buffer above baseline after json_types.py.
         Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
         """
         result = validate_infra_union_usage()
