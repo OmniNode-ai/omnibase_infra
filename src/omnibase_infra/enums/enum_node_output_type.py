@@ -27,7 +27,13 @@ See Also:
     - EnumExecutionShapeViolation: Defines validation violation types
 """
 
+from __future__ import annotations
+
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 
 
 class EnumNodeOutputType(str, Enum):
@@ -91,6 +97,72 @@ class EnumNodeOutputType(str, Enum):
     def is_projection(self) -> bool:
         """Check if this is a PROJECTION output type."""
         return self == EnumNodeOutputType.PROJECTION
+
+    def is_routable(self) -> bool:
+        """Check if this output type can be routed as a message.
+
+        EVENT, COMMAND, and INTENT are routable message categories that can
+        be published to Kafka topics. PROJECTION is NOT routable - it is a
+        node output type used for state consolidation in REDUCER nodes.
+
+        Returns:
+            True if this output type can be routed as a message, False otherwise.
+
+        Example:
+            >>> EnumNodeOutputType.EVENT.is_routable()
+            True
+            >>> EnumNodeOutputType.COMMAND.is_routable()
+            True
+            >>> EnumNodeOutputType.INTENT.is_routable()
+            True
+            >>> EnumNodeOutputType.PROJECTION.is_routable()
+            False
+        """
+        return self != EnumNodeOutputType.PROJECTION
+
+    def to_message_category(self) -> EnumMessageCategory:
+        """Convert this output type to the corresponding message category.
+
+        Maps routable output types to their message category equivalents:
+        - EVENT -> EnumMessageCategory.EVENT
+        - COMMAND -> EnumMessageCategory.COMMAND
+        - INTENT -> EnumMessageCategory.INTENT
+
+        PROJECTION cannot be converted because it is not a routable message
+        category - it is a node output type specific to REDUCER nodes.
+
+        Returns:
+            The corresponding EnumMessageCategory for this output type.
+
+        Raises:
+            ValueError: If this is PROJECTION, which has no message category.
+
+        Example:
+            >>> from omnibase_infra.enums import EnumNodeOutputType
+            >>> EnumNodeOutputType.EVENT.to_message_category()
+            <EnumMessageCategory.EVENT: 'event'>
+            >>> EnumNodeOutputType.COMMAND.to_message_category()
+            <EnumMessageCategory.COMMAND: 'command'>
+            >>> EnumNodeOutputType.INTENT.to_message_category()
+            <EnumMessageCategory.INTENT: 'intent'>
+            >>> EnumNodeOutputType.PROJECTION.to_message_category()
+            Traceback (most recent call last):
+                ...
+            ValueError: PROJECTION has no message category - projections are not routable
+        """
+        # Import at runtime to avoid circular imports
+        from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+
+        if self == EnumNodeOutputType.EVENT:
+            return EnumMessageCategory.EVENT
+        if self == EnumNodeOutputType.COMMAND:
+            return EnumMessageCategory.COMMAND
+        if self == EnumNodeOutputType.INTENT:
+            return EnumMessageCategory.INTENT
+
+        # PROJECTION has no message category
+        msg = "PROJECTION has no message category - projections are not routable"
+        raise ValueError(msg)
 
 
 __all__ = ["EnumNodeOutputType"]

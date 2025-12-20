@@ -278,21 +278,43 @@ output_type = EnumNodeOutputType.PROJECTION  # or EVENT, COMMAND, INTENT
 
 ### Detection Logic
 
-The execution shape validator uses multi-phase detection:
+The execution shape validator uses multi-phase detection in `_detect_message_category()`:
 
 ```python
-# Message category patterns (EnumMessageCategory)
-_MESSAGE_CATEGORY_PATTERNS: dict[str, EnumMessageCategory] = {
-    "Event": EnumMessageCategory.EVENT,
-    "Command": EnumMessageCategory.COMMAND,
-    "Intent": EnumMessageCategory.INTENT,
+# Phase 1: Suffix patterns (most reliable)
+suffix_patterns = [
+    ("EventMessage", EnumMessageCategory.EVENT),
+    ("Event", EnumMessageCategory.EVENT),
+    ("CommandMessage", EnumMessageCategory.COMMAND),
+    ("Command", EnumMessageCategory.COMMAND),
+    ("IntentMessage", EnumMessageCategory.INTENT),
+    ("Intent", EnumMessageCategory.INTENT),
+    # Projections use EnumNodeOutputType (not a message category)
+    ("ProjectionMessage", EnumNodeOutputType.PROJECTION),
+    ("Projection", EnumNodeOutputType.PROJECTION),
+]
+
+# Phase 2: Prefix patterns (Model* naming convention)
+prefix_patterns = [
+    ("ModelEvent", EnumMessageCategory.EVENT),
+    ("ModelCommand", EnumMessageCategory.COMMAND),
+    ("ModelIntent", EnumMessageCategory.INTENT),
+    ("ModelProjection", EnumNodeOutputType.PROJECTION),
+]
+
+# Phase 3: Uppercase enum-style names
+uppercase_patterns = {
+    "EVENT": EnumMessageCategory.EVENT,
+    "COMMAND": EnumMessageCategory.COMMAND,
+    "INTENT": EnumMessageCategory.INTENT,
+    "PROJECTION": EnumNodeOutputType.PROJECTION,
 }
 
-# Projection patterns (EnumNodeOutputType)
-_PROJECTION_PATTERNS: dict[str, EnumNodeOutputType] = {
-    "Projection": EnumNodeOutputType.PROJECTION,
-}
+# Phase 4: Lenient substring matching (fallback)
 ```
+
+The `_MESSAGE_CATEGORY_PATTERNS` constant is used for legacy purposes in the
+`_is_return_type_allowed` method context mapping.
 
 ### Runtime Validator Usage
 

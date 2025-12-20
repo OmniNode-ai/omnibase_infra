@@ -148,18 +148,6 @@ _MESSAGE_CATEGORY_PATTERNS: dict[str, EnumMessageCategory] = {
     "Intent": EnumMessageCategory.INTENT,
 }
 
-# Projection patterns for node output type detection.
-# PROJECTION is a node output type (EnumNodeOutputType), not a message category
-# (EnumMessageCategory). Projections are produced by REDUCER nodes as state
-# consolidation output, not routed via Kafka topics.
-_PROJECTION_PATTERNS: dict[str, EnumNodeOutputType] = {
-    "ModelProjectionMessage": EnumNodeOutputType.PROJECTION,
-    "ProjectionMessage": EnumNodeOutputType.PROJECTION,
-    "ModelProjection": EnumNodeOutputType.PROJECTION,
-    "PROJECTION": EnumNodeOutputType.PROJECTION,
-    "Projection": EnumNodeOutputType.PROJECTION,
-}
-
 # Forbidden direct publish method names
 _FORBIDDEN_PUBLISH_METHODS: frozenset[str] = frozenset(
     {
@@ -298,6 +286,15 @@ class ExecutionShapeValidator:
         The rules dictionary is immutable and no per-validation state is stored.
         Multiple threads can safely call validate_file() or validate_directory()
         on the same validator instance concurrently.
+
+        **Why no locks are needed** (unlike RoutingCoverageValidator):
+        - No lazy initialization: Rules are assigned in __init__, not deferred
+        - No mutable state: The rules dict reference never changes after __init__
+        - No caching: Each validation creates fresh local variables (handlers, violations)
+        - Module-level singleton created at import time (before any threads)
+
+        This is fundamentally different from RoutingCoverageValidator which uses
+        double-checked locking because it has lazy initialization with cached state.
 
     Performance:
         For repeated validation (e.g., CI pipelines), use the module-level
@@ -1180,6 +1177,20 @@ def get_execution_shape_rules() -> dict[EnumHandlerType, ModelExecutionShapeRule
 # - All read operations on the rules dictionary are thread-safe
 # - Each validation creates fresh local state (handlers, violations lists)
 # - No locks are needed because there's no shared mutable state
+#
+# Contrast with RoutingCoverageValidator:
+#   RoutingCoverageValidator uses double-checked locking with threading.Lock
+#   because it has LAZY initialization (discovery happens on first use) and
+#   CACHED STATE (discovered types and routes are stored). The lock prevents
+#   race conditions where two threads might both trigger discovery.
+#
+#   ExecutionShapeValidator needs no locks because:
+#   1. Initialization is EAGER (rules assigned in __init__ at module load)
+#   2. State is IMMUTABLE (rules dict never changes after construction)
+#   3. No caching - each validate_file() call does fresh AST parsing
+#
+#   This is a key architectural distinction: stateless validators can use
+#   simple singletons, while stateful validators need synchronization.
 #
 # When NOT to use the singleton:
 # - If you need custom execution shape rules (create your own instance)
