@@ -3315,8 +3315,8 @@ full = ["psutil"]
 [package.source]
 type = "git"
 url = "https://github.com/OmniNode-ai/omnibase_core.git"
-reference = "01027fab06e830b5b6575e4ecfe03311a2a4616e"
-resolved_reference = "01027fab06e830b5b6575e4ecfe03311a2a4616e"
+reference = "main"
+resolved_reference = "eff3d3c05a0c8c950a2e64dfd9afd8a735aad7ef"
 
 [[package]]
 name = "omnibase-spi"

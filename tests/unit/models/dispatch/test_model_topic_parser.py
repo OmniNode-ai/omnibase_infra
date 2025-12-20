@@ -17,9 +17,9 @@ OMN-934: Message dispatch engine implementation
 from __future__ import annotations
 
 import pytest
+from omnibase_core.enums.enum_topic_taxonomy import EnumTopicType
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.enums.enum_topic_type import EnumTopicType
 from omnibase_infra.models.dispatch.model_topic_parser import (
     EnumTopicStandard,
     ModelParsedTopic,
