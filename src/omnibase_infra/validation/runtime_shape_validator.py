@@ -499,6 +499,31 @@ class RuntimeShapeValidator:
             raise KeyError(f"No execution shape rule defined for: {handler_type.value}")
         return self.rules[handler_type]
 
+    def _get_allowed_types_for_handler(self, handler_type: EnumHandlerType) -> str:
+        """Get a human-readable string of allowed output types for a handler.
+
+        Used to generate helpful error messages that suggest valid alternatives
+        when a handler attempts to return a forbidden output type.
+
+        Args:
+            handler_type: The handler type to get allowed types for.
+
+        Returns:
+            A formatted string listing allowed output types (e.g., "EVENTs or COMMANDs").
+        """
+        try:
+            rule = self.get_rule(handler_type)
+            allowed = [t.value.upper() + "s" for t in rule.allowed_return_types]
+            if len(allowed) == 0:
+                return "no specific types (check EXECUTION_SHAPE_RULES)"
+            if len(allowed) == 1:
+                return allowed[0]
+            if len(allowed) == 2:
+                return f"{allowed[0]} or {allowed[1]}"
+            return ", ".join(allowed[:-1]) + f", or {allowed[-1]}"
+        except KeyError:
+            return "appropriate types (check EXECUTION_SHAPE_RULES)"
+
     def is_output_allowed(
         self,
         handler_type: EnumHandlerType,
@@ -602,18 +627,43 @@ class RuntimeShapeValidator:
         handler_name = handler_type.value.upper()
         category_name = output_category.value.upper()
 
+        # Check if this is a PROJECTION violation - these need educational context
+        # about the distinction between node output types and message categories
+        is_projection_violation = output_category == EnumNodeOutputType.PROJECTION
+
         # Provide context-specific guidance based on whether this is an explicit
         # or implicit violation
         if violation_type == EnumExecutionShapeViolation.FORBIDDEN_RETURN_TYPE:
             # Implicit violation: category not in allow-list
+            if is_projection_violation:
+                # Special case: PROJECTION needs educational message
+                message = (
+                    f"{handler_name} handler cannot return PROJECTION type "
+                    f"'{output_type_name}'. PROJECTION is a node output type "
+                    f"(EnumNodeOutputType), not a message routing category "
+                    f"(EnumMessageCategory). Projections represent aggregated state "
+                    f"and are only valid for REDUCER node output types."
+                )
+            else:
+                message = (
+                    f"{handler_name} handler cannot return {category_name} type "
+                    f"'{output_type_name}'. {category_name} is not in the allowed "
+                    f"return types for {handler_name} handlers. "
+                    f"Check EXECUTION_SHAPE_RULES for allowed message categories."
+                )
+        # Explicit violation: known architectural constraint
+        elif is_projection_violation:
+            # PROJECTION violations get enhanced educational message
+            allowed_types = self._get_allowed_types_for_handler(handler_type)
             message = (
-                f"{handler_name} handler cannot return {category_name} type "
-                f"'{output_type_name}'. {category_name} is not in the allowed "
-                f"return types for {handler_name} handlers. "
-                f"Check EXECUTION_SHAPE_RULES for allowed message categories."
+                f"{handler_name} handler cannot return PROJECTION type "
+                f"'{output_type_name}'. PROJECTION is a node output type "
+                f"(EnumNodeOutputType), not a message routing category "
+                f"(EnumMessageCategory). Projections represent aggregated state "
+                f"and are only valid for REDUCER node output types. "
+                f"{handler_name} handlers should return {allowed_types} instead."
             )
         else:
-            # Explicit violation: known architectural constraint
             message = (
                 f"{handler_name} handler cannot return {category_name} type "
                 f"'{output_type_name}'. This violates ONEX 4-node architecture "

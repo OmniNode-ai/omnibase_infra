@@ -1354,3 +1354,105 @@ class TestEnumMappingEdgeCases:
         assert "PROJECTION" in node_output_names, (
             "PROJECTION should be a valid node output type"
         )
+
+
+class TestEnumMappingCompleteness:
+    """Test that enum mappings stay in sync with enum definitions.
+
+    These tests ensure that when new values are added to EnumMessageCategory,
+    the corresponding mapping in _MESSAGE_CATEGORY_TO_OUTPUT_TYPE is also updated.
+    This prevents drift/sync issues between the enum and the mapping.
+
+    Context:
+        OMN-974 introduced EnumNodeOutputType separate from EnumMessageCategory.
+        The _MESSAGE_CATEGORY_TO_OUTPUT_TYPE mapping bridges these two enums
+        for execution shape validation. If someone adds a new EnumMessageCategory
+        value but forgets to add it to the mapping, validation will silently
+        fail (returning False for unknown categories).
+
+    This test class acts as a guard rail to catch such omissions.
+    """
+
+    def test_all_message_categories_exist_in_output_type_mapping(self) -> None:
+        """Verify every EnumMessageCategory value has a mapping to EnumNodeOutputType.
+
+        This test will FAIL if someone adds a new value to EnumMessageCategory
+        but forgets to add the corresponding entry in _MESSAGE_CATEGORY_TO_OUTPUT_TYPE.
+
+        The mapping is critical for the ExecutionShapeValidator._is_return_type_allowed()
+        method which converts EnumMessageCategory values to EnumNodeOutputType for
+        validation against execution shape rules.
+        """
+        from omnibase_infra.validation.execution_shape_validator import (
+            _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
+        )
+
+        # Get all EnumMessageCategory values
+        all_categories = set(EnumMessageCategory)
+
+        # Get all categories that have mappings
+        mapped_categories = set(_MESSAGE_CATEGORY_TO_OUTPUT_TYPE.keys())
+
+        # Check for missing mappings
+        missing_mappings = all_categories - mapped_categories
+
+        assert not missing_mappings, (
+            f"The following EnumMessageCategory values are missing from "
+            f"_MESSAGE_CATEGORY_TO_OUTPUT_TYPE mapping: {missing_mappings}. "
+            f"When adding new values to EnumMessageCategory, you MUST also update "
+            f"the _MESSAGE_CATEGORY_TO_OUTPUT_TYPE mapping in "
+            f"omnibase_infra/validation/execution_shape_validator.py"
+        )
+
+    def test_mapping_values_are_valid_node_output_types(self) -> None:
+        """Verify all mapping values are valid EnumNodeOutputType members.
+
+        This ensures the mapping doesn't contain typos or invalid output types.
+        """
+        from omnibase_infra.validation.execution_shape_validator import (
+            _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
+        )
+
+        for category, output_type in _MESSAGE_CATEGORY_TO_OUTPUT_TYPE.items():
+            assert isinstance(output_type, EnumNodeOutputType), (
+                f"Mapping for {category} must be an EnumNodeOutputType, "
+                f"got {type(output_type).__name__}: {output_type}"
+            )
+
+    def test_mapping_preserves_semantic_equivalence(self) -> None:
+        """Verify mapped categories have matching semantic values.
+
+        EVENT, COMMAND, and INTENT should map to their EnumNodeOutputType
+        counterparts with identical string values, ensuring semantic consistency.
+        """
+        from omnibase_infra.validation.execution_shape_validator import (
+            _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
+        )
+
+        for category, output_type in _MESSAGE_CATEGORY_TO_OUTPUT_TYPE.items():
+            assert category.value == output_type.value, (
+                f"EnumMessageCategory.{category.name} (value={category.value!r}) "
+                f"should map to EnumNodeOutputType with same value, but maps to "
+                f"EnumNodeOutputType.{output_type.name} (value={output_type.value!r})"
+            )
+
+    def test_no_extra_mappings_for_nonexistent_categories(self) -> None:
+        """Verify mapping doesn't contain stale entries for removed categories.
+
+        If an EnumMessageCategory value is ever removed, this test ensures
+        the mapping is also cleaned up.
+        """
+        from omnibase_infra.validation.execution_shape_validator import (
+            _MESSAGE_CATEGORY_TO_OUTPUT_TYPE,
+        )
+
+        all_categories = set(EnumMessageCategory)
+        mapped_categories = set(_MESSAGE_CATEGORY_TO_OUTPUT_TYPE.keys())
+
+        extra_mappings = mapped_categories - all_categories
+
+        assert not extra_mappings, (
+            f"_MESSAGE_CATEGORY_TO_OUTPUT_TYPE contains mappings for categories "
+            f"that no longer exist in EnumMessageCategory: {extra_mappings}. "
+            f"Remove these stale entries from the mapping."
+        )

@@ -938,14 +938,20 @@ class ExecutionShapeValidator:
                 )
                 message = (
                     f"Orchestrator '{handler.name}' returns PROJECTION type '{type_name}'. "
-                    "Projections are the domain of reducers for state management."
+                    "PROJECTION is a node output type (EnumNodeOutputType), not a message "
+                    "routing category (EnumMessageCategory). Projections represent aggregated "
+                    "state and are only valid for REDUCER node output types. Orchestrators "
+                    "coordinate workflows and should return COMMANDs or EVENTs instead."
                 )
         elif handler.handler_type == EnumHandlerType.EFFECT:
             if is_projection(category):
                 violation_type = EnumExecutionShapeViolation.EFFECT_RETURNS_PROJECTIONS
                 message = (
                     f"Effect handler '{handler.name}' returns PROJECTION type '{type_name}'. "
-                    "Projections are derived state, managed by reducers."
+                    "PROJECTION is a node output type (EnumNodeOutputType), not a message "
+                    "routing category (EnumMessageCategory). Projections represent aggregated "
+                    "state and are only valid for REDUCER node output types. Effect handlers "
+                    "interact with external systems and should return EVENTs or COMMANDs instead."
                 )
 
         if violation_type is None:
