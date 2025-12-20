@@ -417,16 +417,15 @@ The following pattern exemptions are documented in `infra_validators.py`:
 ### Strict Mode Timeline
 
 ```
-Status: DISABLED (INFRA_PATTERNS_STRICT = False)
-Target Re-enable Date: 2026-03-01 (Q1 2026)
+Status: ENABLED (INFRA_PATTERNS_STRICT = True per OMN-983)
 
-Prerequisites:
-1. Complete OMN-934 (this ticket)
+Enabled as of: 2025-12-20
+- All violations must be fixed or added to exempted_patterns with documented rationale
+- See validate_infra_patterns() in infra_validators.py for exemption list
+
+Remaining Targets:
+1. Reduce INFRA_MAX_UNIONS to <200 through dict[str, object] → JsonValue migration
 2. Complete H1 Legacy Migration
-3. Reduce INFRA_MAX_UNIONS to <200
-4. Validate all components pass or have exemptions
-
-Review Cadence: Monthly until re-enabled
 ```
 
 ## Related Documentation

@@ -189,6 +189,86 @@ pattern_exemptions:
       Introspection mixin legitimately requires multiple methods: lifecycle (initialize_introspection, start/stop tasks), capability discovery (get_capabilities, get_endpoints, get_current_state), caching (invalidate_introspection_cache), publishing (publish_introspection), and background tasks (heartbeat, registry listener).
 
     ticket: OMN-958
+  # ==========================================================================
+  # Message Dispatch Engine Exemptions (OMN-934, OMN-983)
+  # ==========================================================================
+  # Central dispatch coordinator pattern requires comprehensive routing capabilities.
+  - file_pattern: 'message_dispatch_engine\.py'
+    class_pattern: "Class 'MessageDispatchEngine'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Central dispatch coordinator requires: registration (register_dispatcher, register_route), routing (dispatch, get_dispatchers_for_message), metrics (get_dispatcher_metrics, get_dispatch_metrics), lifecycle (start, stop, health_check). This is a central coordinator pattern.
+
+    ticket: OMN-934
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function '_build_log_context'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Log context builder intentionally takes many optional parameters to build structured log context. Each parameter is a distinct log field.
+
+    ticket: OMN-934
+  # ==========================================================================
+  # DispatcherRegistry Exemptions (OMN-934)
+  # ==========================================================================
+  - file_pattern: 'dispatcher_registry\.py'
+    class_pattern: "Class 'DispatcherRegistry'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Domain registry pattern requires CRUD + query operations: registration (register, unregister), lookup (get_by_id, get_by_type, get_all), metrics (get_metrics). This is an established domain registry pattern.
+
+    ticket: OMN-934
+  # ==========================================================================
+  # Dispatch Model Semantic Identifier Exemptions (OMN-983)
+  # ==========================================================================
+  # dispatcher_id, route_id are semantic identifiers (like policy_id), NOT UUIDs.
+  # They are human-readable strings that identify dispatchers/routes by name.
+  - file_pattern: 'model_dispatcher_registration\.py'
+    violation_pattern: "Field 'dispatcher_id' should use UUID"
+    reason: >
+      dispatcher_id is a human-readable semantic identifier (e.g., "kafka-main-dispatcher"), not a UUID. Similar to policy_id pattern.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatcher_registration\.py'
+    violation_pattern: 'dispatcher_name.*entity'
+    reason: >
+      dispatcher_name is a display name for the dispatcher, paired with dispatcher_id as the semantic identifier. This follows the ID + display_name pattern.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatcher_metrics\.py'
+    violation_pattern: "Field 'dispatcher_id' should use UUID"
+    reason: >
+      dispatcher_id is a human-readable semantic identifier, not a UUID. Consistent with model_dispatcher_registration.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatch_route\.py'
+    violation_pattern: "Field 'route_id' should use UUID"
+    reason: >
+      route_id is a human-readable semantic identifier (e.g., "default-route"), not a UUID.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatch_route\.py'
+    violation_pattern: "Field 'dispatcher_id' should use UUID"
+    reason: >
+      dispatcher_id is a human-readable semantic identifier, consistent across dispatch models.
+
+    ticket: OMN-983
+  - file_pattern: 'model_dispatch_metrics\.py'
+    method_pattern: "Function 'record_dispatch'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Metrics recording requires multiple parameters for complete dispatch tracking: identifiers (dispatcher_id, route_id, topic, message_type), timing (start_time, end_time, duration_ms), status (success, error_code, error_message).
+
+    ticket: OMN-983
+  # ==========================================================================
+  # MessageTypeRegistry Exemptions (OMN-983)
+  # ==========================================================================
+  - file_pattern: 'registry_message_type\.py'
+    class_pattern: "Class 'MessageTypeRegistry'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Domain registry pattern requires comprehensive message type management: CRUD operations (register, unregister, get), query operations (list, filter, search by topic/domain), validation operations (validate_topic, resolve_type), and statistics (get_statistics). This is an established domain registry pattern.
+
+    ticket: OMN-983
 # Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:
@@ -201,3 +281,12 @@ union_exemptions:
       The config field uses dict[str, int | str | bool | float] for nested configuration values. This is a standard JSON-like config pattern where values can be any primitive type. Creating a ModelConfigValue wrapper would add unnecessary complexity without real benefit for this infrastructure domain.
 
     ticket: null
+  # ==========================================================================
+  # JsonPrimitive Type Alias Exemption (OMN-983)
+  # ==========================================================================
+  - file_pattern: 'json_types\.py'
+    violation_pattern: 'Union with 4\+ primitive types.*bool.*float.*int.*str'
+    reason: >
+      JsonPrimitive is a fundamental type alias defining JSON primitive types (str | int | float | bool | None). This is the canonical definition for JSON primitives in the infrastructure layer. Cannot be reduced - represents JSON specification primitives.
+
+    ticket: OMN-983

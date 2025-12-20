@@ -7,6 +7,7 @@ Core models for the ONEX runtime dispatch engine that routes messages
 based on topic category and message type, and publishes dispatcher outputs.
 
 This module provides:
+- **ModelDispatchContext**: Dispatch context with time injection control
 - **ModelDispatchRoute**: Routing rules that map topic patterns to dispatchers
 - **ModelDispatchResult**: Results of dispatch operations with metrics
 - **ModelDispatcherRegistration**: Dispatcher registration metadata
@@ -90,6 +91,7 @@ See Also:
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
+from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
@@ -112,6 +114,7 @@ __all__ = [
     "EnumDispatchStatus",
     "EnumTopicStandard",
     # Models
+    "ModelDispatchContext",
     "ModelDispatchMetrics",
     "ModelDispatchResult",
     "ModelDispatchRoute",

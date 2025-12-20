@@ -733,21 +733,28 @@ class OrderCreatedEvent:
         validator = RoutingCoverageValidator(source_directory=temp_source_dir)
         results: list[set[str]] = []
         errors: list[Exception] = []
+        lock = threading.Lock()
+        num_threads = 10
+        barrier = threading.Barrier(num_threads)
 
         def get_unmapped() -> None:
             try:
+                # Wait for all threads to be ready before starting
+                barrier.wait()
                 unmapped = validator.get_unmapped_types()
-                results.append(unmapped)
+                with lock:
+                    results.append(unmapped)
             except Exception as e:
-                errors.append(e)
+                with lock:
+                    errors.append(e)
 
-        threads = [threading.Thread(target=get_unmapped) for _ in range(10)]
+        threads = [threading.Thread(target=get_unmapped) for _ in range(num_threads)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
 
-        assert len(errors) == 0
+        assert len(errors) == 0, f"Thread errors: {errors}"
         # All results should be the same
         assert all(r == results[0] for r in results)
 
