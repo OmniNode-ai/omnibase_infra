@@ -76,5 +76,21 @@ class EnumNodeOutputType(str, Enum):
     INTENT = "intent"
     PROJECTION = "projection"
 
+    def is_event(self) -> bool:
+        """Check if this is an EVENT output type."""
+        return self == EnumNodeOutputType.EVENT
+
+    def is_command(self) -> bool:
+        """Check if this is a COMMAND output type."""
+        return self == EnumNodeOutputType.COMMAND
+
+    def is_intent(self) -> bool:
+        """Check if this is an INTENT output type."""
+        return self == EnumNodeOutputType.INTENT
+
+    def is_projection(self) -> bool:
+        """Check if this is a PROJECTION output type."""
+        return self == EnumNodeOutputType.PROJECTION
+
 
 __all__ = ["EnumNodeOutputType"]
