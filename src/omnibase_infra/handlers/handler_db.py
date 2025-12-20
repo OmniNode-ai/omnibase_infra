@@ -25,13 +25,13 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     RuntimeHostError,
 )
-from omnibase_infra.mixins import MixinEnvelopeExtraction
 from omnibase_infra.handlers.models import (
     ModelDbDescribeResponse,
     ModelDbHealthResponse,
     ModelDbQueryPayload,
     ModelDbQueryResponse,
 )
+from omnibase_infra.mixins import MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
 
