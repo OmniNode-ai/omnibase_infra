@@ -862,25 +862,42 @@ class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
 
 The `MixinNodeIntrospection` mixin uses Python reflection (via the `inspect` module) to automatically discover node capabilities. This provides powerful service discovery but has security implications that developers should understand.
 
+**Threat Model**:
+
+Introspection data could be valuable to an attacker for:
+- **Reconnaissance**: Learning what operations a node supports to identify attack vectors (e.g., discovering `decrypt_*`, `admin_*` methods)
+- **Architecture mapping**: Understanding system topology through protocol and mixin discovery
+- **Version fingerprinting**: Identifying outdated versions with known vulnerabilities
+- **State inference**: Deducing system state or health from FSM state values
+
 **What Gets Exposed via Introspection**:
 - Public method names (potential operations a node can perform)
-- Method signatures (parameter names and type annotations)
+- Method signatures (parameter names and type annotations - names like `api_key`, `decrypt_key` reveal sensitive purposes)
 - Protocol and mixin implementations (discovered capabilities)
 - FSM state information (if `MixinFSM` is present)
 - Endpoint URLs (health, API, metrics paths)
 - Node metadata (name, version, type from contract)
 
+**What is NOT Exposed**:
+- Private methods (prefixed with `_`) - completely excluded from discovery
+- Method implementations or source code - only signatures, not logic
+- Configuration values - secrets, connection strings, etc. are not exposed
+- Environment variables or runtime parameters
+- Request/response payloads or historical data
+
 **Built-in Protections**:
 The mixin includes several filtering mechanisms to limit exposure:
 - **Private method exclusion**: Methods prefixed with `_` are excluded from capability discovery
 - **Utility method filtering**: Common utility prefixes (`get_*`, `set_*`, `initialize*`, `start_*`, `stop_*`) are filtered out
-- **Operation keyword matching**: Only methods matching operation keywords (`execute`, `process`, `handle`, `run`, `perform`, `compute`, `validate`, `transform`, `aggregate`, `orchestrate`) are reported as capabilities
+- **Operation keyword matching**: Only methods matching operation keywords (`execute`, `handle`, `process`, `run`, `invoke`, `call`) are reported as capabilities. Node-type-specific keywords (e.g., `fetch`, `compute`, `aggregate`, `orchestrate`) are also available.
 - **Configurable exclusions**: The `exclude_prefixes` parameter allows additional filtering
+- **Caching with TTL**: Introspection data is cached to reduce reflection frequency
 
 **Best Practices for Node Developers**:
 - Prefix internal/sensitive methods with `_` to exclude them from introspection
 - Avoid exposing sensitive business logic in public method names
 - Use generic operation names that don't reveal implementation details (e.g., `process_request` instead of `decrypt_and_forward_to_payment_gateway`)
+- Use generic parameter names (e.g., `data` instead of `user_credentials`, `payload` instead of `encrypted_secret`)
 - Review exposed capabilities before deploying to production environments
 - Consider network segmentation for introspection event topics in multi-tenant environments
 - Use the `exclude_prefixes` parameter to filter additional method patterns if needed
@@ -909,10 +926,19 @@ capabilities = node.get_capabilities()
 ```
 
 **Network Security Considerations**:
-- Introspection data is published to Kafka topics (`*.introspection.*`)
-- In multi-tenant environments, ensure proper topic ACLs
-- Consider whether introspection topics should be accessible outside the cluster
+- Introspection data is published to Kafka topics (`node.introspection`, `node.heartbeat`, `node.request_introspection`)
+- In multi-tenant environments, ensure proper topic ACLs are configured
+- Consider whether introspection topics should be accessible outside the cluster boundary
 - Monitor introspection topic consumers for unauthorized access
+- The registry listener responds to ANY request on the request topic without authentication - secure the topic with Kafka ACLs
+
+**Production Deployment Checklist**:
+1. Review `get_capabilities()` output for each node before deployment
+2. Verify no sensitive method names or parameter names are exposed
+3. Configure Kafka topic ACLs to restrict introspection topic access
+4. Consider disabling `enable_registry_listener` if not needed
+5. Monitor introspection topic consumer groups for unexpected consumers
+6. Use network segmentation to isolate introspection traffic if required
 
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
