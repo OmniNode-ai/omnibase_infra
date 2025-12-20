@@ -290,7 +290,7 @@ The following pattern exemptions are documented in `infra_validators.py`:
    - Introspection mixin: capability discovery, caching, publishing
 
 5. **ExecutionShapeValidator** (many methods)
-   - AST analysis: handler detection, return analysis, violation detection
+   - AST analysis: dispatcher detection, return analysis, violation detection
 
 ### Strict Mode Timeline
 
@@ -356,25 +356,25 @@ ModelDispatchResult(
 ```python
 class EnumDispatchStatus(str, Enum):
     SUCCESS = "success"
-    """Message was successfully routed, handled, and outputs published."""
+    """Message was successfully routed, dispatched, and outputs published."""
 
     ROUTED = "routed"
-    """Message was successfully routed to a handler (pending execution)."""
+    """Message was successfully routed to a dispatcher (pending execution)."""
 
-    NO_HANDLER = "no_handler"
-    """No handler was registered for the message type/topic."""
+    NO_DISPATCHER = "no_dispatcher"
+    """No dispatcher was registered for the message type/topic."""
 
-    HANDLER_ERROR = "handler_error"
-    """Handler execution failed with an exception."""
+    DISPATCHER_ERROR = "dispatcher_error"
+    """Dispatcher execution failed with an exception."""
 
     TIMEOUT = "timeout"
-    """Handler execution exceeded the configured timeout."""
+    """Dispatcher execution exceeded the configured timeout."""
 
     INVALID_MESSAGE = "invalid_message"
     """Message failed validation before dispatch."""
 
     PUBLISH_FAILED = "publish_failed"
-    """Handler succeeded but output publishing failed."""
+    """Dispatcher succeeded but output publishing failed."""
 
     SKIPPED = "skipped"
     """Message was intentionally skipped (e.g., filtered, deduplicated)."""
@@ -383,5 +383,5 @@ class EnumDispatchStatus(str, Enum):
 The enum also provides helper methods:
 - `is_terminal()` - Returns `True` for all statuses except `ROUTED`
 - `is_successful()` - Returns `True` only for `SUCCESS`
-- `is_error()` - Returns `True` for `NO_HANDLER`, `HANDLER_ERROR`, `TIMEOUT`, `INVALID_MESSAGE`, `PUBLISH_FAILED`
+- `is_error()` - Returns `True` for `NO_DISPATCHER`, `DISPATCHER_ERROR`, `TIMEOUT`, `INVALID_MESSAGE`, `PUBLISH_FAILED`
 - `requires_retry()` - Returns `True` for transient failures: `TIMEOUT`, `PUBLISH_FAILED`

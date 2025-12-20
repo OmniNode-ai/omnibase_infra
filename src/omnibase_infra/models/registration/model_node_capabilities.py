@@ -11,18 +11,31 @@ from pydantic import BaseModel, ConfigDict, Field
 # JSON-serializable value type for configuration.
 # Using explicit union instead of Any for ONEX coding guidelines compliance.
 #
-# This type supports:
+# Supported value types:
 # - Primitives: str, int, float, bool, None
 # - Lists of primitives: list[str | int | float | bool | None]
-# - Nested dicts up to 2 levels deep with primitive/list values
+# - Dicts with up to 2 levels of nesting (keys map to primitive/list values)
 #
-# Nesting depth breakdown:
-#   Level 1: Top-level dict keys map to JsonNestedDict values
-#   Level 2: JsonNestedDict keys map to primitives or lists (no further nesting)
+# Type hierarchy:
+#   JsonPrimitive: Terminal values (str, int, float, bool, None)
+#   JsonList: list[JsonPrimitive]
+#   JsonNestedDict: dict[str, JsonPrimitive | JsonList]  # 1 dict level
+#   JsonValue: JsonPrimitive | JsonList | JsonNestedDict | dict[str, JsonNestedDict]
 #
-# Example of maximum nesting:
-#   {"level1_key": {"level2_key": "primitive_value"}}
-#   {"level1_key": {"level2_key": [1, 2, 3]}}  # list values allowed
+# Maximum nesting depth analysis:
+#   The deepest JsonValue is dict[str, JsonNestedDict], which expands to:
+#   dict[str, dict[str, JsonPrimitive | JsonList]]
+#
+#   This gives 2 levels of dict nesting with primitive/list leaf values:
+#     {"outer_key": {"inner_key": "primitive_value"}}
+#
+# When used in config field (dict[str, JsonValue]), total key depth is 3:
+#   config["key1"]["key2"]["key3"] -> primitive
+#
+# Examples:
+#   {"key": "value"}                       # 1 dict level
+#   {"outer": {"inner": "value"}}          # 2 dict levels (maximum)
+#   {"outer": {"inner": [1, 2, 3]}}        # 2 dict levels with list leaf
 #
 # For structures requiring deeper nesting, use a dedicated Pydantic model.
 JsonPrimitive = str | int | float | bool | None

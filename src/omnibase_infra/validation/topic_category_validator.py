@@ -225,7 +225,7 @@ class TopicCategoryValidator:
 
         Returns:
             List of violations for any topic that doesn't match expected categories.
-            Empty list if all subscriptions are valid.
+            Empty list if all subscriptions are valid or if inputs are invalid types.
 
         Example:
             >>> validator = TopicCategoryValidator()
@@ -239,7 +239,16 @@ class TopicCategoryValidator:
         """
         violations: list[ModelExecutionShapeViolationResult] = []
 
+        # Defensive type checks for list inputs
+        if not isinstance(subscribed_topics, list):
+            return violations
+        if not isinstance(expected_categories, list):
+            return violations
+
         for topic in subscribed_topics:
+            # Skip non-string topics
+            if not isinstance(topic, str):
+                continue
             # Determine what category this topic implies
             inferred_category = self._infer_category_from_topic(topic)
 

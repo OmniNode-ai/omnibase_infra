@@ -15,12 +15,13 @@ Exports:
     EnumTopicType: Topic type enumeration (EVENTS, COMMANDS, INTENTS, SNAPSHOTS)
 """
 
+from omnibase_core.enums import EnumTopicType
+
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_policy_type import EnumPolicyType
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
-from omnibase_infra.enums.enum_topic_type import EnumTopicType
 
 __all__ = [
     "EnumDispatchStatus",

@@ -981,9 +981,11 @@ The mixin includes several filtering mechanisms to limit exposure:
 
 **Example - Reviewing Exposed Capabilities**:
 
-The following example demonstrates introspection filtering using simplified placeholder models.
-In production ONEX nodes, input/output models follow the `Model<NodeName>Input` and
-`Model<NodeName>Output` naming convention (e.g., `ModelVaultAdapterInput`, `ModelKafkaAdapterOutput`).
+> **Note on Example Models**: The following example uses simplified `NodeInput` and `NodeOutput`
+> placeholder models for demonstration purposes only. These are **not** production model names.
+> In production ONEX nodes, input/output models follow the `Model<NodeName>Input` and
+> `Model<NodeName>Output` naming convention (e.g., `ModelVaultAdapterInput`, `ModelKafkaAdapterOutput`).
+> See the "File & Class Naming Conventions" section above for complete naming rules.
 
 ```python
 from pydantic import BaseModel

@@ -504,6 +504,7 @@ def _filter_exempted_errors(
 
     Returns:
         Filtered list of errors excluding exempted patterns.
+        Returns empty list if inputs are not the expected types.
 
     Example:
         Pattern:
@@ -520,11 +521,25 @@ def _filter_exempted_errors(
             "kafka_event_bus.py:50: Function 'connect' has 7 parameters" (no class_pattern)
             "other_file.py:10: Class 'KafkaEventBus' has 14 methods" (wrong file)
     """
+    # Defensive type checks for list inputs
+    if not isinstance(errors, list):
+        return []
+    if not isinstance(exempted_patterns, list):
+        # If no valid exemption patterns, return errors as-is (no filtering)
+        return [err for err in errors if isinstance(err, str)]
+
     filtered = []
     for err in errors:
+        # Skip non-string errors
+        if not isinstance(err, str):
+            continue
         is_exempted = False
 
         for pattern in exempted_patterns:
+            # Skip non-dict patterns
+            if not isinstance(pattern, dict):
+                continue
+
             # Extract pattern fields (all are optional except file_pattern in practice)
             file_pattern = pattern.get("file_pattern", "")
             class_pattern = pattern.get("class_pattern", "")
@@ -762,12 +777,25 @@ def get_validation_summary(
 
     Returns:
         Dictionary with summary statistics including passed/failed counts and failed validators.
+        Returns zero counts if input is not a dictionary.
     """
+    # Defensive type check for dict input
+    if not isinstance(results, dict):
+        return {
+            "total_validators": 0,
+            "passed": 0,
+            "failed": 0,
+            "failed_validators": [],
+        }
+
     passed = 0
     failed = 0
     failed_validators: list[str] = []
 
     for name, result in results.items():
+        # Skip entries with non-string keys
+        if not isinstance(name, str):
+            continue
         # NOTE: isinstance usage here is justified as CircularImportValidationResult
         # and ValidationResult have different APIs (has_circular_imports vs is_valid).
         # Duck typing would require protocol definitions in omnibase_core.

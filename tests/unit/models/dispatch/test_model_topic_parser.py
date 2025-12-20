@@ -671,6 +671,97 @@ class TestFallbackCategoryDetection:
 
 
 # ============================================================================
+# False Positive Protection Tests (OMN-977)
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestFalsePositiveProtection:
+    """Tests ensuring no false positive matches in topic category detection.
+
+    These tests verify that segment-based matching prevents incorrectly
+    inferring categories when a category suffix appears as a substring
+    within a segment name (e.g., "eventsource" should not match "events").
+
+    Addresses: PR #63 review feedback on topic matching false positives.
+    """
+
+    def test_eventsource_segment_does_not_match_events(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that 'eventsource' segment does not match 'events' category."""
+        result = parser.parse("dev.eventsource.data.v1")
+
+        # Should NOT match EVENT because 'eventsource' != 'events'
+        assert result.category is None
+        assert result.is_valid is False
+
+    def test_commandservices_segment_does_not_match_commands(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that 'commandservices' segment does not match 'commands' category."""
+        result = parser.parse("dev.commandservices.data.v1")
+
+        # Should NOT match COMMAND because 'commandservices' != 'commands'
+        assert result.category is None
+        assert result.is_valid is False
+
+    def test_intentservice_segment_does_not_match_intents(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that 'intentservice' segment does not match 'intents' category."""
+        result = parser.parse("dev.intentservice.data.v1")
+
+        # Should NOT match INTENT because 'intentservice' != 'intents'
+        assert result.category is None
+        assert result.is_valid is False
+
+    def test_projectionsource_segment_does_not_match_projections(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that 'projectionsource' segment does not match 'projections' category."""
+        result = parser.parse("dev.projectionsource.data.v1")
+
+        # Should NOT match PROJECTION because 'projectionsource' != 'projections'
+        assert result.category is None
+        assert result.is_valid is False
+
+    def test_exact_events_segment_still_matches(self, parser: ModelTopicParser) -> None:
+        """Test that exact 'events' segment still correctly matches EVENT."""
+        result = parser.parse("dev.user.events.v1")
+
+        assert result.category == EnumMessageCategory.EVENT
+        assert result.is_valid is True
+
+    def test_exact_commands_segment_still_matches(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that exact 'commands' segment still correctly matches COMMAND."""
+        result = parser.parse("dev.user.commands.v1")
+
+        assert result.category == EnumMessageCategory.COMMAND
+        assert result.is_valid is True
+
+    def test_category_segment_at_end_still_matches(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that category segment at end of topic still matches."""
+        result = parser.parse("onex.user.events")
+
+        assert result.category == EnumMessageCategory.EVENT
+        assert result.is_valid is True
+
+    def test_category_segment_at_middle_still_matches(
+        self, parser: ModelTopicParser
+    ) -> None:
+        """Test that category segment in middle of topic still matches."""
+        result = parser.parse("custom.prefix.events.suffix.extra")
+
+        assert result.category == EnumMessageCategory.EVENT
+        assert result.is_valid is True  # Category was detected
+
+
+# ============================================================================
 # get_category() Tests
 # ============================================================================
 
