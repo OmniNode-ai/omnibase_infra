@@ -29,11 +29,11 @@ Adding New Handlers:
         class MyCustomHandler:
             '''Handler for custom protocol operations.'''
 
-            async def initialize(self, config: dict[str, object]) -> None:
+            async def initialize(self, config: dict[str, JsonValue]) -> None:
                 '''Initialize handler with configuration.'''
                 self._config = config
 
-            async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+            async def execute(self, envelope: dict[str, JsonValue]) -> dict[str, JsonValue]:
                 '''Execute operation from envelope and return response.'''
                 # Handle the envelope and return response dict
                 return {"success": True, "data": ...}

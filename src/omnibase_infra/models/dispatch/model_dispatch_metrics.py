@@ -52,6 +52,7 @@ See Also:
     omnibase_core.runtime.MessageDispatchEngine: Uses these for observability
 """
 
+from omnibase_core.types import JsonValue
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -450,7 +451,7 @@ class ModelDispatchMetrics(BaseModel):
         category_key = category.value.lower()
         return self.category_metrics.get(category_key, 0)
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, JsonValue]:
         """
         Convert to dictionary with computed properties included.
 
