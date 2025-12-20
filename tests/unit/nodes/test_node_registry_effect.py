@@ -1701,8 +1701,9 @@ class TestNodeRegistryEffectCorrelationId:
         await node.execute(request)
 
         # Verify correlation ID was passed to Consul handler
+        # Note: correlation_id is serialized to string for JSON-compatible EnvelopeDict
         call_args = mock_consul_handler.execute.call_args[0][0]
-        assert call_args["correlation_id"] == correlation_id
+        assert call_args["correlation_id"] == str(correlation_id)
 
         await node.shutdown()
 
@@ -1728,8 +1729,9 @@ class TestNodeRegistryEffectCorrelationId:
         await node.execute(request)
 
         # Verify correlation ID was passed to DB handler
+        # Note: correlation_id is serialized to string for JSON-compatible EnvelopeDict
         call_args = mock_db_handler.execute.call_args[0][0]
-        assert call_args["correlation_id"] == correlation_id
+        assert call_args["correlation_id"] == str(correlation_id)
 
         await node.shutdown()
 
