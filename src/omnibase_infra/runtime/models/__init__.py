@@ -21,8 +21,12 @@ Exports:
     ModelPolicyRegistration: Policy registration parameters model
     ModelPolicyKey: Strongly-typed policy registry key model
     ModelRuntimeTick: Infrastructure event emitted by runtime scheduler
+    ModelDuplicateResponse: Response for duplicate message detection
 """
 
+from omnibase_infra.runtime.models.model_duplicate_response import (
+    ModelDuplicateResponse,
+)
 from omnibase_infra.runtime.models.model_enabled_protocols_config import (
     ModelEnabledProtocolsConfig,
 )
@@ -52,6 +56,7 @@ from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
 
 __all__: list[str] = [
+    "ModelDuplicateResponse",
     "ModelEventBusConfig",
     "ModelEnabledProtocolsConfig",
     "ModelProtocolRegistrationConfig",

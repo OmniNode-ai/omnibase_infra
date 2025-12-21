@@ -683,10 +683,10 @@ class TestDuplicateResponse:
 
         response = process._create_duplicate_response(message_id, correlation_id)
 
-        assert response["success"] is True
-        assert response["status"] == "duplicate"
-        assert response["message"] == "Message already processed"
-        assert response["message_id"] == message_id
-        assert response["correlation_id"] == correlation_id
+        assert response.success is True
+        assert response.status == "duplicate"
+        assert response.message == "Message already processed"
+        assert response.message_id == message_id
+        assert response.correlation_id == correlation_id
 
         await process.stop()
