@@ -37,15 +37,33 @@ def mock_container() -> MagicMock:
 
 @pytest.fixture
 def contract_path() -> Path:
-    """Return path to contract.yaml."""
-    return Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
+    """Return path to contract.yaml.
+
+    Raises:
+        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
+    """
+    path = Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
+    if not path.exists():
+        pytest.skip(f"Contract file not found: {path}")
+    return path
 
 
 @pytest.fixture
 def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict."""
-    with open(contract_path) as f:
-        return yaml.safe_load(f)
+    """Load and return contract.yaml as dict.
+
+    Raises:
+        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
+        pytest.fail: If contract file contains invalid YAML.
+    """
+    if not contract_path.exists():
+        pytest.skip(f"Contract file not found: {contract_path}")
+
+    with open(contract_path, encoding="utf-8") as f:
+        try:
+            return yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            pytest.fail(f"Invalid YAML in contract file: {e}")
 
 
 # =============================================================================

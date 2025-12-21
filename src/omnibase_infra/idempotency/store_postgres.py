@@ -84,7 +84,6 @@ from omnibase_infra.idempotency.models import (
     ModelIdempotencyStoreMetrics,
     ModelPostgresIdempotencyStoreConfig,
 )
-from omnibase_infra.models.health import ModelHealthCheckResult
 
 logger = logging.getLogger(__name__)
 

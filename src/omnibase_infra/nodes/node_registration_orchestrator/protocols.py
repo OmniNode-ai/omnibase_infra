@@ -113,6 +113,8 @@ class ProtocolReducer(Protocol):
 
     Example:
         ```python
+        from uuid import uuid4
+
         class MyReducer:
             async def reduce(
                 self,
@@ -126,20 +128,25 @@ class ProtocolReducer(Protocol):
                 if event.node_id in state.processed_node_ids:
                     return state, []  # Already processed, no-op
 
+                # Propagate correlation_id with uuid4() fallback for tracing.
+                # This ensures every intent has a valid correlation_id even if
+                # the source event lacks one (e.g., legacy events, test fixtures).
+                correlation_id = event.correlation_id or uuid4()
+
                 # Generate intents - be careful with payload content
                 intents = [
                     ModelRegistrationIntent(
                         kind="consul",
                         operation="register",
                         node_id=event.node_id,
-                        correlation_id=event.correlation_id or uuid4(),
+                        correlation_id=correlation_id,
                         payload={"service_name": f"node-{event.node_type}"},
                     ),
                     ModelRegistrationIntent(
                         kind="postgres",
                         operation="upsert",
                         node_id=event.node_id,
-                        correlation_id=event.correlation_id or uuid4(),
+                        correlation_id=correlation_id,
                         payload=event.model_dump(),
                     ),
                 ]
