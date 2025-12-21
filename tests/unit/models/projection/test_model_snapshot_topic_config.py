@@ -18,6 +18,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelSnapshotTopicConfig
@@ -26,10 +27,10 @@ from omnibase_infra.models.projection import ModelSnapshotTopicConfig
 class TestModelSnapshotTopicConfigDefaults:
     """Tests for default configuration values."""
 
-    def test_default_topic_name(self) -> None:
-        """Test default topic name follows ONEX convention."""
+    def test_default_topic(self) -> None:
+        """Test default topic follows ONEX convention."""
         config = ModelSnapshotTopicConfig.default()
-        assert config.topic_name == "onex.registration.snapshots"
+        assert config.topic == "onex.registration.snapshots"
 
     def test_default_cleanup_policy_is_compact(self) -> None:
         """Test that cleanup_policy defaults to compact."""
@@ -63,7 +64,7 @@ class TestModelSnapshotTopicConfigCleanupPolicyValidation:
     def test_compact_policy_accepted(self) -> None:
         """Test that compact cleanup policy is accepted."""
         config = ModelSnapshotTopicConfig(
-            topic_name="test.snapshots",
+            topic="test.snapshots",
             cleanup_policy="compact",
         )
         assert config.cleanup_policy == "compact"
@@ -71,7 +72,7 @@ class TestModelSnapshotTopicConfigCleanupPolicyValidation:
     def test_compact_policy_case_insensitive(self) -> None:
         """Test that cleanup policy validation is case-insensitive."""
         config = ModelSnapshotTopicConfig(
-            topic_name="test.snapshots",
+            topic="test.snapshots",
             cleanup_policy="COMPACT",
         )
         assert config.cleanup_policy == "compact"
@@ -80,7 +81,7 @@ class TestModelSnapshotTopicConfigCleanupPolicyValidation:
         """Test that delete cleanup policy is rejected."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             ModelSnapshotTopicConfig(
-                topic_name="test.snapshots",
+                topic="test.snapshots",
                 cleanup_policy="delete",
             )
         assert "MUST use cleanup.policy=compact" in str(exc_info.value)
@@ -89,7 +90,7 @@ class TestModelSnapshotTopicConfigCleanupPolicyValidation:
         """Test that compact,delete hybrid policy is rejected."""
         with pytest.raises(ProtocolConfigurationError) as exc_info:
             ModelSnapshotTopicConfig(
-                topic_name="test.snapshots",
+                topic="test.snapshots",
                 cleanup_policy="compact,delete",
             )
         assert "MUST use cleanup.policy=compact" in str(exc_info.value)
@@ -98,44 +99,44 @@ class TestModelSnapshotTopicConfigCleanupPolicyValidation:
         """Test that empty cleanup policy is rejected."""
         with pytest.raises(ProtocolConfigurationError):
             ModelSnapshotTopicConfig(
-                topic_name="test.snapshots",
+                topic="test.snapshots",
                 cleanup_policy="",
             )
 
 
-class TestModelSnapshotTopicConfigTopicNameValidation:
-    """Tests for topic name validation."""
+class TestModelSnapshotTopicConfigTopicValidation:
+    """Tests for topic validation."""
 
     def test_valid_onex_kafka_format(self) -> None:
-        """Test valid ONEX Kafka format topic name."""
+        """Test valid ONEX Kafka format topic."""
         config = ModelSnapshotTopicConfig(
-            topic_name="onex.registration.snapshots",
+            topic="onex.registration.snapshots",
         )
-        assert config.topic_name == "onex.registration.snapshots"
+        assert config.topic == "onex.registration.snapshots"
 
     def test_valid_environment_aware_format(self) -> None:
-        """Test valid environment-aware format topic name."""
+        """Test valid environment-aware format topic."""
         config = ModelSnapshotTopicConfig(
-            topic_name="prod.registration.snapshots.v1",
+            topic="prod.registration.snapshots.v1",
         )
-        assert config.topic_name == "prod.registration.snapshots.v1"
+        assert config.topic == "prod.registration.snapshots.v1"
 
-    def test_empty_topic_name_rejected(self) -> None:
-        """Test that empty topic name is rejected."""
+    def test_empty_topic_rejected(self) -> None:
+        """Test that empty topic is rejected."""
         with pytest.raises(ProtocolConfigurationError):
-            ModelSnapshotTopicConfig(topic_name="")
+            ModelSnapshotTopicConfig(topic="")
 
-    def test_whitespace_only_topic_name_rejected(self) -> None:
-        """Test that whitespace-only topic name is rejected."""
+    def test_whitespace_only_topic_rejected(self) -> None:
+        """Test that whitespace-only topic is rejected."""
         with pytest.raises(ProtocolConfigurationError):
-            ModelSnapshotTopicConfig(topic_name="   ")
+            ModelSnapshotTopicConfig(topic="   ")
 
-    def test_nonstandard_topic_name_accepted_with_warning(
+    def test_nonstandard_topic_accepted_with_warning(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Test that non-standard topic names are accepted but logged."""
-        config = ModelSnapshotTopicConfig(topic_name="my-custom-topic")
-        assert config.topic_name == "my-custom-topic"
+        """Test that non-standard topics are accepted but logged."""
+        config = ModelSnapshotTopicConfig(topic="my-custom-topic")
+        assert config.topic == "my-custom-topic"
         assert "does not follow ONEX snapshot topic naming" in caplog.text
 
 
@@ -157,7 +158,7 @@ class TestModelSnapshotTopicConfigKafkaConfig:
     def test_to_kafka_config_min_compaction_lag(self) -> None:
         """Test that min.compaction.lag.ms is correctly set."""
         config = ModelSnapshotTopicConfig(
-            topic_name="test.snapshots",
+            topic="test.snapshots",
             min_compaction_lag_ms=120000,
         )
         kafka_config = config.to_kafka_config()
@@ -214,11 +215,11 @@ class TestModelSnapshotTopicConfigSnapshotKey:
 class TestModelSnapshotTopicConfigEnvironmentOverrides:
     """Tests for environment variable overrides."""
 
-    def test_topic_name_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test topic name can be overridden via environment variable."""
-        monkeypatch.setenv("SNAPSHOT_TOPIC_NAME", "custom.snapshots")
+    def test_topic_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test topic can be overridden via environment variable."""
+        monkeypatch.setenv("SNAPSHOT_TOPIC", "custom.snapshots")
         config = ModelSnapshotTopicConfig.default()
-        assert config.topic_name == "custom.snapshots"
+        assert config.topic == "custom.snapshots"
 
     def test_partition_count_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test partition count can be overridden via environment variable."""
@@ -242,7 +243,7 @@ class TestModelSnapshotTopicConfigYamlLoading:
     def test_from_yaml_loads_correctly(self, tmp_path: Path) -> None:
         """Test loading configuration from YAML file."""
         yaml_content = """
-topic_name: "prod.registration.snapshots.v1"
+topic: "prod.registration.snapshots.v1"
 partition_count: 24
 replication_factor: 3
 cleanup_policy: "compact"
@@ -253,7 +254,7 @@ retention_ms: -1
         yaml_file.write_text(yaml_content)
 
         config = ModelSnapshotTopicConfig.from_yaml(yaml_file)
-        assert config.topic_name == "prod.registration.snapshots.v1"
+        assert config.topic == "prod.registration.snapshots.v1"
         assert config.partition_count == 24
         assert config.min_compaction_lag_ms == 120000
 
@@ -278,11 +279,11 @@ class TestModelSnapshotTopicConfigImmutability:
     def test_model_is_frozen(self) -> None:
         """Test that the model is immutable."""
         config = ModelSnapshotTopicConfig.default()
-        with pytest.raises(Exception):  # Pydantic raises ValidationError for frozen
-            config.topic_name = "modified.topic"  # type: ignore[misc]
+        with pytest.raises(ValidationError, match="frozen"):
+            config.topic = "modified.topic"  # type: ignore[misc]
 
     def test_apply_environment_overrides_returns_new_instance(self) -> None:
         """Test that apply_environment_overrides returns a new instance."""
-        config1 = ModelSnapshotTopicConfig(topic_name="test.snapshots")
+        config1 = ModelSnapshotTopicConfig(topic="test.snapshots")
         config2 = config1.apply_environment_overrides()
         assert config1 is not config2 or config1 == config2

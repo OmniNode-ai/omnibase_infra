@@ -49,7 +49,7 @@ class ModelRegistrationSnapshot(BaseModel):
 
     Design Notes (per F2 requirements):
         - Compacted representation: Only essential fields, no timeout tracking
-        - Kafka topic compaction: Uses entity_id:domain as key for log compaction
+        - Kafka topic compaction: Uses domain:entity_id as key for log compaction
         - Version-based ordering: snapshot_version for conflict resolution
         - Traceability: source_projection_sequence links back to source projection
 

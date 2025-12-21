@@ -295,29 +295,43 @@ finally:
 For high-performance reads, build an in-memory cache from the compacted topic:
 
 ```python
-from collections.abc import AsyncIterator
-
 class SnapshotCache:
     """In-memory cache built from Kafka compacted topic."""
 
     def __init__(self):
         self._cache: dict[str, ModelRegistrationSnapshot] = {}
 
-    async def load_from_topic(self, consumer: AIOKafkaConsumer) -> None:
-        """Load all snapshots from topic into cache."""
+    async def load_from_topic(
+        self,
+        consumer: AIOKafkaConsumer,
+        timeout_ms: int = 5000,
+    ) -> None:
+        """Load all snapshots from topic into cache.
+
+        Note: Uses getmany with timeout to avoid infinite waiting.
+        The async for pattern would wait indefinitely for new messages
+        after reaching the end of the topic.
+        """
         # Seek to beginning to load full state
         await consumer.seek_to_beginning()
 
-        async for message in consumer:
-            key = message.key.decode("utf-8")
+        while True:
+            # Poll with timeout - returns empty dict when no more messages
+            messages = await consumer.getmany(timeout_ms=timeout_ms)
+            if not messages:
+                break  # No more messages within timeout
 
-            if message.value is None:
-                # Tombstone - remove from cache
-                self._cache.pop(key, None)
-            else:
-                # Update cache with latest snapshot
-                data = json.loads(message.value.decode("utf-8"))
-                self._cache[key] = ModelRegistrationSnapshot(**data)
+            for tp, msgs in messages.items():
+                for message in msgs:
+                    key = message.key.decode("utf-8")
+
+                    if message.value is None:
+                        # Tombstone - remove from cache
+                        self._cache.pop(key, None)
+                    else:
+                        # Update cache with latest snapshot
+                        data = json.loads(message.value.decode("utf-8"))
+                        self._cache[key] = ModelRegistrationSnapshot(**data)
 
     def get_active_nodes(self) -> list[ModelRegistrationSnapshot]:
         """Query for all active nodes."""
@@ -366,7 +380,7 @@ config = ModelSnapshotTopicConfig.default()
 
 # Custom configuration for production
 config = ModelSnapshotTopicConfig(
-    topic_name="prod.registration.snapshots.v1",
+    topic="prod.registration.snapshots.v1",
     partition_count=24,
     replication_factor=3,
     cleanup_policy="compact",
@@ -385,7 +399,7 @@ config = ModelSnapshotTopicConfig.from_yaml(Path("config/snapshot_topic.yaml"))
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `topic_name` | `onex.registration.snapshots` | ONEX topic naming |
+| `topic` | `onex.registration.snapshots` | ONEX topic naming |
 | `partition_count` | 12 | Match projection partitioning |
 | `replication_factor` | 3 | High durability |
 | `cleanup_policy` | `compact` | Required for snapshots |
@@ -427,7 +441,7 @@ Examples:
 
 ```bash
 # Override topic configuration via environment
-export SNAPSHOT_TOPIC_NAME="prod.registration.snapshots.v1"
+export SNAPSHOT_TOPIC="prod.registration.snapshots.v1"
 export SNAPSHOT_PARTITION_COUNT="24"
 export SNAPSHOT_REPLICATION_FACTOR="3"
 export SNAPSHOT_MIN_COMPACTION_LAG_MS="120000"

@@ -120,7 +120,7 @@ def mock_producer() -> AsyncMock:
 def snapshot_config() -> ModelSnapshotTopicConfig:
     """Create a snapshot topic configuration."""
     return ModelSnapshotTopicConfig(
-        topic_name="test.registration.snapshots",
+        topic="test.registration.snapshots",
         partition_count=6,
         replication_factor=1,
         cleanup_policy="compact",
@@ -181,13 +181,13 @@ class TestSnapshotPublisherInitialization:
         assert publisher.circuit_breaker_reset_timeout == 60.0
         assert "snapshot-publisher" in publisher.service_name
 
-    async def test_topic_name_property(
+    async def test_topic_property(
         self,
         publisher: SnapshotPublisherRegistration,
         snapshot_config: ModelSnapshotTopicConfig,
     ) -> None:
-        """Test topic_name property returns configured topic."""
-        assert publisher.topic_name == snapshot_config.topic_name
+        """Test topic property returns configured topic."""
+        assert publisher.topic == snapshot_config.topic
 
     async def test_is_started_property_initially_false(
         self, publisher: SnapshotPublisherRegistration
@@ -294,7 +294,7 @@ class TestPublishSnapshot:
         # Should have called send_and_wait
         mock_producer.send_and_wait.assert_called_once()
         call_args = mock_producer.send_and_wait.call_args
-        assert call_args[0][0] == publisher.topic_name  # topic
+        assert call_args[0][0] == publisher.topic  # topic
         assert call_args[1]["key"] is not None  # key should be set
         assert call_args[1]["value"] is not None  # value should be set
 

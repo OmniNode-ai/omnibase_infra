@@ -99,6 +99,7 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
@@ -203,14 +204,14 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         self._init_circuit_breaker(
             threshold=5,
             reset_timeout=60.0,
-            service_name=f"snapshot-publisher.{config.topic_name}",
+            service_name=f"snapshot-publisher.{config.topic}",
             transport_type=EnumInfraTransportType.KAFKA,
         )
 
     @property
-    def topic_name(self) -> str:
-        """Get the configured topic name."""
-        return self._config.topic_name
+    def topic(self) -> str:
+        """Get the configured topic."""
+        return self._config.topic
 
     @property
     def is_started(self) -> bool:
@@ -239,7 +240,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="start",
-            target_name=self._config.topic_name,
+            target_name=self._config.topic,
             correlation_id=correlation_id,
         )
 
@@ -248,12 +249,12 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             self._started = True
             logger.info(
                 "Snapshot publisher started for topic %s",
-                self._config.topic_name,
+                self._config.topic,
                 extra={"correlation_id": str(correlation_id)},
             )
         except Exception as e:
             raise InfraConnectionError(
-                f"Failed to start Kafka producer for topic {self._config.topic_name}",
+                f"Failed to start Kafka producer for topic {self._config.topic}",
                 context=ctx,
             ) from e
 
@@ -274,15 +275,13 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         try:
             await self._producer.stop()
             self._started = False
-            logger.info(
-                "Snapshot publisher stopped for topic %s", self._config.topic_name
-            )
+            logger.info("Snapshot publisher stopped for topic %s", self._config.topic)
         except Exception as e:
             # Log but don't raise - stop should be best-effort
             logger.warning(
                 "Error stopping Kafka producer: %s",
                 str(e),
-                extra={"topic": self._config.topic_name},
+                extra={"topic": self._config.topic},
             )
             self._started = False
 
@@ -334,13 +333,14 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             >>> projection = await reader.get_entity_state(entity_id)
             >>> await publisher.publish_snapshot(projection)
         """
-        # Convert projection to snapshot with auto-versioning
+        # Delegate to publish_from_projection which handles version tracking
+        # and actual publishing. This method exists to satisfy the
+        # ProtocolSnapshotPublisher interface which expects ModelRegistrationProjection
+        # as input, while our internal implementation uses ModelRegistrationSnapshot.
         snapshot_model = await self.publish_from_projection(
             projection=snapshot,
-            node_name=None,  # Not available from projection
+            node_name=None,  # Not available from projection alone
         )
-        # publish_from_projection already publishes, so this is a no-op
-        # The method signature satisfies the protocol
         logger.debug(
             "Published projection as snapshot version %d for %s:%s",
             snapshot_model.snapshot_version,
@@ -375,7 +375,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="publish_snapshot",
-            target_name=self._config.topic_name,
+            target_name=self._config.topic,
             correlation_id=correlation_id,
         )
 
@@ -386,7 +386,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
             # Send and wait for acknowledgment
             await self._producer.send_and_wait(
-                self._config.topic_name,
+                self._config.topic,
                 key=key,
                 value=value,
             )
@@ -452,7 +452,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             try:
                 await self.publish_snapshot(projection)
                 success_count += 1
-            except (InfraConnectionError, InfraTimeoutError) as e:
+            except (
+                InfraConnectionError,
+                InfraTimeoutError,
+                InfraUnavailableError,
+            ) as e:
                 logger.warning(
                     "Failed to publish snapshot %s:%s: %s",
                     projection.domain,
@@ -469,7 +473,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             "Batch publish completed: %d/%d snapshots published",
             success_count,
             len(snapshots),
-            extra={"topic": self._config.topic_name},
+            extra={"topic": self._config.topic},
         )
         return success_count
 
@@ -504,13 +508,13 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         # Reading from compacted topics requires a consumer with seek-to-end
         # or a key-value store built from consumer. This is beyond the scope
         # of a producer-focused publisher.
-        logger.warning(
+        logger.debug(
             "get_latest_snapshot not fully implemented - requires dedicated consumer. "
             "Consider using a Kafka consumer or cache layer for snapshot reads.",
             extra={
                 "entity_id": entity_id,
                 "domain": domain,
-                "topic": self._config.topic_name,
+                "topic": self._config.topic,
             },
         )
         return None
@@ -576,7 +580,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
             # Publish tombstone (null value)
             await self._producer.send_and_wait(
-                self._config.topic_name,
+                self._config.topic,
                 key=key,
                 value=None,  # Tombstone - null value triggers deletion on compaction
             )
@@ -700,7 +704,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             try:
                 await self._publish_snapshot_model(snapshot)
                 success_count += 1
-            except (InfraConnectionError, InfraTimeoutError) as e:
+            except (
+                InfraConnectionError,
+                InfraTimeoutError,
+                InfraUnavailableError,
+            ) as e:
                 logger.warning(
                     "Failed to publish snapshot %s version %d: %s",
                     snapshot.to_kafka_key(),
@@ -713,7 +721,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             "Batch publish completed: %d/%d snapshots published",
             success_count,
             len(snapshots),
-            extra={"topic": self._config.topic_name},
+            extra={"topic": self._config.topic},
         )
         return success_count
 

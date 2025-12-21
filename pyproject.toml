@@ -25,6 +25,11 @@ python = "^3.12"
 # - Supply chain security: SHAs cannot be retroactively modified
 # - Audit trail: Each SHA maps to a verifiable point in git history
 # To update: 1) Review changes in target repo, 2) Update tag/SHA, 3) Run tests
+# NOTE: Tags are acceptable for development; consider commit SHAs for production deployments.
+#
+# omnibase-core v0.5.6: Required for circular import fix in model_snapshot_payload.py.
+# The snapshot publishing feature (OMN-947) imports ModelSnapshotPayload from omnibase_core,
+# which failed on v0.5.5 due to circular imports between snapshot and event modules.
 omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "v0.5.6" }
 omnibase-spi = "^0.4.1"
 

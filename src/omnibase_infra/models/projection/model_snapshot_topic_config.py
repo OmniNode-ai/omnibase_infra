@@ -54,7 +54,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors.infra_errors import ProtocolConfigurationError
@@ -97,7 +97,7 @@ class ModelSnapshotTopicConfig(BaseModel):
         compaction overhead.
 
     Attributes:
-        topic_name: Full Kafka topic name for registration snapshots
+        topic: Full Kafka topic name for registration snapshots
         partition_count: Number of partitions (should match projection partitioning)
         replication_factor: Replication factor for durability
         cleanup_policy: Kafka cleanup policy (must be "compact" for snapshots)
@@ -112,12 +112,12 @@ class ModelSnapshotTopicConfig(BaseModel):
         >>>
         >>> # Use defaults
         >>> config = ModelSnapshotTopicConfig.default()
-        >>> config.topic_name
+        >>> config.topic
         'onex.registration.snapshots'
         >>>
         >>> # Custom configuration
         >>> config = ModelSnapshotTopicConfig(
-        ...     topic_name="prod.registration.snapshots.v1",
+        ...     topic="prod.registration.snapshots.v1",
         ...     partition_count=24,
         ...     replication_factor=3,
         ... )
@@ -131,7 +131,7 @@ class ModelSnapshotTopicConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     # Topic identity
-    topic_name: str = Field(
+    topic: str = Field(
         default="onex.registration.snapshots",
         min_length=1,
         max_length=255,
@@ -245,19 +245,19 @@ class ModelSnapshotTopicConfig(BaseModel):
 
         return v_lower
 
-    @field_validator("topic_name", mode="before")
+    @field_validator("topic", mode="before")
     @classmethod
-    def validate_topic_name(cls, v: object) -> str:
-        """Validate topic name format and content.
+    def validate_topic(cls, v: object) -> str:
+        """Validate topic format and content.
 
         Args:
-            v: Topic name value (any type before Pydantic conversion)
+            v: Topic value (any type before Pydantic conversion)
 
         Returns:
-            Validated topic name string
+            Validated topic string
 
         Raises:
-            ProtocolConfigurationError: If topic name is invalid
+            ProtocolConfigurationError: If topic is invalid
         """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.KAFKA,
@@ -268,25 +268,25 @@ class ModelSnapshotTopicConfig(BaseModel):
 
         if v is None:
             raise ProtocolConfigurationError(
-                "topic_name cannot be None",
+                "topic cannot be None",
                 context=context,
-                parameter="topic_name",
+                parameter="topic",
                 value=None,
             )
         if not isinstance(v, str):
             raise ProtocolConfigurationError(
-                f"topic_name must be a string, got {type(v).__name__}",
+                f"topic must be a string, got {type(v).__name__}",
                 context=context,
-                parameter="topic_name",
+                parameter="topic",
                 value=type(v).__name__,
             )
 
         topic = v.strip()
         if not topic:
             raise ProtocolConfigurationError(
-                "topic_name cannot be empty",
+                "topic cannot be empty",
                 context=context,
-                parameter="topic_name",
+                parameter="topic",
                 value=v,
             )
 
@@ -304,18 +304,52 @@ class ModelSnapshotTopicConfig(BaseModel):
 
     @field_validator("min_compaction_lag_ms", "max_compaction_lag_ms", mode="after")
     @classmethod
-    def validate_compaction_lag_relationship(cls, v: int) -> int:
-        """Validate compaction lag values (individual validation).
+    def validate_compaction_lag_values(cls, v: int) -> int:
+        """Validate individual compaction lag values.
 
-        Note: Cross-field validation (min < max) is done in model_validator.
+        Individual field validation is handled by Pydantic's Field constraints
+        (ge=0, le=604800000). This validator exists for extensibility if
+        additional per-field validation is needed in the future.
+
+        Note: Cross-field validation (min <= max) is done in model_validator.
         """
         return v
+
+    @model_validator(mode="after")
+    def validate_compaction_lag_order(self) -> ModelSnapshotTopicConfig:
+        """Validate that min_compaction_lag_ms <= max_compaction_lag_ms.
+
+        The min lag should not exceed max lag, otherwise compaction timing
+        would be undefined. Kafka requires that minimum compaction lag is
+        less than or equal to maximum compaction lag.
+
+        Returns:
+            Self if validation passes
+
+        Raises:
+            ProtocolConfigurationError: If min_compaction_lag_ms > max_compaction_lag_ms
+        """
+        if self.min_compaction_lag_ms > self.max_compaction_lag_ms:
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="validate_snapshot_topic_config",
+                target_name="snapshot_topic",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"min_compaction_lag_ms ({self.min_compaction_lag_ms}) must be <= "
+                f"max_compaction_lag_ms ({self.max_compaction_lag_ms})",
+                context=context,
+                parameter="compaction_lag",
+                value=f"min={self.min_compaction_lag_ms}, max={self.max_compaction_lag_ms}",
+            )
+        return self
 
     def apply_environment_overrides(self) -> ModelSnapshotTopicConfig:
         """Apply environment variable overrides to configuration.
 
         Environment variables are mapped as follows:
-            - SNAPSHOT_TOPIC_NAME -> topic_name
+            - SNAPSHOT_TOPIC -> topic
             - SNAPSHOT_PARTITION_COUNT -> partition_count
             - SNAPSHOT_REPLICATION_FACTOR -> replication_factor
             - SNAPSHOT_MIN_COMPACTION_LAG_MS -> min_compaction_lag_ms
@@ -333,7 +367,7 @@ class ModelSnapshotTopicConfig(BaseModel):
         overrides: dict[str, object] = {}
 
         env_mappings: dict[str, str] = {
-            "SNAPSHOT_TOPIC_NAME": "topic_name",
+            "SNAPSHOT_TOPIC": "topic",
             "SNAPSHOT_PARTITION_COUNT": "partition_count",
             "SNAPSHOT_REPLICATION_FACTOR": "replication_factor",
             "SNAPSHOT_MIN_COMPACTION_LAG_MS": "min_compaction_lag_ms",
@@ -396,7 +430,7 @@ class ModelSnapshotTopicConfig(BaseModel):
             Default configuration instance with environment overrides
         """
         base_config = cls(
-            topic_name="onex.registration.snapshots",
+            topic="onex.registration.snapshots",
             partition_count=12,
             replication_factor=3,
             cleanup_policy="compact",
@@ -427,7 +461,7 @@ class ModelSnapshotTopicConfig(BaseModel):
 
         Example YAML:
             ```yaml
-            topic_name: "prod.registration.snapshots.v1"
+            topic: "prod.registration.snapshots.v1"
             partition_count: 24
             replication_factor: 3
             cleanup_policy: "compact"
