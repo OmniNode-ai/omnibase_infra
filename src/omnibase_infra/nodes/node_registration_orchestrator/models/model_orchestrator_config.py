@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelOrchestratorConfig(BaseModel):
@@ -21,6 +21,11 @@ class ModelOrchestratorConfig(BaseModel):
         exponential_base: Base for exponential backoff calculation.
         fail_fast: If True, stop workflow on first failure; if False, continue.
     """
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
 
     timeout_seconds: float = Field(
         default=30.0,

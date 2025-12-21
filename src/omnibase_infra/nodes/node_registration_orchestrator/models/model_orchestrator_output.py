@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models.model_intent_execution_result import (
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_intent_execution_result import (
     ModelIntentExecutionResult,
 )
 

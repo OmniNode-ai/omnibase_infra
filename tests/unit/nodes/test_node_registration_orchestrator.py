@@ -18,10 +18,9 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.node import (
+from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )
-
 
 # =============================================================================
 # Test Fixtures
@@ -40,7 +39,7 @@ def mock_container() -> MagicMock:
 def contract_path() -> Path:
     """Return path to contract.yaml."""
     return Path(
-        "src/omnibase_infra/nodes/node_registration_orchestrator/v1_0_0/contract.yaml"
+        "src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml"
     )
 
 
@@ -233,17 +232,34 @@ class TestContractValidation:
         metadata = wf_def["workflow_metadata"]
         assert "workflow_name" in metadata
         assert "workflow_version" in metadata
-        assert "execution_mode" in metadata
+        assert "description" in metadata
 
     def test_workflow_has_coordination_rules(self, contract_data: dict) -> None:
-        """Test that workflow has coordination rules."""
+        """Test that workflow has coordination rules.
+
+        All coordination settings are consolidated in coordination_rules,
+        including execution_mode which was previously in workflow_metadata.
+        """
         wf_def = contract_data["workflow_coordination"]["workflow_definition"]
         assert "coordination_rules" in wf_def
 
         rules = wf_def["coordination_rules"]
+        # Execution mode configuration
+        assert "execution_mode" in rules
+        assert "parallel_execution_allowed" in rules
+        assert "max_parallel_branches" in rules
+        # Failure handling
         assert "failure_recovery_strategy" in rules
         assert "max_retries" in rules
+        assert "recovery_enabled" in rules
+        # Timeout configuration
         assert "timeout_ms" in rules
+        # Checkpoint and state persistence
+        assert "checkpoint_enabled" in rules
+        assert "checkpoint_interval_ms" in rules
+        assert "state_persistence_enabled" in rules
+        # Rollback configuration
+        assert "rollback_enabled" in rules
 
     def test_contract_has_error_handling(self, contract_data: dict) -> None:
         """Test that contract defines error handling configuration."""
@@ -288,7 +304,7 @@ class TestModelsExport:
         Even though the orchestrator is now declarative, the models
         should still be importable for use by other components.
         """
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelIntentExecutionResult,
             ModelOrchestratorConfig,
             ModelOrchestratorInput,
@@ -303,7 +319,7 @@ class TestModelsExport:
     def test_models_are_importable_from_package(self) -> None:
         """Test that models can be imported from the models package."""
         # This tests the __init__.py exports
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0 import models
+        from omnibase_infra.nodes.node_registration_orchestrator import models
 
         assert hasattr(models, "ModelOrchestratorConfig")
         assert hasattr(models, "ModelOrchestratorInput")

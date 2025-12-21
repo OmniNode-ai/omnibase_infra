@@ -54,3 +54,6 @@ class ModelReducerState(BaseModel):
             A fresh ModelReducerState with default values.
         """
         return cls()
+
+
+__all__ = ["ModelReducerState"]

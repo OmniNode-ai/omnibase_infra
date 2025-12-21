@@ -57,3 +57,6 @@ class ModelRegistrationIntent(BaseModel):
         default_factory=dict,
         description="Operation-specific data (JSON-like structure, typed in OMN-912)",
     )
+
+
+__all__ = ["ModelRegistrationIntent"]

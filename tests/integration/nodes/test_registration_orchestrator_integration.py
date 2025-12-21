@@ -37,7 +37,7 @@ from uuid import UUID
 import pytest
 import yaml
 
-from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.node import (
+from omnibase_infra.nodes.node_registration_orchestrator.node import (
     NodeRegistrationOrchestrator,
 )
 
@@ -64,14 +64,14 @@ def mock_container() -> MagicMock:
 def contract_path() -> Path:
     """Return path to contract.yaml."""
     return Path(
-        "src/omnibase_infra/nodes/node_registration_orchestrator/v1_0_0/contract.yaml"
+        "src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml"
     )
 
 
 @pytest.fixture
 def contract_data(contract_path: Path) -> dict:
     """Load and return contract.yaml as dict."""
-    with open(contract_path) as f:
+    with open(contract_path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -174,14 +174,30 @@ class TestWorkflowGraphIntegration:
     """
 
     def test_execution_graph_has_all_nodes(self, contract_data: dict) -> None:
-        """Test that execution graph has all expected nodes."""
+        """Test that execution graph has all 8 required nodes.
+
+        The registration orchestrator workflow requires these nodes in order:
+        1. receive_introspection - Receive introspection or tick event
+        2. read_projection - Read current registration state from projection (OMN-930)
+        3. evaluate_timeout - Evaluate timeout using injected time (OMN-973)
+        4. compute_intents - Compute registration intents via reducer
+        5. execute_consul_registration - Execute Consul registration
+        6. execute_postgres_registration - Execute PostgreSQL registration
+        7. aggregate_results - Aggregate registration results
+        8. publish_outcome - Publish registration outcome event
+
+        This test ensures all 8 nodes are present with exact matching.
+        """
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
         node_ids = {n["node_id"] for n in nodes}
 
+        # All 8 required execution graph nodes per C1 requirements
         expected_nodes = {
             "receive_introspection",
+            "read_projection",
+            "evaluate_timeout",
             "compute_intents",
             "execute_consul_registration",
             "execute_postgres_registration",
@@ -189,7 +205,12 @@ class TestWorkflowGraphIntegration:
             "publish_outcome",
         }
 
-        assert expected_nodes <= node_ids, f"Missing nodes: {expected_nodes - node_ids}"
+        # Strict equality check - must have exactly these nodes
+        assert expected_nodes == node_ids, (
+            f"Execution graph nodes mismatch.\n"
+            f"Missing: {expected_nodes - node_ids}\n"
+            f"Extra: {node_ids - expected_nodes}"
+        )
 
     def test_execution_graph_dependencies_valid(self, contract_data: dict) -> None:
         """Test that all dependencies reference valid nodes."""
@@ -265,11 +286,11 @@ class TestWorkflowGraphIntegration:
             if "consul" in node["node_id"].lower():
                 assert (
                     node["node_type"] == "effect"
-                ), f"Consul registration should be effect type"
+                ), "Consul registration should be effect type"
             if "postgres" in node["node_id"].lower():
                 assert (
                     node["node_type"] == "effect"
-                ), f"Postgres registration should be effect type"
+                ), "Postgres registration should be effect type"
 
     def test_compute_intents_is_reducer(self, contract_data: dict) -> None:
         """Test that compute_intents step is a reducer node."""
@@ -319,12 +340,16 @@ class TestCoordinationRulesIntegration:
         assert rules["timeout_ms"] > 0
 
     def test_sequential_execution_mode(self, contract_data: dict) -> None:
-        """Test that execution mode is sequential (appropriate for registration)."""
-        metadata = contract_data["workflow_coordination"]["workflow_definition"][
-            "workflow_metadata"
+        """Test that execution mode is sequential (appropriate for registration).
+
+        Note: execution_mode is consolidated in coordination_rules
+        along with all other coordination settings.
+        """
+        rules = contract_data["workflow_coordination"]["workflow_definition"][
+            "coordination_rules"
         ]
 
-        assert metadata["execution_mode"] == "sequential"
+        assert rules["execution_mode"] == "sequential"
 
     def test_checkpoint_enabled(self, contract_data: dict) -> None:
         """Test that checkpointing is enabled for recovery."""
@@ -451,7 +476,7 @@ class TestModelContractAlignment:
         input_model_name = contract_data["input_model"]["name"]
         output_model_name = contract_data["output_model"]["name"]
 
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelOrchestratorInput,
             ModelOrchestratorOutput,
         )
@@ -465,7 +490,7 @@ class TestModelContractAlignment:
         output_module = contract_data["output_model"]["module"]
 
         expected_module = (
-            "omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models"
+            "omnibase_infra.nodes.node_registration_orchestrator.models"
         )
         assert input_module == expected_module
         assert output_module == expected_module
@@ -519,23 +544,60 @@ class TestDependencyStructure:
     """Integration tests for dependency declarations."""
 
     def test_dependencies_declared(self, contract_data: dict) -> None:
-        """Test that dependencies are declared in contract."""
+        """Test that required dependencies are declared in contract.
+
+        The registration orchestrator requires specific dependencies:
+        - reducer_protocol: For computing registration intents
+        - effect_node: For executing registration operations
+        - projection_reader: For reading current state (OMN-930)
+
+        This test ensures all required dependencies are present with strict
+        assertions that will fail if any dependency is missing.
+        """
         deps = contract_data.get("dependencies", [])
 
-        # Should have at least reducer protocol and effect node dependencies
+        # Must have at least the required dependencies
+        assert len(deps) >= 3, (
+            f"Contract must declare at least 3 dependencies "
+            f"(reducer_protocol, effect_node, projection_reader), found {len(deps)}"
+        )
+
         dep_names = [d["name"] for d in deps]
 
-        assert "reducer_protocol" in dep_names or len(deps) > 0
-        assert "effect_node" in dep_names or len(deps) > 0
+        # Each required dependency must be explicitly present - no fallback conditions
+        assert "reducer_protocol" in dep_names, (
+            "Must declare 'reducer_protocol' dependency for computing intents"
+        )
+        assert "effect_node" in dep_names, (
+            "Must declare 'effect_node' dependency for executing registration operations"
+        )
+        assert "projection_reader" in dep_names, (
+            "Must declare 'projection_reader' dependency for reading state (OMN-930)"
+        )
 
     def test_dependencies_have_required_fields(self, contract_data: dict) -> None:
         """Test that dependencies have required fields."""
         deps = contract_data.get("dependencies", [])
 
         for dep in deps:
-            assert "name" in dep
-            assert "type" in dep
-            assert "description" in dep
+            assert "name" in dep, f"Dependency missing 'name' field: {dep}"
+            assert "type" in dep, f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
+            assert "description" in dep, (
+                f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
+            )
+
+    def test_dependency_types_valid(self, contract_data: dict) -> None:
+        """Test that dependency types are valid ONEX types."""
+        deps = contract_data.get("dependencies", [])
+
+        valid_types = {"protocol", "node", "service", "config"}
+
+        for dep in deps:
+            dep_type = dep.get("type", "")
+            assert dep_type in valid_types, (
+                f"Dependency '{dep.get('name')}' has invalid type '{dep_type}', "
+                f"expected one of: {valid_types}"
+            )
 
 
 # =============================================================================
@@ -594,7 +656,7 @@ class TestWorkflowExecutionWithMocks:
     @pytest.fixture
     def orchestrator_input(self, introspection_event, correlation_id: UUID):
         """Create test input for the orchestrator."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelOrchestratorInput,
         )
 
@@ -610,7 +672,7 @@ class TestWorkflowExecutionWithMocks:
         The mock reducer implements ProtocolReducer and returns a list
         of intents for Consul and PostgreSQL registration.
         """
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
             ModelRegistrationIntent,
             ProtocolReducer,
@@ -676,10 +738,10 @@ class TestWorkflowExecutionWithMocks:
         The mock effect implements ProtocolEffect and returns successful
         execution results for all intents.
         """
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelIntentExecutionResult,
         )
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelRegistrationIntent,
             ProtocolEffect,
         )
@@ -782,7 +844,7 @@ class TestWorkflowExecutionWithMocks:
 
     def test_mock_reducer_implements_protocol(self, mock_reducer) -> None:
         """Test that mock reducer correctly implements ProtocolReducer."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ProtocolReducer,
         )
 
@@ -792,7 +854,7 @@ class TestWorkflowExecutionWithMocks:
 
     def test_mock_effect_implements_protocol(self, mock_effect) -> None:
         """Test that mock effect correctly implements ProtocolEffect."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ProtocolEffect,
         )
 
@@ -807,7 +869,7 @@ class TestWorkflowExecutionWithMocks:
         introspection_event,
     ) -> None:
         """Test that reducer generates intents from introspection event."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -840,7 +902,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that effect executes intents and returns success results."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelRegistrationIntent,
         )
 
@@ -870,7 +932,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that effect returns failure result when configured to fail."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelRegistrationIntent,
         )
 
@@ -898,7 +960,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test correlation ID is preserved in reducer intents."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -917,7 +979,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test correlation ID is passed to effect execution."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelRegistrationIntent,
         )
 
@@ -942,7 +1004,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that reducer intents are correctly passed to effect nodes."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -976,11 +1038,11 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that effect results are properly aggregated."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelIntentExecutionResult,
             ModelOrchestratorOutput,
         )
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -1036,11 +1098,11 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test aggregation when one effect fails and another succeeds."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelIntentExecutionResult,
             ModelOrchestratorOutput,
         )
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -1097,7 +1159,7 @@ class TestWorkflowExecutionWithMocks:
         introspection_event,
     ) -> None:
         """Test that reducer tracks processed nodes for deduplication."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -1122,7 +1184,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that workflow calls reducer before effects."""
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -1179,7 +1241,7 @@ class TestWorkflowExecutionWithMocks:
         assert hasattr(mock_container, "_test_emitter")
 
         # Verify mocks implement protocols
-        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ProtocolEffect,
             ProtocolReducer,
         )

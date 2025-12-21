@@ -12,12 +12,12 @@ description: "Registration workflow orchestrator that coordinates node lifecycle
 
 input_model:
   name: "ModelOrchestratorInput"
-  module: "omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models"
+  module: "omnibase_infra.nodes.node_registration_orchestrator.models"
   description: "Input containing introspection event and workflow configuration."
 
 output_model:
   name: "ModelOrchestratorOutput"
-  module: "omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models"
+  module: "omnibase_infra.nodes.node_registration_orchestrator.models"
   description: "Output containing dual registration outcome and workflow status."
 
 # OMN-973: Time injection context for timeout evaluation
@@ -35,6 +35,10 @@ projection_reader:
     - name: "node_registration_state"
       description: "Current registration state for all nodes"
 
+# Workflow coordination configuration
+# All coordination settings are consolidated in coordination_rules to avoid duplication.
+# The workflow_definition contains the complete workflow specification including
+# metadata, execution graph, and coordination rules.
 workflow_coordination:
   workflow_definition:
     workflow_metadata:
@@ -43,7 +47,6 @@ workflow_coordination:
         major: 1
         minor: 0
         patch: 0
-      execution_mode: sequential
       description: "Registers nodes with Consul and PostgreSQL based on introspection events"
 
     execution_graph:
@@ -109,22 +112,28 @@ workflow_coordination:
           step_config:
             event_type: "NodeRegistrationResultEvent"
 
+    # Consolidated coordination rules - all workflow coordination settings in one place
     coordination_rules:
+      # Execution mode configuration
+      execution_mode: sequential
       parallel_execution_allowed: false
+      max_parallel_branches: 1
+
+      # Failure handling
       failure_recovery_strategy: retry
       max_retries: 3
-      timeout_ms: 30000
-      checkpoint_enabled: true
-      rollback_enabled: true
+      recovery_enabled: true
 
-  execution_mode: sequential
-  max_parallel_branches: 1
-  checkpoint_enabled: true
-  checkpoint_interval_ms: 5000
-  state_persistence_enabled: true
-  rollback_enabled: true
-  timeout_ms: 30000
-  recovery_enabled: true
+      # Timeout configuration
+      timeout_ms: 30000
+
+      # Checkpoint and state persistence
+      checkpoint_enabled: true
+      checkpoint_interval_ms: 5000
+      state_persistence_enabled: true
+
+      # Rollback configuration
+      rollback_enabled: true
 
 consumed_events:
   - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
