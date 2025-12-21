@@ -812,7 +812,9 @@ class TestWorkflowExecutionWithMocks:
         assert hasattr(
             mock, "execute_intent"
         ), "MockEffect must have 'execute_intent' method"
-        assert callable(mock.execute_intent), "MockEffect.execute_intent must be callable"
+        assert callable(
+            mock.execute_intent
+        ), "MockEffect.execute_intent must be callable"
         return mock
 
     @pytest.fixture
@@ -894,7 +896,9 @@ class TestWorkflowExecutionWithMocks:
         using isinstance checks with Protocol types.
         """
         # Duck typing verification - check method presence and callability
-        assert hasattr(mock_effect, "execute_intent"), "Must have 'execute_intent' method"
+        assert hasattr(
+            mock_effect, "execute_intent"
+        ), "Must have 'execute_intent' method"
         assert callable(mock_effect.execute_intent), "'execute_intent' must be callable"
 
     @pytest.mark.asyncio
