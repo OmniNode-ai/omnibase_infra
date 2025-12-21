@@ -397,7 +397,14 @@ class TestIdempotency:
         projector: ProjectorRegistration,
         reader: ProjectionReaderRegistration,
     ) -> None:
-        """Verify re-projecting same sequence is idempotent (no update)."""
+        """Verify re-projecting same sequence is idempotent (no update).
+
+        Idempotency here means: applying the same sequence twice results in
+        the same final state. The second persist() returns False because the
+        projection is unchanged - this IS idempotent behavior, not a failure.
+        The original projection remains intact, demonstrating that duplicate
+        events don't corrupt state.
+        """
         projection = make_projection(offset=100)
         sequence = make_sequence(100)
 

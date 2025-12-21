@@ -56,6 +56,31 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
     Security:
         All queries use parameterized statements for SQL injection protection.
 
+    Error Handling Pattern:
+        All public methods follow a consistent error handling structure:
+
+        1. Create fresh ModelInfraErrorContext per operation (intentionally NOT
+           reused to ensure each operation has isolated context with its own
+           correlation ID for distributed tracing).
+
+        2. Check circuit breaker before database operation.
+
+        3. Map exceptions consistently:
+           - asyncpg.PostgresConnectionError -> InfraConnectionError
+           - asyncpg.QueryCanceledError -> InfraTimeoutError
+           - Generic Exception -> RuntimeHostError
+
+        4. Record circuit breaker failures for all exception types.
+
+        This pattern ensures predictable error behavior and enables consistent
+        error handling by callers across all reader methods.
+
+    JSONB Handling:
+        The capabilities field is stored as JSONB in PostgreSQL. While asyncpg
+        typically returns JSONB as Python dicts, some connection configurations
+        may return strings. The _row_to_projection method handles both cases
+        using json.loads() for string fallback.
+
     Example:
         >>> pool = await asyncpg.create_pool(dsn)
         >>> reader = ProjectionReaderRegistration(pool)
@@ -88,7 +113,10 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
         Returns:
             ModelRegistrationProjection instance
         """
-        # Parse capabilities from JSONB
+        # Parse capabilities from JSONB.
+        # asyncpg typically returns JSONB as Python dicts, but connection
+        # configuration (e.g., custom type codecs) may return strings.
+        # Handle both cases for robustness.
         capabilities_data = row["capabilities"]
         if isinstance(capabilities_data, str):
             capabilities_data = json.loads(capabilities_data)

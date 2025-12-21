@@ -39,7 +39,10 @@ from omnibase_infra.models.projection import (
 
 logger = logging.getLogger(__name__)
 
-# Path to SQL schema file (relative to this module)
+# Path to SQL schema file.
+# Resolution: projector_registration.py → projectors/ → omnibase_infra/ → schemas/
+# This navigates up two levels from this file to reach the schemas directory,
+# which is a sibling of the projectors directory within omnibase_infra.
 _SCHEMA_FILE = (
     Path(__file__).parent.parent / "schemas" / "schema_registration_projection.sql"
 )
@@ -178,7 +181,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             projection: Projection model to persist
-            entity_id: Entity identifier (partition key)
+            entity_id: Entity identifier (partition key). Passed as a separate
+                parameter (rather than using projection.entity_id) for API
+                clarity and to support protocol implementations where the
+                entity_id may come from external context (e.g., message routing
+                metadata) rather than the projection payload itself.
             domain: Domain namespace
             sequence_info: Sequence info for ordering validation
             correlation_id: Optional correlation ID for tracing
@@ -196,6 +203,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             >>> if result:
             ...     print("Applied")
         """
+        # CORRELATION ID DISTINCTION:
+        # - corr_id: Infrastructure-level tracing for THIS method invocation
+        #   (circuit breaker, error context, logging). Generated if not provided.
+        # - projection.correlation_id: Business-level tracing stored with the
+        #   projection data, representing the original event's correlation chain.
         corr_id = correlation_id or uuid4()
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
@@ -399,6 +411,8 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             >>> if await projector.is_stale(entity_id, "registration", seq):
             ...     print("Skip processing - stale event")
         """
+        # corr_id is for infrastructure-level tracing of THIS method invocation.
+        # See persist() for full correlation ID distinction explanation.
         corr_id = correlation_id or uuid4()
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,

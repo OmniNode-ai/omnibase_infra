@@ -188,3 +188,80 @@ COMMENT ON COLUMN registration_projections.last_applied_sequence IS
 
 COMMENT ON COLUMN registration_projections.last_applied_partition IS
     'Kafka partition of last applied event. Used with offset for global ordering.';
+
+-- =============================================================================
+-- INDEX STRATEGY DOCUMENTATION
+-- =============================================================================
+--
+-- This schema defines multiple indexes for different query patterns. Some indexes
+-- may appear redundant but serve distinct purposes due to partial WHERE clauses.
+--
+-- ACK DEADLINE INDEXES:
+-- ---------------------
+-- 1. idx_registration_ack_deadline (line 104-106):
+--    - Single-column index on ack_deadline
+--    - WHERE: ack_deadline IS NOT NULL
+--    - Use case: General queries filtering by ack_deadline regardless of emission status
+--    - Example: SELECT * FROM registration_projections WHERE ack_deadline < :now
+--
+-- 2. idx_registration_ack_timeout_scan (line 143-145):
+--    - Composite index on (ack_deadline, ack_timeout_emitted_at)
+--    - WHERE: ack_deadline IS NOT NULL AND ack_timeout_emitted_at IS NULL
+--    - Use case: Timeout scanner queries that need un-emitted timeouts only
+--    - Example: SELECT * FROM registration_projections
+--               WHERE ack_deadline < :now AND ack_timeout_emitted_at IS NULL
+--
+-- WHY BOTH INDEXES EXIST:
+-- The partial WHERE clauses differ significantly:
+--   - idx_registration_ack_deadline includes ALL rows with non-null deadlines
+--   - idx_registration_ack_timeout_scan ONLY includes rows awaiting timeout emission
+--
+-- PostgreSQL's query planner selects the most selective index. For timeout scans
+-- (the common orchestrator query), idx_registration_ack_timeout_scan is optimal
+-- because it pre-filters to only candidate rows. For other deadline queries that
+-- don't filter on emission status, idx_registration_ack_deadline is used.
+--
+-- LIVENESS DEADLINE INDEXES:
+-- --------------------------
+-- Similar rationale applies to liveness indexes:
+--   - idx_registration_liveness_deadline: All rows with liveness deadlines
+--   - idx_registration_liveness_timeout_scan: Only active nodes awaiting emission
+--
+-- =============================================================================
+-- UPSERT ORDERING ENFORCEMENT PATTERN
+-- =============================================================================
+--
+-- The projector (projector_registration.py) uses an atomic INSERT-or-UPDATE with
+-- sequence validation to enforce event ordering and reject stale updates.
+--
+-- KEY CONCEPT: Stale Update Rejection
+-- ------------------------------------
+-- "Stale" means the incoming event is older than what we've already processed.
+-- The upsert's WHERE clause compares sequence/offset numbers to ensure we never
+-- regress projection state. If the incoming event is older, PostgreSQL skips
+-- the UPDATE entirely - the existing row remains unchanged.
+--
+-- ORDERING MODES (mutually exclusive):
+-- ------------------------------------
+-- 1. KAFKA-BASED ORDERING (partition IS NOT NULL):
+--    Uses last_applied_offset for ordering within a partition.
+--    Kafka guarantees ordering within a partition, so (partition, offset)
+--    provides a total order for events affecting the same entity.
+--
+-- 2. SEQUENCE-BASED ORDERING (partition IS NULL):
+--    Falls back to last_applied_sequence for non-Kafka transports (e.g., HTTP).
+--    Used when the event source doesn't provide Kafka-style partition/offset.
+--
+-- IDEMPOTENCY FIELDS:
+-- -------------------
+-- - last_applied_event_id: Message UUID for exact duplicate detection
+-- - last_applied_offset: Kafka offset for Kafka-based ordering
+-- - last_applied_sequence: Generic sequence for non-Kafka ordering
+-- - last_applied_partition: Kafka partition for partitioned ordering context
+--
+-- These fields together enable:
+-- 1. Replay correctness: Replaying events produces identical projection state
+-- 2. Stale rejection: Out-of-order events don't regress state
+-- 3. Idempotency: Duplicate events are handled gracefully
+--
+-- See projector_registration.py for the complete upsert SQL implementation.
