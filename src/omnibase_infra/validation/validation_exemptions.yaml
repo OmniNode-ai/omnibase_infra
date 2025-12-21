@@ -260,6 +260,30 @@ pattern_exemptions:
 
     ticket: OMN-983
   # ==========================================================================
+  # RuntimeScheduler Semantic Identifier Exemptions (OMN-953)
+  # ==========================================================================
+  # scheduler_id is a human-readable semantic identifier set via environment variable
+  # (e.g., "runtime-scheduler-prod-1"), NOT a UUID. Follows same pattern as policy_id
+  # and dispatcher_id.
+  - file_pattern: 'model_runtime_scheduler_config\.py'
+    violation_pattern: "Field 'scheduler_id' should use UUID"
+    reason: >
+      scheduler_id is a human-readable semantic identifier (e.g., "runtime-scheduler-prod-1") set via RUNTIME_SCHEDULER_ID environment variable. Not a UUID - follows policy_id/dispatcher_id pattern.
+
+    ticket: OMN-953
+  - file_pattern: 'model_runtime_scheduler_metrics\.py'
+    violation_pattern: "Field 'scheduler_id' should use UUID"
+    reason: >
+      scheduler_id is a human-readable semantic identifier, consistent with model_runtime_scheduler_config.
+
+    ticket: OMN-953
+  - file_pattern: 'model_runtime_tick\.py'
+    violation_pattern: "Field 'scheduler_id' should use UUID"
+    reason: >
+      scheduler_id identifies which runtime scheduler instance emitted the tick. Human-readable identifier, consistent across scheduler models.
+
+    ticket: OMN-953
+  # ==========================================================================
   # MessageTypeRegistry Exemptions (OMN-983)
   # ==========================================================================
   - file_pattern: 'registry_message_type\.py'
