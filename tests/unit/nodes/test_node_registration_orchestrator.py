@@ -211,16 +211,43 @@ class TestContractValidation:
         assert "nodes" in wf["workflow_definition"]["execution_graph"]
 
     def test_workflow_has_required_nodes(self, contract_data: dict) -> None:
-        """Test that workflow has required execution graph nodes."""
+        """Test that workflow has all 8 required execution graph nodes.
+
+        The registration orchestrator workflow requires these nodes in order:
+        1. receive_introspection - Receive introspection or tick event
+        2. read_projection - Read current registration state from projection (OMN-930)
+        3. evaluate_timeout - Evaluate timeout using injected time (OMN-973)
+        4. compute_intents - Compute registration intents via reducer
+        5. execute_consul_registration - Execute Consul registration
+        6. execute_postgres_registration - Execute PostgreSQL registration
+        7. aggregate_results - Aggregate registration results
+        8. publish_outcome - Publish registration outcome event
+
+        This test ensures all 8 nodes are present with exact matching.
+        """
         nodes = contract_data["workflow_coordination"]["workflow_definition"][
             "execution_graph"
         ]["nodes"]
-        node_ids = [n["node_id"] for n in nodes]
+        node_ids = {n["node_id"] for n in nodes}
 
-        # Required workflow steps
-        assert "compute_intents" in node_ids
-        assert "execute_consul_registration" in node_ids
-        assert "execute_postgres_registration" in node_ids
+        # All 8 required execution graph nodes per C1 requirements
+        expected_nodes = {
+            "receive_introspection",
+            "read_projection",
+            "evaluate_timeout",
+            "compute_intents",
+            "execute_consul_registration",
+            "execute_postgres_registration",
+            "aggregate_results",
+            "publish_outcome",
+        }
+
+        # Strict equality check - must have exactly these nodes
+        assert expected_nodes == node_ids, (
+            f"Execution graph nodes mismatch.\n"
+            f"Missing: {expected_nodes - node_ids}\n"
+            f"Extra: {node_ids - expected_nodes}"
+        )
 
     def test_workflow_has_metadata(self, contract_data: dict) -> None:
         """Test that workflow has required metadata."""

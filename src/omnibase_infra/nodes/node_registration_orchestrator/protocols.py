@@ -323,8 +323,6 @@ class ProtocolEffect(Protocol):
 
 
 __all__ = [
-    "ModelReducerState",
-    "ModelRegistrationIntent",
     "ProtocolEffect",
     "ProtocolReducer",
 ]

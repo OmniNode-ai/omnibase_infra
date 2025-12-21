@@ -35,10 +35,23 @@ projection_reader:
     - name: "node_registration_state"
       description: "Current registration state for all nodes"
 
-# Workflow coordination configuration
-# All coordination settings are consolidated in coordination_rules to avoid duplication.
-# The workflow_definition contains the complete workflow specification including
-# metadata, execution graph, and coordination rules.
+# Workflow Coordination Configuration
+# ====================================
+# Design Decision: Single Source of Truth for Coordination Settings
+#
+# All workflow coordination settings are consolidated within coordination_rules
+# (see lines below). This prevents duplication that could occur if coordination
+# settings were split between top-level workflow_coordination and nested
+# coordination_rules sections.
+#
+# Structure:
+#   workflow_coordination.workflow_definition:
+#     - workflow_metadata: Name, version, description
+#     - execution_graph: DAG of nodes with dependencies
+#     - coordination_rules: ALL execution/failure/timeout/checkpoint settings
+#
+# Note: No top-level coordination settings exist outside workflow_definition
+# to ensure a single authoritative source for all coordination behavior.
 workflow_coordination:
   workflow_definition:
     workflow_metadata:
@@ -112,7 +125,10 @@ workflow_coordination:
           step_config:
             event_type: "NodeRegistrationResultEvent"
 
-    # Consolidated coordination rules - all workflow coordination settings in one place
+    # Coordination Rules (Single Source of Truth)
+    # This section contains ALL coordination settings for the workflow.
+    # Settings are grouped by concern: execution mode, failure handling,
+    # timeouts, checkpointing, and rollback.
     coordination_rules:
       # Execution mode configuration
       execution_mode: sequential

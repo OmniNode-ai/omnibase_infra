@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.types.json_types import JsonValue
+
 
 class ModelRegistrationIntent(BaseModel):
     """Base model for registration intents.
@@ -53,9 +55,11 @@ class ModelRegistrationIntent(BaseModel):
         ...,
         description="Correlation ID for distributed tracing",
     )
-    payload: dict[str, object] = Field(
+    payload: dict[str, JsonValue] = Field(
         default_factory=dict,
-        description="Operation-specific data (JSON-like structure, typed in OMN-912)",
+        description="Operation-specific data. Values must be JSON-serializable "
+        "(str, int, float, bool, None, list, dict). Will be typed as discriminated "
+        "union in OMN-912.",
     )
 
 

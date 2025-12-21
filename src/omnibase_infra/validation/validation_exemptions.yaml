@@ -319,6 +319,11 @@ architecture_exemptions:
       Domain-grouped protocols for registration orchestrator workflow.
       ProtocolReducer and ProtocolEffect define the complete interface for the
       reducer-effect pattern in node registration. Per CLAUDE.md convention.
+
+      Architectural documentation included in module:
+      - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe
+      - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors
+      - Protocol contracts with examples in docstrings
     ticket: OMN-888
 
 # Union usage validator exemptions

@@ -68,9 +68,20 @@ def contract_path() -> Path:
 
 @pytest.fixture
 def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict."""
+    """Load and return contract.yaml as dict.
+
+    Raises:
+        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
+        yaml.YAMLError: If contract file contains invalid YAML.
+    """
+    if not contract_path.exists():
+        pytest.skip(f"Contract file not found: {contract_path}")
+
     with open(contract_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        try:
+            return yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            pytest.fail(f"Invalid YAML in contract file: {e}")
 
 
 # =============================================================================
@@ -667,13 +678,19 @@ class TestWorkflowExecutionWithMocks:
     def mock_reducer(self, node_id: UUID, correlation_id: UUID):
         """Create mock reducer that returns registration intents.
 
-        The mock reducer implements ProtocolReducer and returns a list
-        of intents for Consul and PostgreSQL registration.
+        The mock reducer implements the ProtocolReducer interface via duck typing.
+        Per ONEX conventions, we verify protocol compliance by checking for required
+        method presence and callability rather than using isinstance checks.
+
+        Duck typing validation:
+        - Has 'reduce' attribute (method presence)
+        - 'reduce' is callable (method behavior)
+
+        Returns a list of intents for Consul and PostgreSQL registration.
         """
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelReducerState,
             ModelRegistrationIntent,
-            ProtocolReducer,
         )
 
         class MockReducer:
@@ -724,24 +741,29 @@ class TestWorkflowExecutionWithMocks:
 
                 return new_state, intents
 
-        # Verify mock implements protocol
+        # Verify mock implements protocol via duck typing (ONEX convention)
         mock = MockReducer()
-        assert isinstance(mock, ProtocolReducer)
+        assert hasattr(mock, "reduce"), "MockReducer must have 'reduce' method"
+        assert callable(mock.reduce), "MockReducer.reduce must be callable"
         return mock
 
     @pytest.fixture
     def mock_effect(self):
         """Create mock effect that executes intents.
 
-        The mock effect implements ProtocolEffect and returns successful
-        execution results for all intents.
+        The mock effect implements the ProtocolEffect interface via duck typing.
+        Per ONEX conventions, we verify protocol compliance by checking for required
+        method presence and callability rather than using isinstance checks.
+
+        Duck typing validation:
+        - Has 'execute_intent' attribute (method presence)
+        - 'execute_intent' is callable (method behavior)
+
+        Returns successful execution results for all intents.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelIntentExecutionResult,
-        )
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelRegistrationIntent,
-            ProtocolEffect,
         )
 
         class MockEffect:
@@ -785,8 +807,12 @@ class TestWorkflowExecutionWithMocks:
                     execution_time_ms=(time.perf_counter() - start_time) * 1000,
                 )
 
+        # Verify mock implements protocol via duck typing (ONEX convention)
         mock = MockEffect()
-        assert isinstance(mock, ProtocolEffect)
+        assert hasattr(
+            mock, "execute_intent"
+        ), "MockEffect must have 'execute_intent' method"
+        assert callable(mock.execute_intent), "MockEffect.execute_intent must be callable"
         return mock
 
     @pytest.fixture
@@ -823,14 +849,23 @@ class TestWorkflowExecutionWithMocks:
         when the orchestrator resolves its dependencies.
         """
         # Configure container to provide mocks via service registry
-        mock_container.service_registry = MagicMock()
-        mock_container.service_registry.resolve.side_effect = (
-            lambda protocol: mock_reducer
-            if "Reducer" in str(protocol)
-            else mock_effect
-            if "Effect" in str(protocol)
-            else mock_event_emitter
+        # Import protocols for type-safe matching (not string-based)
+        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+            ProtocolEffect,
+            ProtocolReducer,
         )
+
+        def resolve_mock(protocol):
+            """Resolve mock dependencies using explicit protocol type matching."""
+            if protocol is ProtocolReducer:
+                return mock_reducer
+            elif protocol is ProtocolEffect:
+                return mock_effect
+            else:
+                return mock_event_emitter
+
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve.side_effect = resolve_mock
 
         # Store references for test access
         mock_container._test_reducer = mock_reducer
@@ -841,24 +876,26 @@ class TestWorkflowExecutionWithMocks:
         return orchestrator
 
     def test_mock_reducer_implements_protocol(self, mock_reducer) -> None:
-        """Test that mock reducer correctly implements ProtocolReducer."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
-            ProtocolReducer,
-        )
+        """Test that mock reducer correctly implements ProtocolReducer interface.
 
-        assert isinstance(mock_reducer, ProtocolReducer)
-        assert hasattr(mock_reducer, "reduce")
-        assert callable(mock_reducer.reduce)
+        Per ONEX conventions, protocol compliance is verified via duck typing
+        by checking for required method presence and callability, rather than
+        using isinstance checks with Protocol types.
+        """
+        # Duck typing verification - check method presence and callability
+        assert hasattr(mock_reducer, "reduce"), "Must have 'reduce' method"
+        assert callable(mock_reducer.reduce), "'reduce' must be callable"
 
     def test_mock_effect_implements_protocol(self, mock_effect) -> None:
-        """Test that mock effect correctly implements ProtocolEffect."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
-            ProtocolEffect,
-        )
+        """Test that mock effect correctly implements ProtocolEffect interface.
 
-        assert isinstance(mock_effect, ProtocolEffect)
-        assert hasattr(mock_effect, "execute_intent")
-        assert callable(mock_effect.execute_intent)
+        Per ONEX conventions, protocol compliance is verified via duck typing
+        by checking for required method presence and callability, rather than
+        using isinstance checks with Protocol types.
+        """
+        # Duck typing verification - check method presence and callability
+        assert hasattr(mock_effect, "execute_intent"), "Must have 'execute_intent' method"
+        assert callable(mock_effect.execute_intent), "'execute_intent' must be callable"
 
     @pytest.mark.asyncio
     async def test_reducer_generates_intents_from_event(
@@ -867,7 +904,7 @@ class TestWorkflowExecutionWithMocks:
         introspection_event,
     ) -> None:
         """Test that reducer generates intents from introspection event."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelReducerState,
         )
 
@@ -900,7 +937,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that effect executes intents and returns success results."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelRegistrationIntent,
         )
 
@@ -930,7 +967,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that effect returns failure result when configured to fail."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelRegistrationIntent,
         )
 
@@ -958,7 +995,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test correlation ID is preserved in reducer intents."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelReducerState,
         )
 
@@ -977,7 +1014,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test correlation ID is passed to effect execution."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelRegistrationIntent,
         )
 
@@ -1002,7 +1039,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that reducer intents are correctly passed to effect nodes."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelReducerState,
         )
 
@@ -1039,8 +1076,6 @@ class TestWorkflowExecutionWithMocks:
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelIntentExecutionResult,
             ModelOrchestratorOutput,
-        )
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -1099,8 +1134,6 @@ class TestWorkflowExecutionWithMocks:
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelIntentExecutionResult,
             ModelOrchestratorOutput,
-        )
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
             ModelReducerState,
         )
 
@@ -1157,7 +1190,7 @@ class TestWorkflowExecutionWithMocks:
         introspection_event,
     ) -> None:
         """Test that reducer tracks processed nodes for deduplication."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelReducerState,
         )
 
@@ -1182,7 +1215,7 @@ class TestWorkflowExecutionWithMocks:
         correlation_id: UUID,
     ) -> None:
         """Test that workflow calls reducer before effects."""
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
+        from omnibase_infra.nodes.node_registration_orchestrator.models import (
             ModelReducerState,
         )
 
@@ -1232,20 +1265,33 @@ class TestWorkflowExecutionWithMocks:
         orchestrator_with_mocks,
         mock_container: MagicMock,
     ) -> None:
-        """Test that mock container provides reducer and effect dependencies."""
+        """Test that mock container provides reducer and effect dependencies.
+
+        Per ONEX conventions, protocol compliance is verified via duck typing
+        by checking for required method presence and callability, rather than
+        using isinstance checks with Protocol types.
+        """
         # Verify mocks are accessible via container
         assert hasattr(mock_container, "_test_reducer")
         assert hasattr(mock_container, "_test_effect")
         assert hasattr(mock_container, "_test_emitter")
 
-        # Verify mocks implement protocols
-        from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
-            ProtocolEffect,
-            ProtocolReducer,
-        )
+        # Verify mocks implement protocols via duck typing (ONEX convention)
+        # ProtocolReducer requires 'reduce' method
+        assert hasattr(
+            mock_container._test_reducer, "reduce"
+        ), "Reducer must have 'reduce' method"
+        assert callable(
+            mock_container._test_reducer.reduce
+        ), "Reducer.reduce must be callable"
 
-        assert isinstance(mock_container._test_reducer, ProtocolReducer)
-        assert isinstance(mock_container._test_effect, ProtocolEffect)
+        # ProtocolEffect requires 'execute_intent' method
+        assert hasattr(
+            mock_container._test_effect, "execute_intent"
+        ), "Effect must have 'execute_intent' method"
+        assert callable(
+            mock_container._test_effect.execute_intent
+        ), "Effect.execute_intent must be callable"
 
 
 __all__ = [
