@@ -20,6 +20,8 @@ Response Models:
 - ModelDbQueryResponse: Database query response envelope
 - ModelDbHealthResponse: Database health check response
 - ModelDbDescribeResponse: Database adapter metadata
+- ModelConsulHandlerPayload: Consul operation result payload
+- ModelConsulHandlerResponse: Consul handler response envelope
 """
 
 from omnibase_infra.handlers.handler_consul import ConsulHandler
@@ -27,6 +29,8 @@ from omnibase_infra.handlers.handler_db import DbAdapter
 from omnibase_infra.handlers.handler_http import HttpRestAdapter
 from omnibase_infra.handlers.handler_vault import VaultAdapter
 from omnibase_infra.handlers.models import (
+    ModelConsulHandlerPayload,
+    ModelConsulHandlerResponse,
     ModelDbDescribeResponse,
     ModelDbHealthResponse,
     ModelDbQueryPayload,
@@ -38,6 +42,8 @@ __all__: list[str] = [
     "DbAdapter",
     "HttpRestAdapter",
     "VaultAdapter",
+    "ModelConsulHandlerPayload",
+    "ModelConsulHandlerResponse",
     "ModelDbQueryPayload",
     "ModelDbQueryResponse",
     "ModelDbHealthResponse",

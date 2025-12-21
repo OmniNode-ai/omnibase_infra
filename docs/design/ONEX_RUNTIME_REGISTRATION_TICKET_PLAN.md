@@ -1766,7 +1766,8 @@ This plan references and should be read alongside:
       (Contains: Logical planes, data flow, handler contracts, Linear ticket mapping)
     - `docs/architecture/DECLARATIVE_EFFECT_NODES_PLAN.md` - Node architecture
     - `docs/architecture/CURRENT_NODE_ARCHITECTURE.md` - Current state reference
-    - `contracts/fsm/dual_registration_reducer_fsm.yaml` - FSM contract definition
+    - `src/omnibase_infra/nodes/reducers/registration_reducer.py` - Pure reducer implementation
+    - `src/omnibase_infra/nodes/reducers/models/model_registration_state.py` - State model
 
 ### Documentation Checklist
 

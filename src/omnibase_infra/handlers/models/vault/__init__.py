@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Vault Handler Models Module.
+
+This module exports Pydantic models for Vault handler request/response structures.
+All models are strongly typed to eliminate Any usage.
+
+Exports:
+    EnumVaultOperationType: Discriminator enum for Vault operation types
+    ModelVaultSecretPayload: Payload for vault.read_secret result
+    ModelVaultWritePayload: Payload for vault.write_secret result
+    ModelVaultDeletePayload: Payload for vault.delete_secret result
+    ModelVaultListPayload: Payload for vault.list_secrets result
+    ModelVaultRenewTokenPayload: Payload for vault.renew_token result
+    ModelVaultHealthCheckPayload: Payload for vault.health_check result
+    VaultPayload: Discriminated union of all Vault payload types
+    ModelVaultHandlerPayload: Wrapper containing discriminated union payload
+"""
+
+from omnibase_infra.handlers.models.vault.enum_vault_operation_type import (
+    EnumVaultOperationType,
+)
+from omnibase_infra.handlers.models.vault.model_vault_delete_payload import (
+    ModelVaultDeletePayload,
+)
+from omnibase_infra.handlers.models.vault.model_vault_handler_payload import (
+    ModelVaultHandlerPayload,
+    VaultPayload,
+)
+from omnibase_infra.handlers.models.vault.model_vault_health_check_payload import (
+    ModelVaultHealthCheckPayload,
+)
+from omnibase_infra.handlers.models.vault.model_vault_list_payload import (
+    ModelVaultListPayload,
+)
+from omnibase_infra.handlers.models.vault.model_vault_renew_token_payload import (
+    ModelVaultRenewTokenPayload,
+)
+from omnibase_infra.handlers.models.vault.model_vault_secret_payload import (
+    ModelVaultSecretPayload,
+)
+from omnibase_infra.handlers.models.vault.model_vault_write_payload import (
+    ModelVaultWritePayload,
+)
+
+__all__: list[str] = [
+    "EnumVaultOperationType",
+    "ModelVaultSecretPayload",
+    "ModelVaultWritePayload",
+    "ModelVaultDeletePayload",
+    "ModelVaultListPayload",
+    "ModelVaultRenewTokenPayload",
+    "ModelVaultHealthCheckPayload",
+    "VaultPayload",
+    "ModelVaultHandlerPayload",
+]

@@ -25,7 +25,14 @@ import pytest
 # Path Constants (computed once at module load)
 # =============================================================================
 
-# Project root: tests/unit/docker/ -> tests/unit/ -> tests/ -> project_root
+# Navigate from this file's location to project root.
+# Path traversal: tests/unit/docker/conftest.py
+#   .parent -> tests/unit/docker/
+#   .parent -> tests/unit/
+#   .parent -> tests/
+#   .parent -> project_root (omnibase_infra2/)
+# This is fragile if the file moves - consider using a marker file like pyproject.toml
+# to find project root dynamically if this becomes a maintenance burden.
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 _DOCKER_DIR = _PROJECT_ROOT / "docker"
 
