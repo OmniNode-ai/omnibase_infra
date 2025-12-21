@@ -111,13 +111,18 @@ class TestContractIntegration:
         contract_version = contract_data["contract_version"]
         node_version = contract_data["node_version"]
 
-        # Should be semver format (x.y.z)
-        assert len(contract_version.split(".")) == 3
-        assert len(node_version.split(".")) == 3
+        # contract_version should be a dict with major, minor, patch keys
+        assert isinstance(contract_version, dict), "contract_version should be a dict"
+        assert "major" in contract_version, "contract_version missing 'major' key"
+        assert "minor" in contract_version, "contract_version missing 'minor' key"
+        assert "patch" in contract_version, "contract_version missing 'patch' key"
+        assert isinstance(contract_version["major"], int)
+        assert isinstance(contract_version["minor"], int)
+        assert isinstance(contract_version["patch"], int)
 
-        # All parts should be numeric
-        for part in contract_version.split("."):
-            assert part.isdigit()
+        # node_version should be semver format string (x.y.z)
+        assert isinstance(node_version, str), "node_version should be a string"
+        assert len(node_version.split(".")) == 3
         for part in node_version.split("."):
             assert part.isdigit()
 
@@ -652,7 +657,8 @@ class TestWorkflowExecutionWithMocks:
                 # Update state
                 new_state = ModelReducerState(
                     last_event_timestamp=event.timestamp.isoformat(),
-                    processed_node_ids=state.processed_node_ids | frozenset({event.node_id}),
+                    processed_node_ids=state.processed_node_ids
+                    | frozenset({event.node_id}),
                     pending_registrations=state.pending_registrations + len(intents),
                 )
 
@@ -807,7 +813,9 @@ class TestWorkflowExecutionWithMocks:
 
         initial_state = ModelReducerState.initial()
 
-        new_state, intents = await mock_reducer.reduce(initial_state, introspection_event)
+        new_state, intents = await mock_reducer.reduce(
+            initial_state, introspection_event
+        )
 
         # Verify reducer was called
         assert mock_reducer.call_count == 1
@@ -1056,9 +1064,7 @@ class TestWorkflowExecutionWithMocks:
         consul_applied = all(r.success for r in consul_results)
         postgres_applied = all(r.success for r in postgres_results)
 
-        consul_error = next(
-            (r.error for r in consul_results if not r.success), None
-        )
+        consul_error = next((r.error for r in consul_results if not r.success), None)
 
         status = (
             "success"
