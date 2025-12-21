@@ -50,7 +50,15 @@ from pathlib import Path
 
 import pytest
 
-# Project root and Docker directory paths
+# Project root and Docker directory paths.
+# Navigate from this file's location to project root:
+# Path traversal: tests/integration/docker/conftest.py
+#   .parent -> tests/integration/docker/
+#   .parent -> tests/integration/
+#   .parent -> tests/
+#   .parent -> project_root (omnibase_infra2/)
+# This is fragile if the file moves - consider using a marker file like pyproject.toml
+# to find project root dynamically if this becomes a maintenance burden.
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 DOCKER_DIR = PROJECT_ROOT / "docker"
 DOCKERFILE_PATH = DOCKER_DIR / "Dockerfile.runtime"

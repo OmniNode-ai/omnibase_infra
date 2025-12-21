@@ -55,6 +55,7 @@ from omnibase_infra.runtime.envelope_validator import (
     validate_envelope,
 )
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
+from omnibase_infra.runtime.models import ModelDuplicateResponse
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.wiring import wire_default_handlers
 
@@ -1525,7 +1526,7 @@ class RuntimeHostProcess:
         self,
         message_id: UUID,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+    ) -> ModelDuplicateResponse:
         """Create response for duplicate message detection.
 
         This is NOT an error response - duplicates are expected under
@@ -1537,15 +1538,12 @@ class RuntimeHostProcess:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            Response dict indicating duplicate detection.
+            ModelDuplicateResponse indicating duplicate detection.
         """
-        return {
-            "success": True,  # Deduplication is successful behavior
-            "status": "duplicate",
-            "message": "Message already processed",
-            "message_id": message_id,
-            "correlation_id": correlation_id,
-        }
+        return ModelDuplicateResponse(
+            message_id=message_id,
+            correlation_id=correlation_id,
+        )
 
     async def _cleanup_idempotency_store(self) -> None:
         """Cleanup idempotency store during shutdown.

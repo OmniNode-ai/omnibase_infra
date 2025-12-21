@@ -154,7 +154,7 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
             correlation_id,
         )
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 raw_config = yaml.safe_load(f) or {}
 
             # Contract validation: validate against schema before Pydantic

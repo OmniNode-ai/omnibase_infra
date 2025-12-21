@@ -341,12 +341,12 @@ class TestConsulHandlerKVOperations:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload["value"] == "test-value"
-            assert payload["key"] == "test/key"
-            assert payload["found"] is True
+            assert result.status == "success"
+            # Access payload data through the discriminated union
+            payload_data = result.payload.data
+            assert payload_data.value == "test-value"
+            assert payload_data.key == "test/key"
+            assert payload_data.found is True
             mock_consul_client.kv.get.assert_called()
 
     @pytest.mark.asyncio
@@ -378,11 +378,11 @@ class TestConsulHandlerKVOperations:
             result = output.result
 
             # Should return success with found=False
-            assert result["status"] == "success"
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload.get("found") is False
-            assert payload.get("value") is None
+            assert result.status == "success"
+            # Access payload data through the discriminated union
+            payload_data = result.payload.data
+            assert payload_data.found is False
+            assert payload_data.value is None
 
     @pytest.mark.asyncio
     async def test_kv_get_recurse(
@@ -428,12 +428,12 @@ class TestConsulHandlerKVOperations:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload["found"] is True
-            assert payload["count"] == 2
-            assert "items" in payload
+            assert result.status == "success"
+            # Access payload data through the discriminated union
+            payload_data = result.payload.data
+            assert payload_data.found is True
+            assert payload_data.count == 2
+            assert len(payload_data.items) == 2
 
     @pytest.mark.asyncio
     async def test_kv_put_success(
@@ -462,11 +462,11 @@ class TestConsulHandlerKVOperations:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload["success"] is True
-            assert payload["key"] == "test/key"
+            assert result.status == "success"
+            # Access payload data through the discriminated union
+            payload_data = result.payload.data
+            assert payload_data.success is True
+            assert payload_data.key == "test/key"
             mock_consul_client.kv.put.assert_called()
 
     @pytest.mark.asyncio
@@ -496,7 +496,7 @@ class TestConsulHandlerKVOperations:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
+            assert result.status == "success"
 
     @pytest.mark.asyncio
     async def test_kv_operation_missing_key(
@@ -585,12 +585,12 @@ class TestConsulHandlerServiceOperations:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload["registered"] is True
-            assert payload["name"] == "my-service"
-            assert payload["service_id"] == "my-service-1"
+            assert result.status == "success"
+            # Access payload data through the discriminated union
+            payload_data = result.payload.data
+            assert payload_data.registered is True
+            assert payload_data.name == "my-service"
+            assert payload_data.consul_service_id == "my-service-1"
 
     @pytest.mark.asyncio
     async def test_register_service_minimal(
@@ -617,12 +617,12 @@ class TestConsulHandlerServiceOperations:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload["registered"] is True
-            # service_id defaults to name when not provided
-            assert payload["service_id"] == "my-service"
+            assert result.status == "success"
+            # Access payload data through the discriminated union
+            payload_data = result.payload.data
+            assert payload_data.registered is True
+            # consul_service_id defaults to name when not provided
+            assert payload_data.consul_service_id == "my-service"
 
     @pytest.mark.asyncio
     async def test_register_service_missing_name(
@@ -675,11 +675,11 @@ class TestConsulHandlerServiceOperations:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload["deregistered"] is True
-            assert payload["service_id"] == "my-service-1"
+            assert result.status == "success"
+            # Access payload data through the discriminated union
+            payload_data = result.payload.data
+            assert payload_data.deregistered is True
+            assert payload_data.consul_service_id == "my-service-1"
 
     @pytest.mark.asyncio
     async def test_deregister_service_missing_id(
@@ -736,10 +736,10 @@ class TestConsulHandlerHealthOperations:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
-            payload = result["payload"]
-            assert isinstance(payload, dict)
-            assert payload["healthy"] is True
+            assert result.status == "success"
+            # Access payload data through the discriminated union
+            payload_data = result.payload.data
+            assert payload_data.healthy is True
 
     @pytest.mark.asyncio
     async def test_handler_health_check_success(
@@ -815,7 +815,7 @@ class TestConsulHandlerExecuteRouting:
 
             output = await handler.execute(envelope)
             result = output.result
-            assert result["status"] == "success"
+            assert result.status == "success"
 
     @pytest.mark.asyncio
     async def test_execute_unsupported_operation(
@@ -937,7 +937,7 @@ class TestConsulHandlerCorrelationId:
 
             output = await handler.execute(envelope)
             result = output.result
-            assert result["correlation_id"] == str(test_uuid)
+            assert result.correlation_id == test_uuid
 
     @pytest.mark.asyncio
     async def test_correlation_id_extraction_string(
@@ -964,7 +964,7 @@ class TestConsulHandlerCorrelationId:
 
             output = await handler.execute(envelope)
             result = output.result
-            assert result["correlation_id"] == test_uuid_str
+            assert result.correlation_id == test_uuid
 
     @pytest.mark.asyncio
     async def test_correlation_id_generation(
@@ -988,10 +988,10 @@ class TestConsulHandlerCorrelationId:
 
             output = await handler.execute(envelope)
             result = output.result
-            # Should have a correlation_id generated (stored as string in result)
-            assert "correlation_id" in result
-            # Verify it's a valid UUID string
-            UUID(result["correlation_id"])
+            # Should have a correlation_id generated (stored as UUID in result)
+            assert result.correlation_id is not None
+            # Verify it's a valid UUID
+            assert isinstance(result.correlation_id, UUID)
 
 
 class TestConsulHandlerDescribe:
@@ -1184,7 +1184,7 @@ class TestConsulHandlerRetryLogic:
             output = await handler.execute(envelope)
             result = output.result
 
-            assert result["status"] == "success"
+            assert result.status == "success"
             assert mock_consul_client.kv.get.call_count == 2
 
     @pytest.mark.asyncio

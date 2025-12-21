@@ -616,7 +616,7 @@ class ModelKafkaEventBusConfig(BaseModel):
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")
 
-        with path.open("r") as f:
+        with path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         if data is None:
