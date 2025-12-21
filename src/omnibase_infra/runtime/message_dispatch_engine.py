@@ -132,6 +132,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
@@ -212,6 +213,7 @@ def _sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
 
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
@@ -255,9 +257,26 @@ DispatcherFunc = Callable[
     [ModelEventEnvelope[object]], DispatcherOutput | Awaitable[DispatcherOutput]
 ]
 
+# Context-aware dispatcher type (for dispatchers registered with node_kind)
+# These dispatchers receive a ModelDispatchContext with time injection based on node_kind:
+# - REDUCER/COMPUTE: now=None (deterministic)
+# - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
+#
+# This type is used when register_dispatcher() is called with node_kind parameter.
+# The dispatch engine inspects the callable's signature to determine if it accepts context.
+ContextAwareDispatcherFunc = Callable[
+    [ModelEventEnvelope[object], ModelDispatchContext],
+    DispatcherOutput | Awaitable[DispatcherOutput],
+]
+
 # Sync-only dispatcher type for use with run_in_executor
 # Used internally after runtime type narrowing via inspect.iscoroutinefunction
 _SyncDispatcherFunc = Callable[[ModelEventEnvelope[object]], DispatcherOutput]
+
+# Sync-only context-aware dispatcher type for use with run_in_executor
+_SyncContextAwareDispatcherFunc = Callable[
+    [ModelEventEnvelope[object], ModelDispatchContext], DispatcherOutput
+]
 
 
 class DispatchEntryInternal:
@@ -267,9 +286,26 @@ class DispatchEntryInternal:
     This class is an implementation detail and not part of the public API.
     It stores the dispatcher callable and associated metadata for the
     MessageDispatchEngine's internal routing.
+
+    Attributes:
+        dispatcher_id: Unique identifier for this dispatcher.
+        dispatcher: The callable that processes messages.
+        category: Message category this dispatcher handles.
+        message_types: Specific message types to handle (None = all types).
+        node_kind: Optional ONEX node kind for time injection context.
+            When set, the dispatcher receives a ModelDispatchContext with
+            appropriate time injection based on ONEX rules:
+            - REDUCER/COMPUTE: now=None (deterministic)
+            - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
     """
 
-    __slots__ = ("category", "dispatcher", "dispatcher_id", "message_types")
+    __slots__ = (
+        "category",
+        "dispatcher",
+        "dispatcher_id",
+        "message_types",
+        "node_kind",
+    )
 
     def __init__(
         self,
@@ -277,11 +313,13 @@ class DispatchEntryInternal:
         dispatcher: DispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None,
+        node_kind: EnumNodeKind | None = None,
     ) -> None:
         self.dispatcher_id = dispatcher_id
         self.dispatcher = dispatcher
         self.category = category
         self.message_types = message_types  # None means "all types"
+        self.node_kind = node_kind  # None means no context injection
 
 
 class MessageDispatchEngine:
@@ -510,6 +548,7 @@ class MessageDispatchEngine:
         dispatcher: DispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
+        node_kind: EnumNodeKind | None = None,
     ) -> None:
         """
         Register a message dispatcher.
@@ -522,9 +561,17 @@ class MessageDispatchEngine:
             dispatcher_id: Unique identifier for this dispatcher
             dispatcher: Callable that processes messages. Can be sync or async.
                 Signature: (envelope: ModelEventEnvelope[object]) -> DispatcherOutput
+                Or with context:
+                (envelope: ModelEventEnvelope[object], context: ModelDispatchContext) -> DispatcherOutput
             category: Message category this dispatcher processes
             message_types: Optional set of specific message types to handle.
                 When None, handles all message types in the category.
+            node_kind: Optional ONEX node kind for time injection context.
+                When provided, the dispatcher receives a ModelDispatchContext
+                with appropriate time injection based on ONEX rules:
+                - REDUCER/COMPUTE: now=None (deterministic execution)
+                - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
+                When None, dispatcher is called without context (backwards compatible).
 
         Raises:
             ModelOnexError: If engine is frozen (INVALID_STATE)
@@ -544,10 +591,25 @@ class MessageDispatchEngine:
             ...     category=EnumMessageCategory.EVENT,
             ...     message_types={"UserCreated", "UserUpdated"},
             ... )
+            >>>
+            >>> # With time injection context for orchestrator
+            >>> async def process_with_context(envelope, context):
+            ...     current_time = context.now  # Injected time
+            ...     return "processed"
+            >>>
+            >>> engine.register_dispatcher(
+            ...     dispatcher_id="orchestrator-dispatcher",
+            ...     dispatcher=process_with_context,
+            ...     category=EnumMessageCategory.COMMAND,
+            ...     node_kind=EnumNodeKind.ORCHESTRATOR,
+            ... )
 
         Note:
             Dispatchers are NOT automatically linked to routes. You must register
             routes separately that reference the dispatcher_id.
+
+        .. versionchanged:: 0.5.0
+            Added ``node_kind`` parameter for time injection context support.
         """
         # Validate inputs before acquiring lock
         if not dispatcher_id or not dispatcher_id.strip():
@@ -590,6 +652,7 @@ class MessageDispatchEngine:
                 dispatcher=dispatcher,
                 category=category,
                 message_types=message_types,
+                node_kind=node_kind,
             )
             self._dispatchers[dispatcher_id] = entry
 
@@ -597,10 +660,11 @@ class MessageDispatchEngine:
             self._dispatchers_by_category[category].append(dispatcher_id)
 
             self._logger.debug(
-                "Registered dispatcher '%s' for category %s (message_types=%s)",
+                "Registered dispatcher '%s' for category %s (message_types=%s, node_kind=%s)",
                 dispatcher_id,
                 category,
                 message_types if message_types else "all",
+                node_kind.value if node_kind else "none",
             )
 
     def freeze(self) -> None:
@@ -1318,11 +1382,21 @@ class MessageDispatchEngine:
             Sync dispatchers that block for extended periods (> 100ms) can
             severely degrade dispatch engine throughput. Prefer async dispatchers
             for any operation involving I/O or external service calls.
+
+        .. versionchanged:: 0.5.0
+            Added support for context-aware dispatchers via ``node_kind``.
         """
         dispatcher = entry.dispatcher
 
+        # Create context if node_kind is set and dispatcher accepts it
+        context: ModelDispatchContext | None = None
+        if entry.node_kind is not None:
+            context = self._create_context_for_entry(entry, envelope)
+
         # Check if dispatcher is async
         if inspect.iscoroutinefunction(dispatcher):
+            if context is not None and self._dispatcher_accepts_context(dispatcher):
+                return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]
             return await dispatcher(envelope)  # type: ignore[no-any-return]
         else:
             # Sync dispatcher execution via ThreadPoolExecutor
@@ -1335,14 +1409,146 @@ class MessageDispatchEngine:
             #
             # For blocking I/O operations, use async dispatchers instead.
             loop = asyncio.get_running_loop()
-            # Cast to sync-only type - safe because iscoroutinefunction check above
-            # guarantees this branch only executes for non-async callables
-            sync_dispatcher = cast(_SyncDispatcherFunc, dispatcher)
-            return await loop.run_in_executor(
-                None,
-                sync_dispatcher,
-                envelope,  # type: ignore[arg-type]
+
+            if context is not None and self._dispatcher_accepts_context(dispatcher):
+                # Context-aware sync dispatcher
+                sync_ctx_dispatcher = cast(_SyncContextAwareDispatcherFunc, dispatcher)
+                return await loop.run_in_executor(
+                    None,
+                    sync_ctx_dispatcher,
+                    envelope,  # type: ignore[arg-type]
+                    context,
+                )
+            else:
+                # Cast to sync-only type - safe because iscoroutinefunction check above
+                # guarantees this branch only executes for non-async callables
+                sync_dispatcher = cast(_SyncDispatcherFunc, dispatcher)
+                return await loop.run_in_executor(
+                    None,
+                    sync_dispatcher,
+                    envelope,  # type: ignore[arg-type]
+                )
+
+    def _create_context_for_entry(
+        self,
+        entry: DispatchEntryInternal,
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchContext:
+        """
+        Create dispatch context based on entry's node_kind.
+
+        Creates a ModelDispatchContext with appropriate time injection based on
+        the ONEX node kind:
+        - REDUCER: now=None (deterministic state aggregation)
+        - COMPUTE: now=None (pure transformation)
+        - ORCHESTRATOR: now=datetime.now(UTC) (coordination)
+        - EFFECT: now=datetime.now(UTC) (I/O operations)
+        - RUNTIME_HOST: now=datetime.now(UTC) (infrastructure)
+
+        Args:
+            entry: The dispatcher entry containing node_kind.
+            envelope: The event envelope containing correlation metadata.
+
+        Returns:
+            ModelDispatchContext configured appropriately for the node kind.
+
+        Raises:
+            ModelOnexError: If node_kind is None or unrecognized.
+
+        Note:
+            This is an internal method. Callers should ensure entry.node_kind
+            is not None before calling.
+
+        .. versionadded:: 0.5.0
+        """
+        node_kind = entry.node_kind
+        if node_kind is None:
+            raise ModelOnexError(
+                message=f"Cannot create context for dispatcher '{entry.dispatcher_id}': "
+                "node_kind is None. This is an internal error.",
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
             )
+
+        # Extract correlation metadata from envelope
+        correlation_id = envelope.correlation_id or uuid4()
+        trace_id = envelope.trace_id
+
+        # Route to appropriate factory based on node kind
+        if node_kind == EnumNodeKind.REDUCER:
+            return ModelDispatchContext.for_reducer(
+                correlation_id=correlation_id,
+                trace_id=trace_id,
+            )
+
+        if node_kind == EnumNodeKind.COMPUTE:
+            return ModelDispatchContext.for_compute(
+                correlation_id=correlation_id,
+                trace_id=trace_id,
+            )
+
+        if node_kind == EnumNodeKind.ORCHESTRATOR:
+            # Timestamp captured at context creation (dispatch time).
+            # Drift from actual handler execution is microseconds in practice.
+            return ModelDispatchContext.for_orchestrator(
+                correlation_id=correlation_id,
+                trace_id=trace_id,
+                now=datetime.now(UTC),
+            )
+
+        if node_kind == EnumNodeKind.EFFECT:
+            return ModelDispatchContext.for_effect(
+                correlation_id=correlation_id,
+                trace_id=trace_id,
+                now=datetime.now(UTC),
+            )
+
+        if node_kind == EnumNodeKind.RUNTIME_HOST:
+            return ModelDispatchContext.for_runtime_host(
+                correlation_id=correlation_id,
+                trace_id=trace_id,
+                now=datetime.now(UTC),
+            )
+
+        # Unknown node kind - should not happen with valid EnumNodeKind
+        raise ModelOnexError(
+            message=f"Unknown node_kind '{node_kind}' for dispatcher "
+            f"'{entry.dispatcher_id}'. Cannot determine time injection rules.",
+            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+        )
+
+    def _dispatcher_accepts_context(
+        self,
+        dispatcher: DispatcherFunc,
+    ) -> bool:
+        """
+        Check if a dispatcher callable accepts a context parameter.
+
+        Uses inspect.signature to determine if the dispatcher has a second
+        parameter for ModelDispatchContext. This enables backwards-compatible
+        context injection - dispatchers without a context parameter will be
+        called with just the envelope.
+
+        Args:
+            dispatcher: The dispatcher callable to inspect.
+
+        Returns:
+            True if dispatcher accepts a context parameter, False otherwise.
+
+        Note:
+            This method caches results internally for performance. Repeated
+            calls with the same dispatcher are efficient.
+
+        .. versionadded:: 0.5.0
+        """
+        try:
+            sig = inspect.signature(dispatcher)
+            params = list(sig.parameters.values())
+            # Dispatcher with context has 2 parameters: (envelope, context)
+            # Dispatcher without context has 1 parameter: (envelope)
+            return len(params) >= 2
+        except (ValueError, TypeError):
+            # If we can't inspect the signature, assume no context
+            return False
 
     def get_metrics(self) -> dict[str, int | float]:
         """
@@ -1531,6 +1737,7 @@ class MessageDispatchEngine:
         handler: DispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
+        node_kind: EnumNodeKind | None = None,
     ) -> None:
         """Register a message handler (legacy alias for register_dispatcher)."""
         return self.register_dispatcher(
@@ -1538,6 +1745,7 @@ class MessageDispatchEngine:
             dispatcher=handler,
             category=category,
             message_types=message_types,
+            node_kind=node_kind,
         )
 
     def get_handler_metrics(self, handler_id: str) -> ModelDispatcherMetrics | None:
