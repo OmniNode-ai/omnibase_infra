@@ -35,6 +35,7 @@ from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationError,
     ChainPropagationValidator,
     enforce_chain_propagation,
+    validate_linear_message_chain,
     validate_message_chain,
 )
 
@@ -46,44 +47,47 @@ pytestmark = [pytest.mark.integration]
 
 
 # =============================================================================
-# Test Payload Classes
-# =============================================================================
-
-
-class UserRegistrationIntent:
-    """Test intent for user registration workflow."""
-
-    def __init__(self, email: str) -> None:
-        self.email = email
-
-
-class CreateUserCommand:
-    """Test command for creating a user."""
-
-    def __init__(self, email: str, name: str) -> None:
-        self.email = email
-        self.name = name
-
-
-class UserCreatedEvent:
-    """Test event for user creation."""
-
-    def __init__(self, user_id: str, email: str) -> None:
-        self.user_id = user_id
-        self.email = email
-
-
-class SendWelcomeEmailCommand:
-    """Test command for sending welcome email."""
-
-    def __init__(self, user_id: str, email: str) -> None:
-        self.user_id = user_id
-        self.email = email
-
-
-# =============================================================================
 # Pydantic Test Models (ONEX-Compliant)
 # =============================================================================
+
+
+class ModelTestUserRegistrationIntent(BaseModel):
+    """Pydantic model for user registration intent in workflow tests.
+
+    Represents the initial intent to register a new user in the system.
+    """
+
+    email: str = Field(..., description="User email address for registration")
+
+
+class ModelTestCreateUserCommand(BaseModel):
+    """Pydantic model for create user command.
+
+    Command issued after registration intent to create the user account.
+    """
+
+    email: str = Field(..., description="User email address")
+    name: str = Field(..., description="User display name")
+
+
+class ModelTestUserCreatedEvent(BaseModel):
+    """Pydantic model for user created event.
+
+    Event emitted after successful user creation.
+    """
+
+    user_id: str = Field(..., description="Created user ID")
+    email: str = Field(..., description="User email address")
+
+
+class ModelTestSendWelcomeEmailCommand(BaseModel):
+    """Pydantic model for send welcome email command.
+
+    Command to send welcome email after user creation.
+    """
+
+    user_id: str = Field(..., description="User to send email to")
+    email: str = Field(..., description="Email address to send to")
 
 
 class ModelTestOrderIntent(BaseModel):
@@ -125,22 +129,24 @@ def correlation_id() -> UUID:
 
 
 @pytest.fixture
-def parent_envelope(correlation_id: UUID) -> ModelEventEnvelope[UserCreatedEvent]:
+def parent_envelope(
+    correlation_id: UUID,
+) -> ModelEventEnvelope[ModelTestUserCreatedEvent]:
     """Create a parent envelope with known IDs.
 
     This envelope represents the root of a message chain with a known
     correlation_id and envelope_id for testing child message validation.
     """
     return ModelEventEnvelope(
-        payload=UserCreatedEvent(user_id="user-123", email="test@example.com"),
+        payload=ModelTestUserCreatedEvent(user_id="user-123", email="test@example.com"),
         correlation_id=correlation_id,
     )
 
 
 @pytest.fixture
 def valid_child_envelope(
-    parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-) -> ModelEventEnvelope[SendWelcomeEmailCommand]:
+    parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+) -> ModelEventEnvelope[ModelTestSendWelcomeEmailCommand]:
     """Create a valid child envelope with correct chain linkage.
 
     The child has:
@@ -153,7 +159,9 @@ def valid_child_envelope(
     )
 
     return ModelEventEnvelope(
-        payload=SendWelcomeEmailCommand(user_id="user-123", email="test@example.com"),
+        payload=ModelTestSendWelcomeEmailCommand(
+            user_id="user-123", email="test@example.com"
+        ),
         correlation_id=parent_envelope.correlation_id,
         metadata=metadata,
     )
@@ -161,8 +169,8 @@ def valid_child_envelope(
 
 @pytest.fixture
 def invalid_correlation_envelope(
-    parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-) -> ModelEventEnvelope[SendWelcomeEmailCommand]:
+    parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+) -> ModelEventEnvelope[ModelTestSendWelcomeEmailCommand]:
     """Create a child envelope with wrong correlation_id.
 
     This envelope has a different correlation_id than its parent,
@@ -174,7 +182,9 @@ def invalid_correlation_envelope(
     )
 
     return ModelEventEnvelope(
-        payload=SendWelcomeEmailCommand(user_id="user-123", email="test@example.com"),
+        payload=ModelTestSendWelcomeEmailCommand(
+            user_id="user-123", email="test@example.com"
+        ),
         correlation_id=uuid4(),  # Different correlation_id!
         metadata=metadata,
     )
@@ -182,8 +192,8 @@ def invalid_correlation_envelope(
 
 @pytest.fixture
 def invalid_causation_envelope(
-    parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-) -> ModelEventEnvelope[SendWelcomeEmailCommand]:
+    parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+) -> ModelEventEnvelope[ModelTestSendWelcomeEmailCommand]:
     """Create a child envelope with wrong causation_id.
 
     This envelope has the correct correlation_id but references a
@@ -195,7 +205,9 @@ def invalid_causation_envelope(
     )
 
     return ModelEventEnvelope(
-        payload=SendWelcomeEmailCommand(user_id="user-123", email="test@example.com"),
+        payload=ModelTestSendWelcomeEmailCommand(
+            user_id="user-123", email="test@example.com"
+        ),
         correlation_id=parent_envelope.correlation_id,
         metadata=metadata,
     )
@@ -203,15 +215,17 @@ def invalid_causation_envelope(
 
 @pytest.fixture
 def missing_causation_envelope(
-    parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-) -> ModelEventEnvelope[SendWelcomeEmailCommand]:
+    parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+) -> ModelEventEnvelope[ModelTestSendWelcomeEmailCommand]:
     """Create a child envelope with no causation_id.
 
     This envelope has the correct correlation_id but is missing
     the causation_id entirely.
     """
     return ModelEventEnvelope(
-        payload=SendWelcomeEmailCommand(user_id="user-123", email="test@example.com"),
+        payload=ModelTestSendWelcomeEmailCommand(
+            user_id="user-123", email="test@example.com"
+        ),
         correlation_id=parent_envelope.correlation_id,
         # No metadata with causation_id
     )
@@ -234,8 +248,8 @@ class TestChainValidation:
     def test_valid_chain_passes_validation(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        valid_child_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        valid_child_envelope: ModelEventEnvelope[ModelTestSendWelcomeEmailCommand],
     ) -> None:
         """Valid parent-child chain should pass validation with no violations.
 
@@ -249,8 +263,10 @@ class TestChainValidation:
     def test_correlation_mismatch_detected(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        invalid_correlation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        invalid_correlation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """Different correlation_id in child should be detected as violation.
 
@@ -279,8 +295,10 @@ class TestChainValidation:
     def test_causation_chain_broken_detected(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        invalid_causation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        invalid_causation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """Wrong causation_id in child should be detected as chain break.
 
@@ -308,8 +326,10 @@ class TestChainValidation:
     def test_missing_causation_detected(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        missing_causation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        missing_causation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """Missing causation_id in child should be detected as chain break.
 
@@ -337,7 +357,7 @@ class TestChainValidation:
     def test_multiple_violations_reported(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
     ) -> None:
         """Both correlation and causation violations should be reported together.
 
@@ -346,7 +366,7 @@ class TestChainValidation:
         """
         # Create envelope with both violations
         bad_envelope = ModelEventEnvelope(
-            payload=SendWelcomeEmailCommand(
+            payload=ModelTestSendWelcomeEmailCommand(
                 user_id="user-123", email="test@example.com"
             ),
             correlation_id=uuid4(),  # Wrong correlation
@@ -384,7 +404,7 @@ class TestWorkflowChainValidation:
         """
         # Create workflow chain
         msg1 = ModelEventEnvelope(
-            payload=UserRegistrationIntent(email="test@example.com"),
+            payload=ModelTestUserRegistrationIntent(email="test@example.com"),
             correlation_id=correlation_id,
         )
 
@@ -392,7 +412,9 @@ class TestWorkflowChainValidation:
             tags={"causation_id": str(msg1.envelope_id)},
         )
         msg2 = ModelEventEnvelope(
-            payload=CreateUserCommand(email="test@example.com", name="Test User"),
+            payload=ModelTestCreateUserCommand(
+                email="test@example.com", name="Test User"
+            ),
             correlation_id=correlation_id,
             metadata=msg2_metadata,
         )
@@ -401,7 +423,9 @@ class TestWorkflowChainValidation:
             tags={"causation_id": str(msg2.envelope_id)},
         )
         msg3 = ModelEventEnvelope(
-            payload=UserCreatedEvent(user_id="user-123", email="test@example.com"),
+            payload=ModelTestUserCreatedEvent(
+                user_id="user-123", email="test@example.com"
+            ),
             correlation_id=correlation_id,
             metadata=msg3_metadata,
         )
@@ -410,7 +434,7 @@ class TestWorkflowChainValidation:
             tags={"causation_id": str(msg3.envelope_id)},
         )
         msg4 = ModelEventEnvelope(
-            payload=SendWelcomeEmailCommand(
+            payload=ModelTestSendWelcomeEmailCommand(
                 user_id="user-123", email="test@example.com"
             ),
             correlation_id=correlation_id,
@@ -433,7 +457,7 @@ class TestWorkflowChainValidation:
         """
         # Create workflow with correlation drift in msg3
         msg1 = ModelEventEnvelope(
-            payload=UserRegistrationIntent(email="test@example.com"),
+            payload=ModelTestUserRegistrationIntent(email="test@example.com"),
             correlation_id=correlation_id,
         )
 
@@ -441,7 +465,9 @@ class TestWorkflowChainValidation:
             tags={"causation_id": str(msg1.envelope_id)},
         )
         msg2 = ModelEventEnvelope(
-            payload=CreateUserCommand(email="test@example.com", name="Test User"),
+            payload=ModelTestCreateUserCommand(
+                email="test@example.com", name="Test User"
+            ),
             correlation_id=correlation_id,
             metadata=msg2_metadata,
         )
@@ -451,7 +477,9 @@ class TestWorkflowChainValidation:
             tags={"causation_id": str(msg2.envelope_id)},
         )
         msg3 = ModelEventEnvelope(
-            payload=UserCreatedEvent(user_id="user-123", email="test@example.com"),
+            payload=ModelTestUserCreatedEvent(
+                user_id="user-123", email="test@example.com"
+            ),
             correlation_id=uuid4(),  # Different correlation_id!
             metadata=msg3_metadata,
         )
@@ -480,7 +508,7 @@ class TestWorkflowChainValidation:
         """
         # Create workflow where msg3 skips msg2
         msg1 = ModelEventEnvelope(
-            payload=UserRegistrationIntent(email="test@example.com"),
+            payload=ModelTestUserRegistrationIntent(email="test@example.com"),
             correlation_id=correlation_id,
         )
 
@@ -488,7 +516,9 @@ class TestWorkflowChainValidation:
             tags={"causation_id": str(msg1.envelope_id)},
         )
         msg2 = ModelEventEnvelope(
-            payload=CreateUserCommand(email="test@example.com", name="Test User"),
+            payload=ModelTestCreateUserCommand(
+                email="test@example.com", name="Test User"
+            ),
             correlation_id=correlation_id,
             metadata=msg2_metadata,
         )
@@ -498,7 +528,9 @@ class TestWorkflowChainValidation:
             tags={"causation_id": str(msg1.envelope_id)},  # Wrong: should be msg2
         )
         msg3 = ModelEventEnvelope(
-            payload=UserCreatedEvent(user_id="user-123", email="test@example.com"),
+            payload=ModelTestUserCreatedEvent(
+                user_id="user-123", email="test@example.com"
+            ),
             correlation_id=correlation_id,
             metadata=msg3_metadata,
         )
@@ -527,8 +559,10 @@ class TestErrorMessageContent:
     def test_error_message_includes_expected_value(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        invalid_correlation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        invalid_correlation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """Violation message should include the expected value for debugging."""
         violations = validator.validate_chain(
@@ -549,8 +583,10 @@ class TestErrorMessageContent:
     def test_error_message_includes_actual_value(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        invalid_correlation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        invalid_correlation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """Violation message should include the actual value found."""
         violations = validator.validate_chain(
@@ -571,8 +607,10 @@ class TestErrorMessageContent:
     def test_error_message_includes_message_id(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        invalid_correlation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        invalid_correlation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """Violation should include the message_id where violation was detected."""
         violations = validator.validate_chain(
@@ -587,8 +625,10 @@ class TestErrorMessageContent:
     def test_violation_format_for_logging(
         self,
         validator: ChainPropagationValidator,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        invalid_correlation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        invalid_correlation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """Violation should have a format_for_logging method for structured logs."""
         violations = validator.validate_chain(
@@ -617,28 +657,30 @@ class TestRegistrationWorkflowChain:
         """Simulate full registration workflow with proper chain validation.
 
         Workflow:
-        1. UserRegistrationIntent (root)
-        2. CreateUserCommand (caused by intent)
-        3. UserCreatedEvent (caused by command)
-        4. SendWelcomeEmailCommand (caused by event)
+        1. ModelTestUserRegistrationIntent (root)
+        2. ModelTestCreateUserCommand (caused by intent)
+        3. ModelTestUserCreatedEvent (caused by command)
+        4. ModelTestSendWelcomeEmailCommand (caused by event)
 
         All messages share same correlation_id.
         Each has causation_id = previous.message_id.
         """
         validator = ChainPropagationValidator()
 
-        # Step 1: UserRegistrationIntent (root message)
+        # Step 1: ModelTestUserRegistrationIntent (root message)
         registration_intent = ModelEventEnvelope(
-            payload=UserRegistrationIntent(email="newuser@example.com"),
+            payload=ModelTestUserRegistrationIntent(email="newuser@example.com"),
             correlation_id=correlation_id,
         )
 
-        # Step 2: CreateUserCommand (caused by intent)
+        # Step 2: ModelTestCreateUserCommand (caused by intent)
         create_command_metadata = ModelEnvelopeMetadata(
             tags={"causation_id": str(registration_intent.envelope_id)},
         )
         create_command = ModelEventEnvelope(
-            payload=CreateUserCommand(email="newuser@example.com", name="New User"),
+            payload=ModelTestCreateUserCommand(
+                email="newuser@example.com", name="New User"
+            ),
             correlation_id=correlation_id,
             metadata=create_command_metadata,
         )
@@ -647,12 +689,14 @@ class TestRegistrationWorkflowChain:
         violations_1_2 = validator.validate_chain(registration_intent, create_command)
         assert len(violations_1_2) == 0, f"Intent->Command failed: {violations_1_2}"
 
-        # Step 3: UserCreatedEvent (caused by command)
+        # Step 3: ModelTestUserCreatedEvent (caused by command)
         user_created_metadata = ModelEnvelopeMetadata(
             tags={"causation_id": str(create_command.envelope_id)},
         )
         user_created = ModelEventEnvelope(
-            payload=UserCreatedEvent(user_id="user-456", email="newuser@example.com"),
+            payload=ModelTestUserCreatedEvent(
+                user_id="user-456", email="newuser@example.com"
+            ),
             correlation_id=correlation_id,
             metadata=user_created_metadata,
         )
@@ -661,12 +705,12 @@ class TestRegistrationWorkflowChain:
         violations_2_3 = validator.validate_chain(create_command, user_created)
         assert len(violations_2_3) == 0, f"Command->Event failed: {violations_2_3}"
 
-        # Step 4: SendWelcomeEmailCommand (caused by event)
+        # Step 4: ModelTestSendWelcomeEmailCommand (caused by event)
         welcome_email_metadata = ModelEnvelopeMetadata(
             tags={"causation_id": str(user_created.envelope_id)},
         )
         welcome_email = ModelEventEnvelope(
-            payload=SendWelcomeEmailCommand(
+            payload=ModelTestSendWelcomeEmailCommand(
                 user_id="user-456", email="newuser@example.com"
             ),
             correlation_id=correlation_id,
@@ -713,8 +757,10 @@ class TestChainEnforcement:
 
     def test_enforce_chain_propagation_raises_on_violation(
         self,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        invalid_correlation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        invalid_correlation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """enforce_chain_propagation should raise ChainPropagationError on violation."""
         with pytest.raises(ChainPropagationError) as exc_info:
@@ -725,8 +771,8 @@ class TestChainEnforcement:
 
     def test_enforce_chain_propagation_passes_valid_chain(
         self,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        valid_child_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        valid_child_envelope: ModelEventEnvelope[ModelTestSendWelcomeEmailCommand],
     ) -> None:
         """enforce_chain_propagation should not raise for valid chain."""
         # Should not raise
@@ -734,12 +780,12 @@ class TestChainEnforcement:
 
     def test_chain_propagation_error_contains_all_violations(
         self,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
     ) -> None:
         """ChainPropagationError should contain all detected violations."""
         # Create envelope with multiple violations
         bad_envelope = ModelEventEnvelope(
-            payload=SendWelcomeEmailCommand(
+            payload=ModelTestSendWelcomeEmailCommand(
                 user_id="user-123", email="test@example.com"
             ),
             correlation_id=uuid4(),  # Wrong correlation
@@ -768,8 +814,10 @@ class TestConvenienceFunctions:
 
     def test_validate_message_chain_returns_violations(
         self,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        invalid_correlation_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        invalid_correlation_envelope: ModelEventEnvelope[
+            ModelTestSendWelcomeEmailCommand
+        ],
     ) -> None:
         """validate_message_chain should return list of violations."""
         violations = validate_message_chain(
@@ -782,8 +830,8 @@ class TestConvenienceFunctions:
 
     def test_validate_message_chain_returns_empty_for_valid(
         self,
-        parent_envelope: ModelEventEnvelope[UserCreatedEvent],
-        valid_child_envelope: ModelEventEnvelope[SendWelcomeEmailCommand],
+        parent_envelope: ModelEventEnvelope[ModelTestUserCreatedEvent],
+        valid_child_envelope: ModelEventEnvelope[ModelTestSendWelcomeEmailCommand],
     ) -> None:
         """validate_message_chain should return empty list for valid chain."""
         violations = validate_message_chain(parent_envelope, valid_child_envelope)
@@ -915,3 +963,242 @@ class TestPydanticModelChainValidation:
             if v.violation_type == EnumChainViolationType.CORRELATION_MISMATCH
         ]
         assert len(correlation_violations) == 1
+
+
+# =============================================================================
+# Linear Chain Validation Integration Tests
+# =============================================================================
+
+
+class TestLinearChainValidation:
+    """Integration tests for strict linear chain validation.
+
+    These tests verify that validate_linear_workflow_chain() and
+    validate_linear_message_chain() correctly detect ancestor skipping
+    scenarios that pass the more flexible validate_workflow_chain().
+    """
+
+    def test_ancestor_skip_passes_workflow_but_fails_linear(
+        self,
+        validator: ChainPropagationValidator,
+        correlation_id: UUID,
+    ) -> None:
+        """Ancestor skip should pass workflow validation but fail linear validation.
+
+        This is the key difference between validate_workflow_chain() and
+        validate_linear_workflow_chain():
+
+        - validate_workflow_chain() allows msg3 to reference msg1 (any ancestor in chain)
+        - validate_linear_workflow_chain() requires msg3 to reference msg2 (direct parent)
+
+        Scenario:
+            msg1 (root) -> msg2 -> msg3
+            where msg3.causation_id = msg1 (skipping msg2)
+
+        This pattern may be valid for fan-out workflows but is invalid for
+        strict linear chains.
+        """
+        # Create workflow where msg3 skips msg2
+        msg1 = ModelEventEnvelope(
+            payload=ModelTestUserRegistrationIntent(email="test@example.com"),
+            correlation_id=correlation_id,
+        )
+
+        msg2_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(msg1.envelope_id)},
+        )
+        msg2 = ModelEventEnvelope(
+            payload=ModelTestCreateUserCommand(
+                email="test@example.com", name="Test User"
+            ),
+            correlation_id=correlation_id,
+            metadata=msg2_metadata,
+        )
+
+        # msg3 references msg1 instead of msg2 (ancestor skip!)
+        msg3_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(msg1.envelope_id)},  # Wrong: should be msg2
+        )
+        msg3 = ModelEventEnvelope(
+            payload=ModelTestUserCreatedEvent(
+                user_id="user-123", email="test@example.com"
+            ),
+            correlation_id=correlation_id,
+            metadata=msg3_metadata,
+        )
+
+        chain = [msg1, msg2, msg3]
+
+        # Workflow validation SHOULD PASS (allows ancestor skipping)
+        workflow_violations = validator.validate_workflow_chain(chain)
+        assert len(workflow_violations) == 0, (
+            f"Expected workflow validation to pass (ancestor skipping allowed), "
+            f"but got violations: {workflow_violations}"
+        )
+
+        # Linear validation SHOULD FAIL (enforces direct parent reference)
+        linear_violations = validator.validate_linear_workflow_chain(chain)
+        assert len(linear_violations) >= 1, (
+            "Expected linear validation to fail (ancestor skip detected), "
+            "but got no violations"
+        )
+
+        # Verify it's specifically a causation chain violation
+        causation_violations = [
+            v
+            for v in linear_violations
+            if v.violation_type == EnumChainViolationType.CAUSATION_CHAIN_BROKEN
+        ]
+        assert len(causation_violations) == 1
+
+        violation = causation_violations[0]
+        assert violation.expected_value == msg2.envelope_id
+        assert violation.actual_value == msg1.envelope_id
+
+    def test_validate_linear_message_chain_convenience_function(
+        self,
+        correlation_id: UUID,
+    ) -> None:
+        """Test the validate_linear_message_chain convenience function.
+
+        Verifies the module-level function works correctly for detecting
+        ancestor skipping in linear chains.
+        """
+        # Create valid linear chain
+        msg1 = ModelEventEnvelope(
+            payload=ModelTestOrderIntent(
+                order_id="order-123",
+                customer_email="test@example.com",
+                total_amount=100.0,
+            ),
+            correlation_id=correlation_id,
+        )
+
+        msg2_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(msg1.envelope_id)},
+        )
+        msg2 = ModelEventEnvelope(
+            payload=ModelTestOrderCommand(
+                order_id="order-123",
+                customer_email="test@example.com",
+                items_count=2,
+            ),
+            correlation_id=correlation_id,
+            metadata=msg2_metadata,
+        )
+
+        msg3_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(msg2.envelope_id)},
+        )
+        msg3 = ModelEventEnvelope(
+            payload=ModelTestOrderEvent(
+                order_id="order-123",
+                confirmation_number="CONF-456",
+                processed_at="2025-12-21T10:00:00Z",
+            ),
+            correlation_id=correlation_id,
+            metadata=msg3_metadata,
+        )
+
+        # Valid linear chain should pass
+        violations = validate_linear_message_chain([msg1, msg2, msg3])
+        assert len(violations) == 0
+
+        # Now create chain with ancestor skip
+        msg3_skipped_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(msg1.envelope_id)},  # Skips msg2
+        )
+        msg3_skipped = ModelEventEnvelope(
+            payload=ModelTestOrderEvent(
+                order_id="order-123",
+                confirmation_number="CONF-789",
+                processed_at="2025-12-21T10:00:00Z",
+            ),
+            correlation_id=correlation_id,
+            metadata=msg3_skipped_metadata,
+        )
+
+        # Chain with ancestor skip should fail
+        violations_with_skip = validate_linear_message_chain([msg1, msg2, msg3_skipped])
+        assert len(violations_with_skip) >= 1
+
+        # Verify the violation details
+        causation_violations = [
+            v
+            for v in violations_with_skip
+            if v.violation_type == EnumChainViolationType.CAUSATION_CHAIN_BROKEN
+        ]
+        assert len(causation_violations) == 1
+
+    def test_four_message_linear_chain_with_ancestor_skip(
+        self,
+        validator: ChainPropagationValidator,
+        correlation_id: UUID,
+    ) -> None:
+        """Test a 4-message chain where msg4 skips msg3 to reference msg2.
+
+        Workflow:
+            msg1 (root) -> msg2 -> msg3 -> msg4
+            where msg4.causation_id = msg2 (skipping msg3)
+
+        This should pass workflow validation but fail linear validation.
+        """
+        # Create 4-message workflow
+        msg1 = ModelEventEnvelope(
+            payload=ModelTestUserRegistrationIntent(email="test@example.com"),
+            correlation_id=correlation_id,
+        )
+
+        msg2_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(msg1.envelope_id)},
+        )
+        msg2 = ModelEventEnvelope(
+            payload=ModelTestCreateUserCommand(email="test@example.com", name="Test"),
+            correlation_id=correlation_id,
+            metadata=msg2_metadata,
+        )
+
+        msg3_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(msg2.envelope_id)},
+        )
+        msg3 = ModelEventEnvelope(
+            payload=ModelTestUserCreatedEvent(
+                user_id="user-1", email="test@example.com"
+            ),
+            correlation_id=correlation_id,
+            metadata=msg3_metadata,
+        )
+
+        # msg4 references msg2 instead of msg3 (ancestor skip at end of chain)
+        msg4_metadata = ModelEnvelopeMetadata(
+            tags={"causation_id": str(msg2.envelope_id)},  # Should be msg3
+        )
+        msg4 = ModelEventEnvelope(
+            payload=ModelTestSendWelcomeEmailCommand(
+                user_id="user-1", email="test@example.com"
+            ),
+            correlation_id=correlation_id,
+            metadata=msg4_metadata,
+        )
+
+        chain = [msg1, msg2, msg3, msg4]
+
+        # Workflow validation should pass
+        workflow_violations = validator.validate_workflow_chain(chain)
+        assert len(workflow_violations) == 0
+
+        # Linear validation should fail
+        linear_violations = validator.validate_linear_workflow_chain(chain)
+        assert len(linear_violations) >= 1
+
+        # Should detect that msg4 skipped msg3
+        causation_violations = [
+            v
+            for v in linear_violations
+            if v.violation_type == EnumChainViolationType.CAUSATION_CHAIN_BROKEN
+        ]
+        assert len(causation_violations) == 1
+
+        violation = causation_violations[0]
+        assert violation.expected_value == msg3.envelope_id
+        assert violation.actual_value == msg2.envelope_id

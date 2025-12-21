@@ -37,6 +37,43 @@ Message ID Semantics:
     For envelopes without an explicit causation_id field, the validator
     checks the metadata for a 'causation_id' key or 'parent_message_id' key.
 
+Causation ID Semantics:
+    **Canonical Location**: When producing child messages, set causation_id in
+    ``metadata.tags["causation_id"]`` as a string UUID. This is the preferred
+    location for new ONEX implementations.
+
+    **Why metadata.tags?** The ModelEventEnvelope's metadata.tags dict provides
+    a flexible, schema-stable location for tracing metadata. Unlike first-class
+    envelope fields (which require schema changes), tags can be extended without
+    breaking compatibility.
+
+    **Producer Responsibility**: When creating a child envelope from a parent:
+
+    .. code-block:: python
+
+        child_envelope = ModelEventEnvelope(
+            payload=child_payload,
+            correlation_id=parent_envelope.correlation_id,  # Propagate correlation
+            metadata=ModelEventMetadata(
+                tags={
+                    "causation_id": str(parent_envelope.envelope_id),  # Canonical
+                },
+            ),
+        )
+
+    **Fallback Locations**: The validator also checks these locations for
+    backwards compatibility with legacy systems and external integrations:
+
+    - ``envelope.causation_id`` - Direct attribute (if envelope model has it)
+    - ``metadata.tags["parent_message_id"]`` - Legacy terminology alias
+    - ``metadata.headers["x-causation-id"]`` - HTTP transport convention
+    - ``metadata.headers["causation-id"]`` - Alternate HTTP header name
+    - ``metadata.headers["x-parent-message-id"]`` - Legacy HTTP header
+
+    These fallbacks exist to support interoperability with older ONEX versions,
+    HTTP-based message transports, and external event producers that may use
+    different naming conventions.
+
 Thread Safety:
     The ChainPropagationValidator is stateless and thread-safe. All validation
     methods are pure functions that produce fresh result objects.
@@ -73,6 +110,7 @@ __all__ = [
     "ChainPropagationValidator",
     "ChainPropagationError",
     "validate_message_chain",
+    "validate_linear_message_chain",
     "enforce_chain_propagation",
 ]
 
@@ -128,16 +166,55 @@ def _get_correlation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
 def _get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
     """Get the causation_id from an envelope.
 
-    Checks multiple locations for causation_id:
-    1. Direct attribute 'causation_id' on the envelope
-    2. Metadata field 'causation_id' (as string, converted to UUID)
-    3. Metadata field 'parent_message_id' (as string, converted to UUID)
+    Canonical Location:
+        The **canonical location** for causation_id is ``metadata.tags["causation_id"]``
+        stored as a string UUID. When creating child envelopes, producers SHOULD set
+        causation_id in this location for consistency across the ONEX ecosystem.
+
+        Example of canonical usage when producing a child message::
+
+            child_envelope = ModelEventEnvelope(
+                # ... other fields ...
+                metadata=ModelEventMetadata(
+                    tags={
+                        "causation_id": str(parent_envelope.envelope_id),
+                    },
+                ),
+            )
+
+    Fallback Locations (Backwards Compatibility):
+        This function checks multiple locations for interoperability with legacy
+        systems and external message producers that may use different conventions:
+
+        1. **Direct attribute** ``envelope.causation_id`` (UUID) - Some envelope
+           implementations may expose causation_id as a first-class attribute.
+
+        2. **Metadata tags** ``metadata.tags["causation_id"]`` (string -> UUID) -
+           **Canonical location**. Preferred for new implementations.
+
+        3. **Metadata tags** ``metadata.tags["parent_message_id"]`` (string -> UUID) -
+           Legacy alias. Some systems use "parent_message_id" terminology.
+
+        4. **Metadata headers** with keys ``x-causation-id``, ``causation-id``,
+           ``x-parent-message-id`` (string -> UUID) - HTTP-style headers for
+           interoperability with HTTP-based message transports.
+
+    Best Practices:
+        - **Producers**: Always set ``metadata.tags["causation_id"]`` when creating
+          child envelopes. This ensures consistent behavior across validators.
+        - **Consumers**: Use this function for extraction - it handles all formats.
+        - **Migrations**: When migrating from legacy formats, populate both the
+          canonical location and the legacy location during the transition period.
 
     Args:
         envelope: The event envelope.
 
     Returns:
-        The envelope's causation_id, or None if not set.
+        The envelope's causation_id, or None if not set in any checked location.
+
+    See Also:
+        - Module docstring "Causation ID Semantics" section for architectural context
+        - ``docs/patterns/correlation_id_tracking.md`` for full tracing patterns
     """
     # Check for direct attribute
     if hasattr(envelope, "causation_id"):
@@ -553,6 +630,49 @@ class ChainPropagationValidator:
 
         return violations
 
+    def validate_linear_workflow_chain(
+        self,
+        envelopes: list[ModelEventEnvelope[object]],
+    ) -> list[ModelChainViolation]:
+        """Validate strict linear chain (no ancestor skipping).
+
+        Unlike validate_workflow_chain() which allows ancestor skipping,
+        this method enforces that each message's causation_id references
+        the immediately preceding message (direct parent).
+
+        Use this method when you need to verify a strict linear workflow
+        where messages form a single unbroken chain:
+        msg1 -> msg2 -> msg3 -> msg4
+
+        For workflows with fan-out patterns or aggregation, use
+        validate_workflow_chain() instead.
+
+        Args:
+            envelopes: Ordered list of message envelopes in the workflow.
+                Each message at index i+1 must have causation_id equal to
+                the envelope_id of message at index i.
+
+        Returns:
+            List of all chain violations detected. Empty list if the
+            entire linear chain is valid.
+
+        Example:
+            >>> validator = ChainPropagationValidator()
+            >>> # Strict linear chain - each message must reference direct parent
+            >>> violations = validator.validate_linear_workflow_chain([msg1, msg2, msg3])
+            >>> if violations:
+            ...     print("Linear chain broken!")
+        """
+        violations: list[ModelChainViolation] = []
+
+        if len(envelopes) < 2:
+            return violations
+
+        for i in range(len(envelopes) - 1):
+            violations.extend(self.validate_chain(envelopes[i], envelopes[i + 1]))
+
+        return violations
+
 
 # ==============================================================================
 # Module-Level Singleton Validator
@@ -598,6 +718,38 @@ def validate_message_chain(
         ...         print(v.format_for_logging())
     """
     return _default_validator.validate_chain(parent_envelope, child_envelope)
+
+
+def validate_linear_message_chain(
+    envelopes: list[ModelEventEnvelope[object]],
+) -> list[ModelChainViolation]:
+    """Validate strict linear chain using default validator.
+
+    Convenience function for validate_linear_workflow_chain() that uses
+    the module-level singleton validator. Validates that each message
+    in the chain references its immediate predecessor.
+
+    Unlike validate_workflow_chain() which allows ancestor skipping,
+    this function enforces strict linear ordering where each message's
+    causation_id must equal the envelope_id of the immediately preceding
+    message.
+
+    Args:
+        envelopes: Ordered list of message envelopes in the workflow.
+            Each message at index i+1 must have causation_id equal to
+            the envelope_id of message at index i.
+
+    Returns:
+        List of all chain violations detected. Empty list if the
+        entire linear chain is valid.
+
+    Example:
+        >>> violations = validate_linear_message_chain([msg1, msg2, msg3])
+        >>> if violations:
+        ...     for v in violations:
+        ...         print(v.format_for_logging())
+    """
+    return _default_validator.validate_linear_workflow_chain(envelopes)
 
 
 def enforce_chain_propagation(

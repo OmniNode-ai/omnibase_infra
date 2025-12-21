@@ -572,3 +572,153 @@ class TestEdgeCases:
         # All should pass (empty violation lists)
         for violations in results:
             assert len(violations) == 0
+
+
+# =============================================================================
+# Linear Chain Validation Tests
+# =============================================================================
+
+
+class TestValidateLinearWorkflowChain:
+    """Tests for validate_linear_workflow_chain method.
+
+    This method enforces strict linear chain validation where each message
+    must reference its immediate predecessor (no ancestor skipping).
+    """
+
+    def test_linear_chain_valid(self) -> None:
+        """Valid linear chain (each msg references direct parent) passes."""
+        validator = ChainPropagationValidator()
+        correlation_id = uuid4()
+
+        # Create valid linear chain: msg1 -> msg2 -> msg3
+        msg1 = create_envelope(correlation_id=correlation_id)
+        msg2 = create_envelope(
+            correlation_id=correlation_id,
+            causation_id=msg1.envelope_id,
+        )
+        msg3 = create_envelope(
+            correlation_id=correlation_id,
+            causation_id=msg2.envelope_id,
+        )
+
+        violations = validator.validate_linear_workflow_chain([msg1, msg2, msg3])
+
+        assert len(violations) == 0
+
+    def test_linear_chain_detects_ancestor_skip(self) -> None:
+        """Ancestor skip in linear chain should be detected as violation.
+
+        When msg3 references msg1 instead of msg2, this is an ancestor skip
+        that passes validate_workflow_chain() but fails linear validation.
+        """
+        validator = ChainPropagationValidator()
+        correlation_id = uuid4()
+
+        # Create chain where msg3 skips msg2 and references msg1
+        msg1 = create_envelope(correlation_id=correlation_id)
+        msg2 = create_envelope(
+            correlation_id=correlation_id,
+            causation_id=msg1.envelope_id,
+        )
+        # msg3 references msg1 (skipping msg2) - this is the violation
+        msg3 = create_envelope(
+            correlation_id=correlation_id,
+            causation_id=msg1.envelope_id,  # Should be msg2.envelope_id
+        )
+
+        # Linear validation should detect this as a causation chain break
+        violations = validator.validate_linear_workflow_chain([msg1, msg2, msg3])
+
+        assert len(violations) >= 1
+
+        # Should detect causation chain broken (expected msg2, got msg1)
+        causation_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumChainViolationType.CAUSATION_CHAIN_BROKEN
+        ]
+        assert len(causation_violations) == 1
+
+        violation = causation_violations[0]
+        assert violation.expected_value == msg2.envelope_id
+        assert violation.actual_value == msg1.envelope_id
+
+    def test_linear_chain_single_message_no_violations(self) -> None:
+        """Single message in chain should return no violations."""
+        validator = ChainPropagationValidator()
+
+        single = create_envelope(correlation_id=uuid4())
+
+        violations = validator.validate_linear_workflow_chain([single])
+
+        assert len(violations) == 0
+
+    def test_linear_chain_empty_list_no_violations(self) -> None:
+        """Empty envelope list should return no violations."""
+        validator = ChainPropagationValidator()
+
+        violations = validator.validate_linear_workflow_chain([])
+
+        assert len(violations) == 0
+
+    def test_linear_chain_two_messages_valid(self) -> None:
+        """Two-message linear chain should pass if properly linked."""
+        validator = ChainPropagationValidator()
+        correlation_id = uuid4()
+
+        msg1 = create_envelope(correlation_id=correlation_id)
+        msg2 = create_envelope(
+            correlation_id=correlation_id,
+            causation_id=msg1.envelope_id,
+        )
+
+        violations = validator.validate_linear_workflow_chain([msg1, msg2])
+
+        assert len(violations) == 0
+
+    def test_linear_chain_detects_correlation_mismatch(self) -> None:
+        """Linear chain should also detect correlation mismatches."""
+        validator = ChainPropagationValidator()
+        correlation_id = uuid4()
+
+        msg1 = create_envelope(correlation_id=correlation_id)
+        # msg2 has different correlation (still references msg1 correctly)
+        msg2 = create_envelope(
+            correlation_id=uuid4(),  # Different correlation!
+            causation_id=msg1.envelope_id,
+        )
+
+        violations = validator.validate_linear_workflow_chain([msg1, msg2])
+
+        assert len(violations) >= 1
+
+        correlation_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumChainViolationType.CORRELATION_MISMATCH
+        ]
+        assert len(correlation_violations) == 1
+
+    def test_linear_chain_detects_missing_causation(self) -> None:
+        """Linear chain should detect missing causation_id."""
+        validator = ChainPropagationValidator()
+        correlation_id = uuid4()
+
+        msg1 = create_envelope(correlation_id=correlation_id)
+        msg2 = create_envelope(
+            correlation_id=correlation_id,
+            causation_id=None,  # Missing causation!
+        )
+
+        violations = validator.validate_linear_workflow_chain([msg1, msg2])
+
+        assert len(violations) >= 1
+
+        causation_violations = [
+            v
+            for v in violations
+            if v.violation_type == EnumChainViolationType.CAUSATION_CHAIN_BROKEN
+        ]
+        assert len(causation_violations) == 1
+        assert causation_violations[0].actual_value is None
