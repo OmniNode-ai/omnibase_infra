@@ -49,6 +49,13 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
             Default: True.
         cleanup_interval_seconds: Interval between cleanup runs in seconds.
             Default: 3600 (1 hour).
+        clock_skew_tolerance_seconds: Buffer added to TTL during cleanup to prevent
+            premature deletion due to clock skew between distributed nodes.
+            Default: 60 (1 minute).
+        cleanup_batch_size: Number of records to delete per batch during cleanup.
+            Batched deletion reduces lock contention. Default: 10000.
+        cleanup_max_iterations: Maximum number of batch iterations during cleanup.
+            Prevents runaway loops. Default: 100.
 
     Example:
         >>> config = ModelPostgresIdempotencyStoreConfig(
@@ -169,6 +176,40 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         description="Interval between cleanup runs in seconds",
         ge=60,  # Minimum 1 minute
         le=86400,  # Maximum 24 hours
+    )
+    clock_skew_tolerance_seconds: int = Field(
+        default=60,  # 1 minute tolerance
+        description=(
+            "Buffer added to TTL during cleanup to prevent premature deletion due to "
+            "clock skew between distributed nodes. In distributed systems, nodes may "
+            "have slightly different system times. This tolerance ensures records are "
+            "not cleaned up before all nodes consider them expired. "
+            "Recommended: Use NTP synchronization in production and set this to at "
+            "least the maximum expected clock drift between nodes."
+        ),
+        ge=0,  # Can be 0 to disable tolerance
+        le=3600,  # Maximum 1 hour tolerance
+    )
+    cleanup_batch_size: int = Field(
+        default=10000,
+        description=(
+            "Number of records to delete per batch during cleanup. "
+            "Batched deletion reduces lock contention on high-volume tables by "
+            "breaking large deletes into smaller transactions, allowing other "
+            "operations to interleave and preventing long-running locks."
+        ),
+        ge=100,  # Minimum batch size
+        le=100000,  # Maximum batch size
+    )
+    cleanup_max_iterations: int = Field(
+        default=100,
+        description=(
+            "Maximum number of batch iterations during cleanup. "
+            "Prevents runaway cleanup loops in extreme cases. "
+            "Total max records deleted = cleanup_batch_size * cleanup_max_iterations."
+        ),
+        ge=1,
+        le=1000,
     )
 
     @field_validator("pool_max_size", mode="after")

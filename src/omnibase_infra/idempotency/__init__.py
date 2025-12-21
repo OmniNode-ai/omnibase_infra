@@ -6,13 +6,14 @@ This module provides idempotency checking and deduplication capabilities
 for message processing in distributed systems.
 
 Components:
-    - Models: Pydantic models for idempotency records, check results, and configuration
+    - Models: Pydantic models for idempotency records, check results, configuration, and metrics
     - Store: Persistent storage backends for idempotency records (PostgreSQL, in-memory)
     - Guard: Decorator and middleware for automatic idempotency checking
 
 Models:
     - ModelIdempotencyRecord: Record of a processed message for deduplication
     - ModelIdempotencyCheckResult: Result of an idempotency check operation
+    - ModelIdempotencyStoreMetrics: Metrics for store observability
     - ModelPostgresIdempotencyStoreConfig: Configuration for PostgreSQL store
     - ModelIdempotencyGuardConfig: Configuration for the idempotency guard
 
@@ -39,6 +40,7 @@ Example - Models:
     >>> from omnibase_infra.idempotency import (
     ...     ModelIdempotencyRecord,
     ...     ModelIdempotencyCheckResult,
+    ...     ModelIdempotencyStoreMetrics,
     ...     ModelPostgresIdempotencyStoreConfig,
     ...     ModelIdempotencyGuardConfig,
     ... )
@@ -58,12 +60,17 @@ Example - Models:
     ...     store_type="postgres",
     ...     domain_from_operation=True,
     ... )
+    >>>
+    >>> # Get store metrics
+    >>> metrics = store.get_metrics()
+    >>> print(f"Duplicate rate: {metrics.duplicate_rate:.2%}")
 """
 
 from omnibase_infra.idempotency.models import (
     ModelIdempotencyCheckResult,
     ModelIdempotencyGuardConfig,
     ModelIdempotencyRecord,
+    ModelIdempotencyStoreMetrics,
     ModelPostgresIdempotencyStoreConfig,
 )
 from omnibase_infra.idempotency.store_inmemory import InMemoryIdempotencyStore
@@ -74,6 +81,7 @@ __all__ = [
     "ModelIdempotencyCheckResult",
     "ModelIdempotencyGuardConfig",
     "ModelIdempotencyRecord",
+    "ModelIdempotencyStoreMetrics",
     "ModelPostgresIdempotencyStoreConfig",
     # Stores
     "InMemoryIdempotencyStore",

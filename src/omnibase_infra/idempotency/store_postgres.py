@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
 # ruff: noqa: S608
-# S608 disabled: All SQL f-strings use table_name which is validated via
-# regex pattern ^[a-zA-Z_][a-zA-Z0-9_]*$ in ModelPostgresIdempotencyStoreConfig.
-# This ensures only valid PostgreSQL identifiers are used, preventing SQL injection.
+# S608 disabled: All SQL f-strings use table_name which is validated via:
+# 1. Pydantic regex pattern ^[a-zA-Z_][a-zA-Z0-9_]*$ in ModelPostgresIdempotencyStoreConfig
+# 2. Runtime validation in _validate_table_name() (defense-in-depth)
+# This defense-in-depth approach ensures only valid PostgreSQL identifiers are used,
+# preventing SQL injection even if config validation is somehow bypassed.
 """PostgreSQL-based Idempotency Store Implementation.
 
 This module provides a PostgreSQL-based implementation of the
@@ -23,16 +25,44 @@ Table Schema:
         UNIQUE (domain, message_id)
     );
     CREATE INDEX idx_idempotency_processed_at ON idempotency_records(processed_at);
+    CREATE INDEX idx_idempotency_domain ON idempotency_records(domain);
+
+Clock Skew Considerations:
+    In distributed systems, nodes may have slightly different system clocks.
+    This can cause issues with TTL-based cleanup:
+
+    Problem Scenario:
+        - Node A processes message at 10:00:01 (its clock)
+        - Node B's clock is 1 second behind (shows 10:00:00)
+        - Cleanup runs on Node B using now() - it might delete records
+          that Node A considers still valid
+
+    Solution:
+        The store applies a clock_skew_tolerance_seconds buffer (default: 60s)
+        to all TTL calculations during cleanup. The effective TTL becomes:
+        effective_ttl = ttl_seconds + clock_skew_tolerance_seconds
+
+        This ensures records are only cleaned up after ALL nodes in the
+        distributed system would consider them expired.
+
+    Production Recommendations:
+        1. Use NTP (Network Time Protocol) on all nodes to minimize clock drift
+        2. Set clock_skew_tolerance_seconds to at least the maximum expected
+           clock drift between nodes (default 60s is conservative for NTP-synced systems)
+        3. Monitor NTP synchronization status across your infrastructure
+        4. Consider higher tolerance values (e.g., 300s) for multi-datacenter deployments
 
 Security Note:
     - DSN contains credentials - never log the raw value
     - Use parameterized queries to prevent SQL injection
     - Connection pool handles credential management
+    - Table names are validated at both config and runtime level (defense-in-depth)
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timezone
 from uuid import UUID, uuid4
 
@@ -46,11 +76,19 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     RuntimeHostError,
 )
-from omnibase_infra.idempotency.models import ModelPostgresIdempotencyStoreConfig
+from omnibase_infra.idempotency.models import (
+    ModelIdempotencyStoreMetrics,
+    ModelPostgresIdempotencyStoreConfig,
+)
 
 logger = logging.getLogger(__name__)
+
+# Regex pattern for valid PostgreSQL table names (defense-in-depth validation)
+# Must start with letter or underscore, followed by letters, digits, or underscores
+_TABLE_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 class PostgresIdempotencyStore(ProtocolIdempotencyStore):
@@ -66,6 +104,16 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         - TTL-based cleanup for expired records
         - Composite key (domain, message_id) for domain-isolated deduplication
         - Full correlation ID support for distributed tracing
+        - Defense-in-depth table name validation for SQL injection prevention
+
+    Security:
+        Table names are validated at two levels:
+        1. Pydantic config model: regex pattern on table_name field
+        2. Runtime validation: _validate_table_name() in __init__
+
+        This defense-in-depth approach ensures SQL injection prevention even
+        if the config validation is somehow bypassed (e.g., through direct
+        attribute assignment or deserialization from untrusted sources).
 
     Thread Safety:
         This store is thread-safe. The underlying asyncpg pool handles
@@ -95,15 +143,76 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
 
         Args:
             config: Configuration model containing DSN, pool settings, and TTL options.
+
+        Raises:
+            ProtocolConfigurationError: If table_name contains invalid characters
+                (defense-in-depth validation for SQL injection prevention).
         """
         self._config = config
         self._pool: asyncpg.Pool | None = None
         self._initialized: bool = False
+        self._metrics = ModelIdempotencyStoreMetrics()
+
+        # Defense-in-depth: Validate table name at runtime even though
+        # Pydantic config already validates it. This protects against:
+        # - Direct attribute assignment bypassing Pydantic validation
+        # - Deserialization from untrusted sources
+        # - Future code changes that might bypass config validation
+        self._validate_table_name(config.table_name)
 
     @property
     def is_initialized(self) -> bool:
         """Return True if the store has been initialized."""
         return self._initialized
+
+    def get_metrics(self) -> ModelIdempotencyStoreMetrics:
+        """Get current store metrics for observability.
+
+        Returns a copy of the current metrics to prevent external mutation.
+        Metrics include:
+            - total_checks: Total check_and_record calls
+            - duplicate_count: Number of duplicates detected
+            - error_count: Number of failed checks
+            - duplicate_rate: Ratio of duplicates to total checks
+            - error_rate: Ratio of errors to total checks
+            - total_cleanup_deleted: Total records cleaned up
+            - last_cleanup_deleted: Records deleted in last cleanup
+            - last_cleanup_at: Timestamp of last cleanup
+
+        Returns:
+            Copy of current metrics.
+        """
+        return self._metrics.model_copy()
+
+    def _validate_table_name(self, table_name: str) -> None:
+        """Validate table name for SQL injection prevention (defense-in-depth).
+
+        This method provides runtime validation of the table name pattern,
+        complementing the Pydantic field validation in the config model.
+        Together they form a defense-in-depth approach to prevent SQL injection.
+
+        Args:
+            table_name: The table name to validate.
+
+        Raises:
+            ProtocolConfigurationError: If table_name doesn't match the
+                expected pattern ^[a-zA-Z_][a-zA-Z0-9_]*$
+        """
+        if not _TABLE_NAME_PATTERN.match(table_name):
+            context = ModelInfraErrorContext(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="validate_table_name",
+                target_name="postgres_idempotency_store",
+                correlation_id=uuid4(),
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid table name: {table_name}. "
+                "Must match pattern ^[a-zA-Z_][a-zA-Z0-9_]*$ "
+                "(letters, digits, underscores only, must start with letter or underscore)",
+                context=context,
+                parameter="table_name",
+                value=table_name,
+            )
 
     async def initialize(self) -> None:
         """Initialize the connection pool and ensure table exists.
@@ -147,21 +256,37 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 },
             )
         except asyncpg.InvalidPasswordError as e:
+            # Clean up pool if it was created before table setup failed
+            if self._pool is not None:
+                await self._pool.close()
+                self._pool = None
             raise InfraConnectionError(
                 "Database authentication failed - check credentials",
                 context=context,
             ) from e
         except asyncpg.InvalidCatalogNameError as e:
+            # Clean up pool if it was created before table setup failed
+            if self._pool is not None:
+                await self._pool.close()
+                self._pool = None
             raise InfraConnectionError(
                 "Database not found - check database name",
                 context=context,
             ) from e
         except OSError as e:
+            # Clean up pool if it was created before table setup failed
+            if self._pool is not None:
+                await self._pool.close()
+                self._pool = None
             raise InfraConnectionError(
                 "Failed to connect to database - check host and port",
                 context=context,
             ) from e
         except Exception as e:
+            # Clean up pool if it was created before table setup failed
+            if self._pool is not None:
+                await self._pool.close()
+                self._pool = None
             raise RuntimeHostError(
                 f"Failed to initialize idempotency store: {type(e).__name__}",
                 context=context,
@@ -174,6 +299,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             - UUID primary key
             - Composite unique constraint on (domain, message_id)
             - Index on processed_at for efficient TTL cleanup
+            - Index on domain for efficient is_processed queries
         """
         if self._pool is None:
             raise RuntimeHostError(
@@ -198,14 +324,21 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             )
         """
 
-        create_index_sql = f"""
+        create_processed_at_index_sql = f"""
             CREATE INDEX IF NOT EXISTS idx_{self._config.table_name}_processed_at
             ON {self._config.table_name}(processed_at)
         """
 
+        # Index on domain for efficient is_processed queries filtering by domain
+        create_domain_index_sql = f"""
+            CREATE INDEX IF NOT EXISTS idx_{self._config.table_name}_domain
+            ON {self._config.table_name}(domain)
+        """
+
         async with self._pool.acquire() as conn:
             await conn.execute(create_table_sql)
-            await conn.execute(create_index_sql)
+            await conn.execute(create_processed_at_index_sql)
+            await conn.execute(create_domain_index_sql)
 
     async def shutdown(self) -> None:
         """Close the connection pool and release resources."""
@@ -281,6 +414,11 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 # asyncpg returns "INSERT 0 1" for success, "INSERT 0 0" for conflict
                 is_new: bool = str(result).endswith(" 1")
 
+                # Update metrics
+                self._metrics.total_checks += 1
+                if not is_new:
+                    self._metrics.duplicate_count += 1
+
                 if is_new:
                     logger.debug(
                         "Recorded new message",
@@ -304,17 +442,23 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 return is_new
 
         except asyncpg.QueryCanceledError as e:
+            self._metrics.total_checks += 1
+            self._metrics.error_count += 1
             raise InfraTimeoutError(
                 f"Check and record timed out after {self._config.command_timeout}s",
                 context=context,
                 timeout_seconds=self._config.command_timeout,
             ) from e
         except asyncpg.PostgresConnectionError as e:
+            self._metrics.total_checks += 1
+            self._metrics.error_count += 1
             raise InfraConnectionError(
                 "Database connection lost during check_and_record",
                 context=context,
             ) from e
         except asyncpg.PostgresError as e:
+            self._metrics.total_checks += 1
+            self._metrics.error_count += 1
             raise RuntimeHostError(
                 f"Database error during check_and_record: {type(e).__name__}",
                 context=context,
@@ -406,7 +550,8 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         Raises:
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If operation times out.
-            RuntimeHostError: If store is not initialized or processed_at is naive.
+            RuntimeHostError: If store is not initialized or if processed_at
+                is a naive (timezone-unaware) datetime.
         """
         op_correlation_id = correlation_id or uuid4()
         context = ModelInfraErrorContext(
@@ -422,13 +567,12 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 context=context,
             )
 
-        # Validate timezone awareness
+        # Validate timezone awareness - fail fast on naive datetime
         if processed_at is not None and processed_at.tzinfo is None:
-            logger.warning(
-                "Naive datetime provided to mark_processed, treating as UTC",
-                extra={"message_id": str(message_id)},
+            raise RuntimeHostError(
+                "processed_at must be timezone-aware (got naive datetime)",
+                context=context,
             )
-            processed_at = processed_at.replace(tzinfo=UTC)
 
         effective_processed_at = processed_at or datetime.now(UTC)
         record_id = uuid4()
@@ -485,23 +629,73 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
     async def cleanup_expired(
         self,
         ttl_seconds: int,
+        batch_size: int | None = None,
+        max_iterations: int | None = None,
     ) -> int:
-        """Remove entries older than TTL.
+        """Remove entries older than TTL using batched deletion with clock skew tolerance.
 
         Cleans up old idempotency records based on processed_at timestamp.
-        Uses batched deletion to avoid long-running transactions.
+        Uses batched deletion to reduce lock contention on high-volume tables.
+
+        Batched Deletion Benefits:
+            - Reduces lock contention by breaking large deletes into smaller
+              transactions
+            - Prevents long-running transactions that can block other operations
+            - Allows other database operations to interleave between batches
+            - Limits transaction log growth by committing in smaller chunks
+
+        Clock Skew Handling:
+            In distributed systems, nodes may have slightly different system clocks.
+            To prevent premature deletion of records that some nodes may still
+            consider valid, we add a clock_skew_tolerance_seconds buffer to the TTL.
+
+            Example scenario without tolerance:
+                - Node A processes message at 10:00:01 (its clock)
+                - Node B checks for duplicate at 10:00:00 (its clock is 1 second behind)
+                - If cleanup runs on Node B using now(), it might delete records
+                  that Node A just created (from Node B's perspective, they're from
+                  the "future")
+
+            With tolerance, effective_ttl = ttl_seconds + clock_skew_tolerance_seconds,
+            ensuring records are only cleaned up after ALL nodes would consider them
+            expired.
 
         Args:
-            ttl_seconds: Time-to-live in seconds. Records older than this
-                value are removed.
+            ttl_seconds: Time-to-live in seconds. Records older than
+                (ttl_seconds + clock_skew_tolerance_seconds) are removed.
+            batch_size: Number of records to delete per batch. Defaults to
+                config.cleanup_batch_size (10000). Use larger values for faster
+                cleanup at the cost of longer locks, smaller values for better
+                concurrency.
+            max_iterations: Maximum number of batch iterations. Defaults to
+                config.cleanup_max_iterations (100). Prevents runaway cleanup
+                loops. Total max records = batch_size * max_iterations.
 
         Returns:
-            Number of entries removed.
+            Total number of entries removed across all batches.
 
         Raises:
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If cleanup times out.
             RuntimeHostError: If store is not initialized.
+
+        Example:
+            >>> # Standard cleanup using config defaults
+            >>> removed = await store.cleanup_expired(ttl_seconds=86400)
+            >>> print(f"Removed {removed} expired records")
+
+            >>> # High-concurrency system: smaller batches
+            >>> removed = await store.cleanup_expired(
+            ...     ttl_seconds=86400,
+            ...     batch_size=1000,
+            ... )
+
+            >>> # Bulk cleanup with large batches
+            >>> removed = await store.cleanup_expired(
+            ...     ttl_seconds=86400,
+            ...     batch_size=50000,
+            ...     max_iterations=10,
+            ... )
         """
         context = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
@@ -516,30 +710,79 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 context=context,
             )
 
-        # Delete records older than TTL
-        # Using interval arithmetic for clarity and correctness
+        # Use config defaults if not specified
+        effective_batch_size = batch_size or self._config.cleanup_batch_size
+        effective_max_iterations = max_iterations or self._config.cleanup_max_iterations
+
+        # Apply clock skew tolerance to prevent premature deletion
+        # effective_ttl = ttl_seconds + clock_skew_tolerance
+        effective_ttl = ttl_seconds + self._config.clock_skew_tolerance_seconds
+
+        # Batched delete using subquery with LIMIT
+        # This pattern:
+        # 1. Selects up to batch_size expired record IDs
+        # 2. Deletes only those specific records
+        # 3. Repeats until no more records are found or max_iterations reached
+        #
         # table_name is validated via regex in ModelPostgresIdempotencyStoreConfig
-        delete_sql = f"""  # noqa: S608
+        delete_batch_sql = f"""  # noqa: S608
             DELETE FROM {self._config.table_name}
-            WHERE processed_at < now() - interval '1 second' * $1
+            WHERE id IN (
+                SELECT id FROM {self._config.table_name}
+                WHERE processed_at < now() - interval '1 second' * $1
+                LIMIT $2
+            )
         """
 
+        total_removed = 0
+        iteration = 0
+
         try:
-            async with self._pool.acquire() as conn:
-                result = await conn.execute(delete_sql, ttl_seconds)
-                # Parse "DELETE N" to get count
-                removed_count = int(result.split()[-1]) if result else 0
+            while iteration < effective_max_iterations:
+                iteration += 1
 
-                logger.info(
-                    "Cleaned up expired idempotency records",
-                    extra={
-                        "removed_count": removed_count,
-                        "ttl_seconds": ttl_seconds,
-                        "table_name": self._config.table_name,
-                    },
-                )
+                async with self._pool.acquire() as conn:
+                    result = await conn.execute(
+                        delete_batch_sql, effective_ttl, effective_batch_size
+                    )
+                    # Parse "DELETE N" to get count
+                    batch_removed = int(result.split()[-1]) if result else 0
 
-                return removed_count
+                    total_removed += batch_removed
+
+                    logger.debug(
+                        "Cleanup batch completed",
+                        extra={
+                            "batch_removed": batch_removed,
+                            "total_removed": total_removed,
+                            "iteration": iteration,
+                            "batch_size": effective_batch_size,
+                        },
+                    )
+
+                    # If we deleted fewer than batch_size, we're done
+                    if batch_removed < effective_batch_size:
+                        break
+
+            # Update cleanup metrics
+            self._metrics.total_cleanup_deleted += total_removed
+            self._metrics.last_cleanup_deleted = total_removed
+            self._metrics.last_cleanup_at = datetime.now(UTC)
+
+            logger.info(
+                "Cleaned up expired idempotency records",
+                extra={
+                    "total_removed": total_removed,
+                    "ttl_seconds": ttl_seconds,
+                    "clock_skew_tolerance_seconds": self._config.clock_skew_tolerance_seconds,
+                    "effective_ttl_seconds": effective_ttl,
+                    "table_name": self._config.table_name,
+                    "iterations": iteration,
+                    "batch_size": effective_batch_size,
+                },
+            )
+
+            return total_removed
 
         except asyncpg.QueryCanceledError as e:
             raise InfraTimeoutError(
@@ -561,20 +804,59 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
     async def health_check(self) -> bool:
         """Check if the store is healthy and can accept operations.
 
-        Performs a simple query to verify database connectivity.
+        Performs both read and write verification to ensure the database
+        is fully operational:
+        1. Read check: SELECT 1 to verify read connectivity
+        2. Write check: INSERT into the actual table within a transaction
+           that is rolled back, verifying write permissions without leaving
+           any persistent data.
 
         Returns:
-            True if store is healthy, False otherwise.
+            True if store is healthy (read and write both work), False otherwise.
         """
         if not self._initialized or self._pool is None:
             return False
 
         try:
             async with self._pool.acquire() as conn:
+                # Step 1: Verify read access
                 await conn.fetchval("SELECT 1")
-                return True
+
+                # Step 2: Verify write access using a transaction with rollback
+                # This tests INSERT permissions without persisting any data
+                # table_name is validated via regex in ModelPostgresIdempotencyStoreConfig
+                async with conn.transaction():
+                    health_check_id = uuid4()
+                    insert_sql = f"""
+                        INSERT INTO {self._config.table_name}
+                            (id, domain, message_id, correlation_id, processed_at)
+                        VALUES ($1, $2, $3, $4, now())
+                    """
+                    await conn.execute(
+                        insert_sql,
+                        health_check_id,
+                        "__health_check__",
+                        health_check_id,
+                        None,
+                    )
+                    # Raise to trigger rollback - this is intentional
+                    raise _HealthCheckRollbackError
+
+        except _HealthCheckRollbackError:
+            # Expected - write test succeeded and was rolled back
+            return True
         except Exception:
+            # Any other exception indicates unhealthy state
             return False
+
+
+class _HealthCheckRollbackError(Exception):
+    """Internal exception used to trigger transaction rollback in health checks.
+
+    This exception is raised intentionally after a successful INSERT
+    to trigger a rollback, ensuring no persistent data is left behind
+    while still verifying write permissions.
+    """
 
 
 __all__: list[str] = ["PostgresIdempotencyStore"]
