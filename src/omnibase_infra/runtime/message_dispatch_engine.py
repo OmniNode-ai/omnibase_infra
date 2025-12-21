@@ -1634,6 +1634,13 @@ class MessageDispatchEngine:
         cached in DispatchEntryInternal.accepts_context for performance.
         No signature inspection occurs during dispatch execution.
 
+        Type Safety Warnings:
+            When a dispatcher has 2+ parameters but the second parameter doesn't
+            follow conventional naming (containing 'context' or 'ctx'), a warning
+            is logged to help developers identify potential signature mismatches.
+            This is non-blocking - the method still returns True for backwards
+            compatibility with existing dispatchers.
+
         Args:
             dispatcher: The dispatcher callable to inspect.
 
@@ -1641,6 +1648,8 @@ class MessageDispatchEngine:
             True if dispatcher accepts a context parameter, False otherwise.
 
         .. versionadded:: 0.5.0
+        .. versionchanged:: 0.5.1
+            Added warning logging for unconventional parameter naming.
         """
         try:
             sig = inspect.signature(dispatcher)
@@ -1655,7 +1664,31 @@ class MessageDispatchEngine:
             #
             # Strict == 2 would reject valid dispatchers that happen to have
             # extra optional parameters, which is unnecessarily restrictive.
-            return len(params) >= 2
+            if len(params) < 2:
+                return False
+
+            # Type safety enhancement: Warn if second parameter doesn't follow
+            # context naming convention. This helps developers identify potential
+            # signature mismatches where a 2+ parameter dispatcher might not
+            # actually expect a ModelDispatchContext.
+            #
+            # This is NON-BLOCKING - we still return True for backwards compatibility.
+            # The warning is informational to help improve code quality.
+            second_param = params[1]
+            second_name = second_param.name.lower()
+            if "context" not in second_name and "ctx" not in second_name:
+                dispatcher_name = getattr(dispatcher, "__name__", str(dispatcher))
+                self._logger.warning(
+                    "Dispatcher '%s' has 2+ parameters but second parameter '%s' "
+                    "doesn't follow context naming convention. "
+                    "Expected parameter name containing 'context' or 'ctx'. "
+                    "If this dispatcher expects a ModelDispatchContext, consider "
+                    "renaming the parameter for clarity.",
+                    dispatcher_name,
+                    second_param.name,
+                )
+
+            return True
         except (ValueError, TypeError) as e:
             # If we can't inspect the signature, assume no context and log warning
             self._logger.warning(

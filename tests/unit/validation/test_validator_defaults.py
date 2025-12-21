@@ -238,7 +238,7 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (410)
+            max_unions=INFRA_MAX_UNIONS,  # Default max from constant
             strict=INFRA_UNIONS_STRICT,  # Strict mode (True) per OMN-983
         )
 
@@ -488,12 +488,12 @@ class TestUnionCountRegressionGuard:
         the threshold, it indicates new code added unions without
         using proper typed patterns from omnibase_core.
 
-        Current baseline (~402 unions as of 2025-12-20):
+        Current baseline (~485 unions as of 2025-12-21):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold: INFRA_MAX_UNIONS (410) - buffer above baseline after json_types.py.
+        Threshold: INFRA_MAX_UNIONS (491) - buffer above baseline.
         Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
         """
         result = validate_infra_union_usage()

@@ -633,7 +633,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS (465).
+        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS.
         strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
 
     Returns:

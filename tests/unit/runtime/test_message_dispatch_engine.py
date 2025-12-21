@@ -3355,6 +3355,123 @@ class TestContextAwareDispatch:
         # Should return False, not raise an exception
         assert result is False
 
+    def test_dispatcher_accepts_context_logs_warning_for_unconventional_parameter_name(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test warning logged for second param without context naming.
+
+        When a dispatcher has 2+ parameters but the second parameter name doesn't
+        contain 'context' or 'ctx', a warning should be logged to help developers
+        identify potential signature mismatches.
+        """
+        import logging
+
+        # Create engine with logger that captures warnings
+        logger = logging.getLogger("test.dispatch.warning")
+        engine = MessageDispatchEngine(logger=logger)
+
+        # Dispatcher with unconventional second parameter name
+        def dispatcher_with_unusual_param(
+            envelope: ModelEventEnvelope[object],
+            some_other_param: str,  # Doesn't contain 'context' or 'ctx'
+        ) -> str:
+            return "output"
+
+        with caplog.at_level(logging.WARNING, logger="test.dispatch.warning"):
+            result = engine._dispatcher_accepts_context(dispatcher_with_unusual_param)
+
+        # Method should still return True (backwards compatible)
+        assert result is True
+
+        # Warning should have been logged
+        assert len(caplog.records) == 1
+        warning_record = caplog.records[0]
+        assert warning_record.levelno == logging.WARNING
+        assert "dispatcher_with_unusual_param" in warning_record.message
+        assert "some_other_param" in warning_record.message
+        assert "context naming convention" in warning_record.message
+
+    def test_dispatcher_accepts_context_no_warning_for_context_parameter(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that no warning is logged when second parameter contains 'context'."""
+        import logging
+
+        logger = logging.getLogger("test.dispatch.no_warning")
+        engine = MessageDispatchEngine(logger=logger)
+
+        # Dispatcher with proper context parameter name
+        def dispatcher_with_context(
+            envelope: ModelEventEnvelope[object],
+            dispatch_context: object,  # Contains 'context'
+        ) -> str:
+            return "output"
+
+        with caplog.at_level(logging.WARNING, logger="test.dispatch.no_warning"):
+            result = engine._dispatcher_accepts_context(dispatcher_with_context)
+
+        # Method should return True
+        assert result is True
+
+        # No warning should be logged
+        assert len(caplog.records) == 0
+
+    def test_dispatcher_accepts_context_no_warning_for_ctx_parameter(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that no warning is logged when second parameter contains 'ctx'."""
+        import logging
+
+        logger = logging.getLogger("test.dispatch.ctx")
+        engine = MessageDispatchEngine(logger=logger)
+
+        # Dispatcher with 'ctx' abbreviation in parameter name
+        def dispatcher_with_ctx(
+            envelope: ModelEventEnvelope[object],
+            dispatch_ctx: object,  # Contains 'ctx'
+        ) -> str:
+            return "output"
+
+        with caplog.at_level(logging.WARNING, logger="test.dispatch.ctx"):
+            result = engine._dispatcher_accepts_context(dispatcher_with_ctx)
+
+        # Method should return True
+        assert result is True
+
+        # No warning should be logged
+        assert len(caplog.records) == 0
+
+    def test_dispatcher_accepts_context_case_insensitive_parameter_check(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that parameter name check is case-insensitive."""
+        import logging
+
+        logger = logging.getLogger("test.dispatch.case")
+        engine = MessageDispatchEngine(logger=logger)
+
+        # Dispatcher with CONTEXT in uppercase
+        def dispatcher_with_uppercase_context(
+            envelope: ModelEventEnvelope[object],
+            DISPATCH_CONTEXT: object,  # noqa: N803 - intentional uppercase for test
+        ) -> str:
+            return "output"
+
+        with caplog.at_level(logging.WARNING, logger="test.dispatch.case"):
+            result = engine._dispatcher_accepts_context(
+                dispatcher_with_uppercase_context
+            )
+
+        # Method should return True
+        assert result is True
+
+        # No warning should be logged (case-insensitive check)
+        assert len(caplog.records) == 0
+
     @pytest.mark.asyncio
     async def test_context_aware_dispatcher_with_reducer_gets_no_time_injection(
         self,
