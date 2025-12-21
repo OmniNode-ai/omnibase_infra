@@ -71,13 +71,22 @@ class SomeGenericPayload:
 class OrderSummaryProjection:
     """Test projection class that ends with 'Projection'.
 
-    TODO(OMN-977): Add dispatch tests for PROJECTION category routing.
-    PROJECTION messages are typically internal state representations consumed
-    by reducers. Unlike EVENT/COMMAND/INTENT, PROJECTION has no topic naming
-    constraint (can exist on any topic). Tests should verify:
-    - Dispatcher registration for PROJECTION category
-    - Routing to PROJECTION handlers
-    - Category inference from *Projection class suffix
+    Note on PROJECTION semantics (OMN-985 resolution):
+        PROJECTION is NOT a message category for routing. This class exists
+        to demonstrate the distinction between node output types and message
+        categories. Projections are:
+
+        - Produced by REDUCER nodes as local state outputs
+        - NOT routed via MessageDispatchEngine
+        - NOT part of EnumMessageCategory
+        - Applied locally by the runtime to a projection sink
+
+        The MessageDispatchEngine only routes EVENT, COMMAND, and INTENT
+        message categories. Projection handling is separate from message
+        dispatch and is the responsibility of the runtime's projection sink.
+
+        See EnumNodeOutputType.PROJECTION for the node output type and
+        CLAUDE.md "Enum Usage" section for the full distinction.
     """
 
     def __init__(self, order_id: str, total: float) -> None:
@@ -896,6 +905,49 @@ class TestDispatchErrors:
         assert result.status == EnumDispatchStatus.INVALID_MESSAGE
         assert result.error_message is not None
         assert "category" in result.error_message.lower()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_projection_topic_returns_invalid_message(
+        self,
+        dispatch_engine: MessageDispatchEngine,
+    ) -> None:
+        """Test that PROJECTION topics are NOT routable via MessageDispatchEngine.
+
+        Architectural Decision (OMN-985):
+            PROJECTION is NOT a message category for routing. Projections are:
+            - Node output types (EnumNodeOutputType.PROJECTION), not message categories
+            - Produced by REDUCER nodes as local state outputs
+            - Applied locally by the runtime to a projection sink
+            - NOT routed via Kafka topics or MessageDispatchEngine
+
+            Topics containing ".projections" segment are therefore invalid for
+            dispatch because EnumMessageCategory.from_topic() does not recognize
+            "projections" as a valid category suffix.
+
+        See Also:
+            - EnumMessageCategory: Only EVENT, COMMAND, INTENT are valid
+            - EnumNodeOutputType: PROJECTION exists here for node validation
+            - CLAUDE.md "Enum Usage" section for full distinction
+        """
+        dispatch_engine.freeze()
+
+        # Create envelope with projection payload
+        projection_envelope = ModelEventEnvelope(
+            payload=OrderSummaryProjection(order_id="order-123", total=99.99),
+            correlation_id=uuid4(),
+        )
+
+        # Topic with .projections segment - NOT a valid routable category
+        result = await dispatch_engine.dispatch(
+            "dev.order.projections.v1", projection_envelope
+        )
+
+        # PROJECTION is not recognized as a message category
+        assert result.status == EnumDispatchStatus.INVALID_MESSAGE
+        assert result.error_message is not None
+        assert "category" in result.error_message.lower()
+        # Verify the topic is mentioned in the error for debugging
+        assert "projections" in result.error_message.lower()
 
     @pytest.mark.skip(
         reason="TODO(OMN-934): Re-enable when ModelEventEnvelope.infer_category() is implemented in omnibase_core"

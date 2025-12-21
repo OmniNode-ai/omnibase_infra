@@ -49,11 +49,23 @@ Message Dispatch Engine
 - **DispatcherRegistry**: Thread-safe registry for message dispatchers with freeze pattern
 - **ProtocolMessageDispatcher**: Protocol for category-based message dispatchers
 
+Chain-Aware Dispatch (OMN-951)
+------------------------------
+- **ChainAwareDispatcher**: Dispatch wrapper with correlation/causation chain validation
+- **propagate_chain_context**: Helper to propagate chain context from parent to child
+- **validate_dispatch_chain**: Validate chain propagation and raise on violations
+
 The runtime module serves as the entry point for running infrastructure services
 and configuring the handler and policy ecosystem.
 """
 
 from __future__ import annotations
+
+# isort: off
+# NOTE: Import order matters here to avoid circular import in omnibase_core.
+# The chain_aware_dispatch module imports ModelEventEnvelope which triggers complex
+# import chains in omnibase_core. By importing message_dispatch_engine first via
+# DispatchContextEnforcer, we warm the sys.modules cache before chain_aware_dispatch.
 
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatcher_registry import (
@@ -117,6 +129,15 @@ from omnibase_infra.runtime.wiring import (
     wire_default_handlers,
     wire_handlers_from_contract,
 )
+
+# Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
+from omnibase_infra.runtime.chain_aware_dispatch import (
+    ChainAwareDispatcher,
+    propagate_chain_context,
+    validate_dispatch_chain,
+)
+
+# isort: on
 
 __all__: list[str] = [
     # Kernel entrypoint
@@ -183,4 +204,8 @@ __all__: list[str] = [
     "ModelMessageTypeEntry",
     "ModelDomainConstraint",
     "ProtocolMessageTypeRegistry",
+    # Chain-aware dispatch (OMN-951)
+    "ChainAwareDispatcher",
+    "propagate_chain_context",
+    "validate_dispatch_chain",
 ]

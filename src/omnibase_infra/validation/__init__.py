@@ -101,6 +101,14 @@ from omnibase_core.validation import (
 from omnibase_core.validation.circular_import_validator import CircularImportValidator
 from omnibase_core.validation.contract_validator import ProtocolContractValidator
 
+# Chain propagation validation for correlation and causation chains (OMN-951)
+from omnibase_infra.validation.chain_propagation_validator import (
+    ChainPropagationError,
+    ChainPropagationValidator,
+    enforce_chain_propagation,
+    validate_message_chain,
+)
+
 # AST-based execution shape validation for CI gate (OMN-958)
 # NOTE: EXECUTION_SHAPE_RULES is defined ONLY in execution_shape_validator.py
 # (the canonical single source of truth). This import re-exports it for public API
@@ -204,4 +212,9 @@ __all__ = [
     "validate_execution_shapes",
     "validate_execution_shapes_ci",
     "get_execution_shape_rules",
+    # Chain propagation validation (OMN-951)
+    "ChainPropagationError",
+    "ChainPropagationValidator",
+    "enforce_chain_propagation",
+    "validate_message_chain",
 ]

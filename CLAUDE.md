@@ -109,8 +109,8 @@ ONEX uses two distinct enums for message categorization with different purposes:
 
 | Enum | Values | Purpose | Location |
 |------|--------|---------|----------|
-| `EnumMessageCategory` | `EVENT`, `COMMAND`, `INTENT` | Message routing, topic parsing, dispatcher selection | `omnibase_core.enums` |
-| `EnumNodeOutputType` | `EVENT`, `COMMAND`, `INTENT`, `PROJECTION` | Execution shape validation, handler return type validation | `omnibase_core.enums` |
+| `EnumMessageCategory` | `EVENT`, `COMMAND`, `INTENT` | Message routing, topic parsing, dispatcher selection | `omnibase_infra.enums` |
+| `EnumNodeOutputType` | `EVENT`, `COMMAND`, `INTENT`, `PROJECTION` | Execution shape validation, handler return type validation | `omnibase_infra.enums` |
 
 **Quick Decision Guide**:
 - **Routing a message?** Use `EnumMessageCategory`
@@ -124,7 +124,7 @@ ONEX uses two distinct enums for message categorization with different purposes:
 **Usage Examples**:
 
 ```python
-from omnibase_core.enums import EnumMessageCategory, EnumNodeOutputType
+from omnibase_infra.enums import EnumMessageCategory, EnumNodeOutputType
 
 # MESSAGE ROUTING - Use EnumMessageCategory
 def parse_topic(topic: str) -> EnumMessageCategory:
@@ -157,7 +157,7 @@ def get_handler_output_type(handler: ProtocolHandler) -> EnumNodeOutputType:
 `EnumNodeOutputType` provides helper methods for safe conversion:
 
 ```python
-from omnibase_core.enums import EnumNodeOutputType, EnumMessageCategory
+from omnibase_infra.enums import EnumNodeOutputType, EnumMessageCategory
 
 # Convert node output type to message category (for routing after validation)
 output_type = EnumNodeOutputType.EVENT

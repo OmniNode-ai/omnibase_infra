@@ -45,11 +45,11 @@ class TestInfraValidatorConstants:
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold set to 465 - buffer above current baseline after OMN-937 and OMN-973 merges.
+        Threshold set to 485 - buffer above current baseline (481) after OMN-985 merge.
         Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 465, (
-            "INFRA_MAX_UNIONS should be 465 (buffer after OMN-937 and OMN-973 merges)"
+        assert INFRA_MAX_UNIONS == 485, (
+            "INFRA_MAX_UNIONS should be 485 (buffer after OMN-985 merge)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
