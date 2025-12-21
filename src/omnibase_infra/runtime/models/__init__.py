@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Runtime Models Module.
 
-This module exports Pydantic models for runtime configuration.
+This module exports Pydantic models for runtime configuration and events.
 All models are strongly typed to eliminate Any usage.
 
 Exports:
@@ -12,12 +12,15 @@ Exports:
     ModelLoggingConfig: Logging configuration model
     ModelShutdownConfig: Shutdown configuration model
     ModelRuntimeConfig: Top-level runtime configuration model
+    ModelRuntimeSchedulerConfig: Runtime tick scheduler configuration model
+    ModelRuntimeSchedulerMetrics: Runtime scheduler metrics model
     ModelOptionalString: Wrapper for optional string values
     ModelOptionalUUID: Wrapper for optional UUID values
     ModelOptionalCorrelationId: Wrapper for optional correlation ID values
     ModelPolicyTypeFilter: Wrapper for policy type filter values
     ModelPolicyRegistration: Policy registration parameters model
     ModelPolicyKey: Strongly-typed policy registry key model
+    ModelRuntimeTick: Infrastructure event emitted by runtime scheduler
 """
 
 from omnibase_infra.runtime.models.model_enabled_protocols_config import (
@@ -39,6 +42,13 @@ from omnibase_infra.runtime.models.model_protocol_registration_config import (
     ModelProtocolRegistrationConfig,
 )
 from omnibase_infra.runtime.models.model_runtime_config import ModelRuntimeConfig
+from omnibase_infra.runtime.models.model_runtime_scheduler_config import (
+    ModelRuntimeSchedulerConfig,
+)
+from omnibase_infra.runtime.models.model_runtime_scheduler_metrics import (
+    ModelRuntimeSchedulerMetrics,
+)
+from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
 
 __all__: list[str] = [
@@ -48,6 +58,9 @@ __all__: list[str] = [
     "ModelLoggingConfig",
     "ModelShutdownConfig",
     "ModelRuntimeConfig",
+    "ModelRuntimeSchedulerConfig",
+    "ModelRuntimeSchedulerMetrics",
+    "ModelRuntimeTick",
     "ModelOptionalString",
     "ModelOptionalUUID",
     "ModelOptionalCorrelationId",

@@ -51,6 +51,29 @@ The polymorphic-agent is the primary agent for ONEX development workflows:
 - No deprecated code maintenance
 - Remove old patterns immediately
 
+## 🚫 CRITICAL POLICY: NO VERSIONED DIRECTORIES
+
+**Versioning is logical, not structural.**
+
+- **NEVER create** directories like `v1_0_0/`, `v2/`, `v1/`, etc.
+- **Version through contracts**: Use `contract_version` field in `contract.yaml`
+- **Semantic versioning**: Version is metadata, not file structure
+
+```yaml
+# CORRECT: Version in contract.yaml
+meta:
+  contract_version: "1.0.0"
+  node_version: "1.2.3"
+```
+
+```
+# WRONG: Versioned directories
+nodes/postgres_adapter/v1_0_0/  # DO NOT CREATE
+nodes/postgres_adapter/v2/      # DO NOT CREATE
+```
+
+**Legacy Exception**: Existing `v1_0_0/` directories (e.g., `nodes/<name>/v1_0_0/`) are legacy patterns from earlier architectural decisions. These will be migrated to the new flat structure per ticket H1 (Legacy Component Refactor Plan). See `docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md` for migration details.
+
 ## 🎯 Core ONEX Principles
 
 ### Strong Typing & Models
@@ -80,12 +103,85 @@ Domain grouping is preferred when:
 - Protocols define the complete interface for a single node or module
 - Protocols share common type dependencies within the same bounded context
 
+### Enum Usage: Message Routing vs Node Validation
+
+ONEX uses two distinct enums for message categorization with different purposes:
+
+| Enum | Values | Purpose | Location |
+|------|--------|---------|----------|
+| `EnumMessageCategory` | `EVENT`, `COMMAND`, `INTENT` | Message routing, topic parsing, dispatcher selection | `omnibase_core.enums` |
+| `EnumNodeOutputType` | `EVENT`, `COMMAND`, `INTENT`, `PROJECTION` | Execution shape validation, handler return type validation | `omnibase_core.enums` |
+
+**Quick Decision Guide**:
+- **Routing a message?** Use `EnumMessageCategory`
+- **Validating node output?** Use `EnumNodeOutputType`
+
+**Key Difference - PROJECTION**:
+- `PROJECTION` exists **only** in `EnumNodeOutputType`
+- `PROJECTION` is **only valid for REDUCER nodes** (state aggregation outputs)
+- Message routing never uses `PROJECTION` because projections are not routable messages
+
+**Usage Examples**:
+
+```python
+from omnibase_core.enums import EnumMessageCategory, EnumNodeOutputType
+
+# MESSAGE ROUTING - Use EnumMessageCategory
+def parse_topic(topic: str) -> EnumMessageCategory:
+    """Parse topic to determine message category for routing."""
+    if ".event." in topic:
+        return EnumMessageCategory.EVENT
+    elif ".command." in topic:
+        return EnumMessageCategory.COMMAND
+    return EnumMessageCategory.INTENT
+
+def select_dispatcher(category: EnumMessageCategory) -> ProtocolMessageDispatcher:
+    """Select dispatcher based on message category."""
+    return dispatcher_registry[category]
+
+# NODE VALIDATION - Use EnumNodeOutputType
+def validate_reducer_output(node_type: str, output_type: EnumNodeOutputType) -> bool:
+    """Validate that output type is valid for node type."""
+    if output_type == EnumNodeOutputType.PROJECTION:
+        # PROJECTION only valid for REDUCER nodes
+        return node_type == "REDUCER"
+    return True
+
+def get_handler_output_type(handler: ProtocolHandler) -> EnumNodeOutputType:
+    """Get the declared output type for handler validation."""
+    return handler.output_type  # May include PROJECTION for reducers
+```
+
+**Mapping Between Enums**:
+
+`EnumNodeOutputType` provides helper methods for safe conversion:
+
+```python
+from omnibase_core.enums import EnumNodeOutputType, EnumMessageCategory
+
+# Convert node output type to message category (for routing after validation)
+output_type = EnumNodeOutputType.EVENT
+category = output_type.to_message_category()  # Returns EnumMessageCategory.EVENT
+
+# PROJECTION cannot be converted - raises ValueError
+projection = EnumNodeOutputType.PROJECTION
+projection.to_message_category()  # Raises ValueError: PROJECTION has no message category
+
+# Check if output type is routable
+output_type.is_routable()  # True for EVENT, COMMAND, INTENT; False for PROJECTION
+```
+
+**Related**:
+- ADR: `docs/decisions/adr-enum-message-category-vs-node-output-type.md`
+- Ticket: OMN-974
+
 ### Registry Naming Conventions
 
-**Node-Specific Registries** (`nodes/<name>/v<version>/registry/`):
+**Node-Specific Registries** (`nodes/<name>/registry/`):
 - File: `registry_infra_<node_name>.py`
 - Class: `RegistryInfra<NodeName>`
 - Examples: `registry_infra_postgres_adapter.py` → `RegistryInfraPostgresAdapter`
+- Note: Legacy paths `nodes/<name>/v1_0_0/registry/` will be migrated (see H1 ticket)
 
 **Standalone Registries** (in domain directories):
 - File: `registry_<purpose>.py`
@@ -130,6 +226,52 @@ def parse_input(data: Optional[Union[str, int]]) -> ParsedResult:  # Avoid this
 - `Optional[X]` can be misleading - it suggests the parameter is optional, not that it can be None
 
 **Exception**: When maintaining compatibility with older codebases or when `typing.Optional` is already imported for other purposes, using `Optional` is acceptable but not preferred.
+
+**Envelope Typing: Use `ModelEventEnvelope[object]` for Generic Dispatchers**
+
+The dispatch engine and protocol dispatchers use `ModelEventEnvelope[object]` instead of `Any` for envelope parameters. This pattern satisfies the ONEX "no Any types" rule while maintaining the necessary flexibility for generic message handling.
+
+```python
+# CORRECT - Generic dispatcher (accepts any payload type)
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+async def process_event(envelope: ModelEventEnvelope[object]) -> str | None:
+    """Process any event type - uses object for generic payloads."""
+    return "dev.processed.v1"
+
+# CORRECT - Specific dispatcher (knows the exact payload type)
+from my_models import UserCreatedEvent
+
+async def process_user_created(envelope: ModelEventEnvelope[UserCreatedEvent]) -> str:
+    """Process UserCreatedEvent - uses specific type when known."""
+    user = envelope.payload  # Type-safe: UserCreatedEvent
+    return f"dev.user.{user.user_id}.processed"
+
+# WRONG - Never use Any
+from typing import Any
+
+async def process_event(envelope: ModelEventEnvelope[Any]) -> str:  # Avoid
+    ...
+```
+
+**When to use each pattern**:
+
+| Context | Type Parameter | Rationale |
+|---------|----------------|-----------|
+| Protocol definitions | `object` | Protocols define structural interfaces; payload type varies |
+| Dispatch engine internals | `object` | Routes based on topic/category, not payload shape |
+| Generic dispatcher functions | `object` | Must accept any payload type within a category |
+| Concrete implementations | Specific type | When dispatcher knows exact payload type (e.g., `UserCreatedEvent`) |
+| Test fixtures | Specific type | Tests create envelopes with known payload types |
+
+**Rationale for `object` over `Any`**:
+- `object` explicitly says "any Python object" - clearer intent than `Any`
+- Type checkers treat `object` as the root of the type hierarchy
+- Satisfies ONEX "no Any types" coding guideline
+- Same runtime behavior as `Any` but with documented semantics
+- Encourages narrowing to specific types where possible
+
+**See also**: `src/omnibase_infra/runtime/message_dispatch_engine.py` for the complete design note.
 
 ### ONEX Architecture
 - **Contract-Driven** - All tools/services follow contract patterns
@@ -448,15 +590,35 @@ class CircuitBreaker:
 Use graceful degradation for `InfraTimeoutError` to maintain service availability with reduced functionality:
 
 ```python
+from collections.abc import Callable
+from types import FrameType
+from typing import TypeVar
+from uuid import UUID
+
+from pydantic import BaseModel
+
 from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
 from omnibase_infra.enums import EnumInfraTransportType
 
+# TypeVar for generic data types in fetch operations
+T = TypeVar("T", bound=BaseModel)
+
+
+class ModelFetchResult(BaseModel):
+    """Result model for fetch operations with graceful degradation."""
+
+    data: BaseModel
+    source: str  # "primary" or "fallback"
+    degraded: bool
+    warning: str | None = None
+
+
 def fetch_with_timeout_fallback(
-    primary_func,
-    fallback_func,
+    primary_func: Callable[[], T],
+    fallback_func: Callable[[], T],
     timeout_seconds: float = 5.0,
-    correlation_id = None,
-) -> dict:
+    correlation_id: UUID | None = None,
+) -> ModelFetchResult:
     """Fetch from primary source with graceful degradation to fallback."""
     import signal
 
@@ -467,7 +629,7 @@ def fetch_with_timeout_fallback(
         correlation_id=correlation_id,
     )
 
-    def timeout_handler(signum, frame):
+    def timeout_handler(signum: int, frame: FrameType | None) -> None:
         raise TimeoutError("Operation exceeded timeout")
 
     # Set timeout handler
@@ -476,9 +638,13 @@ def fetch_with_timeout_fallback(
 
     try:
         # Try primary data source
-        return {"data": primary_func(), "source": "primary", "degraded": False}
+        return ModelFetchResult(
+            data=primary_func(),
+            source="primary",
+            degraded=False,
+        )
 
-    except TimeoutError as e:
+    except TimeoutError:
         # Log timeout but continue with fallback
         context_with_fallback = ModelInfraErrorContext(
             transport_type=context.transport_type,
@@ -489,12 +655,12 @@ def fetch_with_timeout_fallback(
 
         try:
             # Use fallback source (cache, secondary database, etc.)
-            return {
-                "data": fallback_func(),
-                "source": "fallback",
-                "degraded": True,
-                "warning": f"Primary source timed out, using fallback data",
-            }
+            return ModelFetchResult(
+                data=fallback_func(),
+                source="fallback",
+                degraded=True,
+                warning="Primary source timed out, using fallback data",
+            )
 
         except Exception as fallback_error:
             raise InfraTimeoutError(
@@ -702,7 +868,9 @@ self._init_circuit_breaker(
 
 **Integration with Error Recovery**:
 ```python
-async def publish_with_retry(self, message: dict) -> None:
+from pydantic import BaseModel
+
+async def publish_with_retry(self, message: BaseModel) -> None:
     """Publish message with circuit breaker and retry logic."""
     correlation_id = uuid4()
     max_retries = 3
@@ -776,49 +944,167 @@ if is_open:
 - Never suppress InfraUnavailableError from circuit breaker
 - Never use circuit breaker for non-transient errors
 
+### Dispatcher Resilience Pattern
+
+**Dispatchers own their own resilience** - the `MessageDispatchEngine` does NOT wrap dispatchers with circuit breakers.
+
+**Design Rationale**:
+- **Separation of concerns**: Each dispatcher knows its specific failure modes and recovery strategies
+- **Transport-specific tuning**: Kafka dispatchers need different thresholds than HTTP dispatchers
+- **No hidden behavior**: Engine users see exactly what resilience each dispatcher provides
+- **Composability**: Dispatchers can combine circuit breakers with retry, backoff, or degradation
+
+**Dispatcher Implementation Pattern**:
+```python
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.models.dispatch import ModelDispatchResult
+from omnibase_infra.runtime import ProtocolMessageDispatcher
+
+
+class MyDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
+    """Dispatcher with built-in circuit breaker resilience."""
+
+    def __init__(self, config: DispatcherConfig):
+        self._init_circuit_breaker(
+            threshold=config.failure_threshold,
+            reset_timeout=config.reset_timeout_seconds,
+            service_name=f"dispatcher.{config.target_service}",
+            transport_type=config.transport_type,
+        )
+
+    # NOTE: ModelEventEnvelope[object] is used instead of Any to satisfy ONEX "no Any types"
+    # rule. Dispatchers must accept envelopes with any payload type since the dispatch
+    # engine routes based on topic/category, not payload shape. Using `object` provides
+    # the same flexibility as Any but with explicit semantics.
+    async def handle(self, envelope: ModelEventEnvelope[object]) -> ModelDispatchResult:
+        """Handle message with circuit breaker protection."""
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("handle", envelope.correlation_id)
+
+        try:
+            result = await self._do_handle(envelope)
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+            return result
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("handle", envelope.correlation_id)
+            raise
+```
+
+**What the Engine Does NOT Do**:
+- Does not wrap dispatcher calls with circuit breakers
+- Does not implement retry logic around dispatchers
+- Does not catch and suppress dispatcher errors (except for error aggregation)
+
+**What Dispatchers Should Do**:
+- Implement `MixinAsyncCircuitBreaker` for external service calls
+- Configure thresholds appropriate to their transport type
+- Raise `InfraUnavailableError` when circuit opens (engine will capture this)
+- Optionally combine with retry logic for transient failures
+
 ### Node Introspection Security Considerations
 
 The `MixinNodeIntrospection` mixin uses Python reflection (via the `inspect` module) to automatically discover node capabilities. This provides powerful service discovery but has security implications that developers should understand.
 
+**Threat Model**:
+
+Introspection data could be valuable to an attacker for:
+- **Reconnaissance**: Learning what operations a node supports to identify attack vectors (e.g., discovering `decrypt_*`, `admin_*` methods)
+- **Architecture mapping**: Understanding system topology through protocol and mixin discovery
+- **Version fingerprinting**: Identifying outdated versions with known vulnerabilities
+- **State inference**: Deducing system state or health from FSM state values
+
 **What Gets Exposed via Introspection**:
 - Public method names (potential operations a node can perform)
-- Method signatures (parameter names and type annotations)
+- Method signatures (parameter names and type annotations - names like `api_key`, `decrypt_key` reveal sensitive purposes)
 - Protocol and mixin implementations (discovered capabilities)
 - FSM state information (if `MixinFSM` is present)
 - Endpoint URLs (health, API, metrics paths)
 - Node metadata (name, version, type from contract)
 
+**What is NOT Exposed**:
+- Private methods (prefixed with `_`) - completely excluded from discovery
+- Method implementations or source code - only signatures, not logic
+- Configuration values - secrets, connection strings, etc. are not exposed
+- Environment variables or runtime parameters
+- Request/response payloads or historical data
+
 **Built-in Protections**:
 The mixin includes several filtering mechanisms to limit exposure:
 - **Private method exclusion**: Methods prefixed with `_` are excluded from capability discovery
 - **Utility method filtering**: Common utility prefixes (`get_*`, `set_*`, `initialize*`, `start_*`, `stop_*`) are filtered out
-- **Operation keyword matching**: Only methods matching operation keywords (`execute`, `process`, `handle`, `run`, `perform`, `compute`, `validate`, `transform`, `aggregate`, `orchestrate`) are reported as capabilities
+- **Operation keyword matching**: Only methods matching operation keywords (`execute`, `handle`, `process`, `run`, `invoke`, `call`) are reported as capabilities. Node-type-specific keywords (e.g., `fetch`, `compute`, `aggregate`, `orchestrate`) are also available.
 - **Configurable exclusions**: The `exclude_prefixes` parameter allows additional filtering
+- **Caching with TTL**: Introspection data is cached to reduce reflection frequency
 
 **Best Practices for Node Developers**:
 - Prefix internal/sensitive methods with `_` to exclude them from introspection
 - Avoid exposing sensitive business logic in public method names
 - Use generic operation names that don't reveal implementation details (e.g., `process_request` instead of `decrypt_and_forward_to_payment_gateway`)
+- Use generic parameter names (e.g., `data` instead of `user_credentials`, `payload` instead of `encrypted_secret`)
 - Review exposed capabilities before deploying to production environments
 - Consider network segmentation for introspection event topics in multi-tenant environments
 - Use the `exclude_prefixes` parameter to filter additional method patterns if needed
 
 **Example - Reviewing Exposed Capabilities**:
+
+> **Note on Example Models**: The following example uses simplified `NodeInput` and `NodeOutput`
+> placeholder models for demonstration purposes only. These are **not** production model names.
+> In production ONEX nodes, input/output models follow the `Model<NodeName>Input` and
+> `Model<NodeName>Output` naming convention (e.g., `ModelVaultAdapterInput`, `ModelKafkaAdapterOutput`).
+> See the "File & Class Naming Conventions" section above for complete naming rules.
+
 ```python
+from pydantic import BaseModel
+
 from omnibase_infra.mixins import MixinNodeIntrospection
 
+
+# Simplified placeholder models for demonstration purposes.
+# In production ONEX nodes, these would be named following the convention:
+# - Model<NodeName>Input (e.g., ModelVaultAdapterInput, ModelConsulAdapterInput)
+# - Model<NodeName>Output (e.g., ModelVaultAdapterOutput, ModelConsulAdapterOutput)
+# See docs/architecture/CURRENT_NODE_ARCHITECTURE.md for full examples.
+
+
+class NodeInput(BaseModel):
+    """Placeholder input model for demonstration.
+
+    Represents the typed input payload for a node operation.
+    ONEX nodes use strongly-typed Pydantic models to ensure
+    type safety and enable contract-driven validation.
+    """
+
+    value: str
+
+
+class NodeOutput(BaseModel):
+    """Placeholder output model for demonstration.
+
+    Represents the typed output result from a node operation.
+    All ONEX nodes return strongly-typed Pydantic models,
+    never raw dictionaries or untyped data.
+    """
+
+    processed: bool
+
+
 class MyNode(MixinNodeIntrospection):
-    def execute_operation(self, data: dict) -> dict:
+    def execute_operation(self, data: NodeInput) -> NodeOutput:
         """Public operation - WILL be exposed."""
         return self._internal_process(data)
 
-    def _internal_process(self, data: dict) -> dict:
+    def _internal_process(self, data: NodeInput) -> NodeOutput:
         """Private method - will NOT be exposed."""
-        return {"processed": True}
+        return NodeOutput(processed=True)
 
     def get_status(self) -> str:
         """Utility method - will NOT be exposed (get_* prefix filtered)."""
         return "healthy"
+
 
 # Review what gets exposed
 node = MyNode()
@@ -827,10 +1113,19 @@ capabilities = node.get_capabilities()
 ```
 
 **Network Security Considerations**:
-- Introspection data is published to Kafka topics (`*.introspection.*`)
-- In multi-tenant environments, ensure proper topic ACLs
-- Consider whether introspection topics should be accessible outside the cluster
+- Introspection data is published to Kafka topics (`node.introspection`, `node.heartbeat`, `node.request_introspection`)
+- In multi-tenant environments, ensure proper topic ACLs are configured
+- Consider whether introspection topics should be accessible outside the cluster boundary
 - Monitor introspection topic consumers for unauthorized access
+- The registry listener responds to ANY request on the request topic without authentication - secure the topic with Kafka ACLs
+
+**Production Deployment Checklist**:
+1. Review `get_capabilities()` output for each node before deployment
+2. Verify no sensitive method names or parameter names are exposed
+3. Configure Kafka topic ACLs to restrict introspection topic access
+4. Consider disabling `enable_registry_listener` if not needed
+5. Monitor introspection topic consumer groups for unexpected consumers
+6. Use network segmentation to isolate introspection traffic if required
 
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`
@@ -906,16 +1201,28 @@ Infrastructure tools follow ONEX 4-node architecture:
 
 ## 🚀 Node Structure Pattern
 
+**Canonical Structure** (NEW components):
 ```
-nodes/<adapter>/v1_0_0/
-├── contract.yaml          # ONEX contract definition
+nodes/<adapter>/
+├── contract.yaml          # ONEX contract definition (includes version)
 ├── node.py               # Node<Name><Type> implementation
 ├── models/               # Node-specific models
 └── registry/             # registry_infra_<name>.py
 ```
 
+**Legacy Structure** (existing components, will be migrated):
+```
+nodes/<adapter>/v1_0_0/   # LEGACY - do not create new directories like this
+├── contract.yaml
+├── node.py
+├── models/
+└── registry/
+```
+
+See "CRITICAL POLICY: NO VERSIONED DIRECTORIES" above for migration details.
+
 **Contract Requirements**:
-- Semantic versioning (`contract_version`, `node_version`)
+- Semantic versioning in contract (`contract_version`, `node_version` fields)
 - Node type (EFFECT/COMPUTE/REDUCER/ORCHESTRATOR)
 - Strongly typed I/O (`input_model`, `output_model`)
 - Protocol-based dependencies

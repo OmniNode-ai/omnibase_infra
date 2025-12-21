@@ -16,41 +16,6 @@ Service Keys:
 - PolicyRegistry: Registered as interface=PolicyRegistry
 - ProtocolBindingRegistry: Registered as interface=ProtocolBindingRegistry
 
-Node Registration:
-    Effect nodes like NodeRegistryEffect take a container in their __init__
-    and resolve dependencies internally. They are NOT registered by
-    wire_infrastructure_services() because they depend on handler services
-    that must be registered first.
-
-    To use NodeRegistryEffect:
-    ```python
-    from omnibase_infra.nodes.node_registry_effect.v1_0_0.node import NodeRegistryEffect
-
-    # Step 1: Wire base infrastructure services
-    await wire_infrastructure_services(container)
-
-    # Step 2: Register handler services (consul, postgres, event_bus)
-    # This is deployment-specific and depends on your infrastructure setup
-    await container.service_registry.register_instance(
-        interface=ProtocolEnvelopeExecutor,
-        instance=consul_handler,
-        scope="global",
-        metadata={"name": "consul"},
-    )
-    await container.service_registry.register_instance(
-        interface=ProtocolEnvelopeExecutor,
-        instance=postgres_handler,
-        scope="global",
-        metadata={"name": "postgres"},
-    )
-
-    # Step 3: Create node (resolves dependencies from container)
-    # Note: create() is a factory method that constructs the node AND calls
-    # initialize() internally, so the returned node is ready to use immediately.
-    node = await NodeRegistryEffect.create(container)
-    # node is now fully initialized and ready for execute() calls
-    ```
-
 Example Usage:
     ```python
     from omnibase_core.container import ModelONEXContainer
@@ -80,7 +45,6 @@ Integration Notes:
 - Services registered as global scope (singleton per container)
 - Type-safe resolution via interface types
 - Compatible with omnibase_core 0.4.x API
-- Effect nodes take container in __init__ (see Node Registration above)
 """
 
 from __future__ import annotations
@@ -227,7 +191,7 @@ async def wire_infrastructure_services(
             )
         elif "metadata" in error_str:
             invalid_arg = "metadata"
-            hint = "Invalid 'metadata' argument. Expected dict[str, Any]."
+            hint = "Invalid 'metadata' argument. Expected dict[str, object]."
         elif "positional" in error_str or "argument" in error_str:
             invalid_arg = "signature"
             hint = (

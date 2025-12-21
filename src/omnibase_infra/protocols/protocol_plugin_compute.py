@@ -72,11 +72,11 @@ Example Usage:
                 "errors": [] if is_valid else self._get_errors(data, schema),
             }
 
-        def _validate_schema(self, data: dict[str, Any], schema: dict[str, Any]) -> bool:
+        def _validate_schema(self, data: dict[str, object], schema: dict[str, object]) -> bool:
             # Pure computation - deterministic validation
             ...
 
-        def _get_errors(self, data: dict[str, Any], schema: dict[str, Any]) -> list[dict[str, Any]]:
+        def _get_errors(self, data: dict[str, object], schema: dict[str, object]) -> list[dict[str, object]]:
             # Pure computation - deterministic error extraction
             ...
     ```
@@ -97,7 +97,7 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Any, Protocol, TypedDict, runtime_checkable
+from typing import Protocol, TypedDict, runtime_checkable
 
 __all__ = [
     "PluginInputData",
@@ -120,7 +120,7 @@ class PluginInputData(TypedDict, total=False):
     Example:
         ```python
         class JsonNormalizerInput(TypedDict):
-            json: dict[str, Any]  # Required field for JSON normalizer
+            json: dict[str, object]  # Required field for JSON normalizer
 
         # Runtime validation in validate_input()
         def validate_input(self, input_data: PluginInputData) -> None:

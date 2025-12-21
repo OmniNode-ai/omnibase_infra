@@ -22,13 +22,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
 
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
+
 import consul
+from omnibase_core.models.dispatch import ModelHandlerOutput
 from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -36,13 +39,12 @@ from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
     InfraTimeoutError,
-    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 T = TypeVar("T")
 
@@ -51,6 +53,9 @@ logger = logging.getLogger(__name__)
 # Consul handler type constant for registry compatibility
 # Note: EnumHandlerType.CONSUL will be added to omnibase_core in future
 HANDLER_TYPE_CONSUL: str = "consul"
+
+# Handler ID for ModelHandlerOutput
+HANDLER_ID_CONSUL: str = "consul-handler"
 
 SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
     {
@@ -63,7 +68,7 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class ConsulHandler(MixinAsyncCircuitBreaker):
+class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     """HashiCorp Consul handler using python-consul client (MVP: KV, service registration).
 
     Security Policy - Token Handling:
@@ -193,7 +198,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
 
-    async def initialize(self, config: dict[str, object]) -> None:
+    async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize Consul client with configuration.
 
         Args:
@@ -405,7 +410,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             },
         )
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+    async def execute(
+        self, envelope: dict[str, JsonValue]
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute Consul operation from envelope.
 
         Args:
@@ -413,9 +420,10 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - operation: Consul operation (consul.kv_get, consul.kv_put, etc.)
                 - payload: dict with operation-specific parameters
                 - correlation_id: Optional correlation ID for tracing
+                - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            Response envelope with status, payload, and correlation_id
+            ModelHandlerOutput wrapping the operation result with correlation tracking
 
         Raises:
             RuntimeHostError: If handler not initialized or invalid input.
@@ -424,6 +432,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             InfraUnavailableError: If circuit breaker is open.
         """
         correlation_id = self._extract_correlation_id(envelope)
+        input_envelope_id = self._extract_envelope_id(envelope)
 
         if not self._initialized or self._client is None or self._config is None:
             ctx = ModelInfraErrorContext(
@@ -478,27 +487,19 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
         # Route to appropriate handler
         if operation == "consul.kv_get":
-            return await self._kv_get(payload, correlation_id)
+            return await self._kv_get(payload, correlation_id, input_envelope_id)
         elif operation == "consul.kv_put":
-            return await self._kv_put(payload, correlation_id)
+            return await self._kv_put(payload, correlation_id, input_envelope_id)
         elif operation == "consul.register":
-            return await self._register_service(payload, correlation_id)
+            return await self._register_service(
+                payload, correlation_id, input_envelope_id
+            )
         elif operation == "consul.deregister":
-            return await self._deregister_service(payload, correlation_id)
+            return await self._deregister_service(
+                payload, correlation_id, input_envelope_id
+            )
         else:  # consul.health_check
-            return await self._health_check_operation(correlation_id)
-
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate correlation ID from envelope."""
-        raw = envelope.get("correlation_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
+            return await self._health_check_operation(correlation_id, input_envelope_id)
 
     async def _execute_with_retry(
         self,
@@ -698,18 +699,21 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
     async def _kv_get(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Get value from Consul KV store.
 
         Args:
             payload: dict containing:
                 - key: KV key path (required)
                 - recurse: Optional bool to get all keys under prefix (default: False)
+            correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with KV data
+            ModelHandlerOutput wrapping the KV data with correlation tracking
         """
         key = payload.get("key")
         if not isinstance(key, str) or not key:
@@ -731,7 +735,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             raise RuntimeError("Client not initialized")
 
         def get_func() -> tuple[
-            int, list[dict[str, object]] | dict[str, object] | None
+            int, list[dict[str, JsonValue]] | dict[str, JsonValue] | None
         ]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
@@ -746,7 +750,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
 
         # Handle response - data can be None if key doesn't exist
         if data is None:
-            return {
+            result: dict[str, JsonValue] = {
                 "status": "success",
                 "payload": {
                     "found": False,
@@ -754,8 +758,14 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                     "value": None,
                     "index": index,
                 },
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             }
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_CONSUL,
+                result=result,
+            )
 
         # Handle single key or recurse results
         if isinstance(data, list):
@@ -774,7 +784,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                         "modify_index": item.get("ModifyIndex"),
                     }
                 )
-            return {
+            result = {
                 "status": "success",
                 "payload": {
                     "found": True,
@@ -782,13 +792,19 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                     "count": len(items),
                     "index": index,
                 },
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             }
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_CONSUL,
+                result=result,
+            )
         else:
             # Single key mode
             value = data.get("Value")
             decoded_value = value.decode("utf-8") if isinstance(value, bytes) else value
-            return {
+            result = {
                 "status": "success",
                 "payload": {
                     "found": True,
@@ -798,14 +814,21 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                     "modify_index": data.get("ModifyIndex"),
                     "index": index,
                 },
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id),
             }
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_CONSUL,
+                result=result,
+            )
 
     async def _kv_put(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Put value to Consul KV store.
 
         Args:
@@ -814,9 +837,11 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - value: Value to store (required, string)
                 - flags: Optional integer flags
                 - cas: Optional check-and-set index for optimistic locking
+            correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with operation result
+            ModelHandlerOutput wrapping the operation result with correlation tracking
         """
         key = payload.get("key")
         if not isinstance(key, str) or not key:
@@ -865,20 +890,27 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             correlation_id,
         )
 
-        return {
+        result: dict[str, JsonValue] = {
             "status": "success",
             "payload": {
                 "success": success,
                 "key": key,
             },
-            "correlation_id": correlation_id,
+            "correlation_id": str(correlation_id),
         }
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_CONSUL,
+            result=result,
+        )
 
     async def _register_service(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Register service with Consul agent.
 
         Args:
@@ -889,9 +921,11 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
                 - port: Optional service port
                 - tags: Optional list of tags
                 - check: Optional health check configuration dict
+            correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with registration result
+            ModelHandlerOutput wrapping the registration result with correlation tracking
         """
         name = payload.get("name")
         if not isinstance(name, str) or not name:
@@ -921,7 +955,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             tags_list = [str(t) for t in tags]
 
         check = payload.get("check")
-        check_dict: dict[str, object] | None = (
+        check_dict: dict[str, JsonValue] | None = (
             check if isinstance(check, dict) else None
         )
 
@@ -947,29 +981,38 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             correlation_id,
         )
 
-        return {
+        result: dict[str, JsonValue] = {
             "status": "success",
             "payload": {
                 "registered": True,
                 "name": name,
                 "service_id": service_id_str or name,
             },
-            "correlation_id": correlation_id,
+            "correlation_id": str(correlation_id),
         }
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_CONSUL,
+            result=result,
+        )
 
     async def _deregister_service(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Deregister service from Consul agent.
 
         Args:
             payload: dict containing:
                 - service_id: Service ID to deregister (required)
+            correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with deregistration result
+            ModelHandlerOutput wrapping the deregistration result with correlation tracking
         """
         service_id = payload.get("service_id")
         if not isinstance(service_id, str) or not service_id:
@@ -999,20 +1042,51 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             correlation_id,
         )
 
-        return {
+        result: dict[str, JsonValue] = {
             "status": "success",
             "payload": {
                 "deregistered": True,
                 "service_id": service_id,
             },
-            "correlation_id": correlation_id,
+            "correlation_id": str(correlation_id),
         }
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_CONSUL,
+            result=result,
+        )
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(
+        self, correlation_id: UUID | None = None
+    ) -> dict[str, JsonValue]:
         """Return handler health status with operational metrics.
 
         Uses thread pool executor and retry logic for consistency with other operations.
         Includes circuit breaker protection and exponential backoff on transient failures.
+
+        This is the standalone health check method intended for direct invocation by
+        monitoring systems, health check endpoints, or diagnostic tools.
+
+        Envelope-Based vs Direct Invocation:
+            - Direct: Call health_check() for monitoring/diagnostics. If no correlation_id
+              is provided, a new one is generated internally for tracing.
+            - Envelope: Use execute() with operation="consul.health_check" for dispatch.
+              The envelope's correlation_id is propagated to this method via
+              _health_check_operation() for consistent tracing.
+
+        Note:
+            This method does not accept envelope_id because it's designed for direct
+            invocation outside the envelope dispatch context. For envelope-based health
+            checks that preserve causality tracking, use _health_check_operation() via
+            the execute() method.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing. When called via
+                envelope dispatch (through _health_check_operation), this preserves
+                the request's correlation_id for consistent distributed tracing.
+                When called directly (e.g., by monitoring systems), a new ID is
+                generated if not provided.
 
         Returns:
             Health status dict with handler state information including:
@@ -1024,7 +1098,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
             RuntimeHostError: If health check fails (errors are propagated, not swallowed)
         """
         healthy = False
-        correlation_id = uuid4()
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         # Calculate operational metrics (safe even if not initialized)
         circuit_state: str | None = None
@@ -1084,24 +1159,59 @@ class ConsulHandler(MixinAsyncCircuitBreaker):
     async def _health_check_operation(
         self,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute health check operation from envelope.
 
+        This method wraps the core health_check() functionality in a ModelHandlerOutput
+        for envelope-based operation dispatch. It differs from health_check() in that:
+
+        1. It accepts pre-extracted IDs from the request envelope
+        2. It returns ModelHandlerOutput (suitable for envelope dispatch)
+        3. It preserves causality tracking via input_envelope_id
+        4. It propagates correlation_id to health_check() for consistent tracing
+
+        ID Semantics:
+            correlation_id: Groups related operations across distributed services.
+                Used for filtering logs, tracing request flows, and debugging.
+                Propagated from the request envelope to health_check() for consistent
+                distributed tracing across the entire request lifecycle.
+
+            input_envelope_id: Links this response to the originating request envelope.
+                Enables request/response correlation in observability systems.
+                When called via execute(), extracted from the request envelope.
+                Auto-generated if not provided, ensuring all responses have valid
+                causality tracking IDs.
+
+        When health_check() is called directly (not via envelope dispatch), it generates
+        its own correlation_id for monitoring purposes. This method ensures envelope-based
+        calls use the request's correlation_id for end-to-end tracing consistency.
+
         Args:
-            correlation_id: Correlation ID for tracing
+            correlation_id: Correlation ID for distributed tracing across services.
+                Propagated to health_check() to ensure consistent tracing.
+            input_envelope_id: Envelope ID for causality tracking. Links this health
+                check response to the original request envelope, enabling end-to-end
+                request/response correlation in observability systems.
 
         Returns:
-            Response envelope with health check information
+            ModelHandlerOutput wrapping the health check information with correlation tracking
         """
-        health_status = await self.health_check()
+        health_status = await self.health_check(correlation_id=correlation_id)
 
-        return {
+        result: dict[str, JsonValue] = {
             "status": "success",
             "payload": health_status,
-            "correlation_id": correlation_id,
+            "correlation_id": str(correlation_id),
         }
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_CONSUL,
+            result=result,
+        )
 
-    def describe(self) -> dict[str, object]:
+    def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities.
 
         Returns:

@@ -5,6 +5,17 @@
 This module exports all infrastructure-specific Pydantic models.
 """
 
+from omnibase_infra.models.dispatch import (
+    EnumDispatchStatus,
+    EnumTopicStandard,
+    ModelDispatcherMetrics,
+    ModelDispatcherRegistration,
+    ModelDispatchMetrics,
+    ModelDispatchResult,
+    ModelDispatchRoute,
+    ModelParsedTopic,
+    ModelTopicParser,
+)
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeHeartbeatEvent,
@@ -12,12 +23,29 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
     ModelNodeRegistration,
 )
+from omnibase_infra.models.validation import (
+    ModelExecutionShapeRule,
+    ModelExecutionShapeViolationResult,
+)
 
 __all__ = [
+    # Dispatch models
+    "EnumDispatchStatus",
+    "EnumTopicStandard",
+    "ModelDispatchMetrics",
+    "ModelDispatchResult",
+    "ModelDispatchRoute",
+    "ModelDispatcherMetrics",
+    "ModelDispatcherRegistration",
+    "ModelParsedTopic",
+    "ModelTopicParser",
     # Registration models
     "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",
     "ModelNodeIntrospectionEvent",
     "ModelNodeMetadata",
     "ModelNodeRegistration",
+    # Validation models
+    "ModelExecutionShapeRule",
+    "ModelExecutionShapeViolationResult",
 ]

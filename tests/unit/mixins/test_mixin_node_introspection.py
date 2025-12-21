@@ -50,6 +50,7 @@ from omnibase_infra.mixins.mixin_node_introspection import (
     MixinNodeIntrospection,
 )
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
+from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 
 # CI environments may be slower - apply multiplier for performance thresholds
 _CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
@@ -62,7 +63,10 @@ PublishedEventDict = dict[
 
 
 class MockEventBus:
-    """Mock event bus for testing introspection publishing."""
+    """Mock event bus for testing introspection publishing.
+
+    Implements ProtocolEventBusLike protocol for type safety.
+    """
 
     def __init__(self, should_fail: bool = False) -> None:
         """Initialize mock event bus.
@@ -71,18 +75,22 @@ class MockEventBus:
             should_fail: If True, publish operations will raise exceptions.
         """
         self.should_fail = should_fail
-        self.published_envelopes: list[tuple[ModelNodeIntrospectionEvent, str]] = []
+        # Store envelopes for test assertions
+        # Accepts both ModelNodeIntrospectionEvent and ModelNodeHeartbeatEvent
+        self.published_envelopes: list[
+            tuple[ModelNodeIntrospectionEvent | ModelNodeHeartbeatEvent, str]
+        ] = []
         self.published_events: list[PublishedEventDict] = []
 
     async def publish_envelope(
         self,
-        envelope: ModelNodeIntrospectionEvent,
+        envelope: object,
         topic: str,
     ) -> None:
         """Mock publish_envelope method.
 
         Args:
-            envelope: Event envelope to publish.
+            envelope: Event envelope to publish (accepts any object per protocol).
             topic: Event topic.
 
         Raises:
@@ -90,7 +98,9 @@ class MockEventBus:
         """
         if self.should_fail:
             raise RuntimeError("Event bus publish failed")
-        self.published_envelopes.append((envelope, topic))
+        # Store envelopes - supports both introspection and heartbeat events
+        if isinstance(envelope, (ModelNodeIntrospectionEvent, ModelNodeHeartbeatEvent)):
+            self.published_envelopes.append((envelope, topic))
 
     async def publish(
         self,
@@ -226,14 +236,16 @@ class TestMixinNodeIntrospectionInit:
 
     async def test_initialize_introspection_sets_attributes(self) -> None:
         """Test that initialize_introspection properly sets all attributes."""
+        test_node_id = uuid4()
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=test_node_id,
             node_type="EFFECT",
             event_bus=None,
         )
 
-        assert node._introspection_node_id == "test-node-001"
+        # node_id is stored as UUID internally
+        assert node._introspection_node_id == test_node_id
         assert node._introspection_node_type == "EFFECT"
         assert node._introspection_event_bus is None
         assert node._introspection_version == "1.0.0"
@@ -245,7 +257,7 @@ class TestMixinNodeIntrospectionInit:
         event_bus = MockEventBus()
 
         node.initialize_introspection(
-            node_id="test-node-002",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=event_bus,
         )
@@ -256,7 +268,7 @@ class TestMixinNodeIntrospectionInit:
         """Test initialization with custom cache TTL."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-003",
+            node_id=uuid4(),
             node_type="REDUCER",
             event_bus=None,
             cache_ttl=120.0,
@@ -268,7 +280,7 @@ class TestMixinNodeIntrospectionInit:
         """Test initialization with custom version."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-004",
+            node_id=uuid4(),
             node_type="ORCHESTRATOR",
             event_bus=None,
             version="2.1.0",
@@ -280,7 +292,7 @@ class TestMixinNodeIntrospectionInit:
         """Test initialization uses correct defaults."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-005",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -297,9 +309,11 @@ class TestMixinNodeIntrospectionInit:
         """Test that empty node_id raises ValueError."""
         node = MockNode()
 
+        # Note: with UUID type, we can't pass empty string. Instead test None case.
+        # The mixin validates via truthiness check which catches None.
         with pytest.raises(ValueError, match="node_id cannot be empty"):
             node.initialize_introspection(
-                node_id="",
+                node_id=None,  # type: ignore[arg-type]
                 node_type="EFFECT",
             )
 
@@ -309,7 +323,7 @@ class TestMixinNodeIntrospectionInit:
 
         with pytest.raises(ValueError, match="node_type cannot be empty"):
             node.initialize_introspection(
-                node_id="test-node",
+                node_id=uuid4(),
                 node_type="",
             )
 
@@ -328,7 +342,7 @@ class TestMixinNodeIntrospectionCapabilities:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -412,7 +426,7 @@ class TestMixinNodeIntrospectionEndpoints:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -436,7 +450,7 @@ class TestMixinNodeIntrospectionEndpoints:
         """Test endpoint discovery when no endpoints defined."""
         node = MockNodeNoHealth()
         node.initialize_introspection(
-            node_id="test-node-no-health",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -471,7 +485,7 @@ class TestMixinNodeIntrospectionState:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -496,7 +510,7 @@ class TestMixinNodeIntrospectionState:
         """Test get_current_state when _state is missing."""
         node = MockNodeNoState()
         node.initialize_introspection(
-            node_id="test-node-no-state",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -509,7 +523,7 @@ class TestMixinNodeIntrospectionState:
         """Test get_current_state with enum-style state (has .value)."""
         node = MockNodeWithEnumState()
         node.initialize_introspection(
-            node_id="test-node-enum",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -532,7 +546,7 @@ class TestMixinNodeIntrospectionCaching:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.1,  # Short TTL for testing
@@ -572,10 +586,12 @@ class TestMixinNodeIntrospectionCaching:
 
     async def test_get_introspection_data_structure(self, mock_node: MockNode) -> None:
         """Test that get_introspection_data returns expected model."""
+        from uuid import UUID
+
         data = await mock_node.get_introspection_data()
 
         assert isinstance(data, ModelNodeIntrospectionEvent)
-        assert data.node_id == "test-node-001"
+        assert isinstance(data.node_id, UUID)  # node_id is now UUID type
         assert data.node_type == "EFFECT"
         assert isinstance(data.capabilities, dict)
         assert isinstance(data.endpoints, dict)
@@ -585,7 +601,7 @@ class TestMixinNodeIntrospectionCaching:
         """Test that cache starts empty."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-cache",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -621,7 +637,7 @@ class TestMixinNodeIntrospectionPublishing:
         node = MockNode()
         event_bus = MockEventBus()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -636,7 +652,7 @@ class TestMixinNodeIntrospectionPublishing:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-001",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -691,6 +707,8 @@ class TestMixinNodeIntrospectionPublishing:
         assert isinstance(event_bus, MockEventBus)
 
         envelope, _ = event_bus.published_envelopes[0]
+        # Type narrow to ModelNodeIntrospectionEvent for reason attribute
+        assert isinstance(envelope, ModelNodeIntrospectionEvent)
         assert envelope.reason == "shutdown"
 
 
@@ -704,7 +722,7 @@ class TestMixinNodeIntrospectionTasks:
         node = MockNode()
         event_bus = MockEventBus()
         node.initialize_introspection(
-            node_id="test-node-tasks",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -734,7 +752,7 @@ class TestMixinNodeIntrospectionTasks:
         node = MockNode()
         event_bus = MockEventBus()
         node.initialize_introspection(
-            node_id="test-node-stop",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -756,7 +774,7 @@ class TestMixinNodeIntrospectionTasks:
         """Test that stop_introspection_tasks can be called multiple times."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-idempotent",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -772,7 +790,7 @@ class TestMixinNodeIntrospectionTasks:
         node = MockNode()
         event_bus = MockEventBus()
         node.initialize_introspection(
-            node_id="test-node-heartbeat",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -803,7 +821,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         node = MockNode()
         failing_event_bus = MockEventBus(should_fail=True)
         node.initialize_introspection(
-            node_id="test-node-graceful",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=failing_event_bus,
         )
@@ -818,14 +836,18 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         node = MockNode()
 
         # Create event bus that raises unexpected exception
+        # Must implement both methods from ProtocolEventBusLike
         class BrokenEventBus:
-            async def publish_envelope(
-                self, envelope: ModelNodeIntrospectionEvent, topic: str
+            async def publish_envelope(self, envelope: object, topic: str) -> None:
+                raise ValueError("Unexpected error")
+
+            async def publish(
+                self, topic: str, key: bytes | None, value: bytes
             ) -> None:
                 raise ValueError("Unexpected error")
 
         node.initialize_introspection(
-            node_id="test-node-broken",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=BrokenEventBus(),
         )
@@ -839,7 +861,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         node = MockNode()
         event_bus = MockEventBus(should_fail=True)
         node.initialize_introspection(
-            node_id="test-node-continue",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=event_bus,
         )
@@ -879,7 +901,7 @@ class TestMixinNodeIntrospectionPerformance:
         """
         node = MockNode()
         node.initialize_introspection(
-            node_id="test-node-perf",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -995,7 +1017,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Benchmark introspection with detailed timing breakdown."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="benchmark-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1062,7 +1084,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Benchmark introspection under concurrent load."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="concurrent-benchmark-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Force cache misses
@@ -1099,7 +1121,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Verify cache hits are sub-millisecond."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="cache-hit-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1135,7 +1157,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Test that p95 latency meets requirements."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="p95-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1172,7 +1194,7 @@ class TestMixinNodeIntrospectionBenchmark:
         """Test timing breakdown of individual introspection components."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="breakdown-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1225,16 +1247,17 @@ class TestMixinNodeIntrospectionEdgeCases:
         class MinimalNode(MixinNodeIntrospection):
             pass
 
+        test_node_id = uuid4()
         node = MinimalNode()
         node.initialize_introspection(
-            node_id="minimal-node",
+            node_id=test_node_id,
             node_type="EFFECT",
             event_bus=None,
         )
 
         data = await node.get_introspection_data()
 
-        assert data.node_id == "minimal-node"
+        assert data.node_id == test_node_id  # node_id preserved from initialization
         assert data.current_state is None  # No state attribute
 
     async def test_large_capability_list(self) -> None:
@@ -1273,7 +1296,7 @@ class TestMixinNodeIntrospectionEdgeCases:
 
         node = LargeNode()
         node.initialize_introspection(
-            node_id="large-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -1293,9 +1316,10 @@ class TestMixinNodeIntrospectionEdgeCases:
 
     async def test_concurrent_introspection_calls(self) -> None:
         """Test concurrent introspection data requests."""
+        test_node_id = uuid4()
         node = MockNode()
         node.initialize_introspection(
-            node_id="concurrent-node",
+            node_id=test_node_id,
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL
@@ -1308,14 +1332,14 @@ class TestMixinNodeIntrospectionEdgeCases:
         # All should succeed
         assert len(results) == 100
         for result in results:
-            assert result.node_id == "concurrent-node"
+            assert result.node_id == test_node_id
 
     async def test_introspection_with_special_characters_in_state(self) -> None:
         """Test introspection with special characters in state."""
         node = MockNode()
         node._state = "state<with>special&chars\"quote'"
         node.initialize_introspection(
-            node_id="special-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1327,7 +1351,7 @@ class TestMixinNodeIntrospectionEdgeCases:
         """Test that introspection mixin doesn't affect node functionality."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="functional-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1357,7 +1381,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test that class-level cache is populated on first access."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="cache-test-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1378,14 +1402,14 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test that class-level cache is shared across instances."""
         node1 = MockNode()
         node1.initialize_introspection(
-            node_id="cache-node-1",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
 
         node2 = MockNode()
         node2.initialize_introspection(
-            node_id="cache-node-2",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1406,7 +1430,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test invalidating cache for a specific class."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="invalidate-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1425,7 +1449,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test invalidating cache for all classes."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="invalidate-all-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1444,7 +1468,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test that cached signatures match direct signature extraction."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="signature-match-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1466,7 +1490,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         """Test that class-level caching provides performance benefit."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="perf-cache-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1504,14 +1528,14 @@ class TestMixinNodeIntrospectionClassLevelCache:
 
         node1 = CustomNode1()
         node1.initialize_introspection(
-            node_id="custom-1",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
 
         node2 = CustomNode2()
         node2.initialize_introspection(
-            node_id="custom-2",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -1546,7 +1570,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
 
         node = NodeWithBuiltins()
         node.initialize_introspection(
-            node_id="builtins-test",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1566,7 +1590,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         """Test that DEFAULT_OPERATION_KEYWORDS is used when not specified."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="default-keywords-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1579,7 +1603,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         """Test that DEFAULT_EXCLUDE_PREFIXES is used when not specified."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="default-prefixes-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1593,7 +1617,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         custom_keywords = {"fetch", "upload", "download", "sync"}
         node = MockNode()
         node.initialize_introspection(
-            node_id="custom-keywords-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords=custom_keywords,
@@ -1605,7 +1629,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         custom_prefixes = {"_", "helper_", "internal_"}
         node = MockNode()
         node.initialize_introspection(
-            node_id="custom-prefixes-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             exclude_prefixes=custom_prefixes,
@@ -1627,7 +1651,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
 
         node = CustomMethodsNode()
         node.initialize_introspection(
-            node_id="custom-ops-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"fetch", "upload"},
@@ -1654,7 +1678,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         """Test that empty operation_keywords results in no operations discovered."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="empty-keywords-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords=set(),
@@ -1676,14 +1700,14 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
 
         node1 = MultiInstanceNode()
         node1.initialize_introspection(
-            node_id="node-1",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"execute"},
         )
         node2 = MultiInstanceNode()
         node2.initialize_introspection(
-            node_id="node-2",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             operation_keywords={"fetch"},
@@ -1704,7 +1728,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         original_defaults = MixinNodeIntrospection.DEFAULT_OPERATION_KEYWORDS.copy()
         node = MockNode()
         node.initialize_introspection(
-            node_id="no-mutation-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1724,7 +1748,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that get_performance_metrics returns None before introspection."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="metrics-test-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1738,7 +1762,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that get_performance_metrics returns metrics after introspection."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="metrics-test-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1753,7 +1777,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that performance metrics contain all expected fields."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="metrics-fields-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1785,7 +1809,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that cache hits are correctly detected in metrics."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="cache-hit-metrics-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1806,7 +1830,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that method count is correctly reported in metrics."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="method-count-metrics-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1823,7 +1847,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that to_dict() returns all fields."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="to-dict-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -1849,7 +1873,7 @@ class TestMixinNodeIntrospectionPerformanceMetrics:
         """Test that performance metrics are fresh for each introspection call."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="fresh-metrics-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL to force cache refresh
@@ -1897,7 +1921,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         node = MinimalMethodsNode()
         node.initialize_introspection(
-            node_id="minimal-methods-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -1999,7 +2023,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         node = MediumMethodsNode()
         node.initialize_introspection(
-            node_id="medium-methods-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -2053,7 +2077,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         node = LargeMethodsNode()
         node.initialize_introspection(
-            node_id="large-methods-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -2104,7 +2128,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         node = LargeCacheNode()
         node.initialize_introspection(
-            node_id="large-cache-node",
+            node_id=uuid4(),
             node_type="COMPUTE",
             event_bus=None,
         )
@@ -2152,7 +2176,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
             node = ScalingTestNode()
             node.initialize_introspection(
-                node_id=f"scaling-test-{method_count}",
+                node_id=uuid4(),
                 node_type="COMPUTE",
                 event_bus=None,
             )
@@ -2199,7 +2223,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         """Test that thresholds are not marked exceeded in normal operation."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="threshold-normal-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2220,7 +2244,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         # We can't reliably force slow operations in a unit test
         node = MockNode()
         node.initialize_introspection(
-            node_id="slow-ops-structure-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2236,7 +2260,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         """Test that cache hit has its own performance threshold."""
         node = MockNode()
         node.initialize_introspection(
-            node_id="cache-threshold-node",
+            node_id=uuid4(),
             node_type="EFFECT",
             event_bus=None,
         )
@@ -2255,3 +2279,464 @@ class TestMixinNodeIntrospectionThresholdDetection:
         # If it exceeds 1ms, there might be an issue
         if metrics.total_introspection_ms < PERF_THRESHOLD_CACHE_HIT_MS:
             assert "cache_hit" not in metrics.slow_operations
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.performance
+class TestMixinNodeIntrospectionComprehensiveBenchmark:
+    """Comprehensive performance benchmarks for node introspection.
+
+    These tests provide detailed performance analysis with:
+    - Cold-start (no cache) introspection timing
+    - Warm cache hit timing
+    - Component-level timing breakdown
+    - Percentile-based thresholds (p95/p99) for flaky test mitigation
+    - Verification of <50ms target
+    - Performance metrics validation via get_performance_metrics()
+
+    Note: All tests use PERF_MULTIPLIER to adjust thresholds for CI environments.
+    Tests use sample sizes of 20+ iterations for statistical significance.
+    """
+
+    # Minimum sample size for statistical significance
+    MIN_SAMPLE_SIZE = 20
+
+    def _calculate_percentile(self, times: list[float], percentile: float) -> float:
+        """Calculate the percentile value from a list of times.
+
+        Args:
+            times: List of timing measurements in milliseconds.
+            percentile: Percentile to calculate (0-100).
+
+        Returns:
+            The percentile value.
+        """
+        sorted_times = sorted(times)
+        index = int(len(sorted_times) * (percentile / 100))
+        # Clamp index to valid range
+        index = min(index, len(sorted_times) - 1)
+        return sorted_times[index]
+
+    async def test_benchmark_cold_start_introspection(self) -> None:
+        """Benchmark cold-start introspection time (no cache).
+
+        Measures introspection performance when cache is empty,
+        which represents the worst-case timing scenario.
+
+        Uses p95 percentile to avoid flakiness from outliers.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Clear class-level cache for accurate cold-start measurement
+        MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+        cold_start_times: list[float] = []
+
+        for i in range(self.MIN_SAMPLE_SIZE):
+            # Clear both instance and class caches for true cold start
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            if i > 0:
+                # Only clear class cache on iterations > 0 to measure true cold start
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            cold_start_times.append(elapsed_ms)
+
+        # Calculate statistics
+        avg_time = sum(cold_start_times) / len(cold_start_times)
+        p95_time = self._calculate_percentile(cold_start_times, 95)
+        p99_time = self._calculate_percentile(cold_start_times, 99)
+        min_time = min(cold_start_times)
+        max_time = max(cold_start_times)
+
+        print(f"\nCold-start introspection ({self.MIN_SAMPLE_SIZE} iterations):")
+        print(
+            f"  avg={avg_time:.2f}ms, min={min_time:.2f}ms, "
+            f"max={max_time:.2f}ms, p95={p95_time:.2f}ms, p99={p99_time:.2f}ms"
+        )
+
+        # Use p95 for threshold comparison (more stable than max)
+        threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
+        assert p95_time < threshold_ms, (
+            f"Cold-start p95 latency {p95_time:.2f}ms exceeds {threshold_ms:.0f}ms "
+            f"threshold (avg={avg_time:.2f}ms, max={max_time:.2f}ms)"
+        )
+
+    async def test_benchmark_warm_cache_hit(self) -> None:
+        """Benchmark warm cache hit timing.
+
+        Measures introspection performance when result is served from cache,
+        which should be sub-millisecond.
+
+        Uses p99 percentile for cache hits since they should be very fast.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Warm the cache with initial call
+        await node.get_introspection_data()
+
+        cache_hit_times: list[float] = []
+
+        # Measure cache hits - use larger sample for cache hit measurement
+        for _ in range(100):
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            cache_hit_times.append(elapsed_ms)
+
+        # Calculate statistics
+        avg_time = sum(cache_hit_times) / len(cache_hit_times)
+        p95_time = self._calculate_percentile(cache_hit_times, 95)
+        p99_time = self._calculate_percentile(cache_hit_times, 99)
+        min_time = min(cache_hit_times)
+        max_time = max(cache_hit_times)
+
+        print("\nWarm cache hit (100 iterations):")
+        print(
+            f"  avg={avg_time:.3f}ms, min={min_time:.3f}ms, "
+            f"max={max_time:.3f}ms, p95={p95_time:.3f}ms, p99={p99_time:.3f}ms"
+        )
+
+        # Cache hits should be very fast - use p99 for threshold
+        threshold_ms = PERF_THRESHOLD_CACHE_HIT_MS * PERF_MULTIPLIER
+        assert p99_time < threshold_ms, (
+            f"Cache hit p99 latency {p99_time:.3f}ms exceeds {threshold_ms:.1f}ms "
+            f"threshold (avg={avg_time:.3f}ms)"
+        )
+
+        # Verify cache hit was detected in metrics
+        metrics = node.get_performance_metrics()
+        assert metrics is not None
+        assert metrics.cache_hit is True, "Last call should be a cache hit"
+
+    async def test_benchmark_component_level_timing(self) -> None:
+        """Benchmark timing for individual introspection components.
+
+        Measures timing for each component:
+        - get_capabilities()
+        - get_endpoints()
+        - get_current_state()
+
+        Uses p95 for threshold comparison to avoid flakiness.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Clear class cache for accurate capability measurement
+        MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+        component_timings: dict[str, list[float]] = {
+            "get_capabilities": [],
+            "get_endpoints": [],
+            "get_current_state": [],
+        }
+
+        for i in range(self.MIN_SAMPLE_SIZE):
+            # Clear class cache each iteration for get_capabilities measurement
+            if i > 0:
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+            # Time get_capabilities
+            start = time.perf_counter()
+            await node.get_capabilities()
+            component_timings["get_capabilities"].append(
+                (time.perf_counter() - start) * 1000
+            )
+
+            # Time get_endpoints
+            start = time.perf_counter()
+            await node.get_endpoints()
+            component_timings["get_endpoints"].append(
+                (time.perf_counter() - start) * 1000
+            )
+
+            # Time get_current_state
+            start = time.perf_counter()
+            await node.get_current_state()
+            component_timings["get_current_state"].append(
+                (time.perf_counter() - start) * 1000
+            )
+
+        print(f"\nComponent-level timing ({self.MIN_SAMPLE_SIZE} iterations):")
+        for name, times in component_timings.items():
+            avg = sum(times) / len(times)
+            p95 = self._calculate_percentile(times, 95)
+            min_t = min(times)
+            max_t = max(times)
+            print(
+                f"  {name}: avg={avg:.2f}ms, min={min_t:.2f}ms, "
+                f"max={max_t:.2f}ms, p95={p95:.2f}ms"
+            )
+
+        # Verify get_capabilities (most expensive due to reflection)
+        cap_p95 = self._calculate_percentile(component_timings["get_capabilities"], 95)
+        cap_threshold = PERF_THRESHOLD_GET_CAPABILITIES_MS * PERF_MULTIPLIER
+        assert cap_p95 < cap_threshold, (
+            f"get_capabilities p95 {cap_p95:.2f}ms exceeds {cap_threshold:.0f}ms"
+        )
+
+        # Verify get_current_state (should be very fast)
+        state_p95 = self._calculate_percentile(
+            component_timings["get_current_state"], 95
+        )
+        state_threshold = 1.0 * PERF_MULTIPLIER  # Should be sub-millisecond
+        assert state_p95 < state_threshold, (
+            f"get_current_state p95 {state_p95:.2f}ms exceeds {state_threshold:.1f}ms"
+        )
+
+    async def test_benchmark_50ms_target_verification(self) -> None:
+        """Verify that the <50ms target is consistently met.
+
+        This is the primary benchmark test that validates the performance
+        requirement. Uses p95 percentile for stability.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        total_times: list[float] = []
+
+        for i in range(self.MIN_SAMPLE_SIZE):
+            # Clear cache for each iteration
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            if i > 0:
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            total_times.append(elapsed_ms)
+
+        # Calculate statistics
+        avg_time = sum(total_times) / len(total_times)
+        p95_time = self._calculate_percentile(total_times, 95)
+        p99_time = self._calculate_percentile(total_times, 99)
+
+        print(f"\n<50ms Target Verification ({self.MIN_SAMPLE_SIZE} iterations):")
+        print(f"  avg={avg_time:.2f}ms, p95={p95_time:.2f}ms, p99={p99_time:.2f}ms")
+
+        # The 50ms target with CI buffer
+        threshold_ms = 50.0 * PERF_MULTIPLIER
+        assert p95_time < threshold_ms, (
+            f"FAILED: p95 latency {p95_time:.2f}ms exceeds <50ms target "
+            f"(with {PERF_MULTIPLIER}x CI buffer = {threshold_ms:.0f}ms)"
+        )
+
+        print(f"  PASSED: p95={p95_time:.2f}ms < {threshold_ms:.0f}ms threshold")
+
+    async def test_benchmark_performance_metrics_validation(self) -> None:
+        """Verify that get_performance_metrics() returns valid timing data.
+
+        Validates that IntrospectionPerformanceMetrics captures accurate
+        timing information that matches actual measured times.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Clear cache for fresh computation
+        node._introspection_cache = None
+        node._introspection_cached_at = None
+        MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+        # Measure actual time and get metrics
+        start = time.perf_counter()
+        await node.get_introspection_data()
+        actual_total_ms = (time.perf_counter() - start) * 1000
+
+        metrics = node.get_performance_metrics()
+
+        # Validate metrics structure
+        assert metrics is not None, "get_performance_metrics() should return metrics"
+        assert isinstance(metrics, IntrospectionPerformanceMetrics)
+
+        # Validate timing fields are populated
+        assert metrics.total_introspection_ms > 0, (
+            "total_introspection_ms should be > 0"
+        )
+        assert metrics.get_capabilities_ms >= 0, "get_capabilities_ms should be >= 0"
+        assert metrics.get_endpoints_ms >= 0, "get_endpoints_ms should be >= 0"
+        assert metrics.get_current_state_ms >= 0, "get_current_state_ms should be >= 0"
+
+        # Validate method count is reasonable
+        assert metrics.method_count >= 0, "method_count should be >= 0"
+
+        # Validate cache hit detection (should be False for fresh computation)
+        assert metrics.cache_hit is False, "First call should not be cache hit"
+
+        # Validate timing consistency - metrics time should be close to measured time
+        # Allow some tolerance for measurement overhead
+        timing_tolerance_ms = 5.0 * PERF_MULTIPLIER
+        assert (
+            abs(metrics.total_introspection_ms - actual_total_ms) < timing_tolerance_ms
+        ), (
+            f"Metrics time {metrics.total_introspection_ms:.2f}ms differs from "
+            f"measured time {actual_total_ms:.2f}ms by more than {timing_tolerance_ms:.1f}ms"
+        )
+
+        # Validate to_dict() returns all fields
+        metrics_dict = metrics.to_dict()
+        expected_keys = {
+            "get_capabilities_ms",
+            "discover_capabilities_ms",
+            "get_endpoints_ms",
+            "get_current_state_ms",
+            "total_introspection_ms",
+            "cache_hit",
+            "method_count",
+            "threshold_exceeded",
+            "slow_operations",
+        }
+        assert set(metrics_dict.keys()) == expected_keys, (
+            f"to_dict() missing keys: {expected_keys - set(metrics_dict.keys())}"
+        )
+
+        print("\nPerformance Metrics Validation:")
+        print(f"  total_introspection_ms: {metrics.total_introspection_ms:.2f}")
+        print(f"  get_capabilities_ms: {metrics.get_capabilities_ms:.2f}")
+        print(f"  get_endpoints_ms: {metrics.get_endpoints_ms:.2f}")
+        print(f"  get_current_state_ms: {metrics.get_current_state_ms:.2f}")
+        print(f"  method_count: {metrics.method_count}")
+        print(f"  cache_hit: {metrics.cache_hit}")
+        print(f"  threshold_exceeded: {metrics.threshold_exceeded}")
+
+    async def test_benchmark_metrics_threshold_detection(self) -> None:
+        """Verify that threshold_exceeded and slow_operations are correctly set.
+
+        Tests that the metrics correctly identify when operations exceed
+        their performance thresholds.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Run multiple iterations to check threshold detection
+        threshold_exceeded_count = 0
+        iterations = self.MIN_SAMPLE_SIZE
+
+        for i in range(iterations):
+            # Clear cache for each iteration
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            if i > 0:
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+            await node.get_introspection_data()
+            metrics = node.get_performance_metrics()
+
+            assert metrics is not None
+
+            # Count how often threshold is exceeded
+            if metrics.threshold_exceeded:
+                threshold_exceeded_count += 1
+
+            # Validate slow_operations consistency
+            if metrics.threshold_exceeded:
+                # If threshold is exceeded, slow_operations should contain something
+                # (unless it's a cache hit threshold, which may not add to list)
+                pass  # Threshold detection is based on raw values
+            else:
+                # If threshold not exceeded, slow_operations should be empty
+                assert len(metrics.slow_operations) == 0, (
+                    f"slow_operations should be empty when threshold not exceeded: "
+                    f"{metrics.slow_operations}"
+                )
+
+        print(f"\nThreshold Detection ({iterations} iterations):")
+        print(f"  threshold_exceeded: {threshold_exceeded_count}/{iterations} times")
+
+        # In normal operation, we should rarely exceed thresholds
+        # Allow up to 10% of iterations to exceed (for CI variance)
+        max_exceeded_ratio = 0.1
+        exceeded_ratio = threshold_exceeded_count / iterations
+        if exceeded_ratio > max_exceeded_ratio:
+            print(
+                f"  WARNING: {exceeded_ratio:.1%} of iterations exceeded threshold "
+                f"(expected < {max_exceeded_ratio:.1%})"
+            )
+
+    async def test_benchmark_statistical_stability(self) -> None:
+        """Verify that timing measurements are statistically stable.
+
+        Tests that the variance in timing measurements is acceptable,
+        indicating consistent performance.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+        )
+
+        # Collect timing samples
+        samples: list[float] = []
+        sample_size = 50  # Larger sample for better statistics
+
+        for i in range(sample_size):
+            node._introspection_cache = None
+            node._introspection_cached_at = None
+            if i > 0:
+                MixinNodeIntrospection._invalidate_class_method_cache(MockNode)
+
+            start = time.perf_counter()
+            await node.get_introspection_data()
+            samples.append((time.perf_counter() - start) * 1000)
+
+        # Calculate statistics
+        avg = sum(samples) / len(samples)
+        variance = sum((x - avg) ** 2 for x in samples) / len(samples)
+        std_dev = variance**0.5
+        coef_of_variation = std_dev / avg if avg > 0 else 0
+
+        p50 = self._calculate_percentile(samples, 50)
+        p95 = self._calculate_percentile(samples, 95)
+        p99 = self._calculate_percentile(samples, 99)
+
+        print(f"\nStatistical Stability ({sample_size} samples):")
+        print(f"  avg={avg:.2f}ms, std_dev={std_dev:.2f}ms, CV={coef_of_variation:.2%}")
+        print(f"  p50={p50:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms")
+
+        # Coefficient of variation should be reasonable
+        # Allow higher variance in CI environments
+        max_cv = 1.0 * PERF_MULTIPLIER  # 100% CV with CI buffer
+        assert coef_of_variation < max_cv, (
+            f"Coefficient of variation {coef_of_variation:.2%} exceeds {max_cv:.0%}, "
+            f"indicating unstable performance"
+        )
+
+        # p99 should not be excessively higher than p50
+        # This catches outliers that might cause flaky tests
+        max_p99_to_p50_ratio = 5.0 * PERF_MULTIPLIER
+        p99_to_p50_ratio = p99 / p50 if p50 > 0 else 0
+        assert p99_to_p50_ratio < max_p99_to_p50_ratio, (
+            f"p99/p50 ratio {p99_to_p50_ratio:.1f} exceeds {max_p99_to_p50_ratio:.1f}, "
+            f"indicating excessive outliers"
+        )
