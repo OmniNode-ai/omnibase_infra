@@ -112,7 +112,19 @@ class TestValidateInfraArchitectureDefaults:
     @patch("omnibase_infra.validation.infra_validators.validate_architecture")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
         """Verify defaults are correctly passed to core validator."""
-        mock_validate.return_value = MagicMock(is_valid=True, errors=[])
+        # Mock validation result with proper structure for filtered result creation
+        # _create_filtered_result expects real Pydantic model attributes
+        mock_result = MagicMock()
+        mock_result.is_valid = True
+        mock_result.errors = []
+        mock_result.warnings = []
+        mock_result.suggestions = []
+        mock_result.issues = []
+        mock_result.validated_value = None
+        mock_result.summary = ""
+        mock_result.details = ""
+        mock_result.metadata = None
+        mock_validate.return_value = mock_result
 
         # Call with defaults
         validate_infra_architecture()
@@ -334,15 +346,16 @@ class TestScriptDefaults:
 
         script_content = script_path.read_text()
 
-        # Verify architecture validator uses INFRA_MAX_VIOLATIONS constant
+        # Verify architecture validator uses validate_infra_architecture() which has
+        # built-in defaults including INFRA_MAX_VIOLATIONS and exemption filtering
         assert (
-            "max_violations=INFRA_MAX_VIOLATIONS" in script_content
-        ), "Architecture validator should use INFRA_MAX_VIOLATIONS constant"
+            "validate_infra_architecture()" in script_content
+        ), "Architecture validator should use validate_infra_architecture() with built-in defaults"
+        # Check for import - handles both single-line and multi-line import formats
         assert (
-            "from omnibase_infra.validation.infra_validators import INFRA_MAX_VIOLATIONS"
-            in script_content
-        ), "Script should import INFRA_MAX_VIOLATIONS constant"
-        assert "validate_architecture(" in script_content
+            "from omnibase_infra.validation.infra_validators import" in script_content
+            and "validate_infra_architecture" in script_content
+        ), "Script should import validate_infra_architecture from infra_validators"
 
     def test_contracts_script_defaults(self) -> None:
         """Verify contracts validation script uses correct defaults."""

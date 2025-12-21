@@ -63,9 +63,7 @@ def mock_container() -> MagicMock:
 @pytest.fixture
 def contract_path() -> Path:
     """Return path to contract.yaml."""
-    return Path(
-        "src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml"
-    )
+    return Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
 
 
 @pytest.fixture
@@ -489,9 +487,7 @@ class TestModelContractAlignment:
         input_module = contract_data["input_model"]["module"]
         output_module = contract_data["output_model"]["module"]
 
-        expected_module = (
-            "omnibase_infra.nodes.node_registration_orchestrator.models"
-        )
+        expected_module = "omnibase_infra.nodes.node_registration_orchestrator.models"
         assert input_module == expected_module
         assert output_module == expected_module
 
@@ -565,15 +561,15 @@ class TestDependencyStructure:
         dep_names = [d["name"] for d in deps]
 
         # Each required dependency must be explicitly present - no fallback conditions
-        assert "reducer_protocol" in dep_names, (
-            "Must declare 'reducer_protocol' dependency for computing intents"
-        )
-        assert "effect_node" in dep_names, (
-            "Must declare 'effect_node' dependency for executing registration operations"
-        )
-        assert "projection_reader" in dep_names, (
-            "Must declare 'projection_reader' dependency for reading state (OMN-930)"
-        )
+        assert (
+            "reducer_protocol" in dep_names
+        ), "Must declare 'reducer_protocol' dependency for computing intents"
+        assert (
+            "effect_node" in dep_names
+        ), "Must declare 'effect_node' dependency for executing registration operations"
+        assert (
+            "projection_reader" in dep_names
+        ), "Must declare 'projection_reader' dependency for reading state (OMN-930)"
 
     def test_dependencies_have_required_fields(self, contract_data: dict) -> None:
         """Test that dependencies have required fields."""
@@ -581,10 +577,12 @@ class TestDependencyStructure:
 
         for dep in deps:
             assert "name" in dep, f"Dependency missing 'name' field: {dep}"
-            assert "type" in dep, f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
-            assert "description" in dep, (
-                f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
-            )
+            assert (
+                "type" in dep
+            ), f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
+            assert (
+                "description" in dep
+            ), f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
 
     def test_dependency_types_valid(self, contract_data: dict) -> None:
         """Test that dependency types are valid ONEX types."""

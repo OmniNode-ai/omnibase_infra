@@ -293,6 +293,23 @@ pattern_exemptions:
       Domain registry pattern requires comprehensive message type management: CRUD operations (register, unregister, get), query operations (list, filter, search by topic/domain), validation operations (validate_topic, resolve_type), and statistics (get_statistics). This is an established domain registry pattern.
 
     ticket: OMN-983
+# Architecture validator exemptions
+# These handle one-model-per-file violations for domain-grouped protocols
+architecture_exemptions:
+  # ==========================================================================
+  # Domain-Grouped Protocol Exemptions (CLAUDE.md Convention)
+  # ==========================================================================
+  # Per CLAUDE.md "Protocol File Naming" section:
+  # "Domain-grouped protocols: Use protocols.py when multiple cohesive protocols
+  # belong to a specific domain or node module"
+  - file_pattern: 'nodes/node_registration_orchestrator/protocols\.py'
+    violation_pattern: '\d+ protocols in one file'
+    reason: >
+      Domain-grouped protocols for registration orchestrator workflow.
+      ProtocolReducer and ProtocolEffect define the complete interface for the
+      reducer-effect pattern in node registration. Per CLAUDE.md convention.
+    ticket: OMN-888
+
 # Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:

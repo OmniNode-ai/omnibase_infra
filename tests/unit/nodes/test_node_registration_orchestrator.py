@@ -38,9 +38,7 @@ def mock_container() -> MagicMock:
 @pytest.fixture
 def contract_path() -> Path:
     """Return path to contract.yaml."""
-    return Path(
-        "src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml"
-    )
+    return Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
 
 
 @pytest.fixture

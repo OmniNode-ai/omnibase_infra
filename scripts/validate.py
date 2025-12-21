@@ -24,15 +24,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
 def run_architecture(verbose: bool = False) -> bool:
-    """Run architecture validation."""
+    """Run architecture validation with infrastructure-specific exemptions."""
     try:
-        from omnibase_core.validation import validate_architecture
-
-        from omnibase_infra.validation.infra_validators import INFRA_MAX_VIOLATIONS
-
-        result = validate_architecture(
-            "src/omnibase_infra/", max_violations=INFRA_MAX_VIOLATIONS
+        # Use the infrastructure validator which includes exemption filtering
+        # for domain-grouped protocols per CLAUDE.md convention
+        from omnibase_infra.validation.infra_validators import (
+            validate_infra_architecture,
         )
+
+        result = validate_infra_architecture()
         if verbose or not result.is_valid:
             print(f"Architecture: {'PASS' if result.is_valid else 'FAIL'}")
             for e in result.errors:

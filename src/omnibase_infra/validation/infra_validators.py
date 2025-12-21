@@ -16,6 +16,7 @@ Exemption System:
 
     See validation_exemptions.yaml for:
     - pattern_exemptions: Method count, parameter count, naming violations
+    - architecture_exemptions: One-model-per-file violations for domain-grouped protocols
     - union_exemptions: Complex union type violations
 
     Adding new exemptions:
@@ -99,9 +100,9 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
     Cache is cleared when the module is reloaded.
 
     Returns:
-        Dictionary with 'pattern_exemptions' and 'union_exemptions' keys,
-        each containing a list of ExemptionPattern dictionaries.
-        Returns empty lists if file is missing or malformed.
+        Dictionary with 'pattern_exemptions', 'architecture_exemptions', and
+        'union_exemptions' keys, each containing a list of ExemptionPattern
+        dictionaries. Returns empty lists if file is missing or malformed.
 
     Note:
         The YAML file is expected to be at validation_exemptions.yaml alongside
@@ -109,23 +110,35 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
     """
     if not EXEMPTIONS_YAML_PATH.exists():
         # Fallback to empty exemptions if file is missing
-        return {"pattern_exemptions": [], "union_exemptions": []}
+        return {
+            "pattern_exemptions": [],
+            "architecture_exemptions": [],
+            "union_exemptions": [],
+        }
 
     try:
         with EXEMPTIONS_YAML_PATH.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         if not isinstance(data, dict):
-            return {"pattern_exemptions": [], "union_exemptions": []}
+            return {
+                "pattern_exemptions": [],
+                "architecture_exemptions": [],
+                "union_exemptions": [],
+            }
 
         # Extract exemption lists, converting YAML structure to ExemptionPattern format
         pattern_exemptions = _convert_yaml_exemptions(
             data.get("pattern_exemptions", [])
         )
+        architecture_exemptions = _convert_yaml_exemptions(
+            data.get("architecture_exemptions", [])
+        )
         union_exemptions = _convert_yaml_exemptions(data.get("union_exemptions", []))
 
         return {
             "pattern_exemptions": pattern_exemptions,
+            "architecture_exemptions": architecture_exemptions,
             "union_exemptions": union_exemptions,
         }
     except (yaml.YAMLError, OSError) as e:
@@ -135,7 +148,11 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
             EXEMPTIONS_YAML_PATH,
             e,
         )
-        return {"pattern_exemptions": [], "union_exemptions": []}
+        return {
+            "pattern_exemptions": [],
+            "architecture_exemptions": [],
+            "union_exemptions": [],
+        }
 
 
 def _convert_yaml_exemptions(yaml_list: list[dict]) -> list[ExemptionPattern]:
@@ -259,6 +276,20 @@ def get_pattern_exemptions() -> list[ExemptionPattern]:
     return _load_exemptions_yaml()["pattern_exemptions"]
 
 
+def get_architecture_exemptions() -> list[ExemptionPattern]:
+    """
+    Get architecture validator exemptions from YAML configuration.
+
+    Architecture exemptions handle violations of the one-model-per-file principle
+    for domain-grouped protocols. Per CLAUDE.md, protocols.py files may contain
+    multiple cohesive protocols that belong to a specific domain or node module.
+
+    Returns:
+        List of ExemptionPattern dictionaries for architecture validation.
+    """
+    return _load_exemptions_yaml()["architecture_exemptions"]
+
+
 def get_union_exemptions() -> list[ExemptionPattern]:
     """
     Get union validator exemptions from YAML configuration.
@@ -361,14 +392,36 @@ def validate_infra_architecture(
 
     Enforces ONEX one-model-per-file principle critical for infrastructure nodes.
 
+    Exemptions:
+        Exemption patterns are loaded from validation_exemptions.yaml
+        (architecture_exemptions section). Per CLAUDE.md "Protocol File Naming",
+        domain-grouped protocols in protocols.py files are allowed to contain
+        multiple cohesive protocols that belong to a specific domain or node module.
+
+        Example exemption:
+        - nodes/node_registration_orchestrator/protocols.py: Contains ProtocolReducer
+          and ProtocolEffect for the reducer-effect pattern in node registration.
+
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
         max_violations: Maximum allowed violations. Defaults to INFRA_MAX_VIOLATIONS (0).
 
     Returns:
-        ModelValidationResult with validation status and any errors.
+        ModelValidationResult with validation status and filtered errors.
+        Documented exemptions are filtered from error list.
     """
-    return validate_architecture(str(directory), max_violations=max_violations)
+    # Run base validation
+    base_result = validate_architecture(str(directory), max_violations=max_violations)
+
+    # Load exemption patterns from YAML configuration
+    # See validation_exemptions.yaml for pattern definitions and rationale
+    exempted_patterns = get_architecture_exemptions()
+
+    # Filter errors using regex-based pattern matching
+    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
+
+    # Create wrapper result (avoid mutation)
+    return _create_filtered_result(base_result, filtered_errors)
 
 
 def validate_infra_contracts(
@@ -782,6 +835,7 @@ __all__ = [
     "EXEMPTIONS_YAML_PATH",
     # Exemption loaders
     "get_pattern_exemptions",
+    "get_architecture_exemptions",
     "get_union_exemptions",
     # Validators
     "validate_infra_architecture",

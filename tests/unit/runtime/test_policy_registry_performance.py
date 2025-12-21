@@ -166,9 +166,9 @@ class TestPolicyRegistryPerformance:
         # Verify all expected versions exist
         versions = large_policy_registry.list_versions("policy_75")
         expected_versions = {"0.0.0", "1.0.0", "2.0.0", "3.0.0", "4.0.0"}
-        assert set(versions) == expected_versions, (
-            f"Expected versions {expected_versions} but got {set(versions)}"
-        )
+        assert (
+            set(versions) == expected_versions
+        ), f"Expected versions {expected_versions} but got {set(versions)}"
 
         # Verify fast path completes in reasonable time (absolute performance)
         start_time = time.perf_counter()
@@ -178,9 +178,9 @@ class TestPolicyRegistryPerformance:
 
         # 1000 fast path lookups should complete in < 150ms
         # This validates the fast path is performant in absolute terms
-        assert elapsed_ms < 150, (
-            f"Fast path too slow: {elapsed_ms:.2f}ms for 1000 lookups (expected < 150ms)"
-        )
+        assert (
+            elapsed_ms < 150
+        ), f"Fast path too slow: {elapsed_ms:.2f}ms for 1000 lookups (expected < 150ms)"
 
     def test_semver_cache_performance(
         self, large_policy_registry: PolicyRegistry
