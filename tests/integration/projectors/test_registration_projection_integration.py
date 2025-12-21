@@ -63,7 +63,7 @@ def make_projection(
     state: EnumRegistrationState = EnumRegistrationState.PENDING_REGISTRATION,
     node_type: str = "effect",
     node_version: str = "1.0.0",
-    event_id: str | None = None,
+    event_id: UUID | None = None,
     offset: int = 0,
     ack_deadline: datetime | None = None,
     liveness_deadline: datetime | None = None,
@@ -447,21 +447,21 @@ class TestIdempotency:
 
         # Check older sequence is stale
         older_seq = make_sequence(50)
-        is_stale = await projector.is_stale(
+        older_is_stale = await projector.is_stale(
             entity_id=projection.entity_id,
             domain=projection.domain,
             sequence_info=older_seq,
         )
-        assert is_stale is True
+        assert older_is_stale is True
 
         # Check newer sequence is not stale
         newer_seq = make_sequence(150)
-        is_stale = await projector.is_stale(
+        newer_is_stale = await projector.is_stale(
             entity_id=projection.entity_id,
             domain=projection.domain,
             sequence_info=newer_seq,
         )
-        assert is_stale is False
+        assert newer_is_stale is False
 
     async def test_is_stale_for_nonexistent_entity(
         self,

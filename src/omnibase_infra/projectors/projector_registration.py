@@ -208,9 +208,41 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("persist", corr_id)
 
-        # Build upsert query with sequence comparison
-        # The WHERE clause in the ON CONFLICT update ensures we only update
-        # if the incoming sequence is newer than the existing one
+        # ==========================================================================
+        # UPSERT WITH ORDERING ENFORCEMENT (Stale Update Rejection)
+        # ==========================================================================
+        #
+        # This query performs an atomic INSERT-or-UPDATE with sequence validation.
+        # If a row with the same (entity_id, domain) exists, the ON CONFLICT clause
+        # triggers an UPDATE - but ONLY if the WHERE clause evaluates to true.
+        #
+        # KEY CONCEPT: EXCLUDED
+        # ---------------------
+        # In PostgreSQL's ON CONFLICT clause, EXCLUDED is a special pseudo-table
+        # that contains the values from the INSERT statement that triggered the
+        # conflict. For example, EXCLUDED.current_state refers to the $3 parameter
+        # (the new state we're trying to insert), while registration_projections.*
+        # refers to the existing row in the table.
+        #
+        # KEY CONCEPT: Stale Update Rejection
+        # ------------------------------------
+        # "Stale" means the incoming event is older than what we've already processed.
+        # The WHERE clause compares sequence numbers to ensure we never regress state.
+        # If WHERE evaluates to false, PostgreSQL skips the UPDATE entirely - the
+        # existing row remains unchanged, and RETURNING returns no rows.
+        #
+        # ORDERING MODES (mutually exclusive):
+        # ------------------------------------
+        # 1. KAFKA-BASED: When partition IS NOT NULL, we use offset for ordering.
+        #    Kafka guarantees ordering within a partition, so (partition, offset)
+        #    provides a total order for events affecting the same entity.
+        #
+        # 2. SEQUENCE-BASED: When partition IS NULL (non-Kafka transports like HTTP),
+        #    we fall back to a generic sequence number for ordering validation.
+        #
+        # The conditions are mutually exclusive - exactly one branch will match
+        # based on whether the incoming event has a partition value.
+        # ==========================================================================
         upsert_sql = """
             INSERT INTO registration_projections (
                 entity_id, domain, current_state, node_type, node_version,
@@ -223,6 +255,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
             )
             ON CONFLICT (entity_id, domain) DO UPDATE SET
+                -- EXCLUDED.* refers to values from the INSERT that triggered conflict
                 current_state = EXCLUDED.current_state,
                 node_type = EXCLUDED.node_type,
                 node_version = EXCLUDED.node_version,
@@ -238,22 +271,28 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 updated_at = EXCLUDED.updated_at,
                 correlation_id = EXCLUDED.correlation_id
             WHERE
-                -- Only update if incoming sequence is newer (mutually exclusive modes)
+                -- Stale update rejection: only proceed if incoming event is NEWER.
+                -- The two branches below are MUTUALLY EXCLUSIVE based on partition.
                 (
-                    -- Kafka-based ordering (partition + offset)
+                    -- MODE 1: Kafka-based ordering (has partition).
+                    -- Use offset comparison within the partition context.
                     EXCLUDED.last_applied_partition IS NOT NULL
                     AND EXCLUDED.last_applied_offset > registration_projections.last_applied_offset
                 )
                 OR (
-                    -- Generic sequence-based ordering (no partition)
+                    -- MODE 2: Sequence-based ordering (no partition, e.g., HTTP transport).
+                    -- Use generic sequence number for non-Kafka event sources.
                     EXCLUDED.last_applied_partition IS NULL
                     AND EXCLUDED.last_applied_sequence IS NOT NULL
                     AND (
+                        -- Allow update if no previous sequence (first event for this entity)
                         registration_projections.last_applied_sequence IS NULL
+                        -- Or if incoming sequence is strictly greater (newer event)
                         OR EXCLUDED.last_applied_sequence > registration_projections.last_applied_sequence
                     )
                 )
             RETURNING entity_id
+            -- RETURNING: If WHERE was false (stale), no rows returned; if true, entity_id returned
         """
 
         # Prepare parameters
@@ -393,9 +432,11 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             current_sequence = row["last_applied_sequence"]
             current_partition = row["last_applied_partition"]
 
-            # Build current sequence info for comparison
-            # Include partition for consistent comparison with persist() method's
-            # Kafka-based ordering logic
+            # Build current sequence info for comparison.
+            # We include partition to ensure the comparison logic matches persist():
+            # - When partition is set: uses Kafka-based ordering (partition + offset)
+            # - When partition is None: uses generic sequence-based ordering
+            # This alignment prevents false staleness results from mode mismatch.
             current_seq = ModelSequenceInfo(
                 sequence=current_sequence or current_offset,
                 offset=current_offset,

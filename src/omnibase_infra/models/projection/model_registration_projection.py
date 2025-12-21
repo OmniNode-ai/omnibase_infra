@@ -195,14 +195,24 @@ class ModelRegistrationProjection(BaseModel):
             >>> seq_info.sequence
             12345
         """
+        # Sequence selection: prefer last_applied_sequence when explicitly set,
+        # otherwise fall back to last_applied_offset for Kafka-based ordering.
+        # Note: sequence=0 is valid; we check "is not None" not truthiness.
+        sequence = (
+            self.last_applied_sequence
+            if self.last_applied_sequence is not None
+            else self.last_applied_offset
+        )
+
+        # Offset is only meaningful when partition is present (Kafka-based mode).
+        # For non-Kafka transports, partition is None and offset should also be None
+        # to signal that ordering uses the generic sequence field instead.
+        offset = self.last_applied_offset if self.last_applied_partition else None
+
         return ModelSequenceInfo(
-            sequence=(
-                self.last_applied_sequence
-                if self.last_applied_sequence is not None
-                else self.last_applied_offset
-            ),
+            sequence=sequence,
             partition=self.last_applied_partition,
-            offset=(self.last_applied_offset if self.last_applied_partition else None),
+            offset=offset,
         )
 
     def is_stale(self, incoming_sequence: ModelSequenceInfo) -> bool:
