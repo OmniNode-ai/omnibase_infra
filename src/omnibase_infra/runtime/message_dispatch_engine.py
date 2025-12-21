@@ -1578,11 +1578,25 @@ class MessageDispatchEngine:
         try:
             sig = inspect.signature(dispatcher)
             params = list(sig.parameters.values())
-            # Dispatcher with context has 2 parameters: (envelope, context)
+            # Dispatcher with context has 2+ parameters: (envelope, context, ...)
             # Dispatcher without context has 1 parameter: (envelope)
+            #
+            # Design Decision: We use >= 2 (not == 2) intentionally to support:
+            # - Future extensibility (e.g., envelope, context, **kwargs)
+            # - Dispatchers with additional optional parameters for testing/logging
+            # - Protocol compliance without strict arity enforcement
+            #
+            # Strict == 2 would reject valid dispatchers that happen to have
+            # extra optional parameters, which is unnecessarily restrictive.
             return len(params) >= 2
-        except (ValueError, TypeError):
-            # If we can't inspect the signature, assume no context
+        except (ValueError, TypeError) as e:
+            # If we can't inspect the signature, assume no context and log warning
+            self._logger.warning(
+                "Failed to inspect dispatcher signature: %s. "
+                "Assuming no context parameter. Uninspectable dispatchers "
+                "(C extensions, certain decorators) will receive envelope only.",
+                e,
+            )
             return False
 
     def get_metrics(self) -> dict[str, int | float]:
