@@ -7,6 +7,7 @@ components in the ONEX ecosystem.
 
 Protocols:
     - ProtocolPluginCompute: Interface for deterministic compute plugins
+    - ProtocolSnapshotPublisher: Interface for snapshot publishing services (F2)
 
 Architecture:
     Protocols enable duck typing and dependency injection without requiring
@@ -15,20 +16,29 @@ Architecture:
 
 Usage:
     ```python
-    from omnibase_infra.protocols import ProtocolPluginCompute
+    from omnibase_infra.protocols import ProtocolPluginCompute, ProtocolSnapshotPublisher
 
     # Check if class implements protocol
     plugin = MyComputePlugin()
     assert isinstance(plugin, ProtocolPluginCompute)  # Runtime check
+
+    publisher = MySnapshotPublisher()
+    assert isinstance(publisher, ProtocolSnapshotPublisher)  # Runtime check
     ```
 
 See Also:
     - omnibase_infra.plugins for base class implementations
+    - omnibase_infra.models.projection for projection models
     - ONEX 4-node architecture documentation
+    - OMN-947 (F2) for snapshot publishing design
 """
 
 from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
+from omnibase_infra.protocols.protocol_snapshot_publisher import (
+    ProtocolSnapshotPublisher,
+)
 
 __all__ = [
     "ProtocolPluginCompute",
+    "ProtocolSnapshotPublisher",
 ]
