@@ -24,9 +24,135 @@ States:
     - complete: Both backends confirmed
     - failed: Validation or registration failed
 
+State Management:
+    This section documents the state lifecycle including immutability guarantees,
+    transition methods, and integration with the persistence layer.
+
+    **IMMUTABILITY GUARANTEES:**
+
+    This model enforces strict immutability via Pydantic's frozen=True:
+
+    - All field assignments after construction raise TypeError
+    - State transitions return NEW instances; original is unchanged
+    - This enables safe sharing across threads/async contexts
+    - The reducer can safely compare old_state vs new_state
+
+    Example of immutability behavior::
+
+        state1 = ModelRegistrationState(status="idle")
+        state2 = state1.with_pending_registration(node_id, event_id)
+
+        # state1 is unchanged (immutable)
+        assert state1.status == "idle"
+        assert state2.status == "pending"
+
+        # Attempting to mutate raises TypeError
+        state1.status = "pending"  # Raises TypeError
+
+    **STATE TRANSITION METHODS:**
+
+    All state transitions are performed via ``with_*`` methods:
+
+    - ``with_pending_registration(node_id, event_id)``: idle -> pending
+    - ``with_consul_confirmed(event_id)``: pending -> partial, or partial -> complete
+    - ``with_postgres_confirmed(event_id)``: pending -> partial, or partial -> complete
+    - ``with_failure(reason, event_id)``: any -> failed
+
+    Each method:
+
+    1. Creates a NEW ModelRegistrationState instance
+    2. Copies relevant fields from self
+    3. Updates fields per transition logic
+    4. Returns the new instance (self is unchanged)
+
+    **INTEGRATION WITH PERSISTENCE LAYER:**
+
+    This model is persisted to PostgreSQL by the Projector component:
+
+    1. **Reducer Returns State**: After reduce() or reduce_confirmation(),
+       the RegistrationReducer returns ModelReducerOutput containing the
+       new state in the ``result`` field.
+
+    2. **Runtime Extracts State**: The Runtime extracts the state from
+       ModelReducerOutput.result for persistence.
+
+    3. **Projector Persists State**: The Projector writes the state to
+       PostgreSQL synchronously before any Kafka publishing.
+
+    4. **Serialization**: The Projector uses Pydantic's ``model_dump(mode="json")``
+       to serialize state for PostgreSQL storage.
+
+    PostgreSQL Storage::
+
+        # Conceptual Projector implementation
+        async def persist(self, state: ModelRegistrationState, offset: int) -> None:
+            '''Persist state to PostgreSQL with idempotency.'''
+            await self.db.execute(
+                '''
+                UPDATE node_registrations
+                SET
+                    status = $1,
+                    consul_confirmed = $2,
+                    postgres_confirmed = $3,
+                    last_processed_event_id = $4,
+                    failure_reason = $5,
+                    last_event_offset = $6,
+                    updated_at = NOW()
+                WHERE
+                    node_id = $7
+                    AND (last_event_offset IS NULL OR $6 > last_event_offset)
+                ''',
+                state.status,
+                state.consul_confirmed,
+                state.postgres_confirmed,
+                state.last_processed_event_id,
+                state.failure_reason,
+                offset,
+                state.node_id,
+            )
+
+    **State Loading (Projection Reader)**::
+
+        # Conceptual ProtocolProjectionReader implementation
+        async def get_projection(
+            self, entity_type: str, entity_id: UUID
+        ) -> ModelRegistrationState | None:
+            '''Load state from PostgreSQL projection.'''
+            row = await self.db.fetchone(
+                'SELECT * FROM node_registrations WHERE node_id = $1',
+                entity_id,
+            )
+            if row is None:
+                return None  # Orchestrator creates initial idle state
+            return ModelRegistrationState(
+                status=row['status'],
+                node_id=row['node_id'],
+                consul_confirmed=row['consul_confirmed'],
+                postgres_confirmed=row['postgres_confirmed'],
+                last_processed_event_id=row['last_processed_event_id'],
+                failure_reason=row['failure_reason'],
+            )
+
+    **IDEMPOTENCY VIA last_processed_event_id:**
+
+    The ``last_processed_event_id`` field enables idempotent event processing:
+
+    - Each event has a unique ID (correlation_id or generated UUID)
+    - Before processing, the reducer checks ``state.is_duplicate_event(event_id)``
+    - If True, the event was already processed; reducer returns current state
+    - This enables safe replay after crashes or redelivery
+
+    Two levels of idempotency:
+
+    1. **Reducer Level**: ``is_duplicate_event()`` checks ``last_processed_event_id``
+    2. **Persistence Level**: Projector checks ``last_event_offset`` in SQL
+
+    Both levels are required for full replay safety.
+
 Related:
     - RegistrationReducer: Pure reducer that uses this state model
     - DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md: Architecture design
+    - ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md: Tickets F0, F1, B3
     - OMN-889: Infrastructure MVP
 """
 
@@ -54,7 +180,28 @@ class ModelRegistrationState(BaseModel):
 
     The state tracks the current workflow status and confirmation state
     for both Consul and PostgreSQL backends. State transitions are
-    performed via `with_*` methods that return new immutable instances.
+    performed via ``with_*`` methods that return new immutable instances.
+
+    Persistence Integration:
+        This model is designed for persistence to PostgreSQL via the Projector:
+
+        - **Stored**: By Runtime calling Projector.persist() after reduce() returns
+        - **Retrieved**: By Orchestrator via ProtocolProjectionReader before reduce()
+        - **Idempotency**: ``last_processed_event_id`` enables duplicate detection
+
+        The reducer does NOT persist state directly - it returns the new state
+        in ModelReducerOutput.result. The Runtime handles persistence.
+
+        See the module docstring "State Management" section for complete details
+        on persistence integration, including PostgreSQL schema and example code.
+
+    Immutability:
+        This model uses frozen=True to enforce strict immutability:
+
+        - All fields are immutable after construction
+        - Transition methods (with_*) return NEW instances
+        - Original state is never modified
+        - Safe for concurrent access and comparison
 
     Attributes:
         status: Current workflow status (idle, pending, partial, complete, failed).
