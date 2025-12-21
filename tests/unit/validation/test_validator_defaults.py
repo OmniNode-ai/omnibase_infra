@@ -48,7 +48,7 @@ class TestInfraValidatorConstants:
         Valid patterns like `X | None` are NOT counted.
 
         Threshold set to 10 - allows buffer for legitimate edge cases.
-        Current baseline: ~1 violation (json_types.py is exempted).
+        Current baseline: ~0 violations (all unions are valid X | None patterns).
         """
         assert (
             INFRA_MAX_UNION_VIOLATIONS == 10

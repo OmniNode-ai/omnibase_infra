@@ -101,18 +101,27 @@ Related:
     - EnvelopeRouter: Transport-agnostic orchestrator (reference for freeze pattern)
 
 Category Support:
-    The engine supports all four ONEX message categories:
+    The engine supports three ONEX message categories for routing:
     - EVENT: Domain events (e.g., UserCreatedEvent)
     - COMMAND: Action requests (e.g., CreateUserCommand)
     - INTENT: User intentions (e.g., ProvisionUserIntent)
-    - PROJECTION: State projections (e.g., OrderSummaryProjection)
 
-    Note: PROJECTION has no topic naming constraint (unlike EVENT/COMMAND/INTENT
-    which require *.events, *.commands, *.intents suffixes). Projections are
-    typically internal state representations consumed by reducers.
+    Topic naming constraints:
+    - EVENT topics: Must contain ".events" segment
+    - COMMAND topics: Must contain ".commands" segment
+    - INTENT topics: Must contain ".intents" segment
 
-    TODO(OMN-985): Add integration tests for PROJECTION category dispatch.
-    Current test coverage focuses on EVENT/COMMAND/INTENT routing.
+    Note on PROJECTION:
+        PROJECTION is NOT a message category for routing. Projections are
+        node output types (EnumNodeOutputType.PROJECTION) produced by REDUCER
+        nodes as local state outputs. Projections are:
+        - NOT routed via Kafka topics
+        - NOT part of EnumMessageCategory
+        - Applied locally by the runtime to a projection sink
+
+        See EnumNodeOutputType for projection semantics and CLAUDE.md
+        "Enum Usage" section for the distinction between message categories
+        and node output types.
 
 .. versionadded:: 0.4.0
 """

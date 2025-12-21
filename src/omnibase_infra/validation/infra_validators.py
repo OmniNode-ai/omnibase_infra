@@ -367,7 +367,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - `ModelA | ModelB` discriminated unions
 # - Simple 2-3 type unions for legitimate use cases
 #
-# Current baseline: ~1 violation (json_types.py primitive union for JSON compatibility)
+# Current baseline: ~0 violations (all unions are valid X | None patterns)
 # Threshold set to 10 to allow buffer for legitimate edge cases.
 INFRA_MAX_UNION_VIOLATIONS = 10
 
