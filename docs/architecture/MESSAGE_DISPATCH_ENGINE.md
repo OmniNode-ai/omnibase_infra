@@ -392,7 +392,8 @@ The Message Dispatch Engine models contribute to infrastructure validation thres
 
 | Metric | Current | Target | Notes |
 |--------|---------|--------|-------|
-| Union types (INFRA_MAX_UNIONS) | ~350 | <200 | ~148 from dispatch models |
+| Union violations (INFRA_MAX_UNION_VIOLATIONS) | 0 | 0 | Counts violations, not total unions |
+| Total unions (informational) | ~490 | <200 | Valid X \| None not counted |
 | Pattern violations | Exempted | Strict | See exempted_patterns list |
 
 ### Documented Exemptions
@@ -423,8 +424,14 @@ Enabled as of: 2025-12-20
 - All violations must be fixed or added to exempted_patterns with documented rationale
 - See validate_infra_patterns() in infra_validators.py for exemption list
 
+Union Validation:
+- Now counts VIOLATIONS, not total unions
+- INFRA_MAX_UNION_VIOLATIONS = 10 (threshold for actual problems)
+- Valid X | None patterns are NOT counted
+- Total unions (~490) tracked for informational purposes only
+
 Remaining Targets:
-1. Reduce INFRA_MAX_UNIONS to <200 through dict[str, object] → JsonValue migration
+1. Reduce total unions to <200 through dict[str, object] → JsonValue migration
 2. Complete H1 Legacy Migration
 ```
 

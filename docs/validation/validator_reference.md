@@ -327,12 +327,15 @@ if result.suggestions:
 
 Validate Union type usage to prevent overly complex types.
 
+Counts actual **VIOLATIONS** (problematic patterns), not total unions.
+Valid `X | None` patterns are not counted as violations.
+
 ### Signature
 
 ```python
 def validate_infra_union_usage(
     directory: str | Path = INFRA_SRC_PATH,
-    max_unions: int = INFRA_MAX_UNIONS,
+    max_violations: int = INFRA_MAX_UNION_VIOLATIONS,
     strict: bool = INFRA_UNIONS_STRICT,
 ) -> ValidationResult:
 ```
@@ -340,23 +343,29 @@ def validate_infra_union_usage(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `400` (INFRA_MAX_UNIONS).
+- **max_violations** (`int`, optional): Maximum allowed union violations. Defaults to `10` (INFRA_MAX_UNION_VIOLATIONS).
 - **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_UNIONS_STRICT per OMN-983).
 
 ### Returns
 
 `ValidationResult` with:
-- `is_valid`: `True` if unions within threshold
-- `errors`: List of union violations
+- `is_valid`: `True` if violations within threshold
+- `errors`: List of union violations (problematic patterns only)
+- `summary`: Human-readable summary with violation count and total unions
 - `metadata`: `ModelValidationMetadata` with:
-  - `total_unions`: Count of complex union types found
-  - `max_unions`: Configured threshold
+  - `total_unions`: Total count of all unions (informational)
 
-### What It Validates
+### What Counts as a Violation
 
-- **Complex union count**: Total number of Union types
-- **Union complexity**: Number of types in each Union
-- **Type annotation usage**: Proper Union syntax
+- **Primitive soup**: `str | int | float | bool` (4+ primitive types)
+- **Mixed type unions**: `str | int | MyModel` (primitives mixed with models)
+- **Legacy syntax**: `Union[X, None]` instead of `X | None`
+
+### What is NOT Counted (Valid Patterns)
+
+- **Nullable patterns**: `X | None` (ONEX-preferred, PEP 604 compliant)
+- **Discriminated unions**: `ModelA | ModelB`
+- **Simple unions**: 2-3 type unions for legitimate use cases
 
 ### Infrastructure Justification
 
@@ -612,7 +621,7 @@ INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Validation thresholds
-INFRA_MAX_UNIONS = 400          # Maximum allowed union count (tight buffer above ~379 baseline)
+INFRA_MAX_UNION_VIOLATIONS = 10 # Max union violations (not total unions)
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
 
 # Strict mode flags (OMN-983)

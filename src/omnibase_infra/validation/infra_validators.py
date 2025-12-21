@@ -354,18 +354,22 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # See exempted_patterns list in validate_infra_patterns() for complete definitions.
 # ============================================================================
 
-# Maximum allowed union count in infrastructure code.
-# This is a COUNT threshold, not a violation threshold. The validator counts all
-# unions including the ONEX-preferred `X | None` patterns, which are valid.
+# Maximum allowed union VIOLATIONS in infrastructure code.
+# This counts actual problematic patterns, NOT total unions.
 #
-# Current baseline (485 unions as of OMN-944 merge):
-# - Most unions are legitimate `X | None` nullable patterns
-# - These are NOT flagged as violations, just counted
-# - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
+# What counts as a VIOLATION (reported in errors):
+# - Primitive soup: `str | int | float | bool` (4+ primitive types)
+# - Mixed type unions: `str | int | MyModel` (primitives mixed with models)
+# - Legacy syntax: `Union[X, None]` instead of `X | None`
 #
-# Threshold set to 490 - buffer above current baseline after OMN-944 (projection schema) merge.
-# Target: Reduce to <200 through dict[str, object] → JsonValue migration.
-INFRA_MAX_UNIONS = 490
+# What is NOT counted (valid patterns):
+# - `X | None` nullable patterns (ONEX-preferred, PEP 604 compliant)
+# - `ModelA | ModelB` discriminated unions
+# - Simple 2-3 type unions for legitimate use cases
+#
+# Current baseline: ~1 violation (json_types.py primitive union for JSON compatibility)
+# Threshold set to 10 to allow buffer for legitimate edge cases.
+INFRA_MAX_UNION_VIOLATIONS = 10
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -669,13 +673,24 @@ _contract_validator = ProtocolContractValidator()
 
 def validate_infra_union_usage(
     directory: str | Path = INFRA_SRC_PATH,
-    max_unions: int = INFRA_MAX_UNIONS,
+    max_violations: int = INFRA_MAX_UNION_VIOLATIONS,
     strict: bool = INFRA_UNIONS_STRICT,
 ) -> ValidationResult:
     """
     Validate Union type usage in infrastructure code.
 
-    Prevents overly complex union types that complicate infrastructure code.
+    Counts actual VIOLATIONS (problematic patterns), not total unions.
+    Valid `X | None` patterns are not counted as violations.
+
+    Violation Types (what gets counted):
+        - Primitive soup: `str | int | float | bool` (4+ primitive types)
+        - Mixed type unions: `str | int | MyModel`
+        - Legacy syntax: `Union[X, None]` instead of `X | None`
+
+    Valid Patterns (NOT counted):
+        - `X | None` nullable patterns (ONEX-preferred)
+        - `ModelA | ModelB` discriminated unions
+        - Simple 2-3 type unions for legitimate use cases
 
     Exemptions:
         Exemption patterns are loaded from validation_exemptions.yaml (union_exemptions section).
@@ -686,15 +701,17 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS (465).
+        max_violations: Maximum allowed violations. Defaults to INFRA_MAX_UNION_VIOLATIONS (10).
         strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
 
     Returns:
         ModelValidationResult with validation status and any errors.
+        The errors list contains only actual violations, not valid unions.
     """
-    # Run base validation
+    # Run base validation with a high max_unions to get all violations
+    # We don't use max_unions for threshold - we count violations instead
     base_result = validate_union_usage(
-        str(directory), max_unions=max_unions, strict=strict
+        str(directory), max_unions=10000, strict=strict
     )
 
     # Load exemption patterns from YAML configuration
@@ -704,8 +721,33 @@ def validate_infra_union_usage(
     # Filter errors using regex-based pattern matching
     filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
 
-    # Create wrapper result (avoid mutation)
-    return _create_filtered_result(base_result, filtered_errors)
+    # Count actual violations (errors), not total unions
+    violation_count = len(filtered_errors)
+
+    # Log informational union statistics
+    total_unions = base_result.metadata.total_unions if base_result.metadata else 0
+    logger.debug(
+        "Union validation: %d violations (threshold: %d), %d total unions",
+        violation_count,
+        max_violations,
+        total_unions,
+    )
+
+    # Determine validity based on violation count, not total unions
+    is_valid = violation_count <= max_violations
+
+    # Create wrapper result with violation-based validity
+    return ModelValidationResult(
+        is_valid=is_valid,
+        validated_value=base_result.validated_value,
+        issues=base_result.issues,
+        errors=filtered_errors,
+        warnings=base_result.warnings,
+        suggestions=base_result.suggestions,
+        summary=f"Union violations: {violation_count} (max: {max_violations}), total unions: {total_unions}",
+        details=base_result.details,
+        metadata=base_result.metadata,
+    )
 
 
 def validate_infra_circular_imports(
@@ -739,7 +781,7 @@ def validate_infra_all(
     - Architecture (strict, 0 violations)
     - Contracts (nodes directory)
     - Patterns (strict mode)
-    - Union usage (max INFRA_MAX_UNIONS)
+    - Union usage (max INFRA_MAX_UNION_VIOLATIONS - counts violations, not total unions)
     - Circular imports
 
     Args:
@@ -828,7 +870,7 @@ __all__ = [
     # Constants
     "INFRA_SRC_PATH",
     "INFRA_NODES_PATH",
-    "INFRA_MAX_UNIONS",
+    "INFRA_MAX_UNION_VIOLATIONS",
     "INFRA_MAX_VIOLATIONS",
     "INFRA_PATTERNS_STRICT",
     "INFRA_UNIONS_STRICT",

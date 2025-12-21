@@ -82,9 +82,9 @@ def validate_patterns_cmd(directory: str, strict: bool | None) -> None:
 @validate.command("unions")
 @click.argument("directory", default="src/omnibase_infra/")
 @click.option(
-    "--max-unions",
+    "--max-violations",
     default=None,
-    help="Maximum allowed complex unions (default: INFRA_MAX_UNIONS)",
+    help="Maximum allowed union violations (default: INFRA_MAX_UNION_VIOLATIONS)",
 )
 @click.option(
     "--strict/--no-strict",
@@ -92,21 +92,27 @@ def validate_patterns_cmd(directory: str, strict: bool | None) -> None:
     help="Enable strict mode (default: INFRA_UNIONS_STRICT)",
 )
 def validate_unions_cmd(
-    directory: str, max_unions: int | None, strict: bool | None
+    directory: str, max_violations: int | None, strict: bool | None
 ) -> None:
-    """Validate Union type usage."""
+    """Validate Union type usage.
+
+    Counts actual VIOLATIONS (problematic patterns), not total unions.
+    Valid `X | None` patterns are not counted as violations.
+    """
     from omnibase_infra.validation.infra_validators import (
-        INFRA_MAX_UNIONS,
+        INFRA_MAX_UNION_VIOLATIONS,
         INFRA_UNIONS_STRICT,
         validate_infra_union_usage,
     )
 
     console.print(f"[bold blue]Validating union usage in {directory}...[/bold blue]")
     # Use constants if no override provided
-    effective_max_unions = max_unions if max_unions is not None else INFRA_MAX_UNIONS
+    effective_max_violations = (
+        max_violations if max_violations is not None else INFRA_MAX_UNION_VIOLATIONS
+    )
     effective_strict = strict if strict is not None else INFRA_UNIONS_STRICT
     result = validate_infra_union_usage(
-        directory, effective_max_unions, effective_strict
+        directory, effective_max_violations, effective_strict
     )
     _print_result("Union Usage", result)
     raise SystemExit(0 if result.is_valid else 1)
