@@ -21,9 +21,6 @@ from omnibase_infra.idempotency import (
 )
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
-if TYPE_CHECKING:
-    pass
-
 
 @pytest.fixture
 def mock_event_bus() -> MagicMock:

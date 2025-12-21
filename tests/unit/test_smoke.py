@@ -52,14 +52,14 @@ def test_validation_module_import() -> None:
     assert callable(validate_infra_all), "validate_infra_all must be callable"
 
     assert validate_infra_architecture is not None
-    assert callable(validate_infra_architecture), (
-        "validate_infra_architecture must be callable"
-    )
+    assert callable(
+        validate_infra_architecture
+    ), "validate_infra_architecture must be callable"
 
     assert validate_infra_contracts is not None
-    assert callable(validate_infra_contracts), (
-        "validate_infra_contracts must be callable"
-    )
+    assert callable(
+        validate_infra_contracts
+    ), "validate_infra_contracts must be callable"
 
     assert validate_infra_patterns is not None
     assert callable(validate_infra_patterns), "validate_infra_patterns must be callable"
