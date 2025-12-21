@@ -68,9 +68,7 @@ class TestPostgresIdempotencyStoreMetrics:
         yield store
         await store.shutdown()
 
-    def test_initial_metrics_are_zero(
-        self, store: PostgresIdempotencyStore
-    ) -> None:
+    def test_initial_metrics_are_zero(self, store: PostgresIdempotencyStore) -> None:
         """Test that metrics start at zero for new store."""
         metrics = store.get_metrics()
 
@@ -235,9 +233,7 @@ class TestPostgresIdempotencyStoreMetrics:
         assert metrics.success_count == 2  # 4 - 1 - 1
         assert metrics.success_rate == 0.5  # 2/4
 
-    def test_get_metrics_returns_copy(
-        self, store: PostgresIdempotencyStore
-    ) -> None:
+    def test_get_metrics_returns_copy(self, store: PostgresIdempotencyStore) -> None:
         """Test that get_metrics returns a copy to prevent external mutation."""
         metrics1 = store.get_metrics()
         metrics1.total_checks = 100  # Mutate the copy

@@ -205,7 +205,9 @@ class TestPostgresIdempotencyStoreTableNameValidation:
         for name in invalid_names:
             # Pydantic validation may catch some of these first,
             # but if it doesn't, runtime validation should catch it
-            with pytest.raises((ProtocolConfigurationError, ValueError, ValidationError)):
+            with pytest.raises(
+                (ProtocolConfigurationError, ValueError, ValidationError)
+            ):
                 config = ModelPostgresIdempotencyStoreConfig(
                     dsn="postgresql://user:pass@localhost:5432/db",
                     table_name=name,
@@ -220,7 +222,9 @@ class TestPostgresIdempotencyStoreTableNameValidation:
             "a OR 1=1",
         ]
         for name in injection_attempts:
-            with pytest.raises((ProtocolConfigurationError, ValueError, ValidationError)):
+            with pytest.raises(
+                (ProtocolConfigurationError, ValueError, ValidationError)
+            ):
                 config = ModelPostgresIdempotencyStoreConfig(
                     dsn="postgresql://user:pass@localhost:5432/db",
                     table_name=name,
@@ -854,9 +858,7 @@ class TestPostgresIdempotencyStoreHealthCheck:
         """
         mock_conn = AsyncMock()
         # First fetchval succeeds (SELECT 1), second raises exception
-        mock_conn.fetchval = AsyncMock(
-            side_effect=[1, Exception("permission denied")]
-        )
+        mock_conn.fetchval = AsyncMock(side_effect=[1, Exception("permission denied")])
 
         initialized_postgres_store._pool.acquire.return_value.__aenter__ = AsyncMock(
             return_value=mock_conn
