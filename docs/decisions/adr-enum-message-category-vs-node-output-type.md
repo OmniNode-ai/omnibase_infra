@@ -12,7 +12,7 @@ ONEX uses two distinct enums that appear similar but serve fundamentally differe
    - Values: `EVENT`, `COMMAND`, `INTENT`
    - Purpose: Message routing via Kafka topics
 
-2. **EnumNodeOutputType** (`omnibase_core.enums`)
+2. **EnumNodeOutputType** (`omnibase_infra.enums`)
    - Values: `EVENT`, `COMMAND`, `INTENT`, `PROJECTION`
    - Purpose: Node execution shape validation
 
@@ -116,7 +116,7 @@ async def test_dispatch_projection_topic_returns_invalid_message():
 ## References
 
 - `src/omnibase_infra/enums/enum_message_category.py`
-- `omnibase_core/enums/enum_node_output_type.py`
+- `src/omnibase_infra/enums/enum_node_output_type.py`
 - `src/omnibase_infra/runtime/message_dispatch_engine.py`
 - `tests/unit/runtime/test_message_dispatch_engine.py`
 - CLAUDE.md "Enum Usage" section
