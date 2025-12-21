@@ -80,6 +80,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.idempotency.models import (
+    ModelHealthCheckResult,
     ModelIdempotencyStoreMetrics,
     ModelPostgresIdempotencyStoreConfig,
 )

@@ -279,6 +279,41 @@ async def process_event(envelope: ModelEventEnvelope[Any]) -> str:  # Avoid
 - **Protocol Resolution** - Duck typing through protocols, never isinstance
 - **OnexError Only** - `raise OnexError(...) from e`
 
+### Node Archetypes & Core Models (from `omnibase_core`)
+
+**Architecture Rule**: `omnibase_infra` extends base archetypes from `omnibase_core`. Never define new node archetypes in infra - they belong in core. This ensures consistent node contracts across the ONEX ecosystem.
+
+| Layer | Responsibility | Example |
+|-------|---------------|---------|
+| `omnibase_core` | Node archetypes, I/O models, enums | `NodeReducer`, `ModelReducerInput` |
+| `omnibase_spi` | Protocol definitions | `ProtocolReducerNode` |
+| `omnibase_infra` | Infrastructure implementations | `NodeDualRegistrationReducer` |
+
+**All node base classes and their I/O models come from `omnibase_core.nodes`:**
+
+```python
+from omnibase_core.nodes import (
+    # Node base classes (archetypes)
+    NodeEffect,           # External I/O operations
+    NodeCompute,          # Pure transformations
+    NodeReducer,          # State aggregation (FSM-driven)
+    NodeOrchestrator,     # Workflow coordination
+
+    # I/O models for each archetype
+    ModelEffectInput, ModelEffectOutput, ModelEffectTransaction,
+    ModelComputeInput, ModelComputeOutput,
+    ModelReducerInput, ModelReducerOutput,
+    ModelOrchestratorInput, ModelOrchestratorOutput,
+
+    # Enums for node behavior
+    EnumReductionType,      # sum, count, avg, min, max, custom
+    EnumConflictResolution, # last_write_wins, merge, error
+    EnumStreamingMode,      # batch, streaming, hybrid
+    EnumExecutionMode,      # sequential, parallel, conditional
+    EnumWorkflowState,      # pending, running, completed, failed
+)
+```
+
 ### Container-Based Dependency Injection
 
 **All services MUST use ModelONEXContainer for dependency injection.**

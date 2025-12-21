@@ -284,6 +284,24 @@ pattern_exemptions:
 
     ticket: OMN-953
   # ==========================================================================
+  # Consul Service ID Exemptions (OMN-889)
+  # ==========================================================================
+  # consul_service_id is a Consul-specific identifier that is a user-defined string,
+  # NOT a UUID. The Consul API accepts any string as a service ID. This field is
+  # named with the 'consul_' prefix to clarify it's a Consul concept.
+  - file_pattern: 'model_consul_register_payload\.py'
+    violation_pattern: "Field 'consul_service_id' should use UUID"
+    reason: >
+      consul_service_id is a Consul-specific identifier that is a user-defined string, not a UUID. The Consul API accepts any string as a service ID.
+
+    ticket: OMN-889
+  - file_pattern: 'model_consul_deregister_payload\.py'
+    violation_pattern: "Field 'consul_service_id' should use UUID"
+    reason: >
+      consul_service_id is a Consul-specific identifier that is a user-defined string, not a UUID. The Consul API accepts any string as a service ID.
+
+    ticket: OMN-889
+  # ==========================================================================
   # MessageTypeRegistry Exemptions (OMN-983)
   # ==========================================================================
   - file_pattern: 'registry_message_type\.py'
