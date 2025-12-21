@@ -906,6 +906,49 @@ class TestDispatchErrors:
         assert result.error_message is not None
         assert "category" in result.error_message.lower()
 
+    @pytest.mark.asyncio
+    async def test_dispatch_projection_topic_returns_invalid_message(
+        self,
+        dispatch_engine: MessageDispatchEngine,
+    ) -> None:
+        """Test that PROJECTION topics are NOT routable via MessageDispatchEngine.
+
+        Architectural Decision (OMN-985):
+            PROJECTION is NOT a message category for routing. Projections are:
+            - Node output types (EnumNodeOutputType.PROJECTION), not message categories
+            - Produced by REDUCER nodes as local state outputs
+            - Applied locally by the runtime to a projection sink
+            - NOT routed via Kafka topics or MessageDispatchEngine
+
+            Topics containing ".projections" segment are therefore invalid for
+            dispatch because EnumMessageCategory.from_topic() does not recognize
+            "projections" as a valid category suffix.
+
+        See Also:
+            - EnumMessageCategory: Only EVENT, COMMAND, INTENT are valid
+            - EnumNodeOutputType: PROJECTION exists here for node validation
+            - CLAUDE.md "Enum Usage" section for full distinction
+        """
+        dispatch_engine.freeze()
+
+        # Create envelope with projection payload
+        projection_envelope = ModelEventEnvelope(
+            payload=OrderSummaryProjection(order_id="order-123", total=99.99),
+            correlation_id=uuid4(),
+        )
+
+        # Topic with .projections segment - NOT a valid routable category
+        result = await dispatch_engine.dispatch(
+            "dev.order.projections.v1", projection_envelope
+        )
+
+        # PROJECTION is not recognized as a message category
+        assert result.status == EnumDispatchStatus.INVALID_MESSAGE
+        assert result.error_message is not None
+        assert "category" in result.error_message.lower()
+        # Verify the topic is mentioned in the error for debugging
+        assert "projections" in result.error_message.lower()
+
     @pytest.mark.skip(
         reason="TODO(OMN-934): Re-enable when ModelEventEnvelope.infer_category() is implemented in omnibase_core"
     )
