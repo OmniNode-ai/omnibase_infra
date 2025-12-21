@@ -45,12 +45,12 @@ class TestInfraValidatorConstants:
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold set to 490 - buffer above current baseline after OMN-990 integration.
+        Threshold set to 491 - includes DispatcherFunc | ContextAwareDispatcherFunc for @overload.
         Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
         """
         assert (
-            INFRA_MAX_UNIONS == 490
-        ), "INFRA_MAX_UNIONS should be 490 (buffer after OMN-990 integration)"
+            INFRA_MAX_UNIONS == 491
+        ), "INFRA_MAX_UNIONS should be 491 (includes @overload dispatcher union)"
 
     def test_infra_max_violations_constant(self) -> None:
         """Verify INFRA_MAX_VIOLATIONS constant has expected value."""

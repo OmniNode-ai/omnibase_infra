@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -549,3 +549,4 @@ For function-based dispatchers in `MessageDispatchEngine`, we only have a callab
 | Date | Author | Description |
 |------|--------|-------------|
 | 2025-12-21 | Claude | Initial ADR created |
+| 2025-12-21 | Claude | Status changed to Accepted. Phase 1 implementation complete in PR: `DispatchEntryInternal.accepts_context` caching at registration time, `_dispatcher_accepts_context()` called once at registration, `_execute_dispatcher()` uses cached value without runtime inspection |

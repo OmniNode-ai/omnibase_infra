@@ -137,7 +137,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import cast
+from typing import cast, overload
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -323,7 +323,7 @@ class DispatchEntryInternal:
     def __init__(
         self,
         dispatcher_id: str,
-        dispatcher: DispatcherFunc,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None,
         node_kind: EnumNodeKind | None = None,
@@ -484,6 +484,18 @@ class MessageDispatchEngine:
         self._structured_metrics: ModelDispatchMetrics = ModelDispatchMetrics()
 
         # Legacy metrics dict (for backwards compatibility)
+        #
+        # DEPRECATION NOTICE:
+        # This dict-based metrics format is deprecated in favor of the structured
+        # ModelDispatchMetrics accessible via get_structured_metrics(). The legacy
+        # format is retained only for backwards compatibility with existing consumers.
+        #
+        # Why not convert to a Pydantic model?
+        # - ModelDispatchMetrics already exists and provides full typed metrics
+        # - This dict duplicates that functionality for legacy API support
+        # - Converting would add a third format without benefit
+        # - The proper migration path is: consumers should switch to get_structured_metrics()
+        #
         # Type: int | float covers all metric values (counts are int, latency is float)
         self._metrics: dict[str, int | float] = {
             "dispatch_count": 0,
@@ -557,10 +569,36 @@ class MessageDispatchEngine:
                 route.dispatcher_id,
             )
 
+    # --- @overload stubs for static type safety ---
+    # These overloads enable type checkers to validate dispatcher signatures
+    # based on the presence/absence of node_kind parameter.
+    # See ADR_DISPATCHER_TYPE_SAFETY.md Option 4 for design rationale.
+
+    @overload
     def register_dispatcher(
         self,
         dispatcher_id: str,
         dispatcher: DispatcherFunc,
+        category: EnumMessageCategory,
+        message_types: set[str] | None = None,
+        node_kind: None = None,
+    ) -> None: ...
+
+    @overload
+    def register_dispatcher(
+        self,
+        dispatcher_id: str,
+        dispatcher: ContextAwareDispatcherFunc,
+        category: EnumMessageCategory,
+        message_types: set[str] | None = None,
+        *,
+        node_kind: EnumNodeKind,
+    ) -> None: ...
+
+    def register_dispatcher(
+        self,
+        dispatcher_id: str,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
         node_kind: EnumNodeKind | None = None,
@@ -763,6 +801,30 @@ class MessageDispatchEngine:
     ) -> dict[str, str | int | float]:
         """
         Build structured log context dictionary.
+
+        Design Note (PR Review - Dict vs Pydantic Model):
+            This method returns a plain dict rather than a Pydantic model because:
+
+            1. **Ephemeral Data**: Log context is created, passed to logger.info/debug/error,
+               and immediately discarded. No persistence or validation benefit.
+
+            2. **Logger API Compatibility**: Python's logging.Logger.info(..., extra={})
+               expects dict[str, Any]. A Pydantic model would need .model_dump() on every
+               log call, adding overhead without benefit.
+
+            3. **No Validation Needed**: All fields are computed from already-validated
+               sources (enums, UUIDs, timestamps). Double-validating adds latency.
+
+            4. **Performance**: This method is called on every dispatch operation and
+               every log statement. Pydantic model creation overhead (~5-10 microseconds)
+               would accumulate across high-throughput dispatch scenarios.
+
+            5. **Convention**: Using dict for logger extra context is standard Python
+               practice followed by logging frameworks.
+
+            If a structured log context model becomes valuable (e.g., for log aggregation
+            with strict schema enforcement), consider creating ModelLogContext in the
+            models/dispatch/ directory.
 
         Args:
             topic: The topic being dispatched to.
@@ -1408,17 +1470,21 @@ class MessageDispatchEngine:
         """
         dispatcher = entry.dispatcher
 
-        # Create context if node_kind is set and dispatcher accepts it
+        # Create context ONLY if both conditions are met:
+        # 1. node_kind is set (time injection rules apply)
+        # 2. dispatcher accepts context (will actually use it)
+        # This avoids unnecessary object creation on the dispatch hot path when
+        # a dispatcher has node_kind set but doesn't accept a context parameter.
         context: ModelDispatchContext | None = None
-        if entry.node_kind is not None:
+        if entry.node_kind is not None and entry.accepts_context:
             context = self._create_context_for_entry(entry, envelope)
 
-        # Use cached accepts_context from registration (no runtime inspection)
-        accepts_ctx = entry.accepts_context
-
         # Check if dispatcher is async
+        # Note: context is only non-None when entry.accepts_context is True,
+        # so checking `context is not None` is sufficient to determine whether
+        # to pass context to the dispatcher.
         if inspect.iscoroutinefunction(dispatcher):
-            if context is not None and accepts_ctx:
+            if context is not None:
                 return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]
             return await dispatcher(envelope)  # type: ignore[no-any-return]
         else:
@@ -1433,7 +1499,7 @@ class MessageDispatchEngine:
             # For blocking I/O operations, use async dispatchers instead.
             loop = asyncio.get_running_loop()
 
-            if context is not None and accepts_ctx:
+            if context is not None:
                 # Context-aware sync dispatcher
                 sync_ctx_dispatcher = cast(_SyncContextAwareDispatcherFunc, dispatcher)
                 return await loop.run_in_executor(
@@ -1544,16 +1610,17 @@ class MessageDispatchEngine:
                 now=datetime.now(UTC),
             )
 
-        # Unknown node kind - should not happen with valid EnumNodeKind
+        # Unknown node kind - should never happen as all EnumNodeKind values are handled above.
+        # If we reach here, a new enum value was added without updating this switch.
         raise ModelOnexError(
-            message=f"Unknown node_kind '{node_kind}' for dispatcher "
-            f"'{entry.dispatcher_id}'. Cannot determine time injection rules.",
-            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+            message=f"Unhandled node_kind '{node_kind}' for dispatcher "
+            f"'{entry.dispatcher_id}'. This is an internal error - missing case handler.",
+            error_code=EnumCoreErrorCode.INTERNAL_ERROR,
         )
 
     def _dispatcher_accepts_context(
         self,
-        dispatcher: DispatcherFunc,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
     ) -> bool:
         """
         Check if a dispatcher callable accepts a context parameter.

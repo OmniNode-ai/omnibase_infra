@@ -184,11 +184,12 @@ class DispatchContextEnforcer:
                 now=datetime.now(UTC),
             )
 
-        # Unknown node kind - should not happen with valid EnumNodeKind
+        # Unknown node kind - should never happen as all EnumNodeKind values are handled above.
+        # If we reach here, a new enum value was added without updating this switch.
         raise ModelOnexError(
-            message=f"Unknown node_kind '{node_kind}' for dispatcher "
-            f"'{dispatcher.dispatcher_id}'. Cannot determine time injection rules.",
-            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+            message=f"Unhandled node_kind '{node_kind}' for dispatcher "
+            f"'{dispatcher.dispatcher_id}'. This is an internal error - missing case handler.",
+            error_code=EnumCoreErrorCode.INTERNAL_ERROR,
         )
 
     def validate_no_time_injection_for_reducer(
