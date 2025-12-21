@@ -17,7 +17,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.handlers.models.model_consul_handler_payload import (
+from omnibase_infra.handlers.models.consul import (
     ModelConsulHandlerPayload,
 )
 

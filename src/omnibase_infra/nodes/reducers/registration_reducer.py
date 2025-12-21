@@ -608,6 +608,14 @@ class RegistrationReducer:
     # It is documented here as a stub to show the complete event flow.
     # Implementation is pending the ModelRegistrationConfirmation model.
     #
+    # Follow-up Ticket: OMN-996 (Implement Confirmation Event Handling)
+    #   https://linear.app/omninode/issue/OMN-996
+    #
+    # Prerequisites:
+    #   - ModelRegistrationConfirmation model defined in omnibase_core
+    #   - Effect layer confirmation event publishing implemented
+    #   - Tests added for confirmation event handling
+    #
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================
 

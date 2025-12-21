@@ -281,6 +281,14 @@ async def process_event(envelope: ModelEventEnvelope[Any]) -> str:  # Avoid
 
 ### Node Archetypes & Core Models (from `omnibase_core`)
 
+**Architecture Rule**: `omnibase_infra` extends base archetypes from `omnibase_core`. Never define new node archetypes in infra - they belong in core. This ensures consistent node contracts across the ONEX ecosystem.
+
+| Layer | Responsibility | Example |
+|-------|---------------|---------|
+| `omnibase_core` | Node archetypes, I/O models, enums | `NodeReducer`, `ModelReducerInput` |
+| `omnibase_spi` | Protocol definitions | `ProtocolReducerNode` |
+| `omnibase_infra` | Infrastructure implementations | `NodeDualRegistrationReducer` |
+
 **All node base classes and their I/O models come from `omnibase_core.nodes`:**
 
 ```python
@@ -305,14 +313,6 @@ from omnibase_core.nodes import (
     EnumWorkflowState,      # pending, running, completed, failed
 )
 ```
-
-**Architecture Rule**: `omnibase_infra` implements infrastructure-specific nodes by extending these base classes. Never define new node archetypes in infra - they belong in core.
-
-| Layer | Responsibility | Example |
-|-------|---------------|---------|
-| `omnibase_core` | Node archetypes, I/O models, enums | `NodeReducer`, `ModelReducerInput` |
-| `omnibase_spi` | Protocol definitions | `ProtocolReducerNode` |
-| `omnibase_infra` | Infrastructure implementations | `NodeDualRegistrationReducer` |
 
 ### Container-Based Dependency Injection
 

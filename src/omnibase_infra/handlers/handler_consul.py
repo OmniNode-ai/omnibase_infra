@@ -44,6 +44,16 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
+from omnibase_infra.handlers.models.consul import (
+    ModelConsulDeregisterPayload,
+    ModelConsulHealthCheckPayload,
+    ModelConsulKVGetFoundPayload,
+    ModelConsulKVGetNotFoundPayload,
+    ModelConsulKVGetRecursePayload,
+    ModelConsulKVItem,
+    ModelConsulKVPutPayload,
+    ModelConsulRegisterPayload,
+)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 T = TypeVar("T")
@@ -750,14 +760,13 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
 
         # Handle response - data can be None if key doesn't exist
         if data is None:
+            typed_payload = ModelConsulKVGetNotFoundPayload(
+                key=key,
+                index=index,
+            )
             result: dict[str, JsonValue] = {
                 "status": "success",
-                "payload": {
-                    "found": False,
-                    "key": key,
-                    "value": None,
-                    "index": index,
-                },
+                "payload": typed_payload.model_dump(),
                 "correlation_id": str(correlation_id),
             }
             return ModelHandlerOutput.for_compute(
@@ -770,28 +779,34 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         # Handle single key or recurse results
         if isinstance(data, list):
             # Recurse mode - multiple keys
-            items = []
+            items: list[ModelConsulKVItem] = []
             for item in data:
                 value = item.get("Value")
                 decoded_value = (
                     value.decode("utf-8") if isinstance(value, bytes) else value
                 )
+                item_key = item.get("Key")
                 items.append(
-                    {
-                        "key": item.get("Key"),
-                        "value": decoded_value,
-                        "flags": item.get("Flags"),
-                        "modify_index": item.get("ModifyIndex"),
-                    }
+                    ModelConsulKVItem(
+                        key=item_key if isinstance(item_key, str) else "",
+                        value=decoded_value if isinstance(decoded_value, str) else None,
+                        flags=item.get("Flags")
+                        if isinstance(item.get("Flags"), int)
+                        else None,
+                        modify_index=item.get("ModifyIndex")
+                        if isinstance(item.get("ModifyIndex"), int)
+                        else None,
+                    )
                 )
+            typed_payload_recurse = ModelConsulKVGetRecursePayload(
+                found=len(items) > 0,
+                items=items,
+                count=len(items),
+                index=index,
+            )
             result = {
                 "status": "success",
-                "payload": {
-                    "found": True,
-                    "items": items,
-                    "count": len(items),
-                    "index": index,
-                },
+                "payload": typed_payload_recurse.model_dump(),
                 "correlation_id": str(correlation_id),
             }
             return ModelHandlerOutput.for_compute(
@@ -804,16 +819,19 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             # Single key mode
             value = data.get("Value")
             decoded_value = value.decode("utf-8") if isinstance(value, bytes) else value
+            data_key = data.get("Key")
+            typed_payload_found = ModelConsulKVGetFoundPayload(
+                key=data_key if isinstance(data_key, str) else key,
+                value=decoded_value if isinstance(decoded_value, str) else None,
+                flags=data.get("Flags") if isinstance(data.get("Flags"), int) else None,
+                modify_index=data.get("ModifyIndex")
+                if isinstance(data.get("ModifyIndex"), int)
+                else None,
+                index=index,
+            )
             result = {
                 "status": "success",
-                "payload": {
-                    "found": True,
-                    "key": data.get("Key"),
-                    "value": decoded_value,
-                    "flags": data.get("Flags"),
-                    "modify_index": data.get("ModifyIndex"),
-                    "index": index,
-                },
+                "payload": typed_payload_found.model_dump(),
                 "correlation_id": str(correlation_id),
             }
             return ModelHandlerOutput.for_compute(
@@ -890,12 +908,13 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             correlation_id,
         )
 
+        typed_payload = ModelConsulKVPutPayload(
+            success=success,
+            key=key,
+        )
         result: dict[str, JsonValue] = {
             "status": "success",
-            "payload": {
-                "success": success,
-                "key": key,
-            },
+            "payload": typed_payload.model_dump(),
             "correlation_id": str(correlation_id),
         }
         return ModelHandlerOutput.for_compute(
@@ -981,13 +1000,14 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             correlation_id,
         )
 
+        typed_payload = ModelConsulRegisterPayload(
+            registered=True,
+            name=name,
+            consul_service_id=service_id_str or name,
+        )
         result: dict[str, JsonValue] = {
             "status": "success",
-            "payload": {
-                "registered": True,
-                "name": name,
-                "service_id": service_id_str or name,
-            },
+            "payload": typed_payload.model_dump(),
             "correlation_id": str(correlation_id),
         }
         return ModelHandlerOutput.for_compute(
@@ -1042,12 +1062,13 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             correlation_id,
         )
 
+        typed_payload = ModelConsulDeregisterPayload(
+            deregistered=True,
+            consul_service_id=service_id,
+        )
         result: dict[str, JsonValue] = {
             "status": "success",
-            "payload": {
-                "deregistered": True,
-                "service_id": service_id,
-            },
+            "payload": typed_payload.model_dump(),
             "correlation_id": str(correlation_id),
         }
         return ModelHandlerOutput.for_compute(
@@ -1199,9 +1220,31 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         """
         health_status = await self.health_check(correlation_id=correlation_id)
 
+        # Convert dict to typed payload model
+        typed_payload = ModelConsulHealthCheckPayload(
+            healthy=bool(health_status.get("healthy", False)),
+            initialized=bool(health_status.get("initialized", False)),
+            handler_type=str(health_status.get("handler_type", "consul")),
+            timeout_seconds=float(health_status.get("timeout_seconds", 30.0)),
+            circuit_breaker_state=health_status.get("circuit_breaker_state")
+            if isinstance(health_status.get("circuit_breaker_state"), str)
+            else None,
+            circuit_breaker_failure_count=int(
+                health_status.get("circuit_breaker_failure_count", 0)
+            ),
+            thread_pool_active_workers=int(
+                health_status.get("thread_pool_active_workers", 0)
+            ),
+            thread_pool_max_workers=int(
+                health_status.get("thread_pool_max_workers", 0)
+            ),
+            thread_pool_max_queue_size=int(
+                health_status.get("thread_pool_max_queue_size", 0)
+            ),
+        )
         result: dict[str, JsonValue] = {
             "status": "success",
-            "payload": health_status,
+            "payload": typed_payload.model_dump(),
             "correlation_id": str(correlation_id),
         }
         return ModelHandlerOutput.for_compute(

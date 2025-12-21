@@ -590,7 +590,7 @@ class TestConsulHandlerServiceOperations:
             assert isinstance(payload, dict)
             assert payload["registered"] is True
             assert payload["name"] == "my-service"
-            assert payload["service_id"] == "my-service-1"
+            assert payload["consul_service_id"] == "my-service-1"
 
     @pytest.mark.asyncio
     async def test_register_service_minimal(
@@ -621,8 +621,8 @@ class TestConsulHandlerServiceOperations:
             payload = result["payload"]
             assert isinstance(payload, dict)
             assert payload["registered"] is True
-            # service_id defaults to name when not provided
-            assert payload["service_id"] == "my-service"
+            # consul_service_id defaults to name when not provided
+            assert payload["consul_service_id"] == "my-service"
 
     @pytest.mark.asyncio
     async def test_register_service_missing_name(
@@ -679,7 +679,7 @@ class TestConsulHandlerServiceOperations:
             payload = result["payload"]
             assert isinstance(payload, dict)
             assert payload["deregistered"] is True
-            assert payload["service_id"] == "my-service-1"
+            assert payload["consul_service_id"] == "my-service-1"
 
     @pytest.mark.asyncio
     async def test_deregister_service_missing_id(
