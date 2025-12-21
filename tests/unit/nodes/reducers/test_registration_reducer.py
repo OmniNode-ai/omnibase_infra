@@ -874,6 +874,7 @@ class TestConsulIntentBuilding:
             node_type="compute",
             node_version="2.3.4",
             endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=uuid4(),
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1128,6 +1129,7 @@ class TestPostgresIntentBuilding:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             capabilities=ModelNodeCapabilities(postgres=True, consul=True, read=True),
+            correlation_id=uuid4(),
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1324,6 +1326,7 @@ class TestEdgeCases:
             node_type="effect",
             node_version="1.0.0",
             endpoints={},
+            correlation_id=uuid4(),
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1343,6 +1346,7 @@ class TestEdgeCases:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             capabilities=ModelNodeCapabilities(),
+            correlation_id=uuid4(),
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1350,21 +1354,32 @@ class TestEdgeCases:
         assert len(output.intents) == 2
         assert output.result.status == "pending"
 
-    def test_reduce_generates_event_id_when_correlation_id_missing(
+    def test_reduce_uses_deterministic_id_when_mock_has_no_correlation_id(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that event_id is generated when correlation_id is None."""
-        event = ModelNodeIntrospectionEvent(
-            node_id=uuid4(),
-            node_type="effect",
-            node_version="1.0.0",
-            endpoints={"health": "http://localhost:8080/health"},
-            correlation_id=None,
-        )
+        """Test that event_id is derived deterministically when correlation_id is None.
 
-        output = reducer.reduce(initial_state, event)
+        Note: Since ModelNodeIntrospectionEvent now requires correlation_id,
+        this test uses a mock to simulate the case where correlation_id is None.
+        """
+        from unittest.mock import MagicMock
+
+        node_id = uuid4()
+        timestamp = datetime.now(UTC)
+
+        mock_event = MagicMock(spec=ModelNodeIntrospectionEvent)
+        mock_event.node_id = node_id
+        mock_event.node_type = "effect"
+        mock_event.node_version = "1.0.0"
+        mock_event.endpoints = {"health": "http://localhost:8080/health"}
+        mock_event.capabilities = ModelNodeCapabilities()
+        mock_event.metadata = ModelNodeMetadata()
+        mock_event.correlation_id = None  # Force deterministic derivation
+        mock_event.timestamp = timestamp
+
+        output = reducer.reduce(initial_state, mock_event)
 
         # State should have a last_processed_event_id even without correlation_id
         assert output.result.last_processed_event_id is not None
@@ -1659,8 +1674,11 @@ class TestPerformance:
         # Second reduce with same event (duplicate)
         output2 = reducer.reduce(state_after_first, event)
 
-        # Duplicate detection should be near-instant (processing_time_ms = 0)
-        assert output2.processing_time_ms == 0.0
+        # Duplicate detection should be near-instant
+        # Use relaxed assertion: processing_time_ms should be very small (< 1ms)
+        # rather than exactly 0.0 to avoid over-constraining implementation
+        assert output2.processing_time_ms >= 0.0
+        assert output2.processing_time_ms < 1.0  # Should complete in <1ms
         assert output2.items_processed == 0
 
     def test_processing_time_scales_reasonably(

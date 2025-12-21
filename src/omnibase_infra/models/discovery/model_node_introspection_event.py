@@ -70,7 +70,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         current_state: Current FSM state if the node has state management.
         version: Node version string.
         reason: Reason for the introspection event (startup, shutdown, request).
-        correlation_id: Optional correlation ID for tracing.
+        correlation_id: Required correlation ID for distributed tracing and idempotency.
         timestamp: UTC timestamp when the introspection was generated.
 
     Example:
@@ -92,6 +92,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
             current_state="connected",
             version="1.0.0",
             reason="startup",
+            correlation_id=uuid4(),
         )
         ```
     """
@@ -151,9 +152,9 @@ class ModelNodeIntrospectionEvent(BaseModel):
     )
 
     # Tracing
-    correlation_id: UUID | None = Field(
-        default=None,
-        description="Correlation ID for distributed tracing",
+    correlation_id: UUID = Field(
+        ...,
+        description="Correlation ID for distributed tracing (required for idempotency)",
     )
 
     timestamp: datetime = Field(

@@ -342,7 +342,9 @@ import hashlib
 import logging
 import os
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumReductionType, EnumStreamingMode
@@ -401,8 +403,56 @@ PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS", "1.0")
 )
 
-# Logger for performance warnings
+# Logger for performance warnings and validation errors
 _logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Validation Error Types
+# =============================================================================
+
+ValidationErrorCode = Literal[
+    "missing_node_id",
+    "missing_node_type",
+    "invalid_node_type",
+]
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    """Result of event validation with detailed error information.
+
+    Attributes:
+        is_valid: Whether the event passed validation.
+        error_code: Distinct code identifying the validation failure (if any).
+        field_name: Name of the field that failed validation (if any).
+        error_message: Human-readable error message for logging (if any).
+    """
+
+    is_valid: bool
+    error_code: ValidationErrorCode | None = None
+    field_name: str | None = None
+    error_message: str | None = None
+
+    @classmethod
+    def success(cls) -> ValidationResult:
+        """Create a successful validation result."""
+        return cls(is_valid=True)
+
+    @classmethod
+    def failure(
+        cls,
+        error_code: ValidationErrorCode,
+        field_name: str,
+        error_message: str,
+    ) -> ValidationResult:
+        """Create a failed validation result with error details."""
+        return cls(
+            is_valid=False,
+            error_code=error_code,
+            field_name=field_name,
+            error_message=error_message,
+        )
 
 
 class RegistrationReducer:
@@ -528,7 +578,22 @@ class RegistrationReducer:
         # Note: Validation errors are logged with sanitized context (no PII/secrets)
         # but the output intentionally uses a generic failure_reason to avoid
         # exposing internal validation logic to external consumers.
-        if not self._is_valid(event):
+        validation_result = self._validate_event(event)
+        if not validation_result.is_valid:
+            # Log validation failure with sanitized context for diagnostics
+            # SECURITY: Only field presence booleans and error codes are logged
+            _logger.warning(
+                "Event validation failed",
+                extra={
+                    "error_code": validation_result.error_code,
+                    "field_name": validation_result.field_name,
+                    "error_message": validation_result.error_message,
+                    "correlation_id": str(event_id),
+                    "has_node_id": event.node_id is not None,
+                    "has_node_type": hasattr(event, "node_type")
+                    and event.node_type is not None,
+                },
+            )
             new_state = state.with_failure("validation_failed", event_id)
             return self._build_output(
                 state=new_state,
@@ -597,25 +662,8 @@ class RegistrationReducer:
     def _is_valid(self, event: ModelNodeIntrospectionEvent) -> bool:
         """Validate introspection event for processing.
 
-        Validates that required fields are present for registration workflow.
-        Pydantic handles type validation at model construction; this method
-        checks semantic validity required by the reducer.
-
-        **Validation Rules:**
-        - node_id: Must be present (required for registration identity)
-        - node_type: Must be present (required for service categorization)
-
-        **Error Recovery:**
-        When validation fails, the reducer transitions to a "failed" state
-        with failure_reason="validation_failed". The caller should:
-        1. Log the failure for diagnostic purposes (using sanitized context)
-        2. NOT retry the same event (validation failures are deterministic)
-        3. Alert on repeated validation failures from the same source
-
-        **Security Note:**
-        Error messages from this validation are intentionally generic to avoid
-        exposing internal validation logic. Specific field failures are only
-        logged server-side with appropriate sanitization.
+        Delegates to _validate_event() for detailed validation. This method
+        is retained for backwards compatibility.
 
         Args:
             event: Introspection event to validate.
@@ -623,51 +671,64 @@ class RegistrationReducer:
         Returns:
             True if the event is valid for processing, False otherwise.
         """
-        # node_id is required for registration identity
-        if event.node_id is None:
-            return False
+        return self._validate_event(event).is_valid
 
-        # node_type is required for service categorization
-        # Note: Pydantic enforces Literal["effect", "compute", "reducer", "orchestrator"]
-        # but we check for presence to handle mock objects in tests
-        if not hasattr(event, "node_type") or event.node_type is None:
-            return False
+    def _validate_event(self, event: ModelNodeIntrospectionEvent) -> ValidationResult:
+        """Validate introspection event with detailed error information.
 
-        return True
+        Validates that required fields are present for registration workflow.
+        Returns a ValidationResult with distinct error codes for each failure
+        scenario, enabling proper logging and diagnostics.
 
-    def _get_sanitized_validation_context(
-        self, event: ModelNodeIntrospectionEvent
-    ) -> dict[str, str | bool]:
-        """Get sanitized validation context for logging purposes.
+        **Validation Rules:**
+        - node_id: Must be present (required for registration identity)
+        - node_type: Must be present and valid (required for service categorization)
 
-        Returns a dictionary of validation results that is safe to log.
-        This context does NOT include any PII, secrets, or internal state
-        that could be exploited. Only generic field presence indicators.
+        **Error Codes:**
+        - missing_node_id: node_id is None
+        - missing_node_type: node_type attribute is missing or None
+        - invalid_node_type: node_type is not a valid ONEX node type
 
-        **Security Guidelines (per CLAUDE.md):**
-        - NEVER include: passwords, API keys, tokens, secrets
-        - NEVER include: full connection strings, PII
-        - SAFE to include: field presence booleans, generic error codes
-
-        This method is for INTERNAL logging only. The reducer's output
-        uses generic failure_reason values to avoid exposing validation
-        logic to external consumers.
+        **Security Note:**
+        Error messages are logged server-side but the reducer's output uses
+        a generic "validation_failed" reason to avoid exposing internal
+        validation logic to external consumers.
 
         Args:
-            event: The introspection event being validated.
+            event: Introspection event to validate.
 
         Returns:
-            Dictionary with sanitized validation context suitable for logging.
+            ValidationResult with is_valid=True if valid, or detailed error
+            information if validation failed.
         """
-        return {
-            "has_node_id": event.node_id is not None,
-            "has_node_type": hasattr(event, "node_type")
-            and event.node_type is not None,
-            "node_type": str(event.node_type)
-            if hasattr(event, "node_type") and event.node_type
-            else "missing",
-            "validation_passed": self._is_valid(event),
-        }
+        # Validate node_id: required for registration identity
+        if event.node_id is None:
+            return ValidationResult.failure(
+                error_code="missing_node_id",
+                field_name="node_id",
+                error_message="node_id is required for registration identity",
+            )
+
+        # Validate node_type: must be present
+        if not hasattr(event, "node_type") or event.node_type is None:
+            return ValidationResult.failure(
+                error_code="missing_node_type",
+                field_name="node_type",
+                error_message="node_type is required for service categorization",
+            )
+
+        # Validate node_type value is valid ONEX type
+        valid_node_types = {"effect", "compute", "reducer", "orchestrator"}
+        if event.node_type not in valid_node_types:
+            return ValidationResult.failure(
+                error_code="invalid_node_type",
+                field_name="node_type",
+                error_message=(
+                    f"node_type must be one of: {', '.join(sorted(valid_node_types))}"
+                ),
+            )
+
+        return ValidationResult.success()
 
     def _derive_deterministic_event_id(
         self, event: ModelNodeIntrospectionEvent
@@ -1062,6 +1123,9 @@ class RegistrationReducer:
 
 __all__ = [
     "RegistrationReducer",
+    # Validation types (for tests and custom validators)
+    "ValidationResult",
+    "ValidationErrorCode",
     # Performance threshold constants (for tests and monitoring)
     "PERF_THRESHOLD_REDUCE_MS",
     "PERF_THRESHOLD_INTENT_BUILD_MS",
