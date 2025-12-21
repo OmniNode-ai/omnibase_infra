@@ -300,6 +300,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             - Composite unique constraint on (domain, message_id)
             - Index on processed_at for efficient TTL cleanup
             - Index on domain for efficient is_processed queries
+            - Partial index on correlation_id for distributed tracing queries
         """
         if self._pool is None:
             raise RuntimeHostError(
@@ -335,10 +336,19 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             ON {self._config.table_name}(domain)
         """
 
+        # Partial index on correlation_id for distributed tracing queries
+        # Uses partial index (WHERE NOT NULL) to save space since correlation_id is optional
+        create_correlation_index_sql = f"""
+            CREATE INDEX IF NOT EXISTS idx_{self._config.table_name}_correlation_id
+            ON {self._config.table_name}(correlation_id)
+            WHERE correlation_id IS NOT NULL
+        """
+
         async with self._pool.acquire() as conn:
             await conn.execute(create_table_sql)
             await conn.execute(create_processed_at_index_sql)
             await conn.execute(create_domain_index_sql)
+            await conn.execute(create_correlation_index_sql)
 
     async def shutdown(self) -> None:
         """Close the connection pool and release resources."""
@@ -804,15 +814,11 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
     async def health_check(self) -> bool:
         """Check if the store is healthy and can accept operations.
 
-        Performs both read and write verification to ensure the database
-        is fully operational:
-        1. Read check: SELECT 1 to verify read connectivity
-        2. Write check: INSERT into the actual table within a transaction
-           that is rolled back, verifying write permissions without leaving
-           any persistent data.
+        Performs read verification and table existence check to ensure
+        the database is operational without writing data.
 
         Returns:
-            True if store is healthy (read and write both work), False otherwise.
+            True if store is healthy, False otherwise.
         """
         if not self._initialized or self._pool is None:
             return False
@@ -822,41 +828,21 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 # Step 1: Verify read access
                 await conn.fetchval("SELECT 1")
 
-                # Step 2: Verify write access using a transaction with rollback
-                # This tests INSERT permissions without persisting any data
-                # table_name is validated via regex in ModelPostgresIdempotencyStoreConfig
-                async with conn.transaction():
-                    health_check_id = uuid4()
-                    insert_sql = f"""
-                        INSERT INTO {self._config.table_name}
-                            (id, domain, message_id, correlation_id, processed_at)
-                        VALUES ($1, $2, $3, $4, now())
-                    """
-                    await conn.execute(
-                        insert_sql,
-                        health_check_id,
-                        "__health_check__",
-                        health_check_id,
-                        None,
-                    )
-                    # Raise to trigger rollback - this is intentional
-                    raise _HealthCheckRollbackError
+                # Step 2: Verify table exists and is accessible
+                # This confirms schema setup without writes
+                check_table_sql = """
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = $1
+                    LIMIT 1
+                """
+                table_exists = await conn.fetchval(
+                    check_table_sql, self._config.table_name
+                )
 
-        except _HealthCheckRollbackError:
-            # Expected - write test succeeded and was rolled back
-            return True
+                return table_exists is not None
+
         except Exception:
-            # Any other exception indicates unhealthy state
             return False
-
-
-class _HealthCheckRollbackError(Exception):
-    """Internal exception used to trigger transaction rollback in health checks.
-
-    This exception is raised intentionally after a successful INSERT
-    to trigger a rollback, ensuring no persistent data is left behind
-    while still verifying write permissions.
-    """
 
 
 __all__: list[str] = ["PostgresIdempotencyStore"]

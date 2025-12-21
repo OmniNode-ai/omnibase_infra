@@ -162,6 +162,7 @@ class InMemoryIdempotencyStore(ProtocolIdempotencyStore):
         """Remove entries older than TTL.
 
         Cleans up old idempotency records based on their processed_at timestamp.
+        Uses single-pass identification to minimize lock hold time.
 
         Args:
             ttl_seconds: Time-to-live in seconds. Records older than this
@@ -171,20 +172,20 @@ class InMemoryIdempotencyStore(ProtocolIdempotencyStore):
             Number of entries removed.
         """
         now = datetime.now(UTC)
-        removed_count = 0
 
         async with self._lock:
-            keys_to_remove = []
-            for key, record in self._storage.items():
-                age_seconds = (now - record.processed_at).total_seconds()
-                if age_seconds > ttl_seconds:
-                    keys_to_remove.append(key)
+            # Single-pass identification using list comprehension
+            expired_keys = [
+                key
+                for key, record in self._storage.items()
+                if (now - record.processed_at).total_seconds() > ttl_seconds
+            ]
 
-            for key in keys_to_remove:
+            # Delete expired keys
+            for key in expired_keys:
                 del self._storage[key]
-                removed_count += 1
 
-        return removed_count
+            return len(expired_keys)
 
     # Test utility methods
 

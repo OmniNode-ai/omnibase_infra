@@ -72,7 +72,8 @@ class TestPostgresIdempotencyStoreInitialization:
             # 1. CREATE TABLE
             # 2. CREATE INDEX on processed_at
             # 3. CREATE INDEX on domain
-            assert mock_conn.execute.call_count == 3
+            # 4. CREATE INDEX on correlation_id (partial)
+            assert mock_conn.execute.call_count == 4
 
             await store.shutdown()
 
@@ -563,17 +564,18 @@ class TestPostgresIdempotencyStoreCleanupExpired:
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        # Simulate 3 batches: 100, 100, 50 (total 250 records)
-        delete_results = ["DELETE 100", "DELETE 100", "DELETE 50"]
-        mock_conn.execute = AsyncMock(side_effect=delete_results)
+        # Use default return for initialization (table + indexes)
+        mock_conn.execute = AsyncMock(return_value="OK")
 
         with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_pool
             await store.initialize()
 
         try:
-            # Reset mock after initialization
+            # Reset mock after initialization and set up batched delete results
             mock_conn.execute.reset_mock()
+            # Simulate 3 batches: 100, 100, 50 (total 250 records)
+            delete_results = ["DELETE 100", "DELETE 100", "DELETE 50"]
             mock_conn.execute.side_effect = delete_results
 
             result = await store.cleanup_expired(ttl_seconds=86400)
@@ -770,41 +772,25 @@ class TestPostgresIdempotencyStoreCleanupExpired:
 class TestPostgresIdempotencyStoreHealthCheck:
     """Test suite for health_check operation.
 
-    The health_check method tests both read and write capabilities:
+    The health_check method tests read and table existence:
     1. Read check via SELECT 1
-    2. Write check via INSERT within a rolled-back transaction
+    2. Table existence check via information_schema query
     """
 
     @pytest.mark.asyncio
-    async def test_health_check_returns_true_when_read_and_write_succeed(
+    async def test_health_check_returns_true_when_read_and_table_check_succeed(
         self, initialized_postgres_store: PostgresIdempotencyStore
     ) -> None:
-        """Test health_check returns True when read and write both work.
+        """Test health_check returns True when read and table check both work.
 
-        The health check verifies both:
+        The health check verifies:
         1. Read access (SELECT 1)
-        2. Write access (INSERT in rolled-back transaction)
+        2. Table existence (information_schema query)
         """
         mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)
-        mock_conn.execute = AsyncMock()
-
-        # Mock the transaction context manager that re-raises the exception
-        # after handling rollback (which is normal asyncpg behavior)
-        mock_transaction = MagicMock()
-        mock_transaction.__aenter__ = AsyncMock(return_value=None)
-
-        async def transaction_exit(
-            exc_type: type | None,
-            exc_val: BaseException | None,
-            exc_tb: object,
-        ) -> bool:
-            """Re-raise the exception after the transaction handles it."""
-            # asyncpg re-raises exceptions after rollback
-            return False  # False means don't suppress the exception
-
-        mock_transaction.__aexit__ = AsyncMock(side_effect=transaction_exit)
-        mock_conn.transaction = MagicMock(return_value=mock_transaction)
+        # First fetchval call: SELECT 1 returns 1
+        # Second fetchval call: table existence check returns 1
+        mock_conn.fetchval = AsyncMock(side_effect=[1, 1])
 
         initialized_postgres_store._pool.acquire.return_value.__aenter__ = AsyncMock(
             return_value=mock_conn
@@ -813,10 +799,26 @@ class TestPostgresIdempotencyStoreHealthCheck:
         result = await initialized_postgres_store.health_check()
 
         assert result is True
-        # Verify read check was performed
-        mock_conn.fetchval.assert_called_once_with("SELECT 1")
-        # Verify write check was performed via INSERT in transaction
-        assert mock_conn.execute.called
+        # Verify both fetchval calls were made
+        assert mock_conn.fetchval.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_health_check_returns_false_when_table_not_found(
+        self, initialized_postgres_store: PostgresIdempotencyStore
+    ) -> None:
+        """Test health_check returns False when table does not exist."""
+        mock_conn = AsyncMock()
+        # First fetchval call: SELECT 1 returns 1 (read succeeds)
+        # Second fetchval call: table check returns None (table not found)
+        mock_conn.fetchval = AsyncMock(side_effect=[1, None])
+
+        initialized_postgres_store._pool.acquire.return_value.__aenter__ = AsyncMock(
+            return_value=mock_conn
+        )
+
+        result = await initialized_postgres_store.health_check()
+
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_when_not_initialized(
@@ -843,32 +845,17 @@ class TestPostgresIdempotencyStoreHealthCheck:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_health_check_returns_false_on_write_error(
+    async def test_health_check_returns_false_on_table_check_error(
         self, initialized_postgres_store: PostgresIdempotencyStore
     ) -> None:
-        """Test health_check returns False when write check fails.
+        """Test health_check returns False when table check fails.
 
-        Even if read succeeds, if write fails the store is unhealthy.
+        Even if read succeeds, if table check fails the store is unhealthy.
         """
         mock_conn = AsyncMock()
-        mock_conn.fetchval = AsyncMock(return_value=1)  # Read succeeds
-
-        # Mock transaction that fails on execute
-        mock_transaction = MagicMock()
-        mock_transaction.__aenter__ = AsyncMock(return_value=None)
-
-        async def transaction_exit(
-            exc_type: type | None,
-            exc_val: BaseException | None,
-            exc_tb: object,
-        ) -> bool:
-            """Re-raise the exception after the transaction handles it."""
-            return False  # False means don't suppress the exception
-
-        mock_transaction.__aexit__ = AsyncMock(side_effect=transaction_exit)
-        mock_conn.transaction = MagicMock(return_value=mock_transaction)
-        mock_conn.execute = AsyncMock(
-            side_effect=asyncpg.PostgresError("permission denied")
+        # First fetchval succeeds (SELECT 1), second raises exception
+        mock_conn.fetchval = AsyncMock(
+            side_effect=[1, Exception("permission denied")]
         )
 
         initialized_postgres_store._pool.acquire.return_value.__aenter__ = AsyncMock(
