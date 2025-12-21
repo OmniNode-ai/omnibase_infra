@@ -616,9 +616,9 @@ class TestOMN973ReducerCannotAccessNow:
         )
 
         # SECONDARY ASSERTION: has_time_injection property must be False
-        assert context.has_time_injection is False, (
-            "has_time_injection reports True despite now=None"
-        )
+        assert (
+            context.has_time_injection is False
+        ), "has_time_injection reports True despite now=None"
 
     def test_cannot_manually_inject_time_into_reducer_via_model(self) -> None:
         """
@@ -788,9 +788,9 @@ class TestOMN973ComputeCannotAccessNow:
         )
 
         # SECONDARY ASSERTION: has_time_injection property must be False
-        assert context.has_time_injection is False, (
-            "has_time_injection reports True despite now=None"
-        )
+        assert (
+            context.has_time_injection is False
+        ), "has_time_injection reports True despite now=None"
 
 
 class TestOMN973OrchestratorReceivesTime:

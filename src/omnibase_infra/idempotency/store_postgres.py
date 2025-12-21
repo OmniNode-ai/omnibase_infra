@@ -287,7 +287,9 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                         extra={
                             "message_id": str(message_id),
                             "domain": domain,
-                            "correlation_id": str(correlation_id) if correlation_id else None,
+                            "correlation_id": str(correlation_id)
+                            if correlation_id
+                            else None,
                         },
                     )
                 else:
@@ -457,7 +459,9 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                     extra={
                         "message_id": str(message_id),
                         "domain": domain,
-                        "correlation_id": str(correlation_id) if correlation_id else None,
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
                     },
                 )
 

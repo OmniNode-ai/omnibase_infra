@@ -1427,7 +1427,9 @@ class RuntimeHostProcess:
                     message_id=message_id,
                     correlation_id=correlation_id,
                 )
-                await self._publish_envelope_safe(duplicate_response, self._output_topic)
+                await self._publish_envelope_safe(
+                    duplicate_response, self._output_topic
+                )
                 return False
 
             return True

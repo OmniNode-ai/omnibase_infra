@@ -76,7 +76,11 @@ class TestIdempotencyGuardDisabled:
             }
         }
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(event_bus=mock_event_bus, config=config)
             await process.start()
 
@@ -95,7 +99,11 @@ class TestIdempotencyGuardEnabled:
         self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
     ) -> None:
         """Idempotency guard initializes InMemory store when configured."""
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -113,7 +121,11 @@ class TestIdempotencyGuardEnabled:
         self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
     ) -> None:
         """Idempotency store is cleaned up during stop()."""
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -140,7 +152,11 @@ class TestDuplicateMessageDetection:
             return_value={"success": True, "result": "processed"}
         )
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -173,7 +189,11 @@ class TestDuplicateMessageDetection:
             return_value={"success": True, "result": "processed"}
         )
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -208,7 +228,11 @@ class TestDuplicateMessageDetection:
             return_value={"success": True, "result": "processed"}
         )
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -237,7 +261,9 @@ class TestDuplicateMessageDetection:
         # Get the last published message
         last_call = mock_event_bus.publish_envelope.call_args_list[-1]
         # publish_envelope receives (envelope_dict, topic)
-        published_envelope = last_call.args[0] if last_call.args else last_call.kwargs.get("envelope")
+        published_envelope = (
+            last_call.args[0] if last_call.args else last_call.kwargs.get("envelope")
+        )
 
         assert published_envelope["success"] is True
         assert published_envelope["status"] == "duplicate"
@@ -260,7 +286,11 @@ class TestDomainIsolation:
         mock_http_handler = MagicMock()
         mock_http_handler.execute = AsyncMock(return_value={"success": True})
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -297,7 +327,11 @@ class TestDomainIsolation:
         self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
     ) -> None:
         """Domain is correctly extracted from operation prefix."""
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -332,10 +366,12 @@ class TestSkipOperations:
             }
         }
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
-            process = RuntimeHostProcess(
-                event_bus=mock_event_bus, config=config
-            )
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
+            process = RuntimeHostProcess(event_bus=mock_event_bus, config=config)
             await process.start()
             process._handlers["db"] = mock_handler
 
@@ -366,7 +402,11 @@ class TestMessageIdExtraction:
         self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
     ) -> None:
         """Message ID is extracted from envelope headers."""
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -390,7 +430,11 @@ class TestMessageIdExtraction:
         self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
     ) -> None:
         """Message ID is extracted from top-level envelope field."""
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -414,7 +458,11 @@ class TestMessageIdExtraction:
         self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
     ) -> None:
         """Falls back to correlation_id when message_id not present."""
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -434,7 +482,11 @@ class TestMessageIdExtraction:
         self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
     ) -> None:
         """String message_id is parsed to UUID."""
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -465,7 +517,11 @@ class TestFailOpenBehavior:
         mock_handler = MagicMock()
         mock_handler.execute = AsyncMock(return_value={"success": True})
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -503,7 +559,11 @@ class TestReplaySafeBehavior:
         mock_handler = MagicMock()
         mock_handler.execute = AsyncMock(return_value={"success": True})
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -546,7 +606,11 @@ class TestReplaySafeBehavior:
 
         mock_handler.execute = slow_execute
 
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )
@@ -579,7 +643,11 @@ class TestDuplicateResponse:
         self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
     ) -> None:
         """Duplicate response has correct format."""
-        with patch.object(RuntimeHostProcess, "_populate_handlers_from_registry", new_callable=AsyncMock):
+        with patch.object(
+            RuntimeHostProcess,
+            "_populate_handlers_from_registry",
+            new_callable=AsyncMock,
+        ):
             process = RuntimeHostProcess(
                 event_bus=mock_event_bus, config=idempotency_config
             )

@@ -51,9 +51,7 @@ class TestPostgresIdempotencyStoreInitialization:
         """Create store fixture."""
         return PostgresIdempotencyStore(config)
 
-    def test_store_init_default_state(
-        self, store: PostgresIdempotencyStore
-    ) -> None:
+    def test_store_init_default_state(self, store: PostgresIdempotencyStore) -> None:
         """Test store initializes in uninitialized state."""
         assert store.is_initialized is False
         assert store._pool is None
@@ -83,9 +81,7 @@ class TestPostgresIdempotencyStoreInitialization:
             await store.shutdown()
 
     @pytest.mark.asyncio
-    async def test_initialize_idempotent(
-        self, store: PostgresIdempotencyStore
-    ) -> None:
+    async def test_initialize_idempotent(self, store: PostgresIdempotencyStore) -> None:
         """Test calling initialize multiple times is safe."""
         mock_pool = MagicMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
@@ -140,7 +136,10 @@ class TestPostgresIdempotencyStoreInitialization:
             with pytest.raises(InfraConnectionError) as exc_info:
                 await store.initialize()
 
-            assert "host" in str(exc_info.value).lower() or "connect" in str(exc_info.value).lower()
+            assert (
+                "host" in str(exc_info.value).lower()
+                or "connect" in str(exc_info.value).lower()
+            )
 
 
 class TestPostgresIdempotencyStoreCheckAndRecord:
