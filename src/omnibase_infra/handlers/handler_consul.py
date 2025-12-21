@@ -45,7 +45,9 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.model_consul_handler_config import ModelConsulHandlerConfig
 from omnibase_infra.handlers.models.consul import (
+    ConsulPayload,
     ModelConsulDeregisterPayload,
+    ModelConsulHandlerPayload,
     ModelConsulHealthCheckPayload,
     ModelConsulKVGetFoundPayload,
     ModelConsulKVGetNotFoundPayload,
@@ -53,6 +55,9 @@ from omnibase_infra.handlers.models.consul import (
     ModelConsulKVItem,
     ModelConsulKVPutPayload,
     ModelConsulRegisterPayload,
+)
+from omnibase_infra.handlers.models.model_consul_handler_response import (
+    ModelConsulHandlerResponse,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
@@ -420,9 +425,40 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             },
         )
 
+    def _build_response(
+        self,
+        typed_payload: ConsulPayload,
+        correlation_id: UUID,
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
+        """Build standardized ModelConsulHandlerResponse wrapped in ModelHandlerOutput.
+
+        This helper method ensures consistent response formatting across all
+        Consul operations, matching the pattern used by DbAdapter.
+
+        Args:
+            typed_payload: Strongly-typed payload from the discriminated union.
+            correlation_id: Correlation ID for tracing.
+            input_envelope_id: Input envelope ID for causality tracking.
+
+        Returns:
+            ModelHandlerOutput wrapping ModelConsulHandlerResponse.
+        """
+        response = ModelConsulHandlerResponse(
+            status="success",
+            payload=ModelConsulHandlerPayload(data=typed_payload),
+            correlation_id=correlation_id,
+        )
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_CONSUL,
+            result=response,
+        )
+
     async def execute(
         self, envelope: dict[str, JsonValue]
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Execute Consul operation from envelope.
 
         Args:
@@ -712,7 +748,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         payload: dict[str, JsonValue],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Get value from Consul KV store.
 
         Args:
@@ -764,16 +800,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 key=key,
                 index=index,
             )
-            result: dict[str, JsonValue] = {
-                "status": "success",
-                "payload": typed_payload.model_dump(),
-                "correlation_id": str(correlation_id),
-            }
-            return ModelHandlerOutput.for_compute(
-                input_envelope_id=input_envelope_id,
-                correlation_id=correlation_id,
-                handler_id=HANDLER_ID_CONSUL,
-                result=result,
+            return self._build_response(
+                typed_payload, correlation_id, input_envelope_id
             )
 
         # Handle single key or recurse results
@@ -804,16 +832,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 count=len(items),
                 index=index,
             )
-            result = {
-                "status": "success",
-                "payload": typed_payload_recurse.model_dump(),
-                "correlation_id": str(correlation_id),
-            }
-            return ModelHandlerOutput.for_compute(
-                input_envelope_id=input_envelope_id,
-                correlation_id=correlation_id,
-                handler_id=HANDLER_ID_CONSUL,
-                result=result,
+            return self._build_response(
+                typed_payload_recurse, correlation_id, input_envelope_id
             )
         else:
             # Single key mode
@@ -829,16 +849,8 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 else None,
                 index=index,
             )
-            result = {
-                "status": "success",
-                "payload": typed_payload_found.model_dump(),
-                "correlation_id": str(correlation_id),
-            }
-            return ModelHandlerOutput.for_compute(
-                input_envelope_id=input_envelope_id,
-                correlation_id=correlation_id,
-                handler_id=HANDLER_ID_CONSUL,
-                result=result,
+            return self._build_response(
+                typed_payload_found, correlation_id, input_envelope_id
             )
 
     async def _kv_put(
@@ -846,7 +858,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         payload: dict[str, JsonValue],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Put value to Consul KV store.
 
         Args:
@@ -912,24 +924,14 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             success=success,
             key=key,
         )
-        result: dict[str, JsonValue] = {
-            "status": "success",
-            "payload": typed_payload.model_dump(),
-            "correlation_id": str(correlation_id),
-        }
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_CONSUL,
-            result=result,
-        )
+        return self._build_response(typed_payload, correlation_id, input_envelope_id)
 
     async def _register_service(
         self,
         payload: dict[str, JsonValue],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Register service with Consul agent.
 
         Args:
@@ -1005,24 +1007,14 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             name=name,
             consul_service_id=service_id_str or name,
         )
-        result: dict[str, JsonValue] = {
-            "status": "success",
-            "payload": typed_payload.model_dump(),
-            "correlation_id": str(correlation_id),
-        }
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_CONSUL,
-            result=result,
-        )
+        return self._build_response(typed_payload, correlation_id, input_envelope_id)
 
     async def _deregister_service(
         self,
         payload: dict[str, JsonValue],
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Deregister service from Consul agent.
 
         Args:
@@ -1066,17 +1058,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
             deregistered=True,
             consul_service_id=service_id,
         )
-        result: dict[str, JsonValue] = {
-            "status": "success",
-            "payload": typed_payload.model_dump(),
-            "correlation_id": str(correlation_id),
-        }
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_CONSUL,
-            result=result,
-        )
+        return self._build_response(typed_payload, correlation_id, input_envelope_id)
 
     async def health_check(
         self, correlation_id: UUID | None = None
@@ -1181,7 +1163,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         self,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
+    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Execute health check operation from envelope.
 
         This method wraps the core health_check() functionality in a ModelHandlerOutput
@@ -1242,17 +1224,7 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
                 health_status.get("thread_pool_max_queue_size", 0)
             ),
         )
-        result: dict[str, JsonValue] = {
-            "status": "success",
-            "payload": typed_payload.model_dump(),
-            "correlation_id": str(correlation_id),
-        }
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_CONSUL,
-            result=result,
-        )
+        return self._build_response(typed_payload, correlation_id, input_envelope_id)
 
     def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities.

@@ -38,13 +38,22 @@ class ModelConsulHandlerResponse(BaseModel):
 
     Example:
         >>> from uuid import uuid4
+        >>> from omnibase_infra.handlers.models.consul import ModelConsulRegisterPayload
         >>> response = ModelConsulHandlerResponse(
         ...     status="success",
-        ...     payload=ModelConsulHandlerPayload(data={"registered": True}),
+        ...     payload=ModelConsulHandlerPayload(
+        ...         data=ModelConsulRegisterPayload(
+        ...             registered=True,
+        ...             name="my-service",
+        ...             consul_service_id="my-service-1",
+        ...         ),
+        ...     ),
         ...     correlation_id=uuid4(),
         ... )
         >>> print(response.status)
         'success'
+        >>> print(response.payload.data.operation_type)
+        'register'
     """
 
     model_config = ConfigDict(

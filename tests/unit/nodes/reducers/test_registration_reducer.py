@@ -547,6 +547,273 @@ class TestStateTransitions:
         assert failed_state.consul_confirmed is True
         assert failed_state.postgres_confirmed is False
 
+    def test_state_with_reset_from_failed(self) -> None:
+        """Test reset from failed state returns to idle."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        failed_state = pending_state.with_failure("consul_failed", uuid4())
+
+        reset_event_id = uuid4()
+        reset_state = failed_state.with_reset(reset_event_id)
+
+        assert reset_state.status == "idle"
+        assert reset_state.node_id is None
+        assert reset_state.consul_confirmed is False
+        assert reset_state.postgres_confirmed is False
+        assert reset_state.failure_reason is None
+        assert reset_state.last_processed_event_id == reset_event_id
+
+    def test_state_with_reset_from_complete(self) -> None:
+        """Test reset from complete state returns to idle."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
+        complete_state = consul_confirmed.with_postgres_confirmed(uuid4())
+
+        reset_event_id = uuid4()
+        reset_state = complete_state.with_reset(reset_event_id)
+
+        assert reset_state.status == "idle"
+        assert reset_state.node_id is None
+        assert reset_state.consul_confirmed is False
+        assert reset_state.postgres_confirmed is False
+
+    def test_state_with_reset_clears_all_flags(self) -> None:
+        """Test that reset clears all confirmation flags and failure reason."""
+        # Create a failed state with one confirmation
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
+        failed_state = consul_confirmed.with_failure("postgres_failed", uuid4())
+
+        # Verify pre-conditions
+        assert failed_state.consul_confirmed is True
+        assert failed_state.failure_reason == "postgres_failed"
+
+        # Reset should clear everything
+        reset_state = failed_state.with_reset(uuid4())
+
+        assert reset_state.consul_confirmed is False
+        assert reset_state.postgres_confirmed is False
+        assert reset_state.failure_reason is None
+        assert reset_state.node_id is None
+
+    def test_state_can_reset_from_failed(self) -> None:
+        """Test can_reset returns True for failed state."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        failed_state = pending_state.with_failure("validation_failed", uuid4())
+
+        assert failed_state.can_reset() is True
+
+    def test_state_can_reset_from_complete(self) -> None:
+        """Test can_reset returns True for complete state."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
+        complete_state = consul_confirmed.with_postgres_confirmed(uuid4())
+
+        assert complete_state.can_reset() is True
+
+    def test_state_cannot_reset_from_idle(self) -> None:
+        """Test can_reset returns False for idle state."""
+        state = ModelRegistrationState()
+
+        assert state.can_reset() is False
+
+    def test_state_cannot_reset_from_pending(self) -> None:
+        """Test can_reset returns False for pending state."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+
+        assert pending_state.can_reset() is False
+
+    def test_state_cannot_reset_from_partial(self) -> None:
+        """Test can_reset returns False for partial state."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        partial_state = pending_state.with_consul_confirmed(uuid4())
+
+        assert partial_state.can_reset() is False
+
+    def test_state_reset_immutability(self) -> None:
+        """Test that reset creates a new instance without mutating original."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        failed_state = pending_state.with_failure("consul_failed", uuid4())
+
+        original_status = failed_state.status
+        original_failure_reason = failed_state.failure_reason
+
+        reset_state = failed_state.with_reset(uuid4())
+
+        # Original should be unchanged
+        assert failed_state.status == original_status
+        assert failed_state.failure_reason == original_failure_reason
+
+        # New state should be reset
+        assert reset_state.status == "idle"
+        assert reset_state.failure_reason is None
+
+
+# -----------------------------------------------------------------------------
+# Reducer Reset Tests
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestReducerReset:
+    """Tests for RegistrationReducer.reduce_reset() method."""
+
+    def test_reduce_reset_from_failed_state(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that reduce_reset transitions failed state to idle."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        failed_state = pending_state.with_failure("consul_failed", uuid4())
+
+        reset_event_id = uuid4()
+        output = reducer.reduce_reset(failed_state, reset_event_id)
+
+        assert output.result.status == "idle"
+        assert output.result.node_id is None
+        assert output.result.failure_reason is None
+        assert output.items_processed == 1
+
+    def test_reduce_reset_from_complete_state(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that reduce_reset transitions complete state to idle."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
+        complete_state = consul_confirmed.with_postgres_confirmed(uuid4())
+
+        reset_event_id = uuid4()
+        output = reducer.reduce_reset(complete_state, reset_event_id)
+
+        assert output.result.status == "idle"
+        assert output.items_processed == 1
+
+    def test_reduce_reset_no_op_from_idle(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test that reduce_reset is no-op from idle state."""
+        reset_event_id = uuid4()
+        output = reducer.reduce_reset(initial_state, reset_event_id)
+
+        assert output.result.status == "idle"
+        assert output.items_processed == 0
+
+    def test_reduce_reset_no_op_from_pending(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that reduce_reset is no-op from pending state."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+
+        reset_event_id = uuid4()
+        output = reducer.reduce_reset(pending_state, reset_event_id)
+
+        assert output.result.status == "pending"
+        assert output.result.node_id == node_id
+        assert output.items_processed == 0
+
+    def test_reduce_reset_no_op_from_partial(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that reduce_reset is no-op from partial state."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        partial_state = pending_state.with_consul_confirmed(uuid4())
+
+        reset_event_id = uuid4()
+        output = reducer.reduce_reset(partial_state, reset_event_id)
+
+        assert output.result.status == "partial"
+        assert output.result.consul_confirmed is True
+        assert output.items_processed == 0
+
+    def test_reduce_reset_emits_no_intents(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that reduce_reset emits no intents."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        failed_state = pending_state.with_failure("postgres_failed", uuid4())
+
+        output = reducer.reduce_reset(failed_state, uuid4())
+
+        assert len(output.intents) == 0
+
+    def test_reduce_reset_idempotency(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that duplicate reset events are skipped."""
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        failed_state = pending_state.with_failure("consul_failed", uuid4())
+
+        reset_event_id = uuid4()
+        output1 = reducer.reduce_reset(failed_state, reset_event_id)
+        idle_state = output1.result
+
+        # Second reset with same event_id should be skipped
+        output2 = reducer.reduce_reset(idle_state, reset_event_id)
+
+        assert output2.result == idle_state
+        assert output2.items_processed == 0
+
+    def test_reduce_reset_full_recovery_workflow(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test complete workflow: introspection -> failure -> reset -> retry."""
+        initial_state = ModelRegistrationState()
+
+        # First introspection
+        event1 = create_introspection_event()
+        output1 = reducer.reduce(initial_state, event1)
+        assert output1.result.status == "pending"
+        assert len(output1.intents) == 2
+
+        # Simulate failure
+        failed_state = output1.result.with_failure("consul_failed", uuid4())
+        assert failed_state.status == "failed"
+
+        # Reset to recover
+        reset_output = reducer.reduce_reset(failed_state, uuid4())
+        assert reset_output.result.status == "idle"
+
+        # Retry with new introspection
+        event2 = create_introspection_event()
+        retry_output = reducer.reduce(reset_output.result, event2)
+        assert retry_output.result.status == "pending"
+        assert len(retry_output.intents) == 2
+
 
 # -----------------------------------------------------------------------------
 # Consul Intent Building Tests
@@ -1245,3 +1512,275 @@ class TestPureFunctionContract:
         assert output1.result == output2.result
         assert len(output1.intents) == len(output2.intents)
         assert output1.items_processed == output2.items_processed
+
+
+# -----------------------------------------------------------------------------
+# Performance Tests
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestPerformance:
+    """Tests for performance characteristics and thresholds.
+
+    These tests validate that:
+    1. Performance constants are properly exported and usable
+    2. reduce() operation completes within target thresholds
+    3. processing_time_ms is accurately reported in output
+
+    Note: Performance tests use generous thresholds (300ms) since:
+    - CI environments have variable performance
+    - The goal is to catch major regressions, not micro-optimizations
+    - Typical execution is <5ms on standard hardware
+    """
+
+    def test_performance_constants_are_exported(self) -> None:
+        """Test that performance threshold constants are properly exported."""
+        from omnibase_infra.nodes.reducers.registration_reducer import (
+            PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS,
+            PERF_THRESHOLD_INTENT_BUILD_MS,
+            PERF_THRESHOLD_REDUCE_MS,
+        )
+
+        # Verify constants have expected values
+        assert PERF_THRESHOLD_REDUCE_MS == 300.0
+        assert PERF_THRESHOLD_INTENT_BUILD_MS == 50.0
+        assert PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS == 1.0
+
+        # Verify they are floats (for consistent comparison)
+        assert isinstance(PERF_THRESHOLD_REDUCE_MS, float)
+        assert isinstance(PERF_THRESHOLD_INTENT_BUILD_MS, float)
+        assert isinstance(PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS, float)
+
+    def test_reduce_completes_within_threshold(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+        valid_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that reduce() completes well within the 300ms threshold.
+
+        This test validates the primary performance target: <300ms per event.
+        In practice, typical execution is <5ms on standard hardware.
+        """
+        from omnibase_infra.nodes.reducers.registration_reducer import (
+            PERF_THRESHOLD_REDUCE_MS,
+        )
+
+        output = reducer.reduce(initial_state, valid_event)
+
+        # Processing time should be well under threshold
+        assert output.processing_time_ms < PERF_THRESHOLD_REDUCE_MS, (
+            f"Processing time {output.processing_time_ms}ms exceeded "
+            f"threshold {PERF_THRESHOLD_REDUCE_MS}ms"
+        )
+
+        # For healthy systems, should complete in <50ms typically
+        # (we don't assert this to avoid flaky tests in slow CI)
+        assert output.processing_time_ms >= 0.0
+
+    def test_reduce_reset_completes_within_threshold(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that reduce_reset() completes well within the threshold."""
+        from omnibase_infra.nodes.reducers.registration_reducer import (
+            PERF_THRESHOLD_REDUCE_MS,
+        )
+
+        # Create a failed state to reset
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        failed_state = pending_state.with_failure("consul_failed", uuid4())
+
+        output = reducer.reduce_reset(failed_state, uuid4())
+
+        # Processing time should be well under threshold
+        assert output.processing_time_ms < PERF_THRESHOLD_REDUCE_MS
+
+    def test_processing_time_is_reported_accurately(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+        valid_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Test that processing_time_ms is a reasonable positive value."""
+        import time
+
+        start_time = time.perf_counter()
+        output = reducer.reduce(initial_state, valid_event)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Output processing_time_ms should be less than or equal to elapsed time
+        # (allow small margin for measurement overhead)
+        assert output.processing_time_ms <= elapsed_ms + 1.0
+
+        # Should be non-negative
+        assert output.processing_time_ms >= 0.0
+
+    def test_idempotency_check_is_fast(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that idempotency check (duplicate detection) is fast.
+
+        When an event is already processed, the reducer should return
+        immediately with minimal processing time.
+        """
+        correlation_id = uuid4()
+        event = create_introspection_event(correlation_id=correlation_id)
+
+        # First reduce
+        initial_state = ModelRegistrationState()
+        output1 = reducer.reduce(initial_state, event)
+        state_after_first = output1.result
+
+        # Second reduce with same event (duplicate)
+        output2 = reducer.reduce(state_after_first, event)
+
+        # Duplicate detection should be near-instant (processing_time_ms = 0)
+        assert output2.processing_time_ms == 0.0
+        assert output2.items_processed == 0
+
+    def test_processing_time_scales_reasonably(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test that processing multiple events has reasonable overhead.
+
+        This test validates that the reducer doesn't have hidden O(n^2)
+        behavior or state accumulation issues.
+        """
+        from omnibase_infra.nodes.reducers.registration_reducer import (
+            PERF_THRESHOLD_REDUCE_MS,
+        )
+
+        state = ModelRegistrationState()
+        total_processing_time = 0.0
+        num_events = 10
+
+        for i in range(num_events):
+            event = create_introspection_event()
+            output = reducer.reduce(state, event)
+
+            # Each event should process independently and quickly
+            assert output.processing_time_ms < PERF_THRESHOLD_REDUCE_MS
+
+            total_processing_time += output.processing_time_ms
+
+            # Use the new state for next iteration (though state changes)
+            state = output.result
+
+        # Average processing time should be reasonable
+        avg_time = total_processing_time / num_events
+        assert avg_time < PERF_THRESHOLD_REDUCE_MS / 2, (
+            f"Average processing time {avg_time}ms is too high"
+        )
+
+
+# -----------------------------------------------------------------------------
+# Circuit Breaker Non-Applicability Documentation Tests
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestCircuitBreakerNonApplicability:
+    """Tests documenting why circuit breaker is NOT needed for this reducer.
+
+    These tests serve as executable documentation that the RegistrationReducer
+    follows the pure function pattern and therefore does not require circuit
+    breaker integration.
+
+    Key points:
+    1. Pure reducers perform NO I/O operations
+    2. All external interactions are delegated to Effect layer via intents
+    3. Circuit breakers are for I/O resilience, not pure computation
+    4. Effect layer nodes (ConsulAdapter, PostgresAdapter) own their resilience
+    """
+
+    def test_reducer_has_no_async_methods(self) -> None:
+        """Verify reducer has no async methods (no I/O)."""
+        reducer = RegistrationReducer()
+
+        # Get all methods
+        methods = [
+            name
+            for name in dir(reducer)
+            if callable(getattr(reducer, name)) and not name.startswith("_")
+        ]
+
+        # Check none are coroutines
+        import inspect
+
+        for method_name in methods:
+            method = getattr(reducer, method_name)
+            assert not inspect.iscoroutinefunction(method), (
+                f"Method {method_name} is async - reducers should be pure/sync"
+            )
+
+    def test_reducer_has_no_circuit_breaker_mixin(self) -> None:
+        """Verify reducer does not inherit from MixinAsyncCircuitBreaker."""
+        reducer = RegistrationReducer()
+
+        # Check MRO for circuit breaker mixin
+        mro_names = [cls.__name__ for cls in type(reducer).__mro__]
+
+        assert "MixinAsyncCircuitBreaker" not in mro_names, (
+            "Pure reducers should not have circuit breaker mixin"
+        )
+
+    def test_reducer_outputs_intents_not_io(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+        valid_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Verify reducer emits intents (declarative) not I/O (imperative).
+
+        The reducer returns ModelIntent objects that describe desired actions.
+        It does NOT execute those actions - that's the Effect layer's job.
+        """
+        output = reducer.reduce(initial_state, valid_event)
+
+        # Reducer emits intents, not results of I/O operations
+        assert len(output.intents) == 2
+
+        for intent in output.intents:
+            # Intents are declarative descriptions
+            assert intent.intent_type in (
+                "consul.register",
+                "postgres.upsert_registration",
+            )
+            assert intent.target is not None
+            assert intent.payload is not None
+
+            # Verify these are just intent descriptions, not executed operations
+            # (the payload is serialized data, not live connections)
+            assert isinstance(intent.payload, dict)
+
+    def test_reducer_is_deterministic(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Verify reducer is deterministic - same inputs produce same outputs.
+
+        Deterministic behavior means no circuit breaker retry logic is needed.
+        If an operation fails, retrying with the same inputs produces the
+        same result - circuit breakers are for non-deterministic I/O.
+        """
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        correlation_id = uuid4()
+        event = create_introspection_event(
+            node_id=node_id, correlation_id=correlation_id
+        )
+
+        # Run reduce multiple times with same inputs
+        outputs = [reducer.reduce(state, event) for _ in range(5)]
+
+        # All outputs should have equivalent results (except operation_id)
+        for output in outputs:
+            assert output.result == outputs[0].result
+            assert len(output.intents) == len(outputs[0].intents)
+            assert output.items_processed == outputs[0].items_processed

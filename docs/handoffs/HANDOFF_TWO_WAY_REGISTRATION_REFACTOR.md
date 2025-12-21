@@ -190,7 +190,7 @@ The `NodeDualRegistrationReducer` at `nodes/reducers/node_dual_registration_redu
     │  - Emits typed intents:                                                           │
     │    * ModelConsulRegisterIntent                                                    │
     │    * ModelPostgresUpsertRegistrationIntent                                        │
-    │  - FSM-driven state machine (contracts/fsm/dual_registration_reducer_fsm.yaml)    │
+    │  - Pure reducer pattern (ModelRegistrationState immutable state transitions)       │
     │  - NO I/O - purely computes and emits                                             │
     └───────────────────────────────────────┬──────────────────────────────────────────┘
                                             │
@@ -658,7 +658,7 @@ async def handle(
 
 | Test | Description | Acceptance Criteria |
 |------|-------------|---------------------|
-| FSM contract validation | `dual_registration_reducer_fsm.yaml` state machine validation | Acceptance Criteria: FSM contract validation passes with all valid state transitions. Invalid transitions are rejected deterministically. |
+| Pure reducer validation | `RegistrationReducer` state transition validation | Acceptance Criteria: Pure reducer validates all state transitions via `ModelRegistrationState.with_*` methods. Invalid transitions are rejected deterministically. |
 | Orchestrator contract | Command/event shape validation | Acceptance Criteria: Orchestrator contract validates command/event shapes. All required envelope fields are present and typed correctly. |
 | Effect contract | Intent consumption and result emission validation | Acceptance Criteria: Effect contract validates intent consumption and result emission. Intent handlers produce optional result events matching contract. |
 
@@ -1058,7 +1058,8 @@ The following documentation artifacts must be created as part of this refactorin
 - `docs/architecture/CURRENT_NODE_ARCHITECTURE.md`
 
 **Contract References**:
-- `contracts/fsm/dual_registration_reducer_fsm.yaml`
+- `src/omnibase_infra/nodes/reducers/models/model_registration_state.py` (Pure reducer state model)
+- `src/omnibase_infra/nodes/reducers/registration_reducer.py` (Pure reducer implementation)
 
 **External Dependencies**:
 - `omnibase_core` documentation for NodeRuntime, NodeOrchestrator, NodeEffect (requires 0.5.x)

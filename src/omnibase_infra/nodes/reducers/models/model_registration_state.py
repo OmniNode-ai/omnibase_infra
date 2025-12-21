@@ -57,6 +57,7 @@ State Management:
     - ``with_consul_confirmed(event_id)``: pending -> partial, or partial -> complete
     - ``with_postgres_confirmed(event_id)``: pending -> partial, or partial -> complete
     - ``with_failure(reason, event_id)``: any -> failed
+    - ``with_reset(event_id)``: failed -> idle (recovery transition)
 
     Each method:
 
@@ -363,6 +364,57 @@ class ModelRegistrationState(BaseModel):
             True if this event_id matches the last processed event.
         """
         return self.last_processed_event_id == event_id
+
+    def with_reset(self, event_id: UUID) -> ModelRegistrationState:
+        """Transition from failed state back to idle for retry.
+
+        Allows recovery from failed states by resetting to idle. This enables
+        the FSM to process new introspection events after a failure.
+
+        This method can be called from any state but is primarily intended
+        for recovery from the failed state. All confirmation flags are reset
+        and the failure reason is cleared.
+
+        State Diagram::
+
+            +--------+   reset event   +------+
+            | failed | --------------> | idle |
+            +--------+                 +------+
+
+        Args:
+            event_id: UUID of the reset event triggering this transition.
+
+        Returns:
+            New ModelRegistrationState with status="idle" and all flags reset.
+
+        Example:
+            >>> from uuid import uuid4
+            >>> state = ModelRegistrationState(status="failed", failure_reason="consul_failed")
+            >>> reset_state = state.with_reset(uuid4())
+            >>> reset_state.status
+            'idle'
+            >>> reset_state.failure_reason is None
+            True
+        """
+        return ModelRegistrationState(
+            status="idle",
+            node_id=None,
+            consul_confirmed=False,
+            postgres_confirmed=False,
+            last_processed_event_id=event_id,
+            failure_reason=None,
+        )
+
+    def can_reset(self) -> bool:
+        """Check if the current state allows reset to idle.
+
+        Returns True if the state is in a terminal or error state that
+        can be reset. This includes 'failed' and 'complete' states.
+
+        Returns:
+            True if reset is allowed from the current state.
+        """
+        return self.status in ("failed", "complete")
 
 
 __all__ = ["ModelRegistrationState"]
