@@ -13,7 +13,10 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.idempotency import InMemoryIdempotencyStore
+from omnibase_infra.idempotency import (
+    InMemoryIdempotencyStore,
+    ModelIdempotencyGuardConfig,
+)
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 
 
@@ -31,15 +34,15 @@ def mock_event_bus() -> MagicMock:
 
 
 @pytest.fixture
-def idempotency_config() -> dict[str, object]:
+def idempotency_config() -> dict[str, ModelIdempotencyGuardConfig]:
     """Create idempotency configuration for testing."""
     return {
-        "idempotency": {
-            "enabled": True,
-            "store_type": "memory",
-            "domain_from_operation": True,
-            "skip_operations": ["health.check", "metrics.get"],
-        }
+        "idempotency": ModelIdempotencyGuardConfig(
+            enabled=True,
+            store_type="memory",
+            domain_from_operation=True,
+            skip_operations=["health.check", "metrics.get"],
+        )
     }
 
 
@@ -88,7 +91,9 @@ class TestIdempotencyGuardEnabled:
 
     @pytest.mark.asyncio
     async def test_idempotency_guard_initializes_memory_store(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Idempotency guard initializes InMemory store when configured."""
         with patch.object(
@@ -110,7 +115,9 @@ class TestIdempotencyGuardEnabled:
 
     @pytest.mark.asyncio
     async def test_idempotency_guard_cleanup_on_stop(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Idempotency store is cleaned up during stop()."""
         with patch.object(
@@ -135,7 +142,9 @@ class TestDuplicateMessageDetection:
 
     @pytest.mark.asyncio
     async def test_first_message_is_processed(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """First message with unique message_id is processed."""
         # Create mock handler
@@ -172,7 +181,9 @@ class TestDuplicateMessageDetection:
 
     @pytest.mark.asyncio
     async def test_duplicate_message_is_rejected(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Duplicate message with same message_id is rejected."""
         # Create mock handler
@@ -212,7 +223,9 @@ class TestDuplicateMessageDetection:
 
     @pytest.mark.asyncio
     async def test_duplicate_message_publishes_duplicate_response(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Duplicate message publishes success response with status=duplicate."""
         mock_handler = MagicMock()
@@ -269,7 +282,9 @@ class TestDomainIsolation:
 
     @pytest.mark.asyncio
     async def test_same_message_id_different_domains_both_process(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Same message_id in different domains are processed independently."""
         mock_db_handler = MagicMock()
@@ -316,7 +331,9 @@ class TestDomainIsolation:
 
     @pytest.mark.asyncio
     async def test_domain_extracted_from_operation_prefix(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Domain is correctly extracted from operation prefix."""
         with patch.object(
@@ -391,7 +408,9 @@ class TestMessageIdExtraction:
 
     @pytest.mark.asyncio
     async def test_extracts_message_id_from_headers(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Message ID is extracted from envelope headers."""
         with patch.object(
@@ -419,7 +438,9 @@ class TestMessageIdExtraction:
 
     @pytest.mark.asyncio
     async def test_extracts_message_id_from_top_level(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Message ID is extracted from top-level envelope field."""
         with patch.object(
@@ -447,7 +468,9 @@ class TestMessageIdExtraction:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_correlation_id(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Falls back to correlation_id when message_id not present."""
         with patch.object(
@@ -471,7 +494,9 @@ class TestMessageIdExtraction:
 
     @pytest.mark.asyncio
     async def test_extracts_string_message_id(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """String message_id is parsed to UUID."""
         with patch.object(
@@ -503,7 +528,9 @@ class TestFailOpenBehavior:
 
     @pytest.mark.asyncio
     async def test_store_error_allows_message_through(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Store errors result in fail-open (message processed)."""
         mock_handler = MagicMock()
@@ -545,7 +572,9 @@ class TestReplaySafeBehavior:
 
     @pytest.mark.asyncio
     async def test_replay_of_processed_message_is_ignored(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Replayed messages (simulating Kafka redelivery) are properly ignored."""
         mock_handler = MagicMock()
@@ -582,7 +611,9 @@ class TestReplaySafeBehavior:
 
     @pytest.mark.asyncio
     async def test_concurrent_duplicate_messages_only_one_processes(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Concurrent duplicate messages result in only one processing."""
         import asyncio
@@ -632,7 +663,9 @@ class TestDuplicateResponse:
 
     @pytest.mark.asyncio
     async def test_duplicate_response_format(
-        self, mock_event_bus: MagicMock, idempotency_config: dict[str, object]
+        self,
+        mock_event_bus: MagicMock,
+        idempotency_config: dict[str, ModelIdempotencyGuardConfig],
     ) -> None:
         """Duplicate response has correct format."""
         with patch.object(
