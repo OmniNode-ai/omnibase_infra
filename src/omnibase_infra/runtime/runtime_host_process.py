@@ -1559,6 +1559,8 @@ class RuntimeHostProcess:
         try:
             if hasattr(self._idempotency_store, "shutdown"):
                 await self._idempotency_store.shutdown()
+            elif hasattr(self._idempotency_store, "close"):
+                await self._idempotency_store.close()
             logger.debug("Idempotency store shutdown complete")
         except Exception as e:
             logger.warning(

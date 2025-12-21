@@ -25,6 +25,7 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -203,7 +204,7 @@ class TestPostgresIdempotencyStoreTableNameValidation:
         for name in invalid_names:
             # Pydantic validation may catch some of these first,
             # but if it doesn't, runtime validation should catch it
-            with pytest.raises((ProtocolConfigurationError, ValueError)):
+            with pytest.raises((ProtocolConfigurationError, ValueError, ValidationError)):
                 config = ModelPostgresIdempotencyStoreConfig(
                     dsn="postgresql://user:pass@localhost:5432/db",
                     table_name=name,
@@ -218,7 +219,7 @@ class TestPostgresIdempotencyStoreTableNameValidation:
             "a OR 1=1",
         ]
         for name in injection_attempts:
-            with pytest.raises((ProtocolConfigurationError, ValueError)):
+            with pytest.raises((ProtocolConfigurationError, ValueError, ValidationError)):
                 config = ModelPostgresIdempotencyStoreConfig(
                     dsn="postgresql://user:pass@localhost:5432/db",
                     table_name=name,

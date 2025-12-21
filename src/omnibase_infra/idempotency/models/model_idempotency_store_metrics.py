@@ -105,8 +105,9 @@ class ModelIdempotencyStoreMetrics(BaseModel):
 
         Returns:
             Number of check_and_record calls that returned True (new messages).
+            Clamped to 0 if the calculation would yield a negative value.
         """
-        return self.total_checks - self.duplicate_count - self.error_count
+        return max(0, self.total_checks - self.duplicate_count - self.error_count)
 
     @property
     def success_rate(self) -> float:

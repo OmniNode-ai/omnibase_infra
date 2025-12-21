@@ -125,7 +125,10 @@ class ModelPostgresIdempotencyStoreConfig(BaseModel):
         dsn = v.strip()
 
         # Basic PostgreSQL DSN validation
-        valid_prefixes = ("postgresql://", "postgres://", "postgresql+asyncpg://")
+        # Note: Only standard PostgreSQL prefixes are allowed. The "postgresql+asyncpg://"
+        # prefix is a SQLAlchemy convention, not an asyncpg convention. asyncpg uses
+        # standard "postgresql://" or "postgres://" prefixes directly.
+        valid_prefixes = ("postgresql://", "postgres://")
         if not dsn.startswith(valid_prefixes):
             raise ProtocolConfigurationError(
                 f"dsn must start with one of {valid_prefixes}",
