@@ -92,8 +92,14 @@ from omnibase_infra.runtime.kernel import bootstrap as kernel_bootstrap
 from omnibase_infra.runtime.kernel import load_runtime_config
 from omnibase_infra.runtime.kernel import main as kernel_main
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.models import (
+    ModelRuntimeSchedulerConfig,
+    ModelRuntimeSchedulerMetrics,
+    ModelRuntimeTick,
+)
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+from omnibase_infra.runtime.protocols import ProtocolRuntimeScheduler
 from omnibase_infra.runtime.registry import (
     MessageTypeRegistry,
     MessageTypeRegistryError,
@@ -102,6 +108,7 @@ from omnibase_infra.runtime.registry import (
     ProtocolMessageTypeRegistry,
 )
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
 from omnibase_infra.runtime.wiring import (
     get_known_event_bus_kinds,
     get_known_handler_types,
@@ -155,6 +162,12 @@ __all__: list[str] = [
     # Policy protocol and registry
     "ProtocolPolicy",
     "PolicyRegistry",
+    # Runtime scheduler (OMN-953)
+    "ProtocolRuntimeScheduler",
+    "RuntimeScheduler",
+    "ModelRuntimeSchedulerConfig",
+    "ModelRuntimeSchedulerMetrics",
+    "ModelRuntimeTick",
     # Envelope validation
     "PAYLOAD_REQUIRED_OPERATIONS",
     "validate_envelope",
