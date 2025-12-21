@@ -708,23 +708,33 @@ class TestReducerReset:
         assert output.result.status == "idle"
         assert output.items_processed == 1
 
-    def test_reduce_reset_no_op_from_idle(
+    def test_reduce_reset_fails_from_idle(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that reduce_reset is no-op from idle state."""
+        """Test that reduce_reset from idle state returns failed with invalid_reset_state.
+
+        Resetting from idle is invalid because there's nothing to reset.
+        This is a validation error, not a no-op.
+        """
         reset_event_id = uuid4()
         output = reducer.reduce_reset(initial_state, reset_event_id)
 
-        assert output.result.status == "idle"
-        assert output.items_processed == 0
+        assert output.result.status == "failed"
+        assert output.result.failure_reason == "invalid_reset_state"
+        assert output.items_processed == 1  # Event was processed (caused state change)
 
-    def test_reduce_reset_no_op_from_pending(
+    def test_reduce_reset_fails_from_pending(
         self,
         reducer: RegistrationReducer,
     ) -> None:
-        """Test that reduce_reset is no-op from pending state."""
+        """Test that reduce_reset from pending state returns failed with invalid_reset_state.
+
+        Resetting from pending would lose in-flight registration state,
+        potentially causing inconsistency between Consul and PostgreSQL.
+        This is a validation error to prevent accidental state loss.
+        """
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
@@ -732,15 +742,23 @@ class TestReducerReset:
         reset_event_id = uuid4()
         output = reducer.reduce_reset(pending_state, reset_event_id)
 
-        assert output.result.status == "pending"
+        assert output.result.status == "failed"
+        assert output.result.failure_reason == "invalid_reset_state"
+        # Confirmation flags should be preserved for diagnostics
         assert output.result.node_id == node_id
-        assert output.items_processed == 0
+        assert output.items_processed == 1  # Event was processed (caused state change)
 
-    def test_reduce_reset_no_op_from_partial(
+    def test_reduce_reset_fails_from_partial(
         self,
         reducer: RegistrationReducer,
     ) -> None:
-        """Test that reduce_reset is no-op from partial state."""
+        """Test that reduce_reset from partial state returns failed with invalid_reset_state.
+
+        Resetting from partial would lose in-flight registration state.
+        One backend (Consul or PostgreSQL) has already confirmed, and
+        resetting would discard that confirmation, leaving the system
+        in an inconsistent state.
+        """
         state = ModelRegistrationState()
         node_id = uuid4()
         pending_state = state.with_pending_registration(node_id, uuid4())
@@ -749,9 +767,11 @@ class TestReducerReset:
         reset_event_id = uuid4()
         output = reducer.reduce_reset(partial_state, reset_event_id)
 
-        assert output.result.status == "partial"
+        assert output.result.status == "failed"
+        assert output.result.failure_reason == "invalid_reset_state"
+        # Confirmation flags should be preserved for diagnostics
         assert output.result.consul_confirmed is True
-        assert output.items_processed == 0
+        assert output.items_processed == 1  # Event was processed (caused state change)
 
     def test_reduce_reset_emits_no_intents(
         self,

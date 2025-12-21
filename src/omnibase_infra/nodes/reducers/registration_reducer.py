@@ -340,6 +340,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -372,20 +373,33 @@ from omnibase_infra.nodes.reducers.models.model_registration_state import (
 # 2. Most events complete in <5ms
 # 3. Threshold alerts indicate something unusual (test environment, GC pause, etc.)
 #
-# For stricter performance monitoring, these can be overridden in tests.
+# Environment Variable Configuration:
+#   ONEX_PERF_THRESHOLD_REDUCE_MS - reduce() processing threshold (default: 300.0)
+#   ONEX_PERF_THRESHOLD_INTENT_BUILD_MS - intent building threshold (default: 50.0)
+#   ONEX_PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS - idempotency check threshold (default: 1.0)
+#
+# Example usage:
+#   export ONEX_PERF_THRESHOLD_REDUCE_MS=100.0  # Stricter threshold for production
+#   export ONEX_PERF_THRESHOLD_REDUCE_MS=1000.0  # Relaxed threshold for dev/CI
 # =============================================================================
 
 # Target processing time for reduce() method (<300ms per event)
 # This is the primary performance metric for the reducer.
-PERF_THRESHOLD_REDUCE_MS: float = 300.0
+PERF_THRESHOLD_REDUCE_MS: float = float(
+    os.getenv("ONEX_PERF_THRESHOLD_REDUCE_MS", "300.0")
+)
 
 # Target processing time for intent building (<50ms per intent)
 # Consul and PostgreSQL intent construction should be fast.
-PERF_THRESHOLD_INTENT_BUILD_MS: float = 50.0
+PERF_THRESHOLD_INTENT_BUILD_MS: float = float(
+    os.getenv("ONEX_PERF_THRESHOLD_INTENT_BUILD_MS", "50.0")
+)
 
 # Target processing time for idempotency check (<1ms)
 # Simple UUID comparison should be nearly instant.
-PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS: float = 1.0
+PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS: float = float(
+    os.getenv("ONEX_PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS", "1.0")
+)
 
 # Logger for performance warnings
 _logger = logging.getLogger(__name__)
@@ -806,22 +820,25 @@ class RegistrationReducer:
     #
     # The following method will handle confirmation events from Effect layer.
     # It is documented here as a stub to show the complete event flow.
-    # Implementation is pending the ModelRegistrationConfirmation model.
     #
     # Follow-up Ticket: OMN-996 (Implement Confirmation Event Handling)
     #   https://linear.app/omninode/issue/OMN-996
     #
     # Prerequisites:
-    #   - ModelRegistrationConfirmation model defined in omnibase_core
+    #   - [DONE] ModelRegistrationConfirmation model defined
+    #     See: omnibase_infra.nodes.reducers.models.model_registration_confirmation
     #   - Effect layer confirmation event publishing implemented
     #   - Tests added for confirmation event handling
     #
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================
 
+    # TODO(OMN-996): Implement reduce_confirmation() using ModelRegistrationConfirmation
+    # The model is now available at:
+    #   from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+    #
     # NOTE: reduce_confirmation() is not yet implemented. The stub below
-    # documents the expected interface and behavior for when confirmation
-    # event models are defined.
+    # documents the expected interface and behavior.
     #
     # def reduce_confirmation(
     #     self,
@@ -912,6 +929,16 @@ class RegistrationReducer:
         This method allows the FSM to recover from terminal states (failed, complete)
         and return to idle, enabling retry workflows after failures.
 
+        State Validation:
+            Reset is ONLY allowed from terminal states (failed, complete). Attempting
+            to reset from in-flight states (pending, partial) or idle will result in
+            a failed state with failure_reason="invalid_reset_state".
+
+            This validation prevents accidental loss of in-flight registration state.
+            If a reset is attempted while registration is in progress (pending/partial),
+            the Consul or PostgreSQL confirmations could be lost, leaving the system
+            in an inconsistent state.
+
         Use Cases:
             - Retry after registration failure (consul_failed, postgres_failed)
             - Re-register a node after deregistration
@@ -920,7 +947,9 @@ class RegistrationReducer:
         State Transitions:
             - failed -> idle: Clears failure, enables retry
             - complete -> idle: Enables re-registration
-            - Other states: No-op (returns current state)
+            - idle -> failed: Invalid reset (already idle)
+            - pending -> failed: Invalid reset (would lose in-flight state)
+            - partial -> failed: Invalid reset (would lose in-flight state)
 
         Idempotency:
             Reset events are subject to the same idempotency checks as other events.
@@ -931,8 +960,10 @@ class RegistrationReducer:
             reset_event_id: UUID of the reset event triggering this transition.
 
         Returns:
-            ModelReducerOutput with new state (idle if reset allowed) and no intents.
-            Reset transitions do not emit new intents - they only reset state.
+            ModelReducerOutput with new state and no intents.
+            - If reset allowed: new state is idle
+            - If reset not allowed: new state is failed with
+              failure_reason="invalid_reset_state"
 
         Example:
             >>> from uuid import uuid4
@@ -940,6 +971,7 @@ class RegistrationReducer:
             >>> from omnibase_infra.nodes.reducers.models import ModelRegistrationState
             >>>
             >>> reducer = RegistrationReducer()
+            >>> # Reset from failed state succeeds
             >>> failed_state = ModelRegistrationState(
             ...     status="failed",
             ...     failure_reason="consul_failed"
@@ -947,6 +979,14 @@ class RegistrationReducer:
             >>> output = reducer.reduce_reset(failed_state, uuid4())
             >>> output.result.status
             'idle'
+            >>>
+            >>> # Reset from pending state fails (would lose in-flight state)
+            >>> pending_state = ModelRegistrationState(status="pending")
+            >>> output = reducer.reduce_reset(pending_state, uuid4())
+            >>> output.result.status
+            'failed'
+            >>> output.result.failure_reason
+            'invalid_reset_state'
         """
         start_time = time.perf_counter()
 
@@ -959,14 +999,19 @@ class RegistrationReducer:
                 items_processed=0,
             )
 
-        # Only allow reset from terminal states
+        # Validate state allows reset - only terminal states (failed, complete)
+        # can be reset. Resetting from pending or partial would lose in-flight
+        # registration state, potentially causing inconsistency between Consul
+        # and PostgreSQL.
         if not state.can_reset():
-            # Not in a resettable state - return unchanged
+            # Not in a resettable state - transition to failed with clear error
+            # This prevents accidental loss of in-flight registration state.
+            new_state = state.with_failure("invalid_reset_state", reset_event_id)
             return self._build_output(
-                state=state,
+                state=new_state,
                 intents=(),
                 processing_time_ms=(time.perf_counter() - start_time) * 1000,
-                items_processed=0,
+                items_processed=1,  # We processed the event (it caused a state change)
             )
 
         # Perform the reset transition

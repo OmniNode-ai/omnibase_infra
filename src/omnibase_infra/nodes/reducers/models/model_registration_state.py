@@ -169,7 +169,11 @@ RegistrationStatus = Literal["idle", "pending", "partial", "complete", "failed"]
 
 # Type alias for failure reason literals
 FailureReason = Literal[
-    "validation_failed", "consul_failed", "postgres_failed", "both_failed"
+    "validation_failed",
+    "consul_failed",
+    "postgres_failed",
+    "both_failed",
+    "invalid_reset_state",
 ]
 
 
