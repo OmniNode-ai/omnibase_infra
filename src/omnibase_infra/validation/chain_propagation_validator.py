@@ -119,6 +119,8 @@ Related:
 
 from __future__ import annotations
 
+import logging
+
 __all__ = [
     "ChainPropagationValidator",
     "ChainPropagationError",
@@ -128,6 +130,10 @@ __all__ = [
     # Causation ID lookup key constants
     "CAUSATION_ID_TAG_KEYS",
     "CAUSATION_ID_HEADER_KEYS",
+    # Helper functions for envelope field access
+    "get_message_id",
+    "get_correlation_id",
+    "get_causation_id",
 ]
 
 from typing import cast
@@ -142,6 +148,8 @@ from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationTyp
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
+
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
 # Causation ID Lookup Keys
@@ -174,7 +182,7 @@ transports and external event producers that may use different naming convention
 # ==============================================================================
 
 
-def _get_message_id(envelope: ModelEventEnvelope[object]) -> UUID:
+def get_message_id(envelope: ModelEventEnvelope[object]) -> UUID:
     """Get the message_id from an envelope.
 
     In ONEX, the envelope_id serves as the unique message identifier.
@@ -185,11 +193,12 @@ def _get_message_id(envelope: ModelEventEnvelope[object]) -> UUID:
     Returns:
         The envelope's unique identifier (envelope_id).
     """
-    # envelope_id is typed as UUID in ModelEventEnvelope
+    # envelope_id is typed as UUID in ModelEventEnvelope, but mypy sees it as Any
+    # due to the generic type parameter. Cast is required for type safety.
     return cast(UUID, envelope.envelope_id)
 
 
-def _get_correlation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
+def get_correlation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
     """Get the correlation_id from an envelope.
 
     Args:
@@ -198,14 +207,15 @@ def _get_correlation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
     Returns:
         The envelope's correlation_id, or None if not set.
     """
-    # correlation_id is typed as UUID | None in ModelEventEnvelope
+    # correlation_id is typed as UUID | None in ModelEventEnvelope, but mypy sees it
+    # as Any due to the generic type parameter. Cast is required for type safety.
     correlation_id = envelope.correlation_id
     if correlation_id is None:
         return None
     return cast(UUID, correlation_id)
 
 
-def _get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
+def get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
     """Get the causation_id from an envelope.
 
     Canonical Location:
@@ -282,7 +292,11 @@ def _get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
                         try:
                             return UUID(value)
                         except ValueError:
-                            pass
+                            logger.debug(
+                                "Malformed UUID in tags key '%s': %s",
+                                key,
+                                value,
+                            )
 
         # Check headers dict as well
         # Uses CAUSATION_ID_HEADER_KEYS constant for lookup priority
@@ -295,7 +309,11 @@ def _get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
                         try:
                             return UUID(value)
                         except ValueError:
-                            pass
+                            logger.debug(
+                                "Malformed UUID in headers key '%s': %s",
+                                key,
+                                value,
+                            )
 
     return None
 
@@ -359,8 +377,8 @@ class ChainPropagationValidator:
         """
         violations: list[ModelChainViolation] = []
 
-        parent_correlation = _get_correlation_id(parent_envelope)
-        child_correlation = _get_correlation_id(child_envelope)
+        parent_correlation = get_correlation_id(parent_envelope)
+        child_correlation = get_correlation_id(child_envelope)
 
         # If parent has a correlation_id, child must have the same
         if parent_correlation is not None:
@@ -370,8 +388,8 @@ class ChainPropagationValidator:
                         violation_type=EnumChainViolationType.CORRELATION_MISMATCH,
                         expected_value=parent_correlation,
                         actual_value=None,
-                        message_id=_get_message_id(child_envelope),
-                        parent_message_id=_get_message_id(parent_envelope),
+                        message_id=get_message_id(child_envelope),
+                        parent_message_id=get_message_id(parent_envelope),
                         violation_message=(
                             "Child message is missing correlation_id but parent has one. "
                             "All messages in a workflow must share the same correlation_id."
@@ -385,8 +403,8 @@ class ChainPropagationValidator:
                         violation_type=EnumChainViolationType.CORRELATION_MISMATCH,
                         expected_value=parent_correlation,
                         actual_value=child_correlation,
-                        message_id=_get_message_id(child_envelope),
-                        parent_message_id=_get_message_id(parent_envelope),
+                        message_id=get_message_id(child_envelope),
+                        parent_message_id=get_message_id(parent_envelope),
                         violation_message=(
                             "Child message has different correlation_id than parent. "
                             "All messages in a workflow must share the same correlation_id."
@@ -424,8 +442,8 @@ class ChainPropagationValidator:
         """
         violations: list[ModelChainViolation] = []
 
-        parent_message_id = _get_message_id(parent_envelope)
-        child_causation_id = _get_causation_id(child_envelope)
+        parent_message_id = get_message_id(parent_envelope)
+        child_causation_id = get_causation_id(child_envelope)
 
         # Child's causation_id must equal parent's message_id
         if child_causation_id is None:
@@ -435,7 +453,7 @@ class ChainPropagationValidator:
                     violation_type=EnumChainViolationType.CAUSATION_CHAIN_BROKEN,
                     expected_value=parent_message_id,
                     actual_value=None,
-                    message_id=_get_message_id(child_envelope),
+                    message_id=get_message_id(child_envelope),
                     parent_message_id=parent_message_id,
                     violation_message=(
                         "Child message is missing causation_id. "
@@ -451,7 +469,7 @@ class ChainPropagationValidator:
                     violation_type=EnumChainViolationType.CAUSATION_CHAIN_BROKEN,
                     expected_value=parent_message_id,
                     actual_value=child_causation_id,
-                    message_id=_get_message_id(child_envelope),
+                    message_id=get_message_id(child_envelope),
                     parent_message_id=parent_message_id,
                     violation_message=(
                         "Child message's causation_id does not match parent's message_id. "
@@ -563,20 +581,24 @@ class ChainPropagationValidator:
             # Single message or empty list - no chain to validate
             return violations
 
-        # Build message_id index for quick lookup
+        # Build message_id -> envelope and message_id -> index mappings for O(1) lookup
+        # This avoids O(n) list.index() calls inside the O(n) validation loop
         message_id_to_envelope: dict[UUID, ModelEventEnvelope[object]] = {}
-        for env in envelopes:
-            message_id_to_envelope[_get_message_id(env)] = env
+        message_id_to_index: dict[UUID, int] = {}
+        for idx, env in enumerate(envelopes):
+            msg_id = get_message_id(env)
+            message_id_to_envelope[msg_id] = env
+            message_id_to_index[msg_id] = idx
 
         # Get the reference correlation_id from the first message
-        reference_correlation_id = _get_correlation_id(envelopes[0])
+        reference_correlation_id = get_correlation_id(envelopes[0])
 
         # Validate each message in the chain
         for i, envelope in enumerate(envelopes):
-            message_id = _get_message_id(envelope)
+            message_id = get_message_id(envelope)
 
             # 1. Validate correlation_id consistency
-            envelope_correlation_id = _get_correlation_id(envelope)
+            envelope_correlation_id = get_correlation_id(envelope)
             if reference_correlation_id is not None:
                 if envelope_correlation_id is None:
                     violations.append(
@@ -613,7 +635,7 @@ class ChainPropagationValidator:
 
             # 2. Validate causation chain (skip first message - it's the root)
             if i > 0:
-                causation_id = _get_causation_id(envelope)
+                causation_id = get_causation_id(envelope)
 
                 if causation_id is None:
                     # Non-root message must have causation_id
@@ -651,8 +673,8 @@ class ChainPropagationValidator:
                     )
                 else:
                     # Check that causation_id references an earlier message
-                    parent_envelope = message_id_to_envelope[causation_id]
-                    parent_idx = envelopes.index(parent_envelope)
+                    # Use O(1) dict lookup instead of O(n) list.index()
+                    parent_idx = message_id_to_index[causation_id]
 
                     if parent_idx >= i:
                         # Parent appears after child in the list - order violation
@@ -829,7 +851,7 @@ def enforce_chain_propagation(
         # Use parent's correlation_id for error tracking
         context = ModelInfraErrorContext(
             operation="enforce_chain_propagation",
-            correlation_id=_get_correlation_id(parent_envelope),
+            correlation_id=get_correlation_id(parent_envelope),
         )
         raise ChainPropagationError(
             message="Chain propagation validation failed",

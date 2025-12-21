@@ -33,7 +33,7 @@ class ChainPropagationError(RuntimeHostError):
     and supports correlation_id from the error context for meta-level tracing.
 
     Attributes:
-        violations: List of all chain violations detected.
+        violations: Immutable tuple of all chain violations detected.
 
     Example:
         >>> from uuid import uuid4
@@ -111,13 +111,13 @@ class ChainPropagationError(RuntimeHostError):
         )
 
     @property
-    def violations(self) -> list[ModelChainViolation]:
+    def violations(self) -> tuple[ModelChainViolation, ...]:
         """Get all detected chain violations.
 
         Returns:
-            List of ModelChainViolation instances describing each violation.
+            Immutable tuple of ModelChainViolation instances describing each violation.
         """
-        return self._violations
+        return tuple(self._violations)
 
     def get_blocking_violations(self) -> list[ModelChainViolation]:
         """Get only violations that should block processing.

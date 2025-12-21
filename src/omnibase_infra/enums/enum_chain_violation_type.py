@@ -15,6 +15,21 @@ from __future__ import annotations
 
 from enum import Enum, unique
 
+# Module-level cached descriptions for O(1) lookup without repeated dict creation.
+# Must be defined outside the enum class since enums don't support ClassVar attributes
+# in the same way regular classes do.
+_CHAIN_VIOLATION_DESCRIPTIONS: dict[str, str] = {
+    "correlation_mismatch": (
+        "correlation_id doesn't match parent message's correlation_id"
+    ),
+    "causation_chain_broken": (
+        "causation_id doesn't equal parent message's message_id"
+    ),
+    "causation_ancestor_skipped": (
+        "causation chain skips one or more ancestors in the message lineage"
+    ),
+}
+
 
 @unique
 class EnumChainViolationType(str, Enum):
@@ -65,18 +80,9 @@ class EnumChainViolationType(str, Enum):
             >>> EnumChainViolationType.CORRELATION_MISMATCH.get_description()
             "correlation_id doesn't match parent message's correlation_id"
         """
-        descriptions: dict[EnumChainViolationType, str] = {
-            EnumChainViolationType.CORRELATION_MISMATCH: (
-                "correlation_id doesn't match parent message's correlation_id"
-            ),
-            EnumChainViolationType.CAUSATION_CHAIN_BROKEN: (
-                "causation_id doesn't equal parent message's message_id"
-            ),
-            EnumChainViolationType.CAUSATION_ANCESTOR_SKIPPED: (
-                "causation chain skips one or more ancestors in the message lineage"
-            ),
-        }
-        return descriptions.get(self, "Unknown chain violation type")
+        return _CHAIN_VIOLATION_DESCRIPTIONS.get(
+            self.value, "Unknown chain violation type"
+        )
 
     def is_correlation_violation(self) -> bool:
         """Check if this is a correlation-related violation.

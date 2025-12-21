@@ -496,15 +496,20 @@ class TestWorkflowChainValidation:
         ]
         assert len(correlation_violations) >= 1
 
-    def test_workflow_chain_detects_ancestor_skip(
+    def test_workflow_chain_allows_valid_ancestor_reference(
         self,
         validator: ChainPropagationValidator,
         correlation_id: UUID,
     ) -> None:
-        """Workflow should detect when causation_id skips a parent.
+        """Workflow validation allows causation_id to reference any ancestor.
 
-        If msg3's causation_id references msg1 instead of msg2 (its direct
-        parent), this breaks the causation chain lineage.
+        validate_workflow_chain() intentionally allows ancestor skipping for
+        workflow flexibility (fan-out patterns, aggregation, partial chain
+        reconstruction). If msg3's causation_id references msg1 instead of
+        msg2 (its direct parent), this is valid because msg1 IS in the chain.
+
+        Note: For strict direct-parent enforcement, use validate_chain()
+        with pairwise message validation instead.
         """
         # Create workflow where msg3 skips msg2
         msg1 = ModelEventEnvelope(

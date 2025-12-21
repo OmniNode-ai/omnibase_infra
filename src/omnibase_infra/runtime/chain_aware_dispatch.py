@@ -72,8 +72,8 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.validation.chain_propagation_validator import (
     ChainPropagationValidator,
-    _get_correlation_id,
-    _get_message_id,
+    get_correlation_id,
+    get_message_id,
 )
 
 # TypeVar for payload types when creating child envelopes
@@ -115,8 +115,8 @@ def propagate_chain_context(
         If the child already has chain context that matches the parent,
         the returned envelope will be identical to the input child.
     """
-    parent_message_id = _get_message_id(parent)
-    parent_correlation_id = _get_correlation_id(parent)
+    parent_message_id = get_message_id(parent)
+    parent_correlation_id = get_correlation_id(parent)
 
     # Build update dict for chain context
     updates: dict[str, UUID | None] = {}
@@ -173,7 +173,7 @@ def validate_dispatch_chain(
 
     if violations:
         # Get correlation_id for error context
-        correlation_id = _get_correlation_id(parent)
+        correlation_id = get_correlation_id(parent)
 
         # Build error context
         context = ModelInfraErrorContext(
@@ -349,7 +349,7 @@ class ChainAwareDispatcher:
 
         if violations:
             # Get correlation_id for error context
-            correlation_id = _get_correlation_id(parent_envelope)
+            correlation_id = get_correlation_id(parent_envelope)
 
             # Build error context
             context = ModelInfraErrorContext(
@@ -429,8 +429,8 @@ class ChainAwareDispatcher:
         )
 
         # Get parent chain context
-        parent_message_id = _get_message_id(parent_envelope)
-        parent_correlation_id = _get_correlation_id(parent_envelope)
+        parent_message_id = get_message_id(parent_envelope)
+        parent_correlation_id = get_correlation_id(parent_envelope)
 
         # Generate new envelope_id for child
         child_envelope_id = uuid4()
