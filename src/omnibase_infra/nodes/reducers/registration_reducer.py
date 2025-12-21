@@ -296,6 +296,7 @@ Related:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -420,8 +421,13 @@ class RegistrationReducer:
         #   - Message type: ModelNodeIntrospectionEvent
         # =====================================================================
 
-        # Resolve event ID for idempotency
-        event_id = event.correlation_id or uuid4()
+        # Resolve event ID for idempotency.
+        # CRITICAL: We use a deterministic derivation when correlation_id is absent.
+        # Using uuid4() here would break idempotency because replayed events would
+        # get different IDs each time, making duplicate detection impossible.
+        # Instead, we derive a UUID from the event's content hash (node_id + node_type
+        # + timestamp), ensuring the same event always produces the same ID.
+        event_id = event.correlation_id or self._derive_deterministic_event_id(event)
 
         # Idempotency guard - skip if we've already processed this event
         if state.is_duplicate_event(event_id):
@@ -500,6 +506,52 @@ class RegistrationReducer:
         """
         # node_id is required for registration
         return event.node_id is not None
+
+    def _derive_deterministic_event_id(
+        self, event: ModelNodeIntrospectionEvent
+    ) -> UUID:
+        """Derive a deterministic event ID from event content.
+
+        When an event lacks a correlation_id, we must derive a stable identifier
+        from its content to preserve idempotency guarantees. Using uuid4() would
+        break idempotency because replayed events would get different IDs.
+
+        The derived ID uses a SHA-256 hash of the event's identifying fields:
+        - node_id: Unique node identifier
+        - node_type: Node archetype (effect, compute, reducer, orchestrator)
+        - timestamp: Event creation timestamp (ISO format for stability)
+
+        This ensures:
+        1. Same event content always produces the same ID
+        2. Different events produce different IDs (collision-resistant)
+        3. ID format is compatible with existing UUID-based tracking
+
+        Args:
+            event: The introspection event to derive an ID from.
+
+        Returns:
+            A deterministic UUID derived from the event's content.
+        """
+        # Build a canonical string from the event's identifying fields.
+        # Using ISO format for timestamp ensures string stability across serialization.
+        # The pipe delimiter prevents ambiguity between field values.
+        canonical_content = (
+            f"{event.node_id}|{event.node_type}|{event.timestamp.isoformat()}"
+        )
+
+        # Compute SHA-256 hash and convert to UUID format.
+        # SHA-256 provides strong collision resistance for content-derived IDs.
+        content_hash = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
+
+        # Take first 32 hex chars (128 bits) and format as UUID.
+        # Insert hyphens in standard UUID format: 8-4-4-4-12
+        uuid_hex = content_hash[:32]
+        uuid_str = (
+            f"{uuid_hex[:8]}-{uuid_hex[8:12]}-{uuid_hex[12:16]}-"
+            f"{uuid_hex[16:20]}-{uuid_hex[20:32]}"
+        )
+
+        return UUID(uuid_str)
 
     def _build_consul_intent(
         self,
