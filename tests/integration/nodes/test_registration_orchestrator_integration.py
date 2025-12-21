@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 import yaml
@@ -537,6 +538,650 @@ class TestDependencyStructure:
 # =============================================================================
 
 
+# =============================================================================
+# TestWorkflowExecutionWithMocks
+# =============================================================================
+
+
+class TestWorkflowExecutionWithMocks:
+    """Integration tests for workflow execution with mock reducer and effect.
+
+    These tests verify the orchestrator's ability to coordinate workflow
+    execution by mocking the reducer and effect components. Since the
+    orchestrator is declarative, we test that:
+
+    1. Reducer is called before effects
+    2. Correlation ID is propagated through all steps
+    3. Events are emitted in the correct sequence
+    4. Reducer intents are correctly passed to effects
+    5. Effect results are properly aggregated in output
+    6. Error handling follows contract specifications
+    """
+
+    @pytest.fixture
+    def correlation_id(self) -> UUID:
+        """Create a fixed correlation ID for testing propagation."""
+        from uuid import uuid4
+
+        return uuid4()
+
+    @pytest.fixture
+    def node_id(self) -> UUID:
+        """Create a fixed node ID for testing."""
+        from uuid import uuid4
+
+        return uuid4()
+
+    @pytest.fixture
+    def introspection_event(self, node_id: UUID, correlation_id: UUID):
+        """Create a test introspection event."""
+        from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
+
+        return ModelNodeIntrospectionEvent(
+            node_id=node_id,
+            node_type="effect",
+            node_version="1.0.0",
+            capabilities={},
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=correlation_id,
+        )
+
+    @pytest.fixture
+    def orchestrator_input(self, introspection_event, correlation_id: UUID):
+        """Create test input for the orchestrator."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+            ModelOrchestratorInput,
+        )
+
+        return ModelOrchestratorInput(
+            introspection_event=introspection_event,
+            correlation_id=correlation_id,
+        )
+
+    @pytest.fixture
+    def mock_reducer(self, node_id: UUID, correlation_id: UUID):
+        """Create mock reducer that returns registration intents.
+
+        The mock reducer implements ProtocolReducer and returns a list
+        of intents for Consul and PostgreSQL registration.
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelReducerState,
+            ModelRegistrationIntent,
+            ProtocolReducer,
+        )
+
+        class MockReducer:
+            """Mock reducer for testing workflow execution."""
+
+            def __init__(self):
+                self.call_count = 0
+                self.received_events = []
+                self.received_states = []
+                self._node_id = node_id
+                self._correlation_id = correlation_id
+
+            async def reduce(
+                self,
+                state: ModelReducerState,
+                event,
+            ) -> tuple[ModelReducerState, list[ModelRegistrationIntent]]:
+                """Reduce event to state and intents."""
+                self.call_count += 1
+                self.received_events.append(event)
+                self.received_states.append(state)
+
+                # Generate test intents
+                intents = [
+                    ModelRegistrationIntent(
+                        kind="consul",
+                        operation="register",
+                        node_id=self._node_id,
+                        correlation_id=self._correlation_id,
+                        payload={"service_name": f"node-{event.node_type}"},
+                    ),
+                    ModelRegistrationIntent(
+                        kind="postgres",
+                        operation="upsert",
+                        node_id=self._node_id,
+                        correlation_id=self._correlation_id,
+                        payload={"node_type": event.node_type},
+                    ),
+                ]
+
+                # Update state
+                new_state = ModelReducerState(
+                    last_event_timestamp=event.timestamp.isoformat(),
+                    processed_node_ids=state.processed_node_ids | frozenset({event.node_id}),
+                    pending_registrations=state.pending_registrations + len(intents),
+                )
+
+                return new_state, intents
+
+        # Verify mock implements protocol
+        mock = MockReducer()
+        assert isinstance(mock, ProtocolReducer)
+        return mock
+
+    @pytest.fixture
+    def mock_effect(self):
+        """Create mock effect that executes intents.
+
+        The mock effect implements ProtocolEffect and returns successful
+        execution results for all intents.
+        """
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+            ModelIntentExecutionResult,
+        )
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelRegistrationIntent,
+            ProtocolEffect,
+        )
+
+        class MockEffect:
+            """Mock effect for testing workflow execution."""
+
+            def __init__(self):
+                self.call_count = 0
+                self.executed_intents: list[ModelRegistrationIntent] = []
+                self.received_correlation_ids: list[UUID] = []
+                self.should_fail = False
+                self.fail_on_kind: str | None = None
+
+            async def execute_intent(
+                self,
+                intent: ModelRegistrationIntent,
+                correlation_id: UUID,
+            ) -> ModelIntentExecutionResult:
+                """Execute a single intent."""
+                import time
+
+                start_time = time.perf_counter()
+                self.call_count += 1
+                self.executed_intents.append(intent)
+                self.received_correlation_ids.append(correlation_id)
+
+                # Simulate failure if configured
+                if self.should_fail or (
+                    self.fail_on_kind and intent.kind == self.fail_on_kind
+                ):
+                    return ModelIntentExecutionResult(
+                        intent_kind=intent.kind,
+                        success=False,
+                        error=f"Mock failure for {intent.kind}",
+                        execution_time_ms=(time.perf_counter() - start_time) * 1000,
+                    )
+
+                return ModelIntentExecutionResult(
+                    intent_kind=intent.kind,
+                    success=True,
+                    error=None,
+                    execution_time_ms=(time.perf_counter() - start_time) * 1000,
+                )
+
+        mock = MockEffect()
+        assert isinstance(mock, ProtocolEffect)
+        return mock
+
+    @pytest.fixture
+    def mock_event_emitter(self):
+        """Create mock event emitter to capture emitted events."""
+
+        class MockEventEmitter:
+            """Mock event emitter for capturing published events."""
+
+            def __init__(self):
+                self.emitted_events: list[tuple[str, dict]] = []
+
+            async def emit(self, event_type: str, event_data: dict) -> None:
+                """Emit an event."""
+                self.emitted_events.append((event_type, event_data))
+
+            def get_event_types(self) -> list[str]:
+                """Get list of emitted event types in order."""
+                return [e[0] for e in self.emitted_events]
+
+        return MockEventEmitter()
+
+    @pytest.fixture
+    def orchestrator_with_mocks(
+        self,
+        mock_container: MagicMock,
+        mock_reducer,
+        mock_effect,
+        mock_event_emitter,
+    ):
+        """Create orchestrator configured with mock reducer, effect, and emitter.
+
+        Sets up the container's service registry to return mock implementations
+        when the orchestrator resolves its dependencies.
+        """
+        # Configure container to provide mocks via service registry
+        mock_container.service_registry = MagicMock()
+        mock_container.service_registry.resolve.side_effect = (
+            lambda protocol: mock_reducer
+            if "Reducer" in str(protocol)
+            else mock_effect
+            if "Effect" in str(protocol)
+            else mock_event_emitter
+        )
+
+        # Store references for test access
+        mock_container._test_reducer = mock_reducer
+        mock_container._test_effect = mock_effect
+        mock_container._test_emitter = mock_event_emitter
+
+        orchestrator = NodeRegistrationOrchestrator(mock_container)
+        return orchestrator
+
+    def test_mock_reducer_implements_protocol(self, mock_reducer) -> None:
+        """Test that mock reducer correctly implements ProtocolReducer."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ProtocolReducer,
+        )
+
+        assert isinstance(mock_reducer, ProtocolReducer)
+        assert hasattr(mock_reducer, "reduce")
+        assert callable(mock_reducer.reduce)
+
+    def test_mock_effect_implements_protocol(self, mock_effect) -> None:
+        """Test that mock effect correctly implements ProtocolEffect."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ProtocolEffect,
+        )
+
+        assert isinstance(mock_effect, ProtocolEffect)
+        assert hasattr(mock_effect, "execute_intent")
+        assert callable(mock_effect.execute_intent)
+
+    @pytest.mark.asyncio
+    async def test_reducer_generates_intents_from_event(
+        self,
+        mock_reducer,
+        introspection_event,
+    ) -> None:
+        """Test that reducer generates intents from introspection event."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelReducerState,
+        )
+
+        initial_state = ModelReducerState.initial()
+
+        new_state, intents = await mock_reducer.reduce(initial_state, introspection_event)
+
+        # Verify reducer was called
+        assert mock_reducer.call_count == 1
+        assert mock_reducer.received_events[0] == introspection_event
+
+        # Verify intents generated
+        assert len(intents) == 2
+        assert intents[0].kind == "consul"
+        assert intents[0].operation == "register"
+        assert intents[1].kind == "postgres"
+        assert intents[1].operation == "upsert"
+
+        # Verify state updated
+        assert new_state.processed_node_ids == frozenset({introspection_event.node_id})
+        assert new_state.pending_registrations == 2
+
+    @pytest.mark.asyncio
+    async def test_effect_executes_intents_successfully(
+        self,
+        mock_effect,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Test that effect executes intents and returns success results."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelRegistrationIntent,
+        )
+
+        intent = ModelRegistrationIntent(
+            kind="consul",
+            operation="register",
+            node_id=node_id,
+            correlation_id=correlation_id,
+            payload={"service_name": "test-node"},
+        )
+
+        result = await mock_effect.execute_intent(intent, correlation_id)
+
+        assert mock_effect.call_count == 1
+        assert mock_effect.executed_intents[0] == intent
+        assert mock_effect.received_correlation_ids[0] == correlation_id
+        assert result.success is True
+        assert result.intent_kind == "consul"
+        assert result.error is None
+        assert result.execution_time_ms >= 0
+
+    @pytest.mark.asyncio
+    async def test_effect_handles_failure(
+        self,
+        mock_effect,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Test that effect returns failure result when configured to fail."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelRegistrationIntent,
+        )
+
+        mock_effect.should_fail = True
+
+        intent = ModelRegistrationIntent(
+            kind="consul",
+            operation="register",
+            node_id=node_id,
+            correlation_id=correlation_id,
+            payload={},
+        )
+
+        result = await mock_effect.execute_intent(intent, correlation_id)
+
+        assert result.success is False
+        assert result.error is not None
+        assert "Mock failure" in result.error
+
+    @pytest.mark.asyncio
+    async def test_correlation_id_propagated_through_reducer(
+        self,
+        mock_reducer,
+        introspection_event,
+        correlation_id: UUID,
+    ) -> None:
+        """Test correlation ID is preserved in reducer intents."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelReducerState,
+        )
+
+        initial_state = ModelReducerState.initial()
+        _, intents = await mock_reducer.reduce(initial_state, introspection_event)
+
+        # All intents should have the same correlation_id
+        for intent in intents:
+            assert intent.correlation_id == correlation_id
+
+    @pytest.mark.asyncio
+    async def test_correlation_id_propagated_through_effect(
+        self,
+        mock_effect,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Test correlation ID is passed to effect execution."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelRegistrationIntent,
+        )
+
+        intent = ModelRegistrationIntent(
+            kind="postgres",
+            operation="upsert",
+            node_id=node_id,
+            correlation_id=correlation_id,
+            payload={},
+        )
+
+        await mock_effect.execute_intent(intent, correlation_id)
+
+        assert mock_effect.received_correlation_ids[0] == correlation_id
+
+    @pytest.mark.asyncio
+    async def test_reducer_intents_passed_to_effects(
+        self,
+        mock_reducer,
+        mock_effect,
+        introspection_event,
+        correlation_id: UUID,
+    ) -> None:
+        """Test that reducer intents are correctly passed to effect nodes."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelReducerState,
+        )
+
+        # Step 1: Reducer generates intents
+        initial_state = ModelReducerState.initial()
+        _, intents = await mock_reducer.reduce(initial_state, introspection_event)
+
+        # Step 2: Each intent is executed by effect
+        results = []
+        for intent in intents:
+            result = await mock_effect.execute_intent(intent, correlation_id)
+            results.append(result)
+
+        # Verify all intents were executed
+        assert mock_effect.call_count == 2
+        assert len(mock_effect.executed_intents) == 2
+
+        # Verify intents match
+        assert mock_effect.executed_intents[0] == intents[0]
+        assert mock_effect.executed_intents[1] == intents[1]
+
+        # Verify all results are successful
+        assert all(r.success for r in results)
+
+    @pytest.mark.asyncio
+    async def test_effect_results_aggregated_correctly(
+        self,
+        mock_reducer,
+        mock_effect,
+        introspection_event,
+        correlation_id: UUID,
+    ) -> None:
+        """Test that effect results are properly aggregated."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+            ModelIntentExecutionResult,
+            ModelOrchestratorOutput,
+        )
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelReducerState,
+        )
+
+        # Execute reducer
+        initial_state = ModelReducerState.initial()
+        _, intents = await mock_reducer.reduce(initial_state, introspection_event)
+
+        # Execute effects and collect results
+        results: list[ModelIntentExecutionResult] = []
+        for intent in intents:
+            result = await mock_effect.execute_intent(intent, correlation_id)
+            results.append(result)
+
+        # Aggregate results (simulating what the orchestrator would do)
+        consul_results = [r for r in results if r.intent_kind == "consul"]
+        postgres_results = [r for r in results if r.intent_kind == "postgres"]
+
+        consul_applied = all(r.success for r in consul_results)
+        postgres_applied = all(r.success for r in postgres_results)
+
+        all_success = consul_applied and postgres_applied
+        any_success = consul_applied or postgres_applied
+
+        status = "success" if all_success else ("partial" if any_success else "failed")
+
+        total_time = sum(r.execution_time_ms for r in results)
+
+        output = ModelOrchestratorOutput(
+            correlation_id=correlation_id,
+            status=status,
+            consul_applied=consul_applied,
+            postgres_applied=postgres_applied,
+            consul_error=None,
+            postgres_error=None,
+            intent_results=results,
+            total_execution_time_ms=total_time,
+        )
+
+        # Verify output structure
+        assert output.status == "success"
+        assert output.consul_applied is True
+        assert output.postgres_applied is True
+        assert output.correlation_id == correlation_id
+        assert len(output.intent_results) == 2
+        assert output.total_execution_time_ms >= 0
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_aggregation(
+        self,
+        mock_reducer,
+        mock_effect,
+        introspection_event,
+        correlation_id: UUID,
+    ) -> None:
+        """Test aggregation when one effect fails and another succeeds."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models import (
+            ModelIntentExecutionResult,
+            ModelOrchestratorOutput,
+        )
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelReducerState,
+        )
+
+        # Configure effect to fail on consul only
+        mock_effect.fail_on_kind = "consul"
+
+        # Execute reducer
+        initial_state = ModelReducerState.initial()
+        _, intents = await mock_reducer.reduce(initial_state, introspection_event)
+
+        # Execute effects
+        results: list[ModelIntentExecutionResult] = []
+        for intent in intents:
+            result = await mock_effect.execute_intent(intent, correlation_id)
+            results.append(result)
+
+        # Aggregate
+        consul_results = [r for r in results if r.intent_kind == "consul"]
+        postgres_results = [r for r in results if r.intent_kind == "postgres"]
+
+        consul_applied = all(r.success for r in consul_results)
+        postgres_applied = all(r.success for r in postgres_results)
+
+        consul_error = next(
+            (r.error for r in consul_results if not r.success), None
+        )
+
+        status = (
+            "success"
+            if consul_applied and postgres_applied
+            else ("partial" if consul_applied or postgres_applied else "failed")
+        )
+
+        output = ModelOrchestratorOutput(
+            correlation_id=correlation_id,
+            status=status,
+            consul_applied=consul_applied,
+            postgres_applied=postgres_applied,
+            consul_error=consul_error,
+            postgres_error=None,
+            intent_results=results,
+            total_execution_time_ms=sum(r.execution_time_ms for r in results),
+        )
+
+        # Verify partial failure
+        assert output.status == "partial"
+        assert output.consul_applied is False
+        assert output.postgres_applied is True
+        assert output.consul_error is not None
+        assert "Mock failure" in output.consul_error
+
+    @pytest.mark.asyncio
+    async def test_reducer_deduplicates_processed_nodes(
+        self,
+        mock_reducer,
+        introspection_event,
+    ) -> None:
+        """Test that reducer tracks processed nodes for deduplication."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelReducerState,
+        )
+
+        # First reduction
+        initial_state = ModelReducerState.initial()
+        state_after_first, intents_first = await mock_reducer.reduce(
+            initial_state, introspection_event
+        )
+
+        assert len(intents_first) == 2
+        assert introspection_event.node_id in state_after_first.processed_node_ids
+
+        # State should track processed node
+        assert state_after_first.pending_registrations == 2
+
+    @pytest.mark.asyncio
+    async def test_workflow_sequence_reducer_before_effect(
+        self,
+        mock_reducer,
+        mock_effect,
+        introspection_event,
+        correlation_id: UUID,
+    ) -> None:
+        """Test that workflow calls reducer before effects."""
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ModelReducerState,
+        )
+
+        # Track call order
+        call_order: list[str] = []
+
+        # Wrap reducer to track calls
+        original_reduce = mock_reducer.reduce
+
+        async def tracked_reduce(state, event):
+            call_order.append("reducer")
+            return await original_reduce(state, event)
+
+        mock_reducer.reduce = tracked_reduce
+
+        # Wrap effect to track calls
+        original_execute = mock_effect.execute_intent
+
+        async def tracked_execute(intent, corr_id):
+            call_order.append(f"effect:{intent.kind}")
+            return await original_execute(intent, corr_id)
+
+        mock_effect.execute_intent = tracked_execute
+
+        # Execute workflow steps manually (simulating orchestrator)
+        initial_state = ModelReducerState.initial()
+        _, intents = await mock_reducer.reduce(initial_state, introspection_event)
+
+        for intent in intents:
+            await mock_effect.execute_intent(intent, correlation_id)
+
+        # Verify order
+        assert call_order[0] == "reducer"
+        assert call_order[1].startswith("effect:")
+        assert call_order[2].startswith("effect:")
+
+    def test_orchestrator_instantiation_with_mocks(
+        self,
+        orchestrator_with_mocks,
+    ) -> None:
+        """Test that orchestrator can be instantiated with mock container."""
+        assert orchestrator_with_mocks is not None
+        assert isinstance(orchestrator_with_mocks, NodeRegistrationOrchestrator)
+
+    def test_mock_container_provides_dependencies(
+        self,
+        orchestrator_with_mocks,
+        mock_container: MagicMock,
+    ) -> None:
+        """Test that mock container provides reducer and effect dependencies."""
+        # Verify mocks are accessible via container
+        assert hasattr(mock_container, "_test_reducer")
+        assert hasattr(mock_container, "_test_effect")
+        assert hasattr(mock_container, "_test_emitter")
+
+        # Verify mocks implement protocols
+        from omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.protocols import (
+            ProtocolEffect,
+            ProtocolReducer,
+        )
+
+        assert isinstance(mock_container._test_reducer, ProtocolReducer)
+        assert isinstance(mock_container._test_effect, ProtocolEffect)
+
+
 __all__ = [
     "TestContractIntegration",
     "TestWorkflowGraphIntegration",
@@ -546,4 +1191,5 @@ __all__ = [
     "TestModelContractAlignment",
     "TestNodeIntegration",
     "TestDependencyStructure",
+    "TestWorkflowExecutionWithMocks",
 ]

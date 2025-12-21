@@ -17,6 +17,21 @@ output_model:
   module: "omnibase_infra.nodes.node_registration_orchestrator.v1_0_0.models"
   description: "Output containing dual registration outcome and workflow status."
 
+# OMN-973: Time injection context for timeout evaluation
+time_injection:
+  enabled: true
+  source: "RuntimeTick"
+  field: "now"
+  description: "Use injected timestamp from RuntimeTick for timeout evaluation"
+
+# OMN-930: Projection reader integration for state decisions
+projection_reader:
+  protocol: "ProtocolProjectionReader"
+  module: "omnibase_spi.protocols"
+  projections:
+    - name: "node_registration_state"
+      description: "Current registration state for all nodes"
+
 workflow_coordination:
   workflow_definition:
     workflow_metadata:
@@ -32,14 +47,31 @@ workflow_coordination:
       nodes:
         - node_id: "receive_introspection"
           node_type: effect
-          description: "Receive introspection event from Kafka"
+          description: "Receive introspection or tick event"
           step_config:
-            event_pattern: "node.introspection.*"
+            event_pattern: ["node.introspection.*", "runtime-tick.*"]
+
+        - node_id: "read_projection"
+          node_type: effect
+          description: "Read current registration state from projection"
+          depends_on: ["receive_introspection"]
+          step_config:
+            protocol: "ProtocolProjectionReader"
+            operation: "read_projection"
+            projection_name: "node_registration_state"
+
+        - node_id: "evaluate_timeout"
+          node_type: compute
+          description: "Evaluate timeout based on injected now from RuntimeTick"
+          depends_on: ["read_projection"]
+          step_config:
+            time_injection: true
+            timeout_evaluation: true
 
         - node_id: "compute_intents"
           node_type: reducer
           description: "Compute registration intents from introspection event"
-          depends_on: ["receive_introspection"]
+          depends_on: ["evaluate_timeout"]
           step_config:
             reducer_protocol: "ProtocolReducer"
             output_type: "list[ModelRegistrationIntent]"
@@ -96,10 +128,28 @@ consumed_events:
     event_type: "NodeIntrospectionEvent"
   - topic: "{env}.{namespace}.onex.evt.registry-request-introspection.v1"
     event_type: "RegistryRequestIntrospectionEvent"
+  - topic: "{env}.{namespace}.onex.internal.runtime-tick.v1"
+    event_type: "RuntimeTick"
+    internal: true
+    description: "Internal tick for timeout evaluation"
 
 published_events:
   - topic: "{env}.{namespace}.onex.evt.node-registration-result.v1"
     event_type: "NodeRegistrationResultEvent"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-initiated.v1"
+    event_type: "NodeRegistrationInitiated"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-accepted.v1"
+    event_type: "NodeRegistrationAccepted"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-rejected.v1"
+    event_type: "NodeRegistrationRejected"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1"
+    event_type: "NodeRegistrationAckTimedOut"
+  - topic: "{env}.{namespace}.onex.evt.node-registration-ack-received.v1"
+    event_type: "NodeRegistrationAckReceived"
+  - topic: "{env}.{namespace}.onex.evt.node-became-active.v1"
+    event_type: "NodeBecameActive"
+  - topic: "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
+    event_type: "NodeLivenessExpired"
 
 intent_consumption:
   subscribed_intents:
@@ -119,6 +169,10 @@ dependencies:
     type: "node"
     module: "omnibase_infra.nodes.node_registry_effect"
     description: "Effect node for executing intents."
+  - name: "projection_reader"
+    type: "protocol"
+    module: "omnibase_spi.protocols"
+    description: "Protocol for reading projection state."
 
 error_handling:
   retry_policy:
