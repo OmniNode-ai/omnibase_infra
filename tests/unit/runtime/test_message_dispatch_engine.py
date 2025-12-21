@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from datetime import UTC
 from uuid import uuid4
 
 import pytest
@@ -1979,9 +1980,9 @@ class TestMessageDispatchEngineConcurrency:
         # Verify all dispatches completed successfully
         assert len(dispatch_results) == dispatch_count
         for result in dispatch_results:
-            assert (
-                result.status == EnumDispatchStatus.SUCCESS
-            ), f"Dispatch failed: {result.error_message}"
+            assert result.status == EnumDispatchStatus.SUCCESS, (
+                f"Dispatch failed: {result.error_message}"
+            )
 
         # Verify handler was invoked for all dispatches
         assert len(results) == dispatch_count
@@ -2174,9 +2175,9 @@ class TestMessageDispatchEngineConcurrency:
 
         # Each dispatch should have HANDLER_ERROR status (partial failure)
         for result in dispatch_results:
-            assert (
-                result.status == EnumDispatchStatus.HANDLER_ERROR
-            ), f"Expected HANDLER_ERROR, got {result.status}"
+            assert result.status == EnumDispatchStatus.HANDLER_ERROR, (
+                f"Expected HANDLER_ERROR, got {result.status}"
+            )
             # Should still have output from successful handler
             assert result.outputs is not None
             assert "success.output.v1" in result.outputs
@@ -2249,12 +2250,12 @@ class TestMessageDispatchEngineConcurrency:
 
         # Verify metrics accuracy
         metrics = dispatch_engine.get_metrics()
-        assert (
-            metrics["dispatch_count"] == dispatch_count
-        ), f"Expected {dispatch_count} dispatches, got {metrics['dispatch_count']}"
-        assert (
-            metrics["dispatch_success_count"] == dispatch_count
-        ), f"Expected {dispatch_count} successes, got {metrics['dispatch_success_count']}"
+        assert metrics["dispatch_count"] == dispatch_count, (
+            f"Expected {dispatch_count} dispatches, got {metrics['dispatch_count']}"
+        )
+        assert metrics["dispatch_success_count"] == dispatch_count, (
+            f"Expected {dispatch_count} successes, got {metrics['dispatch_success_count']}"
+        )
         assert metrics["dispatcher_execution_count"] == dispatch_count, (
             f"Expected {dispatch_count} dispatcher executions, "
             f"got {metrics['dispatcher_execution_count']}"
@@ -2349,9 +2350,9 @@ class TestConcurrentDispatchAdvanced:
         # Verify all dispatches completed successfully
         assert len(dispatch_results) == dispatch_count
         for result in dispatch_results:
-            assert (
-                result.status == EnumDispatchStatus.SUCCESS
-            ), f"Dispatch failed: {result.error_message}"
+            assert result.status == EnumDispatchStatus.SUCCESS, (
+                f"Dispatch failed: {result.error_message}"
+            )
 
         # Verify all handlers executed
         assert len(execution_order) == dispatch_count
@@ -2419,9 +2420,9 @@ class TestConcurrentDispatchAdvanced:
 
         # Verify metrics accuracy after high-concurrency stress
         metrics = dispatch_engine.get_metrics()
-        assert (
-            metrics["dispatch_count"] == dispatch_count
-        ), f"Expected {dispatch_count}, got {metrics['dispatch_count']}"
+        assert metrics["dispatch_count"] == dispatch_count, (
+            f"Expected {dispatch_count}, got {metrics['dispatch_count']}"
+        )
         assert metrics["dispatch_success_count"] == dispatch_count
         assert metrics["dispatcher_execution_count"] == dispatch_count
 
@@ -2531,12 +2532,12 @@ class TestConcurrentDispatchAdvanced:
             concurrent.futures.wait(futures)
 
         # Verify correct message type routing
-        assert (
-            len(created_results) == dispatch_count_per_type
-        ), f"Expected {dispatch_count_per_type} created, got {len(created_results)}"
-        assert (
-            len(updated_results) == dispatch_count_per_type
-        ), f"Expected {dispatch_count_per_type} updated, got {len(updated_results)}"
+        assert len(created_results) == dispatch_count_per_type, (
+            f"Expected {dispatch_count_per_type} created, got {len(created_results)}"
+        )
+        assert len(updated_results) == dispatch_count_per_type, (
+            f"Expected {dispatch_count_per_type} updated, got {len(updated_results)}"
+        )
 
         # Verify no cross-routing (created handler should not receive updated events)
         for result in created_results:
@@ -2611,9 +2612,9 @@ class TestConcurrentDispatchAdvanced:
         success_count = sum(
             1 for r in all_results if r.status == EnumDispatchStatus.SUCCESS
         )
-        assert (
-            success_count == dispatch_count
-        ), f"Expected {dispatch_count} successes, got {success_count}"
+        assert success_count == dispatch_count, (
+            f"Expected {dispatch_count} successes, got {success_count}"
+        )
 
         # Verify handler execution count matches
         assert results_count == dispatch_count
@@ -3484,6 +3485,7 @@ class TestContextAwareDispatch:
         receive time injection per ONEX architecture rules.
         """
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
         from omnibase_infra.models.dispatch.model_dispatch_context import (
             ModelDispatchContext,
         )
@@ -3545,6 +3547,7 @@ class TestContextAwareDispatch:
         receive time injection per ONEX architecture rules.
         """
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
         from omnibase_infra.models.dispatch.model_dispatch_context import (
             ModelDispatchContext,
         )
@@ -3599,12 +3602,13 @@ class TestContextAwareDispatch:
         from datetime import datetime, timezone
 
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
         from omnibase_infra.models.dispatch.model_dispatch_context import (
             ModelDispatchContext,
         )
 
         captured_context: list[ModelDispatchContext] = []
-        dispatch_time = datetime.now(timezone.utc)
+        dispatch_time = datetime.now(UTC)
 
         async def orchestrator_dispatcher(
             envelope: ModelEventEnvelope[object],
@@ -3657,12 +3661,13 @@ class TestContextAwareDispatch:
         from datetime import datetime, timezone
 
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
         from omnibase_infra.models.dispatch.model_dispatch_context import (
             ModelDispatchContext,
         )
 
         captured_context: list[ModelDispatchContext] = []
-        dispatch_time = datetime.now(timezone.utc)
+        dispatch_time = datetime.now(UTC)
 
         async def effect_dispatcher(
             envelope: ModelEventEnvelope[object],
@@ -3716,12 +3721,13 @@ class TestContextAwareDispatch:
         from datetime import datetime, timezone
 
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
         from omnibase_infra.models.dispatch.model_dispatch_context import (
             ModelDispatchContext,
         )
 
         captured_context: list[ModelDispatchContext] = []
-        dispatch_time = datetime.now(timezone.utc)
+        dispatch_time = datetime.now(UTC)
 
         async def runtime_host_dispatcher(
             envelope: ModelEventEnvelope[object],
@@ -3819,6 +3825,7 @@ class TestContextAwareDispatch:
         via run_in_executor.
         """
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
         from omnibase_infra.models.dispatch.model_dispatch_context import (
             ModelDispatchContext,
         )
@@ -3862,6 +3869,7 @@ class TestContextAwareDispatch:
     ) -> None:
         """Test that correlation_id is properly propagated from envelope to context."""
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
         from omnibase_infra.models.dispatch.model_dispatch_context import (
             ModelDispatchContext,
         )
@@ -3916,6 +3924,7 @@ class TestContextAwareDispatch:
     ) -> None:
         """Test that correlation_id is auto-generated when envelope has None."""
         from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
         from omnibase_infra.models.dispatch.model_dispatch_context import (
             ModelDispatchContext,
         )
@@ -3958,3 +3967,304 @@ class TestContextAwareDispatch:
 
         # Verify correlation_id was auto-generated (not None)
         assert ctx.correlation_id is not None
+
+
+# ============================================================================
+# Dispatcher Signature Inspection Edge Case Tests
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestDispatcherSignatureInspection:
+    """
+    Tests for _dispatcher_accepts_context edge cases.
+
+    These tests specifically cover:
+    - Dispatchers with 3+ parameters (verifies >= 2 logic)
+    - Inspection failures when inspect.signature() raises exceptions
+    - Warning logging for unconventional parameter naming
+
+    These edge cases were identified during PR review to ensure the
+    signature inspection logic is robust and handles all cases correctly.
+    """
+
+    @pytest.fixture
+    def engine(self) -> MessageDispatchEngine:
+        """Create a fresh engine for signature inspection tests."""
+        return MessageDispatchEngine()
+
+    def test_dispatcher_with_three_parameters_accepts_context(
+        self,
+        engine: MessageDispatchEngine,
+    ) -> None:
+        """Test that dispatcher with 3 parameters returns True for accepts_context.
+
+        The implementation uses `len(params) >= 2` intentionally to support
+        dispatchers with additional optional parameters beyond (envelope, context).
+        This test verifies that behavior.
+        """
+        from omnibase_infra.models.dispatch.model_dispatch_context import (
+            ModelDispatchContext,
+        )
+
+        def dispatcher_with_three_params(
+            envelope: ModelEventEnvelope[object],
+            context: ModelDispatchContext,
+            extra_arg: str | None = None,
+        ) -> str:
+            """Dispatcher with an optional third parameter."""
+            return "output"
+
+        result = engine._dispatcher_accepts_context(dispatcher_with_three_params)
+
+        # Should return True because >= 2 parameters
+        assert result is True
+
+    def test_dispatcher_with_four_parameters_accepts_context(
+        self,
+        engine: MessageDispatchEngine,
+    ) -> None:
+        """Test that dispatcher with 4 parameters returns True for accepts_context.
+
+        Further validates the >= 2 logic with even more parameters, which might
+        be used for testing hooks, logging, or future extensibility.
+        """
+        from omnibase_infra.models.dispatch.model_dispatch_context import (
+            ModelDispatchContext,
+        )
+
+        def dispatcher_with_four_params(
+            envelope: ModelEventEnvelope[object],
+            context: ModelDispatchContext,
+            debug_flag: bool = False,
+            trace_callback: object | None = None,
+        ) -> str:
+            """Dispatcher with multiple optional parameters for testing/debugging."""
+            return "output"
+
+        result = engine._dispatcher_accepts_context(dispatcher_with_four_params)
+
+        # Should return True because >= 2 parameters
+        assert result is True
+
+    def test_inspection_failure_returns_false(
+        self,
+        engine: MessageDispatchEngine,
+    ) -> None:
+        """Test that _dispatcher_accepts_context returns False on inspection failure.
+
+        When inspect.signature() raises ValueError or TypeError, the method
+        should gracefully return False rather than propagating the exception.
+        This test uses unittest.mock to simulate the failure.
+        """
+        from unittest.mock import patch
+
+        def valid_dispatcher(
+            envelope: ModelEventEnvelope[object],
+            context: object,
+        ) -> str:
+            return "output"
+
+        # Mock inspect.signature to raise ValueError (simulating C extension behavior)
+        with patch("inspect.signature") as mock_signature:
+            mock_signature.side_effect = ValueError("no signature found")
+
+            result = engine._dispatcher_accepts_context(valid_dispatcher)
+
+        # Should return False when inspection fails
+        assert result is False
+
+    def test_inspection_failure_type_error_returns_false(
+        self,
+        engine: MessageDispatchEngine,
+    ) -> None:
+        """Test that TypeError from inspect.signature() also returns False.
+
+        Some callables can raise TypeError instead of ValueError during
+        signature inspection. The method should handle both exception types.
+        """
+        from unittest.mock import patch
+
+        def valid_dispatcher(
+            envelope: ModelEventEnvelope[object],
+            context: object,
+        ) -> str:
+            return "output"
+
+        # Mock inspect.signature to raise TypeError
+        with patch("inspect.signature") as mock_signature:
+            mock_signature.side_effect = TypeError(
+                "callable is not a valid Python callable"
+            )
+
+            result = engine._dispatcher_accepts_context(valid_dispatcher)
+
+        # Should return False when inspection fails
+        assert result is False
+
+    def test_inspection_failure_logs_warning(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that inspection failure logs a warning message.
+
+        When signature inspection fails, a warning should be logged to help
+        developers understand why their dispatcher won't receive context.
+        The warning should include the original exception message.
+        """
+        import logging
+        from unittest.mock import patch
+
+        logger = logging.getLogger("test.dispatch.inspection_failure")
+        engine = MessageDispatchEngine(logger=logger)
+
+        def valid_dispatcher(
+            envelope: ModelEventEnvelope[object],
+            context: object,
+        ) -> str:
+            return "output"
+
+        with patch("inspect.signature") as mock_signature:
+            mock_signature.side_effect = ValueError("no signature found for builtin")
+
+            log_ctx = caplog.at_level(
+                logging.WARNING, logger="test.dispatch.inspection_failure"
+            )
+            with log_ctx:
+                result = engine._dispatcher_accepts_context(valid_dispatcher)
+
+        # Method should return False
+        assert result is False
+
+        # Warning should have been logged
+        assert len(caplog.records) == 1
+        warning_record = caplog.records[0]
+        assert warning_record.levelno == logging.WARNING
+        assert "Failed to inspect dispatcher signature" in warning_record.message
+        assert "no signature found for builtin" in warning_record.message
+        assert "Uninspectable dispatchers" in warning_record.message
+
+    def test_unconventional_param_name_logs_warning_but_returns_true(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test warning for 2+ params where second param lacks context naming.
+
+        When a dispatcher has 2+ parameters but the second parameter name
+        doesn't contain 'context' or 'ctx', a warning should be logged to
+        help identify potential signature mismatches. The method should
+        still return True for backwards compatibility.
+
+        This is a more explicit test than the existing one, verifying both
+        the warning content and the True return value together.
+        """
+        import logging
+
+        logger = logging.getLogger("test.dispatch.unconventional_param")
+        engine = MessageDispatchEngine(logger=logger)
+
+        def dispatcher_with_data_param(
+            envelope: ModelEventEnvelope[object],
+            data: str,  # Unconventional - doesn't contain 'context' or 'ctx'
+        ) -> str:
+            """Dispatcher where second param is named 'data' not 'context'."""
+            return "output"
+
+        log_ctx = caplog.at_level(
+            logging.WARNING, logger="test.dispatch.unconventional_param"
+        )
+        with log_ctx:
+            result = engine._dispatcher_accepts_context(dispatcher_with_data_param)
+
+        # Method should return True (backwards compatible)
+        assert result is True
+
+        # Warning should have been logged
+        assert len(caplog.records) == 1
+        warning_record = caplog.records[0]
+        assert warning_record.levelno == logging.WARNING
+        assert "dispatcher_with_data_param" in warning_record.message
+        assert "data" in warning_record.message
+        assert "context naming convention" in warning_record.message
+        assert "ModelDispatchContext" in warning_record.message
+
+    def test_three_params_with_unconventional_second_param_logs_warning(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that 3+ param dispatchers also get warnings for unconventional naming.
+
+        Even with 3 or more parameters, if the second parameter doesn't follow
+        the context naming convention, a warning should be logged. This ensures
+        the warning logic applies regardless of total parameter count.
+        """
+        import logging
+
+        logger = logging.getLogger("test.dispatch.three_param_warning")
+        engine = MessageDispatchEngine(logger=logger)
+
+        def dispatcher_three_params_bad_name(
+            envelope: ModelEventEnvelope[object],
+            metadata: dict[str, str],  # Unconventional second param name
+            optional_flag: bool = False,
+        ) -> str:
+            """Three-param dispatcher with unconventional second param."""
+            return "output"
+
+        log_ctx = caplog.at_level(
+            logging.WARNING, logger="test.dispatch.three_param_warning"
+        )
+        with log_ctx:
+            result = engine._dispatcher_accepts_context(
+                dispatcher_three_params_bad_name
+            )
+
+        # Method should return True (has 2+ params)
+        assert result is True
+
+        # Warning should have been logged for unconventional name
+        assert len(caplog.records) == 1
+        warning_record = caplog.records[0]
+        assert warning_record.levelno == logging.WARNING
+        assert "dispatcher_three_params_bad_name" in warning_record.message
+        assert "metadata" in warning_record.message
+
+    def test_three_params_with_context_naming_no_warning(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that 3+ param dispatchers with proper naming don't get warnings.
+
+        When the second parameter follows the context naming convention,
+        no warning should be logged even with additional parameters.
+        """
+        import logging
+
+        from omnibase_infra.models.dispatch.model_dispatch_context import (
+            ModelDispatchContext,
+        )
+
+        logger = logging.getLogger("test.dispatch.three_param_no_warning")
+        engine = MessageDispatchEngine(logger=logger)
+
+        def dispatcher_three_params_good_name(
+            envelope: ModelEventEnvelope[object],
+            dispatch_context: ModelDispatchContext,  # Proper naming
+            debug_mode: bool = False,
+        ) -> str:
+            """Three-param dispatcher with proper context naming."""
+            return "output"
+
+        log_ctx = caplog.at_level(
+            logging.WARNING, logger="test.dispatch.three_param_no_warning"
+        )
+        with log_ctx:
+            result = engine._dispatcher_accepts_context(
+                dispatcher_three_params_good_name
+            )
+
+        # Method should return True
+        assert result is True
+
+        # No warning should be logged (proper naming)
+        assert len(caplog.records) == 0

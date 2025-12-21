@@ -616,9 +616,9 @@ class TestOMN973ReducerCannotAccessNow:
         )
 
         # SECONDARY ASSERTION: has_time_injection property must be False
-        assert (
-            context.has_time_injection is False
-        ), "has_time_injection reports True despite now=None"
+        assert context.has_time_injection is False, (
+            "has_time_injection reports True despite now=None"
+        )
 
     def test_cannot_manually_inject_time_into_reducer_via_model(self) -> None:
         """
@@ -788,9 +788,9 @@ class TestOMN973ComputeCannotAccessNow:
         )
 
         # SECONDARY ASSERTION: has_time_injection property must be False
-        assert (
-            context.has_time_injection is False
-        ), "has_time_injection reports True despite now=None"
+        assert context.has_time_injection is False, (
+            "has_time_injection reports True despite now=None"
+        )
 
 
 class TestOMN973OrchestratorReceivesTime:
@@ -1043,6 +1043,7 @@ class TestDispatchContextEnforcerErrorCases:
         but guards against new enum values being added without updating
         the switch statement in create_context_for_dispatcher.
         """
+
         # Create a custom class that will never equal any EnumNodeKind value.
         # This simulates a hypothetical new enum value added without updating
         # the create_context_for_dispatcher switch statement.

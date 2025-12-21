@@ -146,6 +146,7 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 
 # Patterns that may indicate sensitive data in error messages
 # These patterns are checked case-insensitively
@@ -482,6 +483,10 @@ class MessageDispatchEngine:
 
         # Structured metrics (Pydantic model)
         self._structured_metrics: ModelDispatchMetrics = ModelDispatchMetrics()
+
+        # Context enforcer for creating dispatch contexts based on node_kind.
+        # Delegates time injection rule enforcement to a single source of truth.
+        self._context_enforcer: DispatchContextEnforcer = DispatchContextEnforcer()
 
         # Legacy metrics dict (for backwards compatibility)
         #
@@ -1526,6 +1531,10 @@ class MessageDispatchEngine:
         """
         Create dispatch context based on entry's node_kind.
 
+        Delegates to DispatchContextEnforcer.create_context_for_node_kind() to
+        ensure a single source of truth for time injection rules. This method
+        is a thin wrapper that validates node_kind is not None before delegation.
+
         Creates a ModelDispatchContext with appropriate time injection based on
         the ONEX node kind:
         - REDUCER: now=None (deterministic state aggregation)
@@ -1560,6 +1569,9 @@ class MessageDispatchEngine:
               their own time at the start of execution
 
         .. versionadded:: 0.5.0
+        .. versionchanged:: 0.5.1
+            Now delegates to DispatchContextEnforcer.create_context_for_node_kind()
+            to eliminate code duplication.
         """
         node_kind = entry.node_kind
         if node_kind is None:
@@ -1569,53 +1581,13 @@ class MessageDispatchEngine:
                 error_code=EnumCoreErrorCode.INTERNAL_ERROR,
             )
 
-        # Extract correlation metadata from envelope
-        correlation_id = envelope.correlation_id or uuid4()
-        trace_id = envelope.trace_id
-
-        # Route to appropriate factory based on node kind
-        if node_kind == EnumNodeKind.REDUCER:
-            return ModelDispatchContext.for_reducer(
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-            )
-
-        if node_kind == EnumNodeKind.COMPUTE:
-            return ModelDispatchContext.for_compute(
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-            )
-
-        if node_kind == EnumNodeKind.ORCHESTRATOR:
-            # TIME SEMANTICS: `now` is captured HERE at context creation (dispatch time),
-            # not at handler execution time. The drift between dispatch time and handler
-            # execution is typically microseconds, acceptable for most use cases.
-            return ModelDispatchContext.for_orchestrator(
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-                now=datetime.now(UTC),
-            )
-
-        if node_kind == EnumNodeKind.EFFECT:
-            return ModelDispatchContext.for_effect(
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-                now=datetime.now(UTC),
-            )
-
-        if node_kind == EnumNodeKind.RUNTIME_HOST:
-            return ModelDispatchContext.for_runtime_host(
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-                now=datetime.now(UTC),
-            )
-
-        # Unknown node kind - should never happen as all EnumNodeKind values are handled above.
-        # If we reach here, a new enum value was added without updating this switch.
-        raise ModelOnexError(
-            message=f"Unhandled node_kind '{node_kind}' for dispatcher "
-            f"'{entry.dispatcher_id}'. This is an internal error - missing case handler.",
-            error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+        # Delegate to the shared context enforcer for time injection rules.
+        # This eliminates duplication between MessageDispatchEngine and any
+        # other components that need to create contexts based on node_kind.
+        return self._context_enforcer.create_context_for_node_kind(
+            node_kind=node_kind,
+            envelope=envelope,
+            dispatcher_id=entry.dispatcher_id,
         )
 
     def _dispatcher_accepts_context(
