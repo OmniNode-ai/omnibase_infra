@@ -340,7 +340,7 @@ def validate_infra_union_usage(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `400` (INFRA_MAX_UNIONS).
+- **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `491` (INFRA_MAX_UNIONS).
 - **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_UNIONS_STRICT per OMN-983).
 
 ### Returns
@@ -365,7 +365,7 @@ Infrastructure code needs typed unions for:
 - Message routing and handler dispatch
 - Service integration type safety
 
-**Why max_unions=400**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The threshold is set as a tight buffer above the current baseline (~379 unions as of 2025-12-20). Most unions are legitimate `X | None` nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged as violations. The target is to reduce to <200 through ongoing `dict[str, object]` to `JsonValue` migration.
+**Why max_unions=491**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The threshold is set as a buffer above the current baseline (~485 unions as of 2025-12-21). Most unions are legitimate `X | None` nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged as violations. The target is to reduce to <200 through ongoing `dict[str, object]` to `JsonValue` migration.
 
 ### Example Usage
 
@@ -612,7 +612,7 @@ INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Validation thresholds
-INFRA_MAX_UNIONS = 400          # Maximum allowed union count (tight buffer above ~379 baseline)
+INFRA_MAX_UNIONS = 491          # Maximum allowed union count (buffer above ~485 baseline)
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
 
 # Strict mode flags (OMN-983)

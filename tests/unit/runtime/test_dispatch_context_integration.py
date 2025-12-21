@@ -750,3 +750,176 @@ class TestMultipleDispatchersWithDifferentNodeKinds:
 
         # Both should have same correlation_id
         assert reducer_context.correlation_id == orchestrator_context.correlation_id
+
+
+# =============================================================================
+# Uninspectable Dispatcher Edge Case Tests
+# =============================================================================
+
+
+class TestUninspectableDispatcherFallback:
+    """Tests for dispatchers whose signature cannot be inspected.
+
+    When inspect.signature() fails (e.g., C extensions, certain decorators,
+    wrapped functions), the engine should gracefully fall back to treating
+    the dispatcher as not accepting context, calling it with only the envelope.
+
+    This covers the edge case identified in CodeRabbit review for PR #73.
+
+    Related:
+        - OMN-990: Dispatcher signature inspection edge cases
+        - src/omnibase_infra/runtime/message_dispatch_engine.py lines 1664-1672
+    """
+
+    @pytest.mark.asyncio
+    async def test_uninspectable_dispatcher_called_with_envelope_only(self) -> None:
+        """Verify dispatchers that cannot be inspected are called with envelope only.
+
+        When inspect.signature() raises ValueError or TypeError (which can happen
+        with C extensions, built-in functions, or certain decorators), the engine
+        should:
+        1. Log a warning about the signature inspection failure
+        2. Treat the dispatcher as not accepting context (accepts_context=False)
+        3. Call the dispatcher with only the envelope parameter
+        4. Not raise any exceptions
+
+        This test uses a sync callable class with __signature__ property that raises
+        ValueError, simulating the behavior of uninspectable callables like
+        C extensions.
+        """
+        # Track what the dispatcher receives
+        received_args: list[object] = []
+
+        # Create a sync callable that breaks signature inspection.
+        # The engine uses inspect.iscoroutinefunction() which returns False for
+        # class instances with __call__, so this is treated as a sync dispatcher
+        # and executed via run_in_executor.
+        class UninspectableDispatcher:
+            """A dispatcher class that cannot be inspected.
+
+            Setting __signature__ to raise ValueError mimics C extensions
+            and other uninspectable callables.
+            """
+
+            @property
+            def __signature__(self) -> None:
+                """Raise ValueError to simulate uninspectable callable."""
+                raise ValueError("No signature available")
+
+            def __call__(self, *args: object) -> str | None:
+                """Process the envelope and return None."""
+                received_args.extend(args)
+                return None
+
+        uninspectable_dispatcher = UninspectableDispatcher()
+
+        engine = setup_engine_with_dispatcher(
+            dispatcher_id="test-uninspectable",
+            dispatcher=uninspectable_dispatcher,
+            category=EnumMessageCategory.EVENT,
+            node_kind=EnumNodeKind.ORCHESTRATOR,  # Would normally inject time
+        )
+
+        envelope = create_test_envelope()
+        await engine.dispatch("test.user.events.v1", envelope)
+
+        # Dispatcher should be called with only the envelope (no context)
+        assert len(received_args) == 1, (
+            f"Expected dispatcher to receive 1 argument (envelope only), "
+            f"but received {len(received_args)} arguments"
+        )
+        assert received_args[0] is envelope, "Dispatcher should receive the envelope"
+
+    @pytest.mark.asyncio
+    async def test_uninspectable_dispatcher_registration_succeeds(self) -> None:
+        """Verify uninspectable dispatchers can be registered without error.
+
+        Even if signature inspection fails, the dispatcher should be registered
+        successfully with accepts_context=False in its internal entry.
+        """
+
+        class UninspectableDispatcher:
+            """A dispatcher class that raises TypeError on signature inspection."""
+
+            @property
+            def __signature__(self) -> None:
+                """Raise TypeError to simulate certain built-in functions."""
+                raise TypeError("No signature available for built-in")
+
+            def __call__(self, envelope: object) -> str | None:
+                """Process envelope."""
+                return None
+
+        uninspectable_dispatcher = UninspectableDispatcher()
+
+        # Registration should succeed without raising exceptions
+        engine = MessageDispatchEngine()
+        engine.register_dispatcher(
+            dispatcher_id="test-uninspectable-reg",
+            dispatcher=uninspectable_dispatcher,
+            category=EnumMessageCategory.EVENT,
+            node_kind=EnumNodeKind.EFFECT,
+        )
+
+        # Verify dispatcher is registered by checking dispatcher_count increased
+        assert engine.dispatcher_count == 1, (
+            "Uninspectable dispatcher should be registered successfully"
+        )
+
+    @pytest.mark.asyncio
+    async def test_uninspectable_dispatcher_with_context_param_works(self) -> None:
+        """Verify uninspectable dispatcher with context param falls back gracefully.
+
+        Even if a dispatcher actually accepts a context parameter, if its signature
+        cannot be inspected, it will only receive the envelope. This is the
+        documented fallback behavior - the dispatcher must handle this gracefully.
+
+        This test documents this edge case: if you have an uninspectable dispatcher
+        that needs context, you must wrap it in an inspectable function.
+        """
+        received_args: list[object] = []
+
+        class UninspectableWithContextDispatcher:
+            """Dispatcher that could accept context but can't be inspected."""
+
+            @property
+            def __signature__(self) -> None:
+                """Raise ValueError to simulate uninspectable callable."""
+                raise ValueError("No signature available")
+
+            def __call__(
+                self,
+                envelope: object,
+                context: ModelDispatchContext | None = None,
+            ) -> str | None:
+                """Accept envelope and optional context.
+
+                Due to uninspectable signature, context will always be None
+                when called by the engine (engine passes envelope only).
+                """
+                received_args.append(envelope)
+                received_args.append(context)
+                return None
+
+        dispatcher = UninspectableWithContextDispatcher()
+
+        engine = setup_engine_with_dispatcher(
+            dispatcher_id="test-uninspectable-with-context",
+            dispatcher=dispatcher,
+            category=EnumMessageCategory.EVENT,
+            node_kind=EnumNodeKind.ORCHESTRATOR,
+        )
+
+        envelope = create_test_envelope()
+        await engine.dispatch("test.user.events.v1", envelope)
+
+        # Dispatcher receives only envelope - context is not passed
+        # The dispatcher's default value (None) applies
+        assert len(received_args) == 2, (
+            "Dispatcher should record 2 args (envelope, context default)"
+        )
+        assert received_args[0] is envelope
+        # Context is None because engine didn't pass it (uninspectable fallback)
+        assert received_args[1] is None, (
+            "Uninspectable dispatcher should not receive context from engine"
+        )
