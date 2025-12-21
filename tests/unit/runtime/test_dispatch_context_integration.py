@@ -460,9 +460,9 @@ class TestSyncDispatcherWithContext:
         await engine.dispatch("test.user.commands.v1", envelope)
 
         assert received_context is not None, "Sync dispatcher was not called"
-        assert (
-            received_context.now is not None
-        ), "Sync effect dispatcher did not receive time injection"
+        assert received_context.now is not None, (
+            "Sync effect dispatcher did not receive time injection"
+        )
         assert received_context.node_kind == EnumNodeKind.EFFECT
 
     @pytest.mark.asyncio
@@ -611,15 +611,15 @@ class TestAllNodeKindsTimeInjectionMatrix:
         envelope = create_test_envelope()
         await engine.dispatch("test.user.events.v1", envelope)
 
-        assert (
-            received_context is not None
-        ), f"Dispatcher for {node_kind} was not called"
+        assert received_context is not None, (
+            f"Dispatcher for {node_kind} was not called"
+        )
         assert received_context.node_kind == node_kind
 
         if expects_time:
-            assert (
-                received_context.now is not None
-            ), f"{node_kind.value} should receive time injection but got now=None"
+            assert received_context.now is not None, (
+                f"{node_kind.value} should receive time injection but got now=None"
+            )
             assert received_context.has_time_injection is True
         else:
             assert received_context.now is None, (

@@ -114,9 +114,9 @@ class TestPolicyRegistryPerformance:
 
         # With secondary index, 1000 lookups should complete in < 100ms
         # (< 0.1ms per lookup on average)
-        assert (
-            elapsed_ms < 100
-        ), f"1000 lookups took {elapsed_ms:.2f}ms (expected < 100ms)"
+        assert elapsed_ms < 100, (
+            f"1000 lookups took {elapsed_ms:.2f}ms (expected < 100ms)"
+        )
 
     def test_get_performance_early_exit_on_missing(
         self, large_policy_registry: PolicyRegistry
@@ -140,9 +140,9 @@ class TestPolicyRegistryPerformance:
         # Early exit optimization: 100 failed lookups should complete quickly
         # Even though error message generation is expensive, it's deferred
         # until we actually raise the error
-        assert (
-            elapsed_ms < 500
-        ), f"100 failed lookups took {elapsed_ms:.2f}ms (expected < 500ms)"
+        assert elapsed_ms < 500, (
+            f"100 failed lookups took {elapsed_ms:.2f}ms (expected < 500ms)"
+        )
 
     def test_get_performance_fast_path_no_filters(
         self, large_policy_registry: PolicyRegistry
@@ -175,9 +175,9 @@ class TestPolicyRegistryPerformance:
         # Fast path should be noticeably faster (at least 20% faster)
         # This validates the optimization
         speedup = filtered_path_ms / fast_path_ms
-        assert (
-            speedup > 1.1
-        ), f"Fast path not optimized (speedup: {speedup:.2f}x, expected > 1.1x)"
+        assert speedup > 1.1, (
+            f"Fast path not optimized (speedup: {speedup:.2f}x, expected > 1.1x)"
+        )
 
     def test_semver_cache_performance(
         self, large_policy_registry: PolicyRegistry
@@ -219,9 +219,9 @@ class TestPolicyRegistryPerformance:
 
         # Warm cache should complete in reasonable time regardless
         # This is the more important assertion - absolute performance
-        assert (
-            warm_cache_ms < 150
-        ), f"Cached lookups too slow ({warm_cache_ms:.2f}ms for 100 lookups)"
+        assert warm_cache_ms < 150, (
+            f"Cached lookups too slow ({warm_cache_ms:.2f}ms for 100 lookups)"
+        )
 
     def test_get_performance_with_version_sorting(
         self, large_policy_registry: PolicyRegistry
@@ -243,9 +243,9 @@ class TestPolicyRegistryPerformance:
 
         # With 5 versions, sorting overhead should be minimal
         # 1000 lookups with sorting should complete in < 150ms
-        assert (
-            elapsed_ms < 150
-        ), f"1000 lookups with sorting took {elapsed_ms:.2f}ms (expected < 150ms)"
+        assert elapsed_ms < 150, (
+            f"1000 lookups with sorting took {elapsed_ms:.2f}ms (expected < 150ms)"
+        )
 
         # CRITICAL: Verify the correct version was returned (PR #36 feedback)
         # The fixture registers versions 0.0.0 through 4.0.0
@@ -255,9 +255,9 @@ class TestPolicyRegistryPerformance:
         # Verify that list_versions confirms all expected versions exist
         versions = large_policy_registry.list_versions("policy_10")
         expected_versions = {"0.0.0", "1.0.0", "2.0.0", "3.0.0", "4.0.0"}
-        assert (
-            set(versions) == expected_versions
-        ), f"Expected versions {expected_versions} but got {set(versions)}"
+        assert set(versions) == expected_versions, (
+            f"Expected versions {expected_versions} but got {set(versions)}"
+        )
 
         # Verify explicit version lookup returns 4.0.0 (semantically latest)
         # This confirms semantic sorting, not lexicographic
@@ -307,9 +307,9 @@ class TestPolicyRegistryPerformance:
 
         # Concurrent access should complete in reasonable time
         # 10 threads * 100 lookups = 1000 total lookups
-        assert (
-            elapsed_ms < 500
-        ), f"1000 concurrent lookups took {elapsed_ms:.2f}ms (expected < 500ms)"
+        assert elapsed_ms < 500, (
+            f"1000 concurrent lookups took {elapsed_ms:.2f}ms (expected < 500ms)"
+        )
 
 
 # =============================================================================
@@ -417,9 +417,9 @@ class TestPolicyRegistryOptimizationRegression:
         # Additional verification: instantiate and check behavior
         policy_instance = policy_cls()
         result = policy_instance.evaluate({})
-        assert (
-            result["version"] == "10.0.0"
-        ), f"Expected version 10.0.0 but got {result['version']}"
+        assert result["version"] == "10.0.0", (
+            f"Expected version 10.0.0 but got {result['version']}"
+        )
 
         # Verify all versions are registered
         versions = registry.list_versions("test")
