@@ -411,6 +411,8 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             ON CONFLICT (domain, message_id) DO NOTHING
         """
 
+        is_new: bool = False  # Initialize before try block for finally access
+        metrics_updated: bool = False  # Track if exception handler updated metrics
         try:
             async with self._pool.acquire() as conn:
                 result = await conn.execute(
@@ -422,12 +424,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                     processed_at,
                 )
                 # asyncpg returns "INSERT 0 1" for success, "INSERT 0 0" for conflict
-                is_new: bool = str(result).endswith(" 1")
-
-                # Update metrics
-                self._metrics.total_checks += 1
-                if not is_new:
-                    self._metrics.duplicate_count += 1
+                is_new = str(result).endswith(" 1")
 
                 if is_new:
                     logger.debug(
@@ -454,6 +451,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         except asyncpg.QueryCanceledError as e:
             self._metrics.total_checks += 1
             self._metrics.error_count += 1
+            metrics_updated = True
             raise InfraTimeoutError(
                 f"Check and record timed out after {self._config.command_timeout}s",
                 context=context,
@@ -462,6 +460,7 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         except asyncpg.PostgresConnectionError as e:
             self._metrics.total_checks += 1
             self._metrics.error_count += 1
+            metrics_updated = True
             raise InfraConnectionError(
                 "Database connection lost during check_and_record",
                 context=context,
@@ -469,10 +468,19 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
         except asyncpg.PostgresError as e:
             self._metrics.total_checks += 1
             self._metrics.error_count += 1
+            metrics_updated = True
             raise RuntimeHostError(
                 f"Database error during check_and_record: {type(e).__name__}",
                 context=context,
             ) from e
+        finally:
+            # Always update metrics for success path, even if logging fails.
+            # Exception handlers above set metrics_updated=True before re-raising,
+            # so we only update here for the success path (no exception caught).
+            if not metrics_updated:
+                self._metrics.total_checks += 1
+                if not is_new:
+                    self._metrics.duplicate_count += 1
 
     async def is_processed(
         self,
@@ -578,6 +586,8 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
             )
 
         # Validate timezone awareness - fail fast on naive datetime
+        # Note: This guards against external callers passing naive datetimes.
+        # Our internal datetime.now(UTC) is always timezone-aware.
         if processed_at is not None and processed_at.tzinfo is None:
             raise RuntimeHostError(
                 "processed_at must be timezone-aware (got naive datetime)",
@@ -770,6 +780,17 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                         },
                     )
 
+                    # Log progress every 10 batches for visibility during large cleanups
+                    if iteration % 10 == 0:
+                        logger.info(
+                            "Cleanup progress",
+                            extra={
+                                "total_removed": total_removed,
+                                "iteration": iteration,
+                                "batch_size": effective_batch_size,
+                            },
+                        )
+
                     # If we deleted fewer than batch_size, we're done
                     if batch_removed < effective_batch_size:
                         break
@@ -811,17 +832,20 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 context=context,
             ) from e
 
-    async def health_check(self) -> bool:
+    async def health_check(self) -> dict[str, object]:
         """Check if the store is healthy and can accept operations.
 
         Performs read verification and table existence check to ensure
         the database is operational without writing data.
 
         Returns:
-            True if store is healthy, False otherwise.
+            Dict with health status and diagnostics:
+            - healthy: bool - True if store is healthy
+            - reason: str - "ok", "not_initialized", "table_not_found", or "check_failed"
+            - error_type: str - Exception type if check failed (optional)
         """
         if not self._initialized or self._pool is None:
-            return False
+            return {"healthy": False, "reason": "not_initialized"}
 
         try:
             async with self._pool.acquire() as conn:
@@ -839,10 +863,16 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                     check_table_sql, self._config.table_name
                 )
 
-                return table_exists is not None
+                if table_exists is None:
+                    return {"healthy": False, "reason": "table_not_found"}
+                return {"healthy": True, "reason": "ok"}
 
-        except Exception:
-            return False
+        except Exception as e:
+            return {
+                "healthy": False,
+                "reason": "check_failed",
+                "error_type": type(e).__name__,
+            }
 
 
 __all__: list[str] = ["PostgresIdempotencyStore"]

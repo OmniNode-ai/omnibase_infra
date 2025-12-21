@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelIdempotencyStoreMetrics(BaseModel):
@@ -36,6 +36,17 @@ class ModelIdempotencyStoreMetrics(BaseModel):
     All counters are monotonically increasing over the lifetime of the store
     instance, except for last_cleanup_deleted which is reset each cleanup.
 
+    Mutability Note:
+        This model is intentionally mutable (frozen=False) to allow the
+        idempotency store to update metrics internally during operation.
+        External consumers should use the store's get_metrics() method,
+        which returns a copy of the metrics to prevent unintended mutation
+        from external code. This design ensures:
+
+        - Internal updates are efficient (no copy on each increment)
+        - External access is safe (isolated copies)
+        - Metrics remain consistent during reads
+
     Attributes:
         total_checks: Total number of check_and_record calls.
         duplicate_count: Number of duplicates detected (check_and_record returned False).
@@ -44,6 +55,10 @@ class ModelIdempotencyStoreMetrics(BaseModel):
         last_cleanup_deleted: Records deleted in the most recent cleanup run.
         last_cleanup_at: Timestamp of the most recent cleanup run.
     """
+
+    # Explicitly mutable for internal metric updates.
+    # External consumers receive copies via get_metrics() to prevent unintended mutation.
+    model_config = ConfigDict(frozen=False, extra="forbid")
 
     total_checks: int = Field(
         default=0,

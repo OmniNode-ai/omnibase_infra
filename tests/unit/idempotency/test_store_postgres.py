@@ -802,7 +802,8 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
         result = await initialized_postgres_store.health_check()
 
-        assert result is True
+        assert result["healthy"] is True
+        assert result["reason"] == "ok"
         # Verify both fetchval calls were made
         assert mock_conn.fetchval.call_count == 2
 
@@ -822,7 +823,8 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
         result = await initialized_postgres_store.health_check()
 
-        assert result is False
+        assert result["healthy"] is False
+        assert result["reason"] == "table_not_found"
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_when_not_initialized(
@@ -831,7 +833,8 @@ class TestPostgresIdempotencyStoreHealthCheck:
         """Test health_check returns False when not initialized."""
         result = await postgres_store.health_check()
 
-        assert result is False
+        assert result["healthy"] is False
+        assert result["reason"] == "not_initialized"
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_on_read_error(
@@ -846,7 +849,9 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
         result = await initialized_postgres_store.health_check()
 
-        assert result is False
+        assert result["healthy"] is False
+        assert result["reason"] == "check_failed"
+        assert result["error_type"] == "Exception"
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_on_table_check_error(
@@ -866,7 +871,9 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
         result = await initialized_postgres_store.health_check()
 
-        assert result is False
+        assert result["healthy"] is False
+        assert result["reason"] == "check_failed"
+        assert result["error_type"] == "Exception"
 
     @pytest.mark.asyncio
     async def test_health_check_returns_false_on_acquire_error(
@@ -879,7 +886,9 @@ class TestPostgresIdempotencyStoreHealthCheck:
 
         result = await initialized_postgres_store.health_check()
 
-        assert result is False
+        assert result["healthy"] is False
+        assert result["reason"] == "check_failed"
+        assert result["error_type"] == "PostgresConnectionError"
 
 
 class TestPostgresIdempotencyStoreLifecycle:
