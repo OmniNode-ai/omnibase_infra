@@ -78,6 +78,19 @@ Thread Safety:
     The ChainPropagationValidator is stateless and thread-safe. All validation
     methods are pure functions that produce fresh result objects.
 
+Performance Considerations:
+    The validator does not cache results. This is an intentional design decision:
+
+    - **Production Use**: Workflows are validated once per dispatch, making caching
+      unnecessary overhead. Each message passes through validation exactly once.
+    - **Stateless Design**: Caching would introduce state, complicating thread safety
+      and increasing memory footprint without meaningful performance benefit.
+    - **Testing/Debugging**: For repeated validation of the same message sets during
+      debugging, callers can implement their own memoization if needed.
+
+    If profiling reveals validation as a bottleneck (unlikely given O(n) complexity),
+    consider batching validations rather than adding caching.
+
 Usage:
     >>> from omnibase_infra.validation.chain_propagation_validator import (
     ...     ChainPropagationValidator,
@@ -112,6 +125,9 @@ __all__ = [
     "validate_message_chain",
     "validate_linear_message_chain",
     "enforce_chain_propagation",
+    # Causation ID lookup key constants
+    "CAUSATION_ID_TAG_KEYS",
+    "CAUSATION_ID_HEADER_KEYS",
 ]
 
 from typing import cast
@@ -126,6 +142,32 @@ from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationTyp
 from omnibase_infra.errors.error_chain_propagation import ChainPropagationError
 from omnibase_infra.errors.model_infra_error_context import ModelInfraErrorContext
 from omnibase_infra.models.validation.model_chain_violation import ModelChainViolation
+
+# ==============================================================================
+# Causation ID Lookup Keys
+# ==============================================================================
+# These constants define the keys checked when resolving causation_id from
+# envelope metadata. The canonical location is metadata.tags["causation_id"],
+# but other keys are checked for backwards compatibility.
+
+CAUSATION_ID_TAG_KEYS: tuple[str, ...] = ("causation_id", "parent_message_id")
+"""Keys checked in metadata.tags for causation_id (in priority order).
+
+The first key ("causation_id") is the canonical location for new implementations.
+The second key ("parent_message_id") is a legacy alias maintained for backwards
+compatibility with older ONEX versions.
+"""
+
+CAUSATION_ID_HEADER_KEYS: tuple[str, ...] = (
+    "x-causation-id",
+    "causation-id",
+    "x-parent-message-id",
+)
+"""Keys checked in metadata.headers for causation_id (in priority order).
+
+These HTTP-style header keys support interoperability with HTTP-based message
+transports and external event producers that may use different naming conventions.
+"""
 
 # ==============================================================================
 # Helper Functions for Envelope Field Access
@@ -228,9 +270,10 @@ def _get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
         metadata = envelope.metadata
 
         # Check if metadata has a tags dict with causation info
+        # Uses CAUSATION_ID_TAG_KEYS constant for lookup priority
         if hasattr(metadata, "tags") and metadata.tags:
             tags = metadata.tags
-            for key in ("causation_id", "parent_message_id"):
+            for key in CAUSATION_ID_TAG_KEYS:
                 if key in tags:
                     value = tags[key]
                     if isinstance(value, UUID):
@@ -242,9 +285,10 @@ def _get_causation_id(envelope: ModelEventEnvelope[object]) -> UUID | None:
                             pass
 
         # Check headers dict as well
+        # Uses CAUSATION_ID_HEADER_KEYS constant for lookup priority
         if hasattr(metadata, "headers") and metadata.headers:
             headers = metadata.headers
-            for key in ("x-causation-id", "causation-id", "x-parent-message-id"):
+            for key in CAUSATION_ID_HEADER_KEYS:
                 if key in headers:
                     value = headers[key]
                     if isinstance(value, str):

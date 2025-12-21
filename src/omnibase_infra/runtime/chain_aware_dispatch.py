@@ -440,9 +440,9 @@ class ChainAwareDispatcher:
             message_type if message_type is not None else type(payload).__name__
         )
 
-        # Create child envelope with proper chain context
-        # Note: ModelEventEnvelope[T] is only valid as a type annotation, not as a constructor.
-        # The runtime envelope object accepts any payload type; the generic is for static typing.
+        # Create child envelope with proper chain context.
+        # The type annotation ModelEventEnvelope[T] enables static type checking of the payload,
+        # but Python's generics are erased at runtime - the envelope accepts any payload type.
         envelope: ModelEventEnvelope[T] = EnvelopeClass(
             envelope_id=child_envelope_id,
             payload=payload,
