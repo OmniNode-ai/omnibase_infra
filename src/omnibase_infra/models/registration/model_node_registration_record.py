@@ -16,6 +16,15 @@ Architecture:
     - Minimal (only essential fields)
     - Compliant with ProtocolRegistrationRecord
 
+    Strong Typing:
+    This model uses strongly-typed models for capabilities and metadata:
+    - capabilities: ModelNodeCapabilities - typed capability flags
+    - metadata: ModelNodeMetadata - typed deployment metadata
+
+    These models replace the legacy dict[str, Any] pattern to comply with
+    the ONEX "no Any types" rule. Both models use extra="allow" to support
+    custom fields while maintaining type safety for known fields.
+
 Thread Safety:
     ModelNodeRegistrationRecord is immutable after creation, making it
     thread-safe for concurrent read access.
@@ -23,17 +32,24 @@ Thread Safety:
 Related:
     - ModelNodeRegistration: Full mutable registration model
     - ModelPostgresUpsertRegistrationIntent: Intent that uses this record
+    - ModelNodeCapabilities: Strongly-typed capabilities model
+    - ModelNodeMetadata: Strongly-typed metadata model
     - OMN-889: Infrastructure MVP
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from omnibase_core.models.intents import ModelRegistrationRecordBase
 from pydantic import Field
+
+from omnibase_infra.models.registration.model_node_capabilities import (
+    ModelNodeCapabilities,
+)
+from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
 
 
 class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
@@ -47,13 +63,18 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
     The to_persistence_dict() method (inherited from ModelRegistrationRecordBase)
     handles JSON-compatible serialization.
 
+    Strong Typing:
+        Uses ModelNodeCapabilities and ModelNodeMetadata instead of dict[str, Any]
+        to comply with ONEX "no Any types" rule. Both models use extra="allow"
+        to support custom fields while providing type safety for known fields.
+
     Attributes:
         node_id: Unique node identifier (UUID).
         node_type: ONEX node type (effect, compute, reducer, orchestrator).
         node_version: Semantic version of the node.
-        capabilities: Node capabilities as JSON-serializable dict.
+        capabilities: Strongly-typed node capabilities (ModelNodeCapabilities).
         endpoints: Exposed endpoints as name -> URL mapping.
-        metadata: Additional node metadata as JSON-serializable dict.
+        metadata: Strongly-typed node metadata (ModelNodeMetadata).
         health_endpoint: Optional URL for health check endpoint.
         registered_at: Timestamp when node was first registered.
         updated_at: Timestamp of last update.
@@ -61,14 +82,18 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
     Example:
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
+        >>> from omnibase_infra.models.registration import (
+        ...     ModelNodeCapabilities,
+        ...     ModelNodeMetadata,
+        ... )
         >>> now = datetime.now(UTC)
         >>> record = ModelNodeRegistrationRecord(
         ...     node_id=uuid4(),
         ...     node_type="effect",
         ...     node_version="1.0.0",
-        ...     capabilities={"postgres": True},
+        ...     capabilities=ModelNodeCapabilities(postgres=True),
         ...     endpoints={"health": "http://localhost:8080/health"},
-        ...     metadata={"environment": "production"},
+        ...     metadata=ModelNodeMetadata(environment="production"),
         ...     health_endpoint="http://localhost:8080/health",
         ...     registered_at=now,
         ...     updated_at=now,
@@ -86,15 +111,17 @@ class ModelNodeRegistrationRecord(ModelRegistrationRecordBase):
         default="1.0.0", description="Semantic version of the node"
     )
 
-    # Capabilities and endpoints (JSON-serializable dicts)
-    capabilities: dict[str, Any] = Field(
-        default_factory=dict, description="Node capabilities"
+    # Capabilities and endpoints - strongly typed models
+    capabilities: ModelNodeCapabilities = Field(
+        default_factory=ModelNodeCapabilities,
+        description="Strongly-typed node capabilities",
     )
     endpoints: dict[str, str] = Field(
         default_factory=dict, description="Exposed endpoints (name -> URL)"
     )
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional node metadata"
+    metadata: ModelNodeMetadata = Field(
+        default_factory=ModelNodeMetadata,
+        description="Strongly-typed node metadata",
     )
 
     # Health tracking

@@ -297,10 +297,13 @@ Related:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumReductionType, EnumStreamingMode
+from omnibase_core.models.intents import (
+    ModelConsulRegisterIntent,
+    ModelPostgresUpsertRegistrationIntent,
+)
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 
@@ -524,7 +527,7 @@ class RegistrationReducer:
 
         # Build health check configuration if health endpoint is provided
         health_endpoint = event.endpoints.get("health") if event.endpoints else None
-        health_check: dict[str, Any] | None = None
+        health_check: dict[str, str] | None = None
         if health_endpoint:
             health_check = {
                 "HTTP": health_endpoint,
@@ -532,20 +535,19 @@ class RegistrationReducer:
                 "Timeout": "5s",
             }
 
-        # Build payload for Consul registration
-        payload: dict[str, Any] = {
-            "correlation_id": str(correlation_id),
-            "service_id": service_id,
-            "service_name": service_name,
-            "tags": tags,
-        }
-        if health_check:
-            payload["health_check"] = health_check
+        # Build typed Consul registration intent, then serialize for ModelIntent payload
+        consul_intent = ModelConsulRegisterIntent(
+            correlation_id=correlation_id,
+            service_id=service_id,
+            service_name=service_name,
+            tags=tags,
+            health_check=health_check,
+        )
 
         return ModelIntent(
             intent_type="consul.register",
             target=f"consul://service/{service_name}",
-            payload=payload,
+            payload=consul_intent.model_dump(mode="json"),
         )
 
     def _build_postgres_intent(
@@ -567,27 +569,16 @@ class RegistrationReducer:
         """
         now = datetime.now(UTC)
 
-        # Convert capabilities to dict if it's a model
-        if hasattr(event.capabilities, "model_dump"):
-            capabilities_dict = event.capabilities.model_dump(mode="json")
-        else:
-            capabilities_dict = dict(event.capabilities) if event.capabilities else {}
-
-        # Convert metadata to dict if it's a model
-        if hasattr(event.metadata, "model_dump"):
-            metadata_dict = event.metadata.model_dump(mode="json")
-        else:
-            metadata_dict = dict(event.metadata) if event.metadata else {}
-
-        # Build the registration record as a Pydantic model for validation,
-        # then serialize to dict for the intent payload
+        # Build the registration record using strongly-typed models
+        # event.capabilities and event.metadata are already typed as
+        # ModelNodeCapabilities and ModelNodeMetadata respectively
         record = ModelNodeRegistrationRecord(
             node_id=event.node_id,
             node_type=event.node_type,
             node_version=event.node_version,
-            capabilities=capabilities_dict,
+            capabilities=event.capabilities,
             endpoints=dict(event.endpoints) if event.endpoints else {},
-            metadata=metadata_dict,
+            metadata=event.metadata,
             health_endpoint=(
                 event.endpoints.get("health") if event.endpoints else None
             ),
@@ -595,16 +586,19 @@ class RegistrationReducer:
             updated_at=now,
         )
 
-        # Build payload with correlation_id and serialized record
-        payload: dict[str, Any] = {
-            "correlation_id": str(correlation_id),
-            "record": record.model_dump(mode="json"),
-        }
+        # Build typed PostgreSQL upsert intent, then serialize for ModelIntent payload
+        postgres_intent = ModelPostgresUpsertRegistrationIntent(
+            correlation_id=correlation_id,
+            record=record,
+        )
 
+        # Use serialize_as_any=True because ModelPostgresUpsertRegistrationIntent.record
+        # is typed as BaseModel (for flexibility), but we need to serialize the actual
+        # subclass (ModelNodeRegistrationRecord) with all its fields
         return ModelIntent(
             intent_type="postgres.upsert_registration",
             target=f"postgres://node_registrations/{event.node_id}",
-            payload=payload,
+            payload=postgres_intent.model_dump(mode="json", serialize_as_any=True),
         )
 
     # =========================================================================

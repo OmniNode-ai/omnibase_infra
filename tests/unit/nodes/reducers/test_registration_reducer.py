@@ -626,7 +626,7 @@ class TestConsulIntentBuilding:
         initial_state: ModelRegistrationState,
         event_without_health_endpoint: ModelNodeIntrospectionEvent,
     ) -> None:
-        """Test that health check is omitted if no endpoint."""
+        """Test that health check is None if no endpoint."""
         output = reducer.reduce(initial_state, event_without_health_endpoint)
 
         consul_intent = next(
@@ -634,8 +634,8 @@ class TestConsulIntentBuilding:
         )
         assert consul_intent is not None
 
-        # health_check key should not exist
-        assert "health_check" not in consul_intent.payload
+        # health_check should be None when no health endpoint is provided
+        assert consul_intent.payload["health_check"] is None
 
     def test_consul_intent_has_correct_target(
         self,
