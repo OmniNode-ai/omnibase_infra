@@ -45,9 +45,9 @@ class TestRepeatabilityRequirement:
 
         # Assert: All results are bit-for-bit identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "REPEATABILITY VIOLATION: Same input did not produce same output"
+        assert all(result == first_result for result in results), (
+            "REPEATABILITY VIOLATION: Same input did not produce same output"
+        )
 
     def test_repeatability_100_iterations_nested_input(self) -> None:
         """Same nested input produces identical output across 100 iterations."""
@@ -66,9 +66,9 @@ class TestRepeatabilityRequirement:
 
         # Assert: All results identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "REPEATABILITY VIOLATION: Nested input produced non-deterministic results"
+        assert all(result == first_result for result in results), (
+            "REPEATABILITY VIOLATION: Nested input produced non-deterministic results"
+        )
 
     def test_repeatability_100_iterations_large_input(self) -> None:
         """Same large input produces identical output across 100 iterations."""
@@ -82,9 +82,9 @@ class TestRepeatabilityRequirement:
 
         # Assert: All results identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "REPEATABILITY VIOLATION: Large input produced non-deterministic results"
+        assert all(result == first_result for result in results), (
+            "REPEATABILITY VIOLATION: Large input produced non-deterministic results"
+        )
 
     def test_repeatability_with_lists(self) -> None:
         """Repeatability holds for inputs containing lists."""
@@ -103,9 +103,9 @@ class TestRepeatabilityRequirement:
 
         # Assert: All results identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "REPEATABILITY VIOLATION: List inputs produced non-deterministic results"
+        assert all(result == first_result for result in results), (
+            "REPEATABILITY VIOLATION: List inputs produced non-deterministic results"
+        )
 
     def test_repeatability_empty_input(self) -> None:
         """Repeatability holds for empty input."""
@@ -119,9 +119,9 @@ class TestRepeatabilityRequirement:
 
         # Assert: All results identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "REPEATABILITY VIOLATION: Empty input produced non-deterministic results"
+        assert all(result == first_result for result in results), (
+            "REPEATABILITY VIOLATION: Empty input produced non-deterministic results"
+        )
 
 
 class TestObjectIdentityIndependence:
@@ -140,9 +140,9 @@ class TestObjectIdentityIndependence:
 
         # Assert: All instances produce identical results
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "OBJECT IDENTITY VIOLATION: Different instances produced different results"
+        assert all(result == first_result for result in results), (
+            "OBJECT IDENTITY VIOLATION: Different instances produced different results"
+        )
 
     def test_instance_reuse_vs_fresh_instances(self) -> None:
         """Reused instance produces same result as fresh instances."""
@@ -161,7 +161,9 @@ class TestObjectIdentityIndependence:
         # Assert: Reused and fresh instances produce identical results
         assert all(
             result == reused_results[0] for result in reused_results + fresh_results
-        ), "OBJECT IDENTITY VIOLATION: Reused instance behaved differently than fresh instances"
+        ), (
+            "OBJECT IDENTITY VIOLATION: Reused instance behaved differently than fresh instances"
+        )
 
 
 class TestConcurrentExecutionSafety:
@@ -188,9 +190,9 @@ class TestConcurrentExecutionSafety:
 
         # Assert: All concurrent results are identical
         first_result = concurrent_results[0]
-        assert all(
-            result == first_result for result in concurrent_results
-        ), "CONCURRENT EXECUTION VIOLATION: Parallel executions produced different results"
+        assert all(result == first_result for result in concurrent_results), (
+            "CONCURRENT EXECUTION VIOLATION: Parallel executions produced different results"
+        )
 
     def test_concurrent_execution_10_threads_50_calls(self) -> None:
         """High concurrency (10 threads, 50 calls) maintains determinism."""
@@ -208,9 +210,9 @@ class TestConcurrentExecutionSafety:
 
         # Assert: All results identical despite high concurrency
         first_result = concurrent_results[0]
-        assert all(
-            result == first_result for result in concurrent_results
-        ), "CONCURRENT EXECUTION VIOLATION: High concurrency produced non-deterministic results"
+        assert all(result == first_result for result in concurrent_results), (
+            "CONCURRENT EXECUTION VIOLATION: High concurrency produced non-deterministic results"
+        )
 
     def test_concurrent_mixed_inputs(self) -> None:
         """Concurrent execution with different inputs produces consistent results."""
@@ -241,15 +243,15 @@ class TestConcurrentExecutionSafety:
             results_input3 = [f.result() for f in futures_input3]
 
         # Assert: Each input group has identical results
-        assert all(
-            r == results_input1[0] for r in results_input1
-        ), "CONCURRENT EXECUTION VIOLATION: Input 1 produced different results"
-        assert all(
-            r == results_input2[0] for r in results_input2
-        ), "CONCURRENT EXECUTION VIOLATION: Input 2 produced different results"
-        assert all(
-            r == results_input3[0] for r in results_input3
-        ), "CONCURRENT EXECUTION VIOLATION: Input 3 produced different results"
+        assert all(r == results_input1[0] for r in results_input1), (
+            "CONCURRENT EXECUTION VIOLATION: Input 1 produced different results"
+        )
+        assert all(r == results_input2[0] for r in results_input2), (
+            "CONCURRENT EXECUTION VIOLATION: Input 2 produced different results"
+        )
+        assert all(r == results_input3[0] for r in results_input3), (
+            "CONCURRENT EXECUTION VIOLATION: Input 3 produced different results"
+        )
 
 
 class TestCallOrderIndependence:
@@ -281,15 +283,15 @@ class TestCallOrderIndependence:
         result1_order3 = plugin.execute(input1, context)
 
         # Assert: Same inputs produce same outputs regardless of call order
-        assert (
-            result1_order1 == result1_order2 == result1_order3
-        ), "CALL ORDER VIOLATION: Input 1 results changed based on call order"
-        assert (
-            result2_order1 == result2_order2 == result2_order3
-        ), "CALL ORDER VIOLATION: Input 2 results changed based on call order"
-        assert (
-            result3_order1 == result3_order2 == result3_order3
-        ), "CALL ORDER VIOLATION: Input 3 results changed based on call order"
+        assert result1_order1 == result1_order2 == result1_order3, (
+            "CALL ORDER VIOLATION: Input 1 results changed based on call order"
+        )
+        assert result2_order1 == result2_order2 == result2_order3, (
+            "CALL ORDER VIOLATION: Input 2 results changed based on call order"
+        )
+        assert result3_order1 == result3_order2 == result3_order3, (
+            "CALL ORDER VIOLATION: Input 3 results changed based on call order"
+        )
 
     def test_interleaved_calls_determinism(self) -> None:
         """Interleaved calls with different inputs maintain determinism."""
@@ -338,9 +340,9 @@ class TestInputImmutability:
         plugin.execute(input_data, context)
 
         # Assert: input_data unchanged
-        assert (
-            input_data == input_data_original
-        ), "INPUT IMMUTABILITY VIOLATION: input_data was modified"
+        assert input_data == input_data_original, (
+            "INPUT IMMUTABILITY VIOLATION: input_data was modified"
+        )
 
     def test_context_not_modified(self) -> None:
         """Plugin does not modify context dictionary."""
@@ -354,9 +356,9 @@ class TestInputImmutability:
         plugin.execute(input_data, context)
 
         # Assert: context unchanged
-        assert (
-            context == context_original
-        ), "INPUT IMMUTABILITY VIOLATION: context was modified"
+        assert context == context_original, (
+            "INPUT IMMUTABILITY VIOLATION: context was modified"
+        )
 
     def test_nested_input_not_modified(self) -> None:
         """Plugin does not modify nested structures in input_data."""
@@ -374,9 +376,9 @@ class TestInputImmutability:
         plugin.execute(input_data, context)
 
         # Assert: Nested structures unchanged
-        assert (
-            input_data == input_data_original
-        ), "INPUT IMMUTABILITY VIOLATION: Nested input structures were modified"
+        assert input_data == input_data_original, (
+            "INPUT IMMUTABILITY VIOLATION: Nested input structures were modified"
+        )
 
 
 class TestStateIndependence:
@@ -395,9 +397,9 @@ class TestStateIndependence:
         result3 = plugin.execute(input_data, context)
 
         # Assert: All results identical (no state accumulation)
-        assert (
-            result1 == result2 == result3
-        ), "STATE INDEPENDENCE VIOLATION: Results changed across calls (state accumulation detected)"
+        assert result1 == result2 == result3, (
+            "STATE INDEPENDENCE VIOLATION: Results changed across calls (state accumulation detected)"
+        )
 
     def test_alternating_inputs_no_state_leakage(self) -> None:
         """Alternating different inputs shows no state leakage."""
@@ -415,12 +417,12 @@ class TestStateIndependence:
         result1_third = plugin.execute(input1, context)
 
         # Assert: Results for each input are identical (no state leakage)
-        assert (
-            result1_first == result1_second == result1_third
-        ), "STATE LEAKAGE VIOLATION: Input 1 results changed"
-        assert (
-            result2_first == result2_second
-        ), "STATE LEAKAGE VIOLATION: Input 2 results changed"
+        assert result1_first == result1_second == result1_third, (
+            "STATE LEAKAGE VIOLATION: Input 1 results changed"
+        )
+        assert result2_first == result2_second, (
+            "STATE LEAKAGE VIOLATION: Input 2 results changed"
+        )
 
 
 class TestDeepCopyIndependence:
@@ -438,9 +440,9 @@ class TestDeepCopyIndependence:
         result_deepcopy = plugin.execute(copy.deepcopy(input_data), context)
 
         # Assert: Results identical regardless of copy status
-        assert (
-            result_original == result_deepcopy
-        ), "DEEP COPY VIOLATION: Deep-copied inputs produced different results"
+        assert result_original == result_deepcopy, (
+            "DEEP COPY VIOLATION: Deep-copied inputs produced different results"
+        )
 
     def test_multiple_deep_copies_identical_results(self) -> None:
         """Multiple deep copies produce identical results."""
@@ -456,9 +458,9 @@ class TestDeepCopyIndependence:
 
         # Assert: All deep copy results identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "DEEP COPY VIOLATION: Multiple deep copies produced different results"
+        assert all(result == first_result for result in results), (
+            "DEEP COPY VIOLATION: Multiple deep copies produced different results"
+        )
 
 
 class TestEdgeCases:
@@ -476,9 +478,9 @@ class TestEdgeCases:
 
         # Assert: All results identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "EDGE CASE VIOLATION: Empty input produced non-deterministic results"
+        assert all(result == first_result for result in results), (
+            "EDGE CASE VIOLATION: Empty input produced non-deterministic results"
+        )
 
     def test_large_nested_structure_determinism(self) -> None:
         """Large nested structure produces deterministic results."""
@@ -500,9 +502,9 @@ class TestEdgeCases:
 
         # Assert: All results identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "EDGE CASE VIOLATION: Large nested structure produced non-deterministic results"
+        assert all(result == first_result for result in results), (
+            "EDGE CASE VIOLATION: Large nested structure produced non-deterministic results"
+        )
 
     def test_unicode_input_determinism(self) -> None:
         """Unicode input produces deterministic results."""
@@ -523,6 +525,6 @@ class TestEdgeCases:
 
         # Assert: All results identical
         first_result = results[0]
-        assert all(
-            result == first_result for result in results
-        ), "EDGE CASE VIOLATION: Unicode input produced non-deterministic results"
+        assert all(result == first_result for result in results), (
+            "EDGE CASE VIOLATION: Unicode input produced non-deterministic results"
+        )
