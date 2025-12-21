@@ -257,6 +257,14 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 context=ctx,
             ) from e
 
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_registration_status", corr_id)
+            raise InfraTimeoutError(
+                "Registration status lookup timed out",
+                context=ctx,
+            ) from e
+
         except Exception as e:
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure("get_registration_status", corr_id)
@@ -323,6 +331,14 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_by_state", corr_id)
             raise InfraConnectionError(
                 "Failed to connect to database for state query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_by_state", corr_id)
+            raise InfraTimeoutError(
+                "State query timed out",
                 context=ctx,
             ) from e
 
@@ -409,6 +425,16 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 )
             raise InfraConnectionError(
                 "Failed to connect to database for overdue ack query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "get_overdue_ack_registrations", corr_id
+                )
+            raise InfraTimeoutError(
+                "Overdue ack registrations query timed out",
                 context=ctx,
             ) from e
 
@@ -502,6 +528,16 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 context=ctx,
             ) from e
 
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    "get_overdue_liveness_registrations", corr_id
+                )
+            raise InfraTimeoutError(
+                "Overdue liveness registrations query timed out",
+                context=ctx,
+            ) from e
+
         except Exception as e:
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
@@ -571,6 +607,14 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("count_by_state", corr_id)
             raise InfraConnectionError(
                 "Failed to connect to database for state count",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("count_by_state", corr_id)
+            raise InfraTimeoutError(
+                "State count query timed out",
                 context=ctx,
             ) from e
 

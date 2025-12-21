@@ -31,12 +31,10 @@ Related Tickets:
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -59,7 +57,7 @@ from omnibase_infra.projectors.projector_registration import ProjectorRegistrati
 
 
 def create_test_projection(
-    entity_id: None = None,
+    entity_id: UUID | None = None,
     state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
     offset: int = 100,
 ) -> ModelRegistrationProjection:
@@ -429,10 +427,11 @@ class TestProjectorRegistrationStaleness:
         """Test is_stale returns True when incoming sequence is older."""
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
-        # Existing row has offset 200
+        # Existing row has offset 200 with partition "0"
         mock_connection.fetchrow.return_value = {
             "last_applied_offset": 200,
             "last_applied_sequence": None,
+            "last_applied_partition": "0",
         }
 
         entity_id = uuid4()
@@ -456,10 +455,11 @@ class TestProjectorRegistrationStaleness:
         """Test is_stale returns False when incoming sequence is newer."""
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
-        # Existing row has offset 100
+        # Existing row has offset 100 with partition "0"
         mock_connection.fetchrow.return_value = {
             "last_applied_offset": 100,
             "last_applied_sequence": None,
+            "last_applied_partition": "0",
         }
 
         entity_id = uuid4()
@@ -729,10 +729,11 @@ class TestProjectorRegistrationEdgeCases:
         """Test is_stale works with sequence-only (non-Kafka) transports."""
         mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
         mock_pool.acquire.return_value.__aexit__.return_value = None
-        # Existing row uses sequence, not offset
+        # Existing row uses sequence, not offset (non-Kafka: no partition)
         mock_connection.fetchrow.return_value = {
             "last_applied_offset": None,
             "last_applied_sequence": 100,
+            "last_applied_partition": None,
         }
 
         entity_id = uuid4()

@@ -21,9 +21,10 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
+import random
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -58,7 +59,7 @@ pytestmark = [
 
 def make_projection(
     *,
-    entity_id: str | None = None,
+    entity_id: UUID | None = None,
     state: EnumRegistrationState = EnumRegistrationState.PENDING_REGISTRATION,
     node_type: str = "effect",
     node_version: str = "1.0.0",
@@ -994,8 +995,6 @@ class TestConcurrency:
             projections.append((proj, offset))
 
         # Shuffle order to simulate out-of-order arrival
-        import random
-
         random.shuffle(projections)
 
         async def persist_projection(

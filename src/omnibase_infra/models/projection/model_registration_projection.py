@@ -196,7 +196,11 @@ class ModelRegistrationProjection(BaseModel):
             12345
         """
         return ModelSequenceInfo(
-            sequence=self.last_applied_sequence or self.last_applied_offset,
+            sequence=(
+                self.last_applied_sequence
+                if self.last_applied_sequence is not None
+                else self.last_applied_offset
+            ),
             partition=self.last_applied_partition,
             offset=(self.last_applied_offset if self.last_applied_partition else None),
         )

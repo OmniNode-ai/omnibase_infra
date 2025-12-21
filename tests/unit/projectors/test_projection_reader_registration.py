@@ -37,11 +37,9 @@ Related Tickets:
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -63,7 +61,7 @@ from omnibase_infra.projectors.projection_reader_registration import (
 
 
 def create_mock_row(
-    entity_id: None = None,
+    entity_id: UUID | None = None,
     state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
     domain: str = "registration",
     ack_deadline: datetime | None = None,

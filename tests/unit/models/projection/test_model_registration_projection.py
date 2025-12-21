@@ -359,6 +359,27 @@ class TestGetSequenceInfo:
         # Should prefer last_applied_sequence
         assert seq_info.sequence == 200
 
+    def test_get_sequence_info_with_zero_sequence(self) -> None:
+        """Test get_sequence_info correctly handles last_applied_sequence=0.
+
+        Edge case: sequence=0 is a valid value and should NOT fall back to offset.
+        This tests the fix for using explicit None check instead of truthy 'or'.
+        """
+        now = datetime.now(UTC)
+        proj = ModelRegistrationProjection(
+            entity_id=uuid4(),
+            current_state=EnumRegistrationState.ACTIVE,
+            node_type="effect",
+            last_applied_event_id=uuid4(),
+            last_applied_offset=100,  # offset is 100
+            last_applied_sequence=0,  # sequence is explicitly 0
+            registered_at=now,
+            updated_at=now,
+        )
+        seq_info = proj.get_sequence_info()
+        # Should use last_applied_sequence=0, NOT fall back to last_applied_offset=100
+        assert seq_info.sequence == 0
+
     def test_get_sequence_info_returns_model_sequence_info(self) -> None:
         """Test that get_sequence_info returns ModelSequenceInfo instance."""
         now = datetime.now(UTC)

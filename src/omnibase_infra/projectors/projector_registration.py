@@ -373,7 +373,7 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
             await self._check_circuit_breaker("is_stale", corr_id)
 
         query_sql = """
-            SELECT last_applied_offset, last_applied_sequence
+            SELECT last_applied_offset, last_applied_sequence, last_applied_partition
             FROM registration_projections
             WHERE entity_id = $1 AND domain = $2
         """
@@ -391,11 +391,15 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
 
             current_offset = row["last_applied_offset"]
             current_sequence = row["last_applied_sequence"]
+            current_partition = row["last_applied_partition"]
 
             # Build current sequence info for comparison
+            # Include partition for consistent comparison with persist() method's
+            # Kafka-based ordering logic
             current_seq = ModelSequenceInfo(
                 sequence=current_sequence or current_offset,
                 offset=current_offset,
+                partition=current_partition,
             )
 
             return sequence_info.is_stale_compared_to(current_seq)
@@ -405,6 +409,14 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("is_stale", corr_id)
             raise InfraConnectionError(
                 "Failed to connect to database for staleness check",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("is_stale", corr_id)
+            raise InfraTimeoutError(
+                "Staleness check timed out",
                 context=ctx,
             ) from e
 
