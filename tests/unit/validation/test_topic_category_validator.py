@@ -8,10 +8,14 @@ Validates that:
 - Static (AST) analysis detects topic/category mismatches
 - Runtime validation catches category violations
 - Handler type to category mappings are enforced
+
+Note:
+    This module uses pytest's tmp_path fixture for temporary file management.
+    The fixture automatically handles cleanup after each test, eliminating
+    the need for manual try/finally blocks with file.unlink().
 """
 
 import ast
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -436,55 +440,46 @@ class TestValidateTopicCategoriesInFile:
         violations = validate_topic_categories_in_file(Path("/nonexistent/file.py"))
         assert len(violations) == 0
 
-    def test_non_python_file_skipped(self) -> None:
-        """Verify non-Python files are skipped."""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"not python")
-            f.flush()
-            file_path = Path(f.name)
+    def test_non_python_file_skipped(self, tmp_path: Path) -> None:
+        """Verify non-Python files are skipped.
 
-        try:
-            violations = validate_topic_categories_in_file(file_path)
-            assert len(violations) == 0
-        finally:
-            file_path.unlink(missing_ok=True)
+        Uses tmp_path fixture for automatic cleanup.
+        """
+        file_path = tmp_path / "not_python.txt"
+        file_path.write_text("not python")
 
-    def test_syntax_error_handling(self) -> None:
-        """Verify syntax error handling uses correct violation type."""
-        with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w") as f:
-            f.write("def broken(:\n")  # Invalid syntax
-            f.flush()
-            file_path = Path(f.name)
+        violations = validate_topic_categories_in_file(file_path)
+        assert len(violations) == 0
 
-        try:
-            violations = validate_topic_categories_in_file(file_path)
-            assert len(violations) == 1
-            assert (
-                violations[0].violation_type == EnumExecutionShapeViolation.SYNTAX_ERROR
-            )
-            assert (
-                violations[0].handler_type is None
-            )  # Can't determine from unparseable file
-            assert "syntax error" in violations[0].message.lower()
-        finally:
-            file_path.unlink(missing_ok=True)
+    def test_syntax_error_handling(self, tmp_path: Path) -> None:
+        """Verify syntax error handling uses correct violation type.
 
-    def test_valid_python_file(self) -> None:
-        """Verify valid Python file analysis."""
-        with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w") as f:
-            f.write("""
+        Uses tmp_path fixture for automatic cleanup.
+        """
+        file_path = tmp_path / "broken_syntax.py"
+        file_path.write_text("def broken(:\n")  # Invalid syntax
+
+        violations = validate_topic_categories_in_file(file_path)
+        assert len(violations) == 1
+        assert violations[0].violation_type == EnumExecutionShapeViolation.SYNTAX_ERROR
+        # Can't determine handler type from unparseable file
+        assert violations[0].handler_type is None
+        assert "syntax error" in violations[0].message.lower()
+
+    def test_valid_python_file(self, tmp_path: Path) -> None:
+        """Verify valid Python file analysis.
+
+        Uses tmp_path fixture for automatic cleanup.
+        """
+        file_path = tmp_path / "valid_handler.py"
+        file_path.write_text("""
 class OrderReducer:
     def setup(self, consumer):
         consumer.subscribe("order.events")
 """)
-            f.flush()
-            file_path = Path(f.name)
 
-        try:
-            violations = validate_topic_categories_in_file(file_path)
-            assert len(violations) == 0
-        finally:
-            file_path.unlink(missing_ok=True)
+        violations = validate_topic_categories_in_file(file_path)
+        assert len(violations) == 0
 
 
 class TestValidateMessageOnTopic:
@@ -537,64 +532,71 @@ class TestValidateMessageOnTopic:
 
 
 class TestValidateTopicCategoriesInDirectory:
-    """Test validate_topic_categories_in_directory function."""
+    """Test validate_topic_categories_in_directory function.
+
+    Uses tmp_path fixture for automatic cleanup of temporary directories
+    and files created during testing.
+    """
 
     def test_non_existent_directory(self) -> None:
         """Verify empty result for non-existent directory."""
         violations = validate_topic_categories_in_directory(Path("/nonexistent/dir"))
         assert len(violations) == 0
 
-    def test_empty_directory(self) -> None:
-        """Verify empty result for empty directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            violations = validate_topic_categories_in_directory(Path(tmpdir))
+    def test_empty_directory(self, tmp_path: Path) -> None:
+        """Verify empty result for empty directory.
+
+        Uses tmp_path fixture for automatic cleanup.
+        """
+        violations = validate_topic_categories_in_directory(tmp_path)
         assert len(violations) == 0
 
-    def test_directory_with_violations(self) -> None:
-        """Verify violations are found in directory scan."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a file with violations
-            test_file = Path(tmpdir) / "test_handler.py"
-            test_file.write_text("""
+    def test_directory_with_violations(self, tmp_path: Path) -> None:
+        """Verify violations are found in directory scan.
+
+        Uses tmp_path fixture for automatic cleanup.
+        """
+        test_file = tmp_path / "test_handler.py"
+        test_file.write_text("""
 class OrderReducer:
     def setup(self, consumer):
         consumer.subscribe("order.commands")  # Wrong for reducer
 """)
-            violations = validate_topic_categories_in_directory(Path(tmpdir))
+        violations = validate_topic_categories_in_directory(tmp_path)
         assert len(violations) == 1
 
-    def test_recursive_scan(self) -> None:
-        """Verify recursive directory scanning."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create nested structure
-            subdir = Path(tmpdir) / "nested"
-            subdir.mkdir()
-            test_file = subdir / "handler.py"
-            test_file.write_text("""
+    def test_recursive_scan(self, tmp_path: Path) -> None:
+        """Verify recursive directory scanning.
+
+        Uses tmp_path fixture for automatic cleanup.
+        """
+        # Create nested structure
+        subdir = tmp_path / "nested"
+        subdir.mkdir()
+        test_file = subdir / "handler.py"
+        test_file.write_text("""
 class OrderReducer:
     def setup(self, consumer):
         consumer.subscribe("order.commands")  # Wrong
 """)
-            violations = validate_topic_categories_in_directory(
-                Path(tmpdir), recursive=True
-            )
+        violations = validate_topic_categories_in_directory(tmp_path, recursive=True)
         assert len(violations) == 1
 
-    def test_non_recursive_scan(self) -> None:
-        """Verify non-recursive scanning ignores subdirectories."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create nested structure
-            subdir = Path(tmpdir) / "nested"
-            subdir.mkdir()
-            test_file = subdir / "handler.py"
-            test_file.write_text("""
+    def test_non_recursive_scan(self, tmp_path: Path) -> None:
+        """Verify non-recursive scanning ignores subdirectories.
+
+        Uses tmp_path fixture for automatic cleanup.
+        """
+        # Create nested structure
+        subdir = tmp_path / "nested"
+        subdir.mkdir()
+        test_file = subdir / "handler.py"
+        test_file.write_text("""
 class OrderReducer:
     def setup(self, consumer):
         consumer.subscribe("order.commands")  # Wrong
 """)
-            violations = validate_topic_categories_in_directory(
-                Path(tmpdir), recursive=False
-            )
+        violations = validate_topic_categories_in_directory(tmp_path, recursive=False)
         # Should not find violations in subdirectory
         assert len(violations) == 0
 

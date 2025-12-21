@@ -8,13 +8,16 @@ Validates that:
 - RoutingCoverageValidator accurately computes coverage
 - Startup fail-fast integration works correctly
 - CI gate returns appropriate results and violations
+
+Note:
+    This module uses pytest's tmp_path fixture for temporary file management.
+    The fixture automatically handles cleanup after each test, eliminating
+    the need for manual cleanup in fixtures or try/finally blocks.
 """
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -33,20 +36,20 @@ from omnibase_infra.validation.routing_coverage_validator import (
     validate_routing_coverage_on_startup,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
-
 # =============================================================================
 # Test Fixtures
 # =============================================================================
 
 
 @pytest.fixture
-def temp_source_dir() -> Generator[Path, None, None]:
-    """Create a temporary directory for test source files."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
+def temp_source_dir(tmp_path: Path) -> Path:
+    """Create a temporary directory for test source files.
+
+    Uses pytest's tmp_path fixture for automatic cleanup.
+    The tmp_path fixture provides a temporary directory unique to this test
+    invocation, which is automatically cleaned up after the test completes.
+    """
+    return tmp_path
 
 
 @pytest.fixture

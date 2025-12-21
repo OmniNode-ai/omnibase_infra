@@ -81,7 +81,7 @@ class ModelRuntimeConfig(BaseModel):
     Example:
         >>> from pathlib import Path
         >>> import yaml
-        >>> with open(Path("contracts/runtime/runtime_config.yaml")) as f:
+        >>> with open(Path("contracts/runtime/runtime_config.yaml"), encoding="utf-8") as f:
         ...     data = yaml.safe_load(f)
         >>> config = ModelRuntimeConfig.model_validate(data)
         >>> print(config.input_topic)
