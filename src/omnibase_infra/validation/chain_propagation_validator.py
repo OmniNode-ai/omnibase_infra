@@ -20,8 +20,13 @@ Chain Rules:
        correlation_id exactly. A mismatch breaks trace correlation.
     2. **Causation Chain**: Every produced message's causation_id must equal
        its direct parent's message_id. This creates parent-child relationships.
-    3. **No Skipped Ancestors**: Causation chains must be continuous - a message
+    3. **No Skipped Ancestors** (strict mode only): In strict pairwise validation
+       via ``validate_chain()``, causation chains must be continuous - a message
        cannot skip its direct parent to reference a grandparent.
+
+    Note: ``validate_workflow_chain()`` intentionally relaxes Rule 3 to allow
+    ancestor skipping for workflow flexibility (fan-out patterns, aggregation,
+    partial chain reconstruction). See its docstring for details.
 
 Message ID Semantics:
     In ONEX, the ModelEventEnvelope uses:
@@ -389,11 +394,30 @@ class ChainPropagationValidator:
 
         The envelopes list should be ordered by causation (parent before child).
 
-        NOTE: This method validates that causation_ids reference messages within
-        the chain, but does NOT enforce direct parent-child ordering. A message
-        may reference any ancestor in the chain (e.g., msg3 can reference msg1
-        even if msg2 exists between them). For strict direct parent validation,
-        use pairwise validate_chain() calls.
+        Ancestor Skipping (Intentional Design Decision):
+            This method validates that causation_ids reference messages **within**
+            the chain, but does NOT enforce direct parent-child ordering. A message
+            may reference any ancestor in the chain (e.g., msg3 can reference msg1
+            even if msg2 exists between them). This is an intentional design
+            decision that provides workflow flexibility for:
+
+            - **Partial chain reconstruction**: When only a subset of messages
+              is available for validation (e.g., from logs or replay)
+            - **Fan-out patterns**: When a parent spawns multiple children that
+              all reference it directly rather than forming a linear chain
+            - **Aggregation patterns**: When reducers aggregate from multiple
+              ancestors within the same correlation context
+
+            For strict direct parent-child validation (enforcing linear chains),
+            use pairwise ``validate_chain()`` calls:
+
+            .. code-block:: python
+
+                # Strict linear chain validation
+                for i in range(len(envelopes) - 1):
+                    violations.extend(
+                        validator.validate_chain(envelopes[i], envelopes[i + 1])
+                    )
 
         Args:
             envelopes: Ordered list of message envelopes in the workflow.
@@ -406,7 +430,7 @@ class ChainPropagationValidator:
 
         Example:
             >>> validator = ChainPropagationValidator()
-            >>> # msg1 -> msg2 -> msg3 (causation order)
+            >>> # Workflow with messages that may reference any ancestor
             >>> violations = validator.validate_workflow_chain([msg1, msg2, msg3])
             >>> blocking = [v for v in violations if v.is_blocking()]
             >>> if blocking:
