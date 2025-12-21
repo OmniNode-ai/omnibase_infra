@@ -282,8 +282,27 @@ class TestModelSnapshotTopicConfigImmutability:
         with pytest.raises(ValidationError, match="frozen"):
             config.topic = "modified.topic"  # type: ignore[misc]
 
-    def test_apply_environment_overrides_returns_new_instance(self) -> None:
-        """Test that apply_environment_overrides returns a new instance."""
+    def test_apply_environment_overrides_returns_self_when_no_overrides(self) -> None:
+        """Test that apply_environment_overrides returns self when no overrides exist.
+
+        Since the model is frozen (immutable), returning self is safe and efficient
+        when no environment variables modify the configuration.
+        """
         config1 = ModelSnapshotTopicConfig(topic="test.snapshots")
         config2 = config1.apply_environment_overrides()
-        assert config1 is not config2 or config1 == config2
+        # No overrides applied, so same immutable instance is returned
+        assert config1 is config2
+
+    def test_apply_environment_overrides_returns_new_instance_when_overridden(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that apply_environment_overrides returns new instance with overrides."""
+        monkeypatch.setenv("SNAPSHOT_PARTITION_COUNT", "24")
+        config1 = ModelSnapshotTopicConfig(topic="test.snapshots")
+        config2 = config1.apply_environment_overrides()
+        # Override applied, so new instance is created
+        assert config1 is not config2
+        # Original unchanged (frozen model)
+        assert config1.partition_count == 12
+        # New instance has override applied
+        assert config2.partition_count == 24

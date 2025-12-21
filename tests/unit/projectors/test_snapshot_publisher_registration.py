@@ -36,6 +36,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -347,8 +348,6 @@ class TestPublishSnapshot:
 
         # Value should be JSON bytes
         assert isinstance(value, bytes)
-        import json
-
         value_dict = json.loads(value.decode("utf-8"))
         assert value_dict["domain"] == projection.domain
         assert value_dict["current_state"] == projection.current_state.value

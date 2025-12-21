@@ -333,19 +333,10 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             >>> projection = await reader.get_entity_state(entity_id)
             >>> await publisher.publish_snapshot(projection)
         """
-        # Delegate to publish_from_projection which handles version tracking
-        # and actual publishing. This method exists to satisfy the
-        # ProtocolSnapshotPublisher interface which expects ModelRegistrationProjection
-        # as input, while our internal implementation uses ModelRegistrationSnapshot.
-        snapshot_model = await self.publish_from_projection(
+        # Delegate to publish_from_projection for versioning and publishing
+        await self.publish_from_projection(
             projection=snapshot,
-            node_name=None,  # Not available from projection alone
-        )
-        logger.debug(
-            "Published projection as snapshot version %d for %s:%s",
-            snapshot_model.snapshot_version,
-            snapshot.domain,
-            str(snapshot.entity_id),
+            node_name=None,
         )
 
     async def _publish_snapshot_model(
