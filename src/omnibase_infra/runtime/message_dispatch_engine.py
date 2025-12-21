@@ -222,6 +222,7 @@ def _sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
+from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
@@ -1198,6 +1199,11 @@ class MessageDispatchEngine:
                 ),
             )
 
+        # Convert list of output topics to ModelDispatchOutputs
+        dispatch_outputs: ModelDispatchOutputs | None = (
+            ModelDispatchOutputs(topics=outputs) if outputs else None
+        )
+
         return ModelDispatchResult(
             dispatch_id=dispatch_id,
             status=status,
@@ -1209,7 +1215,7 @@ class MessageDispatchEngine:
             duration_ms=duration_ms,
             started_at=started_at,
             completed_at=datetime.now(UTC),
-            outputs=outputs if outputs else None,
+            outputs=dispatch_outputs,
             output_count=len(outputs),
             error_message="; ".join(dispatcher_errors) if dispatcher_errors else None,
             error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR

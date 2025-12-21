@@ -30,6 +30,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
@@ -1786,7 +1787,7 @@ class TestDispatchResultRetryScenarios:
         result = ModelDispatchResult(
             status=EnumDispatchStatus.SUCCESS,
             topic="dev.user.events.v1",
-            outputs=["dev.notification.events.v1"],
+            outputs=ModelDispatchOutputs(topics=["dev.notification.events.v1"]),
         )
 
         assert result.requires_retry() is False

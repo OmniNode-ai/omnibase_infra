@@ -28,6 +28,7 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatcher_registry import ProtocolMessageDispatcher
@@ -945,12 +946,13 @@ class TestFactoryMethodForCompute:
 
     def test_for_compute_preserves_metadata(self) -> None:
         """for_compute() should preserve the provided metadata."""
-        metadata = {"algorithm": "sha256"}
+        metadata = ModelDispatchMetadata(algorithm="sha256")
         ctx = ModelDispatchContext.for_compute(
             correlation_id=uuid4(),
             metadata=metadata,
         )
         assert ctx.metadata == metadata
+        assert ctx.metadata.model_extra.get("algorithm") == "sha256"
 
     def test_for_compute_has_time_injection_is_false(self) -> None:
         """for_compute() context should have has_time_injection=False."""
@@ -999,13 +1001,14 @@ class TestFactoryMethodForRuntimeHost:
 
     def test_for_runtime_host_preserves_metadata(self) -> None:
         """for_runtime_host() should preserve the provided metadata."""
-        metadata = {"host": "infra-hub-1"}
+        metadata = ModelDispatchMetadata(host="infra-hub-1")
         ctx = ModelDispatchContext.for_runtime_host(
             correlation_id=uuid4(),
             now=datetime.now(UTC),
             metadata=metadata,
         )
         assert ctx.metadata == metadata
+        assert ctx.metadata.model_extra.get("host") == "infra-hub-1"
 
     def test_for_runtime_host_has_time_injection_is_true(self) -> None:
         """for_runtime_host() context should have has_time_injection=True."""
