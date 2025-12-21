@@ -734,9 +734,9 @@ class ConsulHandler(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def get_func() -> (
-            tuple[int, list[dict[str, JsonValue]] | dict[str, JsonValue] | None]
-        ):
+        def get_func() -> tuple[
+            int, list[dict[str, JsonValue]] | dict[str, JsonValue] | None
+        ]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
             index, data = self._client.kv.get(key, recurse=recurse_bool)

@@ -659,9 +659,9 @@ class TestPolicyRegistryVersioning:
 
         # Get without version should return 10.0.0 (semver highest), not 2.0.0
         latest_cls = policy_registry.get("semver-policy")
-        assert (
-            latest_cls is MockPolicyV2
-        ), "10.0.0 should be considered later than 2.0.0"
+        assert latest_cls is MockPolicyV2, (
+            "10.0.0 should be considered later than 2.0.0"
+        )
 
     def test_get_latest_with_prerelease_versions(
         self, policy_registry: PolicyRegistry
@@ -1784,9 +1784,9 @@ class TestPolicyRegistryInvalidVersions:
                     version=version,
                 )
             error_msg = str(exc_info.value)
-            assert (
-                "Prerelease suffix cannot be empty" in error_msg
-            ), f"Expected error for version '{version}'"
+            assert "Prerelease suffix cannot be empty" in error_msg, (
+                f"Expected error for version '{version}'"
+            )
 
     def test_invalid_version_format_non_numeric(
         self, policy_registry: PolicyRegistry
@@ -2041,9 +2041,9 @@ class TestPolicyRegistryInvalidVersions:
 
         # Get latest should return 1.10.0 (MockPolicyV2), not 1.9.0
         latest_cls = policy_registry.get("version-test")
-        assert (
-            latest_cls is MockPolicyV2
-        ), "1.10.0 should be considered later than 1.9.0 (semantic versioning)"
+        assert latest_cls is MockPolicyV2, (
+            "1.10.0 should be considered later than 1.9.0 (semantic versioning)"
+        )
 
     def test_semver_comparison_minor_version_edge_case(
         self, policy_registry: PolicyRegistry
