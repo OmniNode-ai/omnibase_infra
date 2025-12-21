@@ -297,9 +297,13 @@ class DispatchEntryInternal:
             appropriate time injection based on ONEX rules:
             - REDUCER/COMPUTE: now=None (deterministic)
             - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
+        accepts_context: Cached result of signature inspection indicating
+            whether the dispatcher accepts a context parameter (2+ params).
+            Computed once at registration time for performance.
     """
 
     __slots__ = (
+        "accepts_context",
         "category",
         "dispatcher",
         "dispatcher_id",
@@ -314,12 +318,14 @@ class DispatchEntryInternal:
         category: EnumMessageCategory,
         message_types: set[str] | None,
         node_kind: EnumNodeKind | None = None,
+        accepts_context: bool = False,
     ) -> None:
         self.dispatcher_id = dispatcher_id
         self.dispatcher = dispatcher
         self.category = category
         self.message_types = message_types  # None means "all types"
         self.node_kind = node_kind  # None means no context injection
+        self.accepts_context = accepts_context  # Cached: dispatcher has 2+ params
 
 
 class MessageDispatchEngine:
@@ -646,6 +652,10 @@ class MessageDispatchEngine:
                     error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
                 )
 
+            # Compute accepts_context once at registration time (cached)
+            # This avoids expensive inspect.signature() calls on every dispatch
+            accepts_context = self._dispatcher_accepts_context(dispatcher)
+
             # Store dispatcher entry
             entry = DispatchEntryInternal(
                 dispatcher_id=dispatcher_id,
@@ -653,6 +663,7 @@ class MessageDispatchEngine:
                 category=category,
                 message_types=message_types,
                 node_kind=node_kind,
+                accepts_context=accepts_context,
             )
             self._dispatchers[dispatcher_id] = entry
 
@@ -1393,9 +1404,12 @@ class MessageDispatchEngine:
         if entry.node_kind is not None:
             context = self._create_context_for_entry(entry, envelope)
 
+        # Use cached accepts_context from registration (no runtime inspection)
+        accepts_ctx = entry.accepts_context
+
         # Check if dispatcher is async
         if inspect.iscoroutinefunction(dispatcher):
-            if context is not None and self._dispatcher_accepts_context(dispatcher):
+            if context is not None and accepts_ctx:
                 return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]
             return await dispatcher(envelope)  # type: ignore[no-any-return]
         else:
@@ -1410,7 +1424,7 @@ class MessageDispatchEngine:
             # For blocking I/O operations, use async dispatchers instead.
             loop = asyncio.get_running_loop()
 
-            if context is not None and self._dispatcher_accepts_context(dispatcher):
+            if context is not None and accepts_ctx:
                 # Context-aware sync dispatcher
                 sync_ctx_dispatcher = cast(_SyncContextAwareDispatcherFunc, dispatcher)
                 return await loop.run_in_executor(
@@ -1459,6 +1473,17 @@ class MessageDispatchEngine:
             This is an internal method. Callers should ensure entry.node_kind
             is not None before calling.
 
+        Time Semantics:
+            The ``now`` field is captured at context creation time (dispatch time),
+            NOT at handler execution time. For ORCHESTRATOR, EFFECT, and RUNTIME_HOST
+            nodes, this means:
+
+            - ``now`` represents when MessageDispatchEngine created the context
+            - Handler execution may occur microseconds to milliseconds later
+            - For most use cases, this drift is negligible
+            - If sub-millisecond precision is required, handlers should capture
+              their own time at the start of execution
+
         .. versionadded:: 0.5.0
         """
         node_kind = entry.node_kind
@@ -1487,8 +1512,9 @@ class MessageDispatchEngine:
             )
 
         if node_kind == EnumNodeKind.ORCHESTRATOR:
-            # Timestamp captured at context creation (dispatch time).
-            # Drift from actual handler execution is microseconds in practice.
+            # TIME SEMANTICS: `now` is captured HERE at context creation (dispatch time),
+            # not at handler execution time. The drift between dispatch time and handler
+            # execution is typically microseconds, acceptable for most use cases.
             return ModelDispatchContext.for_orchestrator(
                 correlation_id=correlation_id,
                 trace_id=trace_id,
@@ -1528,15 +1554,15 @@ class MessageDispatchEngine:
         context injection - dispatchers without a context parameter will be
         called with just the envelope.
 
+        This method is called once at registration time and the result is
+        cached in DispatchEntryInternal.accepts_context for performance.
+        No signature inspection occurs during dispatch execution.
+
         Args:
             dispatcher: The dispatcher callable to inspect.
 
         Returns:
             True if dispatcher accepts a context parameter, False otherwise.
-
-        Note:
-            This method caches results internally for performance. Repeated
-            calls with the same dispatcher are efficient.
 
         .. versionadded:: 0.5.0
         """
