@@ -12,12 +12,12 @@ Reducers are responsible for:
 - Dual registration coordination (Consul + PostgreSQL)
 
 Available Reducers:
-- NodeDualRegistrationReducer: Coordinates parallel registration to Consul
-  and PostgreSQL backends with graceful degradation for partial failures.
+- RegistrationReducer: Canonical pure reducer for dual registration workflow.
+  Uses ModelReducerOutput from omnibase_core. (~80 lines, stateless)
 """
 
-from omnibase_infra.nodes.reducers.node_dual_registration_reducer import (
-    NodeDualRegistrationReducer,
-)
+from omnibase_infra.nodes.reducers.registration_reducer import RegistrationReducer
 
-__all__ = ["NodeDualRegistrationReducer"]
+__all__ = [
+    "RegistrationReducer",
+]

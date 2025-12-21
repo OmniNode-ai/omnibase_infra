@@ -36,6 +36,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
 
 logger = logging.getLogger(__name__)
@@ -218,7 +219,7 @@ class ProtocolLifecycleExecutor:
         handler_type: str,
         handler: ProtocolHandler,
         timeout_seconds: float = -1.0,
-    ) -> tuple[str, dict[str, object]]:
+    ) -> tuple[str, JsonValue]:
         """Check health of a single handler with timeout.
 
         This method performs an individual handler health check with a configurable

@@ -12,6 +12,11 @@ Security Features:
     - Token auto-renewal management
 
 All secret operations MUST use proper authentication and authorization.
+
+Return Type:
+    All operations return ModelHandlerOutput[dict[str, JsonValue]] per OMN-975.
+    Uses ModelHandlerOutput.for_compute() since handlers return synchronous results
+    rather than emitting events to the event bus.
 """
 
 from __future__ import annotations
@@ -21,8 +26,13 @@ import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID, uuid4
+
+from omnibase_core.models.dispatch import ModelHandlerOutput
+
+if TYPE_CHECKING:
+    from omnibase_core.types import JsonValue
 
 T = TypeVar("T")
 
@@ -42,9 +52,12 @@ from omnibase_infra.errors import (
     SecretResolutionError,
 )
 from omnibase_infra.handlers.model_vault_adapter_config import ModelVaultAdapterConfig
-from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
 
 logger = logging.getLogger(__name__)
+
+# Handler ID for ModelHandlerOutput
+HANDLER_ID_VAULT: str = "vault-handler"
 
 DEFAULT_MOUNT_POINT: str = "secret"
 SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
@@ -59,7 +72,7 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
-class VaultAdapter(MixinAsyncCircuitBreaker):
+class VaultAdapter(MixinAsyncCircuitBreaker, MixinEnvelopeExtraction):
     """HashiCorp Vault adapter using hvac client (MVP: KV v2 secrets engine).
 
     Security Policy - Token Handling:
@@ -136,7 +149,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         """Return maximum queue size (public API for tests)."""
         return self._max_queue_size
 
-    async def initialize(self, config: dict[str, object]) -> None:
+    async def initialize(self, config: dict[str, JsonValue]) -> None:
         """Initialize Vault client with configuration.
 
         Args:
@@ -391,7 +404,9 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         self._circuit_breaker_initialized = False
         logger.info("VaultAdapter shutdown complete")
 
-    async def execute(self, envelope: dict[str, object]) -> dict[str, object]:
+    async def execute(
+        self, envelope: dict[str, JsonValue]
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute Vault operation from envelope.
 
         Args:
@@ -399,9 +414,11 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                 - operation: Vault operation (vault.read_secret, vault.write_secret, etc.)
                 - payload: dict with operation-specific parameters
                 - correlation_id: Optional correlation ID for tracing
+                - envelope_id: Optional envelope ID for causality tracking
 
         Returns:
-            Response envelope with status, payload, and correlation_id
+            ModelHandlerOutput[dict[str, JsonValue]] with status, payload, and correlation_id
+            per OMN-975 handler output standardization.
 
         Raises:
             RuntimeHostError: If handler not initialized or invalid input.
@@ -410,6 +427,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             SecretResolutionError: If secret resolution fails.
         """
         correlation_id = self._extract_correlation_id(envelope)
+        input_envelope_id = self._extract_envelope_id(envelope)
 
         if not self._initialized or self._client is None or self._config is None:
             ctx = ModelInfraErrorContext(
@@ -471,29 +489,17 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
 
         # Route to appropriate handler
         if operation == "vault.read_secret":
-            return await self._read_secret(payload, correlation_id)
+            return await self._read_secret(payload, correlation_id, input_envelope_id)
         elif operation == "vault.write_secret":
-            return await self._write_secret(payload, correlation_id)
+            return await self._write_secret(payload, correlation_id, input_envelope_id)
         elif operation == "vault.delete_secret":
-            return await self._delete_secret(payload, correlation_id)
+            return await self._delete_secret(payload, correlation_id, input_envelope_id)
         elif operation == "vault.list_secrets":
-            return await self._list_secrets(payload, correlation_id)
+            return await self._list_secrets(payload, correlation_id, input_envelope_id)
         elif operation == "vault.renew_token":
-            return await self._renew_token_operation(correlation_id)
+            return await self._renew_token_operation(correlation_id, input_envelope_id)
         else:  # vault.health_check
-            return await self._health_check_operation(correlation_id)
-
-    def _extract_correlation_id(self, envelope: dict[str, object]) -> UUID:
-        """Extract or generate correlation ID from envelope."""
-        raw = envelope.get("correlation_id")
-        if isinstance(raw, UUID):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return UUID(raw)
-            except ValueError:
-                pass
-        return uuid4()
+            return await self._health_check_operation(correlation_id, input_envelope_id)
 
     async def _check_token_renewal(self, correlation_id: UUID) -> None:
         """Check if token needs renewal and renew if necessary.
@@ -558,7 +564,7 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                     "correlation_id": str(correlation_id),
                 },
             )
-            await self.renew_token()
+            await self.renew_token(correlation_id=correlation_id)
             logger.debug(
                 "Token renewal completed successfully",
                 extra={
@@ -761,18 +767,21 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
 
     async def _read_secret(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Read secret from Vault KV v2 secrets engine.
 
         Args:
             payload: dict containing:
                 - path: Secret path (required)
                 - mount_point: KV mount point (default: "secret")
+            correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with secret data
+            ModelHandlerOutput with secret data
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
@@ -795,12 +804,14 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def read_func() -> dict[str, object]:
+        def read_func() -> dict[str, JsonValue]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, object] = self._client.secrets.kv.v2.read_secret_version(
-                path=path,
-                mount_point=mount_point,
+            result: dict[str, JsonValue] = (
+                self._client.secrets.kv.v2.read_secret_version(
+                    path=path,
+                    mount_point=mount_point,
+                )
             )
             return result
 
@@ -816,20 +827,26 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         secret_data = data_dict.get("data", {})
         metadata = data_dict.get("metadata", {})
 
-        return {
-            "status": "success",
-            "payload": {
-                "data": secret_data if isinstance(secret_data, dict) else {},
-                "metadata": metadata if isinstance(metadata, dict) else {},
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_VAULT,
+            result={
+                "status": "success",
+                "payload": {
+                    "data": secret_data if isinstance(secret_data, dict) else {},
+                    "metadata": metadata if isinstance(metadata, dict) else {},
+                },
+                "correlation_id": str(correlation_id),
             },
-            "correlation_id": correlation_id,
-        }
+        )
 
     async def _write_secret(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Write secret to Vault KV v2 secrets engine.
 
         Args:
@@ -837,9 +854,11 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                 - path: Secret path (required)
                 - data: Secret data dict (required)
                 - mount_point: KV mount point (default: "secret")
+            correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with write confirmation
+            ModelHandlerOutput with write confirmation
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
@@ -876,10 +895,10 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def write_func() -> dict[str, object]:
+        def write_func() -> dict[str, JsonValue]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, object] = (
+            result: dict[str, JsonValue] = (
                 self._client.secrets.kv.v2.create_or_update_secret(
                     path=path,
                     secret=data,
@@ -898,29 +917,37 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         data_obj = result.get("data", {})
         data_dict = data_obj if isinstance(data_obj, dict) else {}
 
-        return {
-            "status": "success",
-            "payload": {
-                "version": data_dict.get("version"),
-                "created_time": data_dict.get("created_time"),
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_VAULT,
+            result={
+                "status": "success",
+                "payload": {
+                    "version": data_dict.get("version"),
+                    "created_time": data_dict.get("created_time"),
+                },
+                "correlation_id": str(correlation_id),
             },
-            "correlation_id": correlation_id,
-        }
+        )
 
     async def _delete_secret(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Delete secret from Vault KV v2 secrets engine.
 
         Args:
             payload: dict containing:
                 - path: Secret path (required)
                 - mount_point: KV mount point (default: "secret")
+            correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with deletion confirmation
+            ModelHandlerOutput with deletion confirmation
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
@@ -958,26 +985,34 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             correlation_id,
         )
 
-        return {
-            "status": "success",
-            "payload": {"deleted": True},
-            "correlation_id": correlation_id,
-        }
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_VAULT,
+            result={
+                "status": "success",
+                "payload": {"deleted": True},
+                "correlation_id": str(correlation_id),
+            },
+        )
 
     async def _list_secrets(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """List secrets at path in Vault KV v2 secrets engine.
 
         Args:
             payload: dict containing:
                 - path: Secret path (required)
                 - mount_point: KV mount point (default: "secret")
+            correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with list of secret keys
+            ModelHandlerOutput with list of secret keys
         """
         path = payload.get("path")
         if not isinstance(path, str) or not path:
@@ -1000,10 +1035,10 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         if self._client is None:
             raise RuntimeError("Client not initialized")
 
-        def list_func() -> dict[str, object]:
+        def list_func() -> dict[str, JsonValue]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, object] = self._client.secrets.kv.v2.list_secrets(
+            result: dict[str, JsonValue] = self._client.secrets.kv.v2.list_secrets(
                 path=path,
                 mount_point=mount_point,
             )
@@ -1020,13 +1055,20 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
         data_dict = data_obj if isinstance(data_obj, dict) else {}
         keys = data_dict.get("keys", [])
 
-        return {
-            "status": "success",
-            "payload": {"keys": keys if isinstance(keys, list) else []},
-            "correlation_id": correlation_id,
-        }
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_VAULT,
+            result={
+                "status": "success",
+                "payload": {"keys": keys if isinstance(keys, list) else []},
+                "correlation_id": str(correlation_id),
+            },
+        )
 
-    async def renew_token(self) -> dict[str, object]:
+    async def renew_token(
+        self, correlation_id: UUID | None = None
+    ) -> dict[str, JsonValue]:
         """Renew Vault authentication token.
 
         Token TTL Extraction Logic:
@@ -1035,13 +1077,19 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             3. Update _token_expires_at = current_time + extracted_ttl
             4. Log warning when falling back to default TTL
 
+        Args:
+            correlation_id: Optional correlation ID for tracing. When called via
+                envelope dispatch, this preserves the request's correlation_id.
+                When called directly (e.g., by monitoring), a new ID is generated.
+
         Returns:
             Token renewal information including new TTL
 
         Raises:
             InfraAuthenticationError: If token renewal fails
         """
-        correlation_id = uuid4()
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         if self._client is None or self._config is None:
             ctx = ModelInfraErrorContext(
@@ -1056,10 +1104,10 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
                 context=ctx,
             )
 
-        def renew_func() -> dict[str, object]:
+        def renew_func() -> dict[str, JsonValue]:
             if self._client is None:
                 raise RuntimeError("Client not initialized")
-            result: dict[str, object] = self._client.auth.token.renew_self()
+            result: dict[str, JsonValue] = self._client.auth.token.renew_self()
             return result
 
         try:
@@ -1147,35 +1195,65 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
     async def _renew_token_operation(
         self,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute token renewal operation from envelope.
 
         Args:
             correlation_id: Correlation ID for tracing
+            input_envelope_id: Input envelope ID for causality tracking
 
         Returns:
-            Response envelope with renewal information
+            ModelHandlerOutput with renewal information
         """
-        result = await self.renew_token()
+        result = await self.renew_token(correlation_id=correlation_id)
 
         # Extract nested auth data with type checking
         auth_obj = result.get("auth", {})
         auth_data = auth_obj if isinstance(auth_obj, dict) else {}
 
-        return {
-            "status": "success",
-            "payload": {
-                "renewable": auth_data.get("renewable", False),
-                "lease_duration": auth_data.get("lease_duration", 0),
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_VAULT,
+            result={
+                "status": "success",
+                "payload": {
+                    "renewable": auth_data.get("renewable", False),
+                    "lease_duration": auth_data.get("lease_duration", 0),
+                },
+                "correlation_id": str(correlation_id),
             },
-            "correlation_id": correlation_id,
-        }
+        )
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(
+        self, correlation_id: UUID | None = None
+    ) -> dict[str, JsonValue]:
         """Return handler health status with operational metrics.
 
         Uses thread pool executor and retry logic for consistency with other operations.
         Includes circuit breaker protection and exponential backoff on transient failures.
+
+        This is the standalone health check method intended for direct invocation by
+        monitoring systems, health check endpoints, or diagnostic tools. When called
+        directly, a new correlation_id is generated for tracing purposes.
+
+        Envelope-Based vs Direct Invocation:
+            - Direct: Call health_check() for monitoring/diagnostics. If no correlation_id
+              is provided, a new one is generated internally for tracing.
+            - Envelope: Use execute() with operation="vault.health_check" for dispatch.
+              The envelope's correlation_id and envelope_id are preserved for causality.
+
+        Note:
+            This method does not accept envelope_id because it's designed for direct
+            invocation outside the envelope dispatch context. For envelope-based health
+            checks that preserve causality tracking, use _health_check_operation() via
+            the execute() method.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing. When called via
+                envelope dispatch, this preserves the request's correlation_id.
+                When called directly (e.g., by monitoring), a new ID is generated.
 
         Returns:
             Health status dict with handler state information including:
@@ -1188,7 +1266,8 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
             RuntimeHostError: If health check fails (errors are propagated, not swallowed)
         """
         healthy = False
-        correlation_id = uuid4()
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         # Calculate operational metrics (safe even if not initialized)
         token_ttl_remaining: int | None = None
@@ -1225,10 +1304,10 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
 
         if self._initialized and self._client is not None:
 
-            def health_check_func() -> dict[str, object]:
+            def health_check_func() -> dict[str, JsonValue]:
                 if self._client is None:
                     raise RuntimeError("Client not initialized")
-                result: dict[str, object] = self._client.sys.read_health_status()
+                result: dict[str, JsonValue] = self._client.sys.read_health_status()
                 return result
 
             # Use thread pool executor with retry logic for consistency
@@ -1258,24 +1337,54 @@ class VaultAdapter(MixinAsyncCircuitBreaker):
     async def _health_check_operation(
         self,
         correlation_id: UUID,
-    ) -> dict[str, object]:
+        input_envelope_id: UUID,
+    ) -> ModelHandlerOutput[dict[str, JsonValue]]:
         """Execute health check operation from envelope.
 
+        This method wraps the core health_check() functionality in a ModelHandlerOutput
+        for envelope-based operation dispatch. It differs from health_check() in that:
+
+        1. It accepts pre-extracted IDs from the request envelope
+        2. It returns ModelHandlerOutput (suitable for envelope dispatch)
+        3. It preserves causality tracking via input_envelope_id
+
+        ID Semantics:
+            correlation_id: Groups related operations across distributed services.
+                Used for filtering logs, tracing request flows, and debugging.
+                Propagated from the request envelope or auto-generated if missing.
+
+            input_envelope_id: Links this response to the originating request envelope.
+                Enables request/response correlation in observability systems.
+                When called via execute(), extracted from the request envelope.
+                Auto-generated if not provided, ensuring all responses have valid
+                causality tracking IDs.
+
+        The standalone health_check() method generates its own correlation_id since
+        it may be called directly (not via envelope dispatch) for monitoring purposes.
+
         Args:
-            correlation_id: Correlation ID for tracing
+            correlation_id: Correlation ID for distributed tracing across services.
+            input_envelope_id: Envelope ID for causality tracking. Links this health
+                check response to the original request envelope, enabling end-to-end
+                request/response correlation in observability systems.
 
         Returns:
-            Response envelope with health check information
+            ModelHandlerOutput with health check information
         """
-        health_status = await self.health_check()
+        health_status = await self.health_check(correlation_id=correlation_id)
 
-        return {
-            "status": "success",
-            "payload": health_status,
-            "correlation_id": correlation_id,
-        }
+        return ModelHandlerOutput.for_compute(
+            input_envelope_id=input_envelope_id,
+            correlation_id=correlation_id,
+            handler_id=HANDLER_ID_VAULT,
+            result={
+                "status": "success",
+                "payload": health_status,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
-    def describe(self) -> dict[str, object]:
+    def describe(self) -> dict[str, JsonValue]:
         """Return handler metadata and capabilities.
 
         Returns:

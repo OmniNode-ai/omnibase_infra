@@ -263,6 +263,9 @@ claude-flow.config.json
 session-*.json
 *auto-save*.json
 
+# Temporary files and caches
+tmp/
+
 # Development and Analysis Documents (temporary files)
 *_ANALYSIS.md
 *_SUMMARY.md

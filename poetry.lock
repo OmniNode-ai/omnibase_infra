@@ -3283,15 +3283,13 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.5.1"
+version = "0.5.5"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
-python-versions = ">=3.12"
+python-versions = "^3.12"
 groups = ["main"]
-files = [
-    {file = "omnibase_core-0.5.1-py3-none-any.whl", hash = "sha256:28f167a3c87a82e3a753d98d5a820296fdf55b45ba28c7987d1a15ee1c520f13"},
-    {file = "omnibase_core-0.5.1.tar.gz", hash = "sha256:a6e32b1c82dd5bac5e6955a02bf12ef54fe20692dfdfa7bcf9c1dfc6f52b45ba"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 aiohttp = ">=3.9.0,<4.0.0"
@@ -3314,22 +3312,32 @@ uvicorn = ">=0.32.0,<0.33.0"
 cli = ["psutil"]
 full = ["psutil"]
 
+[package.source]
+type = "git"
+url = "https://github.com/OmniNode-ai/omnibase_core.git"
+reference = "v0.5.5"
+resolved_reference = "72fad1abacd95afc0754e41e50ad624b560032da"
+
 [[package]]
 name = "omnibase-spi"
 version = "0.4.0"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
-python-versions = ">=3.12"
+python-versions = "^3.12"
 groups = ["main"]
-files = [
-    {file = "omnibase_spi-0.4.0-py3-none-any.whl", hash = "sha256:06c06c37b6a4612c9b47e6cdd9573e7f16616dc0a5dbbd80fe72f2b6ed272a78"},
-    {file = "omnibase_spi-0.4.0.tar.gz", hash = "sha256:2422c21cfae6cd2c4f7a026d7886877ccf940c4ea70739a17411928096ec3768"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 omnibase_core = ">=0.4.0"
 pydantic = ">=2.11.7"
 typing-extensions = ">=4.5.0"
+
+[package.source]
+type = "git"
+url = "https://github.com/OmniNode-ai/omnibase_spi.git"
+reference = "main"
+resolved_reference = "65a2ec579661456325d7c6c4e522d91c33462b35"
 
 [[package]]
 name = "openai"
@@ -6161,4 +6169,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "c83a0543354ab85d1e2a425eeaffee7de6bb7179869e4b590c0cbfd9d9ea386f"
+content-hash = "21bfe0adc530d69860e5bfc78579f4b20de70f1ebdb41ab6ffb98b4d67da720d"

@@ -12,10 +12,10 @@ Available Submodules:
 - reducers: Reducer nodes for state aggregation
 
 Available Classes:
-- NodeDualRegistrationReducer: Coordinates dual registration to Consul
-  and PostgreSQL backends with graceful degradation.
+- RegistrationReducer: Pure reducer for dual registration to Consul
+  and PostgreSQL backends.
 """
 
-from omnibase_infra.nodes.reducers import NodeDualRegistrationReducer
+from omnibase_infra.nodes.reducers import RegistrationReducer
 
-__all__ = ["NodeDualRegistrationReducer"]
+__all__ = ["RegistrationReducer"]

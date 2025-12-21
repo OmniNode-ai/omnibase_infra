@@ -106,15 +106,15 @@ def run_patterns(verbose: bool = False) -> bool:
 def run_unions(verbose: bool = False) -> bool:
     """Run union usage validation."""
     try:
-        from omnibase_core.validation import validate_union_usage
-
+        # Use infrastructure wrapper which includes exemption filtering
+        # for documented infrastructure patterns
         from omnibase_infra.validation.infra_validators import (
             INFRA_MAX_UNIONS,
             INFRA_UNIONS_STRICT,
+            validate_infra_union_usage,
         )
 
-        result = validate_union_usage(
-            "src/omnibase_infra/",
+        result = validate_infra_union_usage(
             max_unions=INFRA_MAX_UNIONS,
             strict=INFRA_UNIONS_STRICT,
         )
