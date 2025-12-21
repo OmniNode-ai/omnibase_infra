@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -239,10 +238,16 @@ class ProjectorRegistration(MixinAsyncCircuitBreaker):
                 updated_at = EXCLUDED.updated_at,
                 correlation_id = EXCLUDED.correlation_id
             WHERE
-                -- Only update if incoming sequence is newer
-                EXCLUDED.last_applied_offset > registration_projections.last_applied_offset
+                -- Only update if incoming sequence is newer (mutually exclusive modes)
+                (
+                    -- Kafka-based ordering (partition + offset)
+                    EXCLUDED.last_applied_partition IS NOT NULL
+                    AND EXCLUDED.last_applied_offset > registration_projections.last_applied_offset
+                )
                 OR (
-                    EXCLUDED.last_applied_sequence IS NOT NULL
+                    -- Generic sequence-based ordering (no partition)
+                    EXCLUDED.last_applied_partition IS NULL
+                    AND EXCLUDED.last_applied_sequence IS NOT NULL
                     AND (
                         registration_projections.last_applied_sequence IS NULL
                         OR EXCLUDED.last_applied_sequence > registration_projections.last_applied_sequence

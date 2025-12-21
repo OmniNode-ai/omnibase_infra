@@ -95,14 +95,6 @@ CREATE TABLE IF NOT EXISTS registration_projections (
 -- INDEXES FOR ORCHESTRATION QUERIES
 -- =============================================================================
 
--- Index for ack deadline scanning (C2: orchestrator queries for overdue ack)
--- Partial index: only index rows with non-null ack_deadline
--- Query pattern: SELECT * FROM registration_projections
---                WHERE ack_deadline < :now AND ack_timeout_emitted_at IS NULL
-CREATE INDEX IF NOT EXISTS idx_registration_ack_deadline
-    ON registration_projections (ack_deadline)
-    WHERE ack_deadline IS NOT NULL;
-
 -- Index for liveness deadline scanning (C2: orchestrator queries for overdue liveness)
 -- Partial index: only index active nodes with non-null liveness_deadline
 -- Query pattern: SELECT * FROM registration_projections
