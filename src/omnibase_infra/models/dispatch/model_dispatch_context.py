@@ -65,6 +65,8 @@ from uuid import UUID
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
+
 
 class ModelDispatchContext(BaseModel):
     """
@@ -130,7 +132,7 @@ class ModelDispatchContext(BaseModel):
     )
 
     # ---- Optional Metadata ----
-    metadata: dict[str, str] | None = Field(
+    metadata: ModelDispatchMetadata | None = Field(
         default=None,
         description="Optional additional metadata for extensibility.",
     )
@@ -228,7 +230,7 @@ class ModelDispatchContext(BaseModel):
         cls,
         correlation_id: UUID,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for a REDUCER node.
 
@@ -266,7 +268,7 @@ class ModelDispatchContext(BaseModel):
         correlation_id: UUID,
         now: datetime,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for an ORCHESTRATOR node.
 
@@ -305,7 +307,7 @@ class ModelDispatchContext(BaseModel):
         correlation_id: UUID,
         now: datetime,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for an EFFECT node.
 
@@ -345,7 +347,7 @@ class ModelDispatchContext(BaseModel):
         cls,
         correlation_id: UUID,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for a COMPUTE node.
 
@@ -384,7 +386,7 @@ class ModelDispatchContext(BaseModel):
         correlation_id: UUID,
         now: datetime,
         trace_id: UUID | None = None,
-        metadata: dict[str, str] | None = None,
+        metadata: ModelDispatchMetadata | None = None,
     ) -> "ModelDispatchContext":
         """Create dispatch context for a RUNTIME_HOST node.
 

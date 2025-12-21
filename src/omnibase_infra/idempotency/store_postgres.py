@@ -83,6 +83,7 @@ from omnibase_infra.idempotency.models import (
     ModelIdempotencyStoreMetrics,
     ModelPostgresIdempotencyStoreConfig,
 )
+from omnibase_infra.models.health import ModelHealthCheckResult
 
 logger = logging.getLogger(__name__)
 
@@ -832,20 +833,20 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 context=context,
             ) from e
 
-    async def health_check(self) -> dict[str, object]:
+    async def health_check(self) -> ModelHealthCheckResult:
         """Check if the store is healthy and can accept operations.
 
         Performs read verification and table existence check to ensure
         the database is operational without writing data.
 
         Returns:
-            Dict with health status and diagnostics:
+            ModelHealthCheckResult with health status and diagnostics:
             - healthy: bool - True if store is healthy
             - reason: str - "ok", "not_initialized", "table_not_found", or "check_failed"
-            - error_type: str - Exception type if check failed (optional)
+            - error_type: str | None - Exception type if check failed
         """
         if not self._initialized or self._pool is None:
-            return {"healthy": False, "reason": "not_initialized"}
+            return ModelHealthCheckResult(healthy=False, reason="not_initialized")
 
         try:
             async with self._pool.acquire() as conn:
@@ -864,15 +865,17 @@ class PostgresIdempotencyStore(ProtocolIdempotencyStore):
                 )
 
                 if table_exists is None:
-                    return {"healthy": False, "reason": "table_not_found"}
-                return {"healthy": True, "reason": "ok"}
+                    return ModelHealthCheckResult(
+                        healthy=False, reason="table_not_found"
+                    )
+                return ModelHealthCheckResult(healthy=True, reason="ok")
 
         except Exception as e:
-            return {
-                "healthy": False,
-                "reason": "check_failed",
-                "error_type": type(e).__name__,
-            }
+            return ModelHealthCheckResult(
+                healthy=False,
+                reason="check_failed",
+                error_type=type(e).__name__,
+            )
 
 
 __all__: list[str] = ["PostgresIdempotencyStore"]

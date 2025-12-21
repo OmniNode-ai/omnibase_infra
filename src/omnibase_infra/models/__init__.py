@@ -16,6 +16,7 @@ from omnibase_infra.models.dispatch import (
     ModelParsedTopic,
     ModelTopicParser,
 )
+from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelSequenceInfo,
@@ -43,6 +44,8 @@ __all__ = [
     "ModelDispatcherRegistration",
     "ModelParsedTopic",
     "ModelTopicParser",
+    # Health models
+    "ModelHealthCheckResult",
     # Projection models
     "ModelRegistrationProjection",
     "ModelSequenceInfo",
