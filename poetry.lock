@@ -3320,24 +3320,20 @@ resolved_reference = "72fad1abacd95afc0754e41e50ad624b560032da"
 
 [[package]]
 name = "omnibase-spi"
-version = "0.4.0"
+version = "0.4.1"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
-python-versions = "^3.12"
+python-versions = ">=3.12"
 groups = ["main"]
-files = []
-develop = false
+files = [
+    {file = "omnibase_spi-0.4.1-py3-none-any.whl", hash = "sha256:609e702d76e6d53307d981e352d4ed3c6439f2e6ed5be13753c96a0c476534cb"},
+    {file = "omnibase_spi-0.4.1.tar.gz", hash = "sha256:6a40db84223d6ed87acd51726153b59717d945ab1d272c9580d2866c1234f2c0"},
+]
 
 [package.dependencies]
 omnibase_core = ">=0.4.0"
 pydantic = ">=2.11.7"
 typing-extensions = ">=4.5.0"
-
-[package.source]
-type = "git"
-url = "https://github.com/OmniNode-ai/omnibase_spi.git"
-reference = "main"
-resolved_reference = "65a2ec579661456325d7c6c4e522d91c33462b35"
 
 [[package]]
 name = "openai"
@@ -6169,4 +6165,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "21bfe0adc530d69860e5bfc78579f4b20de70f1ebdb41ab6ffb98b4d67da720d"
+content-hash = "8c5614c1f22289aa3ab9f001784eb0ae56a75e67094e20348fadd9c544bf1f0b"

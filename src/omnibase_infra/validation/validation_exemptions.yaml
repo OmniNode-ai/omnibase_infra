@@ -293,6 +293,17 @@ pattern_exemptions:
       Domain registry pattern requires comprehensive message type management: CRUD operations (register, unregister, get), query operations (list, filter, search by topic/domain), validation operations (validate_topic, resolve_type), and statistics (get_statistics). This is an established domain registry pattern.
 
     ticket: OMN-983
+  # ==========================================================================
+  # Idempotency Store Configuration Exemptions (OMN-945)
+  # ==========================================================================
+  # table_name is a database configuration field specifying the PostgreSQL table
+  # name for storing idempotency records. It is NOT an entity reference.
+  - file_pattern: 'model_postgres_idempotency_store_config\.py'
+    violation_pattern: "Field 'table_name' might reference an entity"
+    reason: >
+      table_name is a database configuration parameter specifying the PostgreSQL table name for storing idempotency records (default: "idempotency_records"). This is infrastructure configuration, not an entity reference.
+
+    ticket: OMN-945
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
