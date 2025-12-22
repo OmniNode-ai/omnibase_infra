@@ -101,6 +101,9 @@ from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
 from omnibase_infra.models.dispatch.model_dispatcher_registration import (
     ModelDispatcherRegistration,
 )
+from omnibase_infra.models.dispatch.model_orchestrator_context import (
+    ModelOrchestratorContext,
+)
 from omnibase_infra.models.dispatch.model_parsed_topic import ModelParsedTopic
 from omnibase_infra.models.dispatch.model_topic_parser import (
     CacheInfo,
@@ -120,6 +123,7 @@ __all__ = [
     "ModelDispatchRoute",
     "ModelDispatcherMetrics",
     "ModelDispatcherRegistration",
+    "ModelOrchestratorContext",
     "ModelParsedTopic",
     "ModelTopicParser",
     # Cache utilities
