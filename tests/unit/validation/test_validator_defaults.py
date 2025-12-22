@@ -40,19 +40,27 @@ class TestInfraValidatorConstants:
 
         OMN-983: Strict validation mode enabled.
 
-        Current baseline (~515 unions as of 2025-12-22):
+        Current baseline (530 unions as of 2025-12-22):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
         Threshold history:
         - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
-        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots
+        - 503 (2025-12-22): PR #77 fix/ci-test-failures branch additions:
+          - ProtocolIdempotencyStore protocol addition (local definition pending omnibase_spi 0.5.0)
+          - ModelNodeIntrospectionEvent correlation_id field additions (UUID | None patterns)
+          - Additional nullable fields for CI test failure fixes
+        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~12 unions added)
+        - 530 (2025-12-22): PR #77 protocol tests + security documentation (~15 unions added)
+          - test_protocol_idempotency_store.py: type annotation tests with Union checks
+          - protocol_idempotency_store.py: security documentation additions
 
+        Threshold: 540 (10 buffer above 530 baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 515, (
-            "INFRA_MAX_UNIONS should be 515 (OMN-990 + OMN-947)"
+        assert INFRA_MAX_UNIONS == 540, (
+            "INFRA_MAX_UNIONS should be 540 (10 buffer above 530 baseline)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

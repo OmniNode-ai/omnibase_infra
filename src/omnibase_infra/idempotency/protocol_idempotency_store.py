@@ -11,7 +11,7 @@ Migration Note:
     available in omnibase_spi versions 0.4.0/0.4.1. This is a TEMPORARY
     definition that should be migrated to omnibase_spi in a future release.
 
-    Migration Path (TICKET PENDING - create ticket for protocol migration to omnibase_spi):
+    Migration Path (OMN-1000):
         1. When omnibase_spi 0.5.0+ is released with ProtocolIdempotencyStore,
            update pyproject.toml to require the new version
         2. Update imports in InMemoryIdempotencyStore and PostgresIdempotencyStore
@@ -31,6 +31,31 @@ Protocol Methods:
 Implementations:
     - InMemoryIdempotencyStore: In-memory store for testing (OMN-945)
     - PostgresIdempotencyStore: Production PostgreSQL store (OMN-945)
+
+Security Considerations:
+    - Thread Safety: All implementations MUST be safe for concurrent access.
+      Multiple coroutines may call check_and_record simultaneously with the
+      same message_id. Implementations must use appropriate synchronization
+      (e.g., asyncio.Lock for in-memory, database transactions for PostgreSQL).
+
+    - Atomicity: The check_and_record method MUST provide atomic check-and-set
+      semantics. When multiple callers race with the same (domain, message_id),
+      exactly ONE caller must receive True. This prevents duplicate processing
+      in concurrent scenarios.
+
+    - Domain Isolation: Messages are namespaced by domain to prevent cross-tenant
+      conflicts. The (domain, message_id) tuple forms the unique key. Different
+      domains can safely use the same message_id without collision. This is
+      critical for multi-tenant deployments where tenant data must be isolated.
+
+    - Correlation ID Usage: The correlation_id parameter is used ONLY for
+      distributed tracing and observability. It is NOT used for authentication
+      or authorization. Security-sensitive operations must implement their own
+      authentication layer; do not rely on correlation_id for access control.
+
+    - Input Validation: Implementations should validate that message_id is a
+      valid UUID. Domain names should be sanitized if used in storage backends
+      (e.g., as part of database keys or Redis key prefixes).
 """
 
 from __future__ import annotations

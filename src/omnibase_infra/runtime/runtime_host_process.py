@@ -1364,6 +1364,18 @@ class RuntimeHostProcess:
             self._idempotency_store = None
             self._idempotency_config = None
 
+    # =========================================================================
+    # WARNING: FAIL-OPEN BEHAVIOR
+    # =========================================================================
+    # This method implements FAIL-OPEN semantics: if the idempotency store
+    # is unavailable or errors, messages are ALLOWED THROUGH for processing.
+    #
+    # This is an intentional design decision prioritizing availability over
+    # exactly-once guarantees. See docstring below for full trade-off analysis.
+    #
+    # IMPORTANT: Downstream handlers MUST be designed for at-least-once delivery
+    # and implement their own idempotency for critical operations.
+    # =========================================================================
     async def _check_idempotency(
         self,
         envelope: dict[str, object],
