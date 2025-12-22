@@ -326,6 +326,27 @@ pattern_exemptions:
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================
+  # Contract Linter Models Exemption (PR #57)
+  # ==========================================================================
+  # contract_linter.py contains domain-grouped validation models and enums
+  # that are cohesive and always used together. These define the complete
+  # interface for contract linting results.
+  - file_pattern: 'validation/contract_linter\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Domain-grouped validation result models for contract linting.
+      ModelContractViolation and ModelContractLintResult define the complete
+      interface for contract validation results. Per CLAUDE.md domain-grouping
+      convention for cohesive models that are always used together.
+    ticket: PR-57
+  - file_pattern: 'validation/contract_linter\.py'
+    violation_pattern: 'Mixed types in one file'
+    reason: >
+      Contract linter module contains cohesive types (enum + models) for
+      validation results. EnumContractViolationSeverity is tightly coupled
+      with ModelContractViolation and ModelContractLintResult.
+    ticket: PR-57
+  # ==========================================================================
   # Domain-Grouped Protocol Exemptions (CLAUDE.md Convention)
   # ==========================================================================
   # Per CLAUDE.md "Protocol File Naming" section:
@@ -342,6 +363,7 @@ architecture_exemptions:
       - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe
       - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors
       - Protocol contracts with examples in docstrings
+    documentation: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
     ticket: OMN-888
 
 # Union usage validator exemptions

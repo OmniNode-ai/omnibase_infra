@@ -249,7 +249,7 @@ class ModelDispatchContext(BaseModel):
             >>> ctx = ModelDispatchContext.for_reducer(
             ...     correlation_id=uuid4(),
             ...     trace_id=uuid4(),
-            ...     metadata={"source": "kafka"},
+            ...     metadata=ModelDispatchMetadata(source_node="kafka"),
             ... )
             >>> assert ctx.now is None
             >>> assert ctx.node_kind == EnumNodeKind.REDUCER
@@ -329,7 +329,7 @@ class ModelDispatchContext(BaseModel):
             >>> ctx = ModelDispatchContext.for_effect(
             ...     correlation_id=uuid4(),
             ...     now=datetime.now(UTC),
-            ...     metadata={"target": "database"},
+            ...     metadata=ModelDispatchMetadata(target_node="database"),
             ... )
             >>> assert ctx.now is not None
             >>> assert ctx.node_kind == EnumNodeKind.EFFECT
@@ -367,7 +367,7 @@ class ModelDispatchContext(BaseModel):
             >>> ctx = ModelDispatchContext.for_compute(
             ...     correlation_id=uuid4(),
             ...     trace_id=uuid4(),
-            ...     metadata={"algorithm": "sha256"},
+            ...     metadata=ModelDispatchMetadata(routing_decision="sha256"),
             ... )
             >>> assert ctx.now is None
             >>> assert ctx.node_kind == EnumNodeKind.COMPUTE
@@ -408,7 +408,7 @@ class ModelDispatchContext(BaseModel):
             >>> ctx = ModelDispatchContext.for_runtime_host(
             ...     correlation_id=uuid4(),
             ...     now=datetime.now(UTC),
-            ...     metadata={"host": "infra-hub-1"},
+            ...     metadata=ModelDispatchMetadata(source_node="infra-hub-1"),
             ... )
             >>> assert ctx.now is not None
             >>> assert ctx.node_kind == EnumNodeKind.RUNTIME_HOST

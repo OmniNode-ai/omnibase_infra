@@ -72,6 +72,10 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_st
     ModelReducerState,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registration_intent import (
+    ModelConsulIntentPayload,
+    ModelConsulRegistrationIntent,
+    ModelPostgresIntentPayload,
+    ModelPostgresUpsertIntent,
     ModelRegistrationIntent,
 )
 
@@ -133,21 +137,34 @@ class ProtocolReducer(Protocol):
                 # the source event lacks one (e.g., legacy events, test fixtures).
                 correlation_id = event.correlation_id or uuid4()
 
-                # Generate intents - be careful with payload content
-                intents = [
-                    ModelRegistrationIntent(
-                        kind="consul",
+                # Generate intents with typed payloads
+                intents: list[ModelRegistrationIntent] = [
+                    ModelConsulRegistrationIntent(
                         operation="register",
                         node_id=event.node_id,
                         correlation_id=correlation_id,
-                        payload={"service_name": f"node-{event.node_type}"},
+                        payload=ModelConsulIntentPayload(
+                            service_name=f"node-{event.node_type}",
+                        ),
                     ),
-                    ModelRegistrationIntent(
-                        kind="postgres",
+                    ModelPostgresUpsertIntent(
                         operation="upsert",
                         node_id=event.node_id,
                         correlation_id=correlation_id,
-                        payload=event.model_dump(),
+                        payload=ModelPostgresIntentPayload(
+                            node_id=event.node_id,
+                            node_type=event.node_type,
+                            node_version=event.node_version,
+                            capabilities=event.capabilities.model_dump(),
+                            endpoints=event.endpoints,
+                            node_role=event.node_role,
+                            metadata=event.metadata.model_dump(),
+                            correlation_id=correlation_id,
+                            network_id=event.network_id,
+                            deployment_id=event.deployment_id,
+                            epoch=event.epoch,
+                            timestamp=event.timestamp.isoformat(),
+                        ),
                     ),
                 ]
 

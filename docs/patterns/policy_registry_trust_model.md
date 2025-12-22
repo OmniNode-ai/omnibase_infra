@@ -474,6 +474,7 @@ tenant_b.use_registry(global_registry)  # Security boundary violated
 
 ## Related Patterns
 
+- [Security Patterns](./security_patterns.md) - Comprehensive security guide including policy security, input validation, and authentication
 - [Container Dependency Injection](./container_dependency_injection.md) - How to properly inject PolicyRegistry
 - [Error Handling Patterns](./error_handling_patterns.md) - PolicyRegistryError usage
 - [Correlation ID Tracking](./correlation_id_tracking.md) - Tracing policy evaluations

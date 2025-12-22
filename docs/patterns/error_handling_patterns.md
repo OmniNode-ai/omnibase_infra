@@ -87,32 +87,32 @@ EnumInfraTransportType.VALKEY    # Cache layer
 
 ## Error Sanitization
 
-### Security Requirements
+For comprehensive error sanitization guidance, see [Error Sanitization Patterns](./error_sanitization_patterns.md).
+
+### Quick Reference
 
 **NEVER include** in error messages or context:
-- Passwords or passphrases
-- API keys or tokens
+- Passwords, API keys, tokens, certificates
 - Connection strings with credentials
-- Personally Identifiable Information (PII)
+- PII (names, emails, SSNs, phone numbers)
 - Internal system paths with sensitive data
 
 **SAFE to include**:
-- Service names (sanitized)
+- Service names (sanitized identifiers)
 - Operation names
 - Correlation IDs
-- Sanitized hostnames (e.g., `postgres-primary` not `postgres://user:pass@host`)
 - Port numbers
 - Error types and codes
 
-### Sanitization Example
+### Quick Example
 
 ```python
-# ❌ UNSAFE - exposes credentials
+# UNSAFE - exposes credentials
 raise InfraConnectionError(
     f"Failed to connect to postgresql://admin:secret123@db.internal:5432/mydb"
 )
 
-# ✅ SAFE - sanitized target
+# SAFE - sanitized target
 context = ModelInfraErrorContext(
     transport_type=EnumInfraTransportType.DATABASE,
     operation="connect",
@@ -121,6 +121,8 @@ context = ModelInfraErrorContext(
 )
 raise InfraConnectionError("Failed to connect to database", context=context)
 ```
+
+For detailed implementation patterns including connection string sanitization, request/response sanitization, and logging integration, see [Error Sanitization Patterns](./error_sanitization_patterns.md).
 
 ## Complete Implementation Examples
 
@@ -245,6 +247,8 @@ raise InfraConnectionError("Connection failed", context=context)
 
 ## Related Patterns
 
+- [Security Patterns](./security_patterns.md) - Comprehensive security guide including error sanitization, input validation, authentication, and secret management
+- [Error Sanitization Patterns](./error_sanitization_patterns.md) - Data classification, sanitization rules, and secure error reporting
 - [Error Recovery Patterns](./error_recovery_patterns.md) - Retry logic, circuit breakers
 - [Correlation ID Tracking](./correlation_id_tracking.md) - Request tracing across services
 - [Container Dependency Injection](./container_dependency_injection.md) - Service resolution

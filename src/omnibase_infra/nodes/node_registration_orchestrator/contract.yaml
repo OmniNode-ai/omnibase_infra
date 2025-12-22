@@ -135,9 +135,11 @@ workflow_coordination:
       parallel_execution_allowed: false
       max_parallel_branches: 1
 
-      # Failure handling
+      # Failure handling (workflow-level step retries)
+      # Note: This controls workflow step retry behavior, not error-level retries.
+      # For error-specific retry configuration, see error_handling.retry_policy.
       failure_recovery_strategy: retry
-      max_retries: 3
+      max_retries: 3  # Workflow step retry count
       recovery_enabled: true
 
       # Timeout configuration
@@ -202,9 +204,15 @@ dependencies:
     module: "omnibase_spi.protocols"
     description: "Protocol for reading projection state."
 
+# Error Handling Configuration
+# =============================
+# Note: This section controls error-specific retry behavior with exponential backoff.
+# This is distinct from coordination_rules.max_retries which controls workflow step retries.
+# - coordination_rules.max_retries: How many times to retry a failed workflow step
+# - error_handling.retry_policy: How to handle specific error types with backoff
 error_handling:
   retry_policy:
-    max_retries: 3
+    max_retries: 3  # Error-level retry with exponential backoff
     initial_delay_ms: 100
     max_delay_ms: 5000
     exponential_base: 2

@@ -53,7 +53,7 @@ class TestLoadRuntimeConfig:
             "output_topic": "test-responses",
             "group_id": "test-group",
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         # Load config
@@ -143,7 +143,7 @@ class TestLoadRuntimeConfig:
         test_config = {
             "input_topic": "invalid topic with spaces",
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -166,7 +166,7 @@ class TestLoadRuntimeConfig:
             "output_topic": "also invalid",
             "event_bus": {"type": "unknown-type"},
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:
@@ -205,7 +205,7 @@ class TestLoadRuntimeConfig:
             "consumer_group": "bad group name",
             "event_bus": {"type": "unknown-type"},
         }
-        with open(config_file, "w") as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(test_config, f)
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:

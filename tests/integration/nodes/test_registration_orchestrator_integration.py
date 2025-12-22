@@ -140,34 +140,93 @@ class TestContractIntegration:
         assert contract_data["node_type"] == "ORCHESTRATOR"
 
     def test_input_model_importable(self, contract_data: dict) -> None:
-        """Test that input model specified in contract is importable."""
+        """Test that input model specified in contract is importable and valid.
+
+        Verifies:
+        - Model can be imported from specified module path
+        - Model class name matches contract specification
+        - Model is a proper Pydantic BaseModel with expected fields
+        """
+        import importlib
+
+        from pydantic import BaseModel
+
         input_model = contract_data["input_model"]
         module_path = input_model["module"]
         class_name = input_model["name"]
 
         # Import the module dynamically
-        import importlib
-
         module = importlib.import_module(module_path)
         model_class = getattr(module, class_name)
 
-        assert model_class is not None
+        # Verify class name matches contract
         assert class_name == "ModelOrchestratorInput"
+        assert model_class.__name__ == class_name
+
+        # Verify it's a Pydantic model via duck typing (check for model_fields attribute)
+        assert hasattr(model_class, "model_fields"), (
+            f"{class_name} must be a Pydantic model with 'model_fields'"
+        )
+
+        # Verify required fields are present
+        required_fields = {"introspection_event", "correlation_id"}
+        actual_fields = set(model_class.model_fields.keys())
+        missing_fields = required_fields - actual_fields
+        assert not missing_fields, (
+            f"{class_name} missing required fields: {missing_fields}"
+        )
+
+        # Verify model is subclass of BaseModel via duck typing
+        # (has model_validate method which is BaseModel behavior)
+        assert hasattr(model_class, "model_validate"), (
+            f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
+        )
 
     def test_output_model_importable(self, contract_data: dict) -> None:
-        """Test that output model specified in contract is importable."""
+        """Test that output model specified in contract is importable and valid.
+
+        Verifies:
+        - Model can be imported from specified module path
+        - Model class name matches contract specification
+        - Model is a proper Pydantic BaseModel with expected fields
+        """
+        import importlib
+
         output_model = contract_data["output_model"]
         module_path = output_model["module"]
         class_name = output_model["name"]
 
         # Import the module dynamically
-        import importlib
-
         module = importlib.import_module(module_path)
         model_class = getattr(module, class_name)
 
-        assert model_class is not None
+        # Verify class name matches contract
         assert class_name == "ModelOrchestratorOutput"
+        assert model_class.__name__ == class_name
+
+        # Verify it's a Pydantic model via duck typing (check for model_fields attribute)
+        assert hasattr(model_class, "model_fields"), (
+            f"{class_name} must be a Pydantic model with 'model_fields'"
+        )
+
+        # Verify required fields are present for orchestrator output
+        required_fields = {
+            "correlation_id",
+            "status",
+            "consul_applied",
+            "postgres_applied",
+            "intent_results",
+        }
+        actual_fields = set(model_class.model_fields.keys())
+        missing_fields = required_fields - actual_fields
+        assert not missing_fields, (
+            f"{class_name} missing required fields: {missing_fields}"
+        )
+
+        # Verify model is subclass of BaseModel via duck typing
+        assert hasattr(model_class, "model_validate"), (
+            f"{class_name} must have 'model_validate' method (Pydantic BaseModel)"
+        )
 
 
 # =============================================================================
@@ -315,6 +374,115 @@ class TestWorkflowGraphIntegration:
                 break
         else:
             pytest.fail("compute_intents node not found")
+
+    def test_all_8_nodes_have_correct_properties(self, contract_data: dict) -> None:
+        """Test that all 8 execution graph nodes have correct types and dependencies.
+
+        This test validates each of the 8 nodes in the registration orchestrator workflow:
+
+        1. receive_introspection (effect) - Entry point, no dependencies
+        2. read_projection (effect) - Reads state, depends on receive_introspection
+        3. evaluate_timeout (compute) - Evaluates timeout, depends on read_projection
+        4. compute_intents (reducer) - Generates intents, depends on evaluate_timeout
+        5. execute_consul_registration (effect) - Consul registration, depends on compute_intents
+        6. execute_postgres_registration (effect) - PostgreSQL registration, depends on compute_intents
+        7. aggregate_results (compute) - Aggregates results, depends on both registrations
+        8. publish_outcome (effect) - Publishes result event, depends on aggregate_results
+
+        Each node is validated for:
+        - Correct node_type (effect, compute, or reducer)
+        - Correct dependencies (depends_on list)
+        - Presence of description
+        """
+        nodes = contract_data["workflow_coordination"]["workflow_definition"][
+            "execution_graph"
+        ]["nodes"]
+
+        # Build lookup for easier validation
+        node_map = {n["node_id"]: n for n in nodes}
+
+        # Expected properties for all 8 nodes
+        # Format: node_id -> (node_type, depends_on)
+        expected_node_properties = {
+            # Node 1: Entry point - receives introspection or tick event
+            "receive_introspection": {
+                "node_type": "effect",
+                "depends_on": [],
+                "description": "Receive introspection or tick event",
+            },
+            # Node 2: Read projection state (OMN-930)
+            "read_projection": {
+                "node_type": "effect",
+                "depends_on": ["receive_introspection"],
+                "description": "Read current registration state from projection",
+            },
+            # Node 3: Evaluate timeout using injected time (OMN-973)
+            "evaluate_timeout": {
+                "node_type": "compute",
+                "depends_on": ["read_projection"],
+                "description": "Evaluate timeout based on injected now from RuntimeTick",
+            },
+            # Node 4: Compute intents via reducer
+            "compute_intents": {
+                "node_type": "reducer",
+                "depends_on": ["evaluate_timeout"],
+                "description": "Compute registration intents from introspection event",
+            },
+            # Node 5: Execute Consul registration
+            "execute_consul_registration": {
+                "node_type": "effect",
+                "depends_on": ["compute_intents"],
+                "description": "Execute Consul registration intent",
+            },
+            # Node 6: Execute PostgreSQL registration
+            "execute_postgres_registration": {
+                "node_type": "effect",
+                "depends_on": ["compute_intents"],
+                "description": "Execute PostgreSQL registration intent",
+            },
+            # Node 7: Aggregate registration results
+            "aggregate_results": {
+                "node_type": "compute",
+                "depends_on": ["execute_consul_registration", "execute_postgres_registration"],
+                "description": "Aggregate registration results",
+            },
+            # Node 8: Publish outcome event
+            "publish_outcome": {
+                "node_type": "effect",
+                "depends_on": ["aggregate_results"],
+                "description": "Publish registration outcome event",
+            },
+        }
+
+        # Validate we have exactly 8 nodes
+        assert len(expected_node_properties) == 8, "Test expects exactly 8 nodes"
+        assert len(node_map) == 8, f"Contract has {len(node_map)} nodes, expected 8"
+
+        # Validate each node's properties
+        for node_id, expected in expected_node_properties.items():
+            assert node_id in node_map, f"Missing node: {node_id}"
+            node = node_map[node_id]
+
+            # Validate node_type
+            assert node["node_type"] == expected["node_type"], (
+                f"Node '{node_id}' has type '{node['node_type']}', "
+                f"expected '{expected['node_type']}'"
+            )
+
+            # Validate dependencies (order-independent comparison)
+            actual_deps = set(node.get("depends_on", []))
+            expected_deps = set(expected["depends_on"])
+            assert actual_deps == expected_deps, (
+                f"Node '{node_id}' has dependencies {actual_deps}, "
+                f"expected {expected_deps}"
+            )
+
+            # Validate description exists
+            assert "description" in node, f"Node '{node_id}' missing description"
+            assert node["description"] == expected["description"], (
+                f"Node '{node_id}' has description '{node['description']}', "
+                f"expected '{expected['description']}'"
+            )
 
 
 # =============================================================================
@@ -512,16 +680,64 @@ class TestNodeIntegration:
     """Integration tests for node instantiation and base class behavior."""
 
     def test_node_instantiation_succeeds(self, mock_container: MagicMock) -> None:
-        """Test that node can be instantiated successfully."""
+        """Test that node can be instantiated successfully with proper state.
+
+        Verifies:
+        - Node is instantiated with expected type
+        - Container is stored as expected
+        - Node has required orchestrator attributes
+        """
         orchestrator = NodeRegistrationOrchestrator(mock_container)
-        assert orchestrator is not None
+
+        # Verify type via duck typing (check for class name match)
+        assert orchestrator.__class__.__name__ == "NodeRegistrationOrchestrator", (
+            "Instantiated object must be NodeRegistrationOrchestrator"
+        )
+
+        # Verify container reference is stored
+        assert hasattr(orchestrator, "container"), (
+            "Orchestrator must have 'container' attribute"
+        )
+        assert orchestrator.container is mock_container, (
+            "Container reference must match provided container"
+        )
 
     def test_node_inherits_base_class(self, mock_container: MagicMock) -> None:
-        """Test that node inherits from NodeOrchestrator base class."""
-        from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
+        """Test that node inherits from NodeOrchestrator base class.
 
+        Per ONEX conventions, we verify inheritance via duck typing by checking
+        for required methods and attributes rather than isinstance checks.
+        """
         orchestrator = NodeRegistrationOrchestrator(mock_container)
-        assert isinstance(orchestrator, NodeOrchestrator)
+
+        # Verify NodeOrchestrator behavior via duck typing
+        # NodeOrchestrator provides workflow execution and state management methods
+        required_methods = [
+            "process",  # Core processing method
+            "execute_workflow_from_contract",  # Contract-driven workflow execution
+            "validate_workflow_contract",  # Workflow contract validation
+            "get_workflow_snapshot",  # Workflow state management
+            "get_node_type",  # Node metadata
+        ]
+
+        for method_name in required_methods:
+            assert hasattr(orchestrator, method_name), (
+                f"Orchestrator must have '{method_name}' method from NodeOrchestrator"
+            )
+            assert callable(getattr(orchestrator, method_name)), (
+                f"'{method_name}' must be callable"
+            )
+
+        # Verify it has container attribute (set by NodeOrchestrator.__init__)
+        assert hasattr(orchestrator, "container"), (
+            "Orchestrator must have 'container' attribute from base class"
+        )
+
+        # Verify class hierarchy by checking MRO contains expected base class name
+        mro_names = [cls.__name__ for cls in orchestrator.__class__.__mro__]
+        assert "NodeOrchestrator" in mro_names, (
+            f"NodeOrchestrator must be in MRO, found: {mro_names}"
+        )
 
     def test_node_is_declarative(self, mock_container: MagicMock) -> None:
         """Test that node has no custom imperative methods."""
@@ -689,6 +905,10 @@ class TestWorkflowExecutionWithMocks:
         Returns a list of intents for Consul and PostgreSQL registration.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
+            ModelConsulIntentPayload,
+            ModelConsulRegistrationIntent,
+            ModelPostgresIntentPayload,
+            ModelPostgresUpsertIntent,
             ModelReducerState,
             ModelRegistrationIntent,
         )
@@ -713,21 +933,26 @@ class TestWorkflowExecutionWithMocks:
                 self.received_events.append(event)
                 self.received_states.append(state)
 
-                # Generate test intents
-                intents = [
-                    ModelRegistrationIntent(
-                        kind="consul",
+                # Generate test intents with typed payloads
+                intents: list[ModelRegistrationIntent] = [
+                    ModelConsulRegistrationIntent(
                         operation="register",
                         node_id=self._node_id,
                         correlation_id=self._correlation_id,
-                        payload={"service_name": f"node-{event.node_type}"},
+                        payload=ModelConsulIntentPayload(
+                            service_name=f"node-{event.node_type}",
+                        ),
                     ),
-                    ModelRegistrationIntent(
-                        kind="postgres",
+                    ModelPostgresUpsertIntent(
                         operation="upsert",
                         node_id=self._node_id,
                         correlation_id=self._correlation_id,
-                        payload={"node_type": event.node_type},
+                        payload=ModelPostgresIntentPayload(
+                            node_id=self._node_id,
+                            node_type=event.node_type,
+                            correlation_id=self._correlation_id,
+                            timestamp=event.timestamp.isoformat(),
+                        ),
                     ),
                 ]
 
@@ -762,23 +987,28 @@ class TestWorkflowExecutionWithMocks:
         Returns successful execution results for all intents.
         """
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
+            ModelConsulRegistrationIntent,
             ModelIntentExecutionResult,
+            ModelPostgresUpsertIntent,
             ModelRegistrationIntent,
         )
+
+        # Define the concrete union type for executed intents
+        ConcreteIntent = ModelConsulRegistrationIntent | ModelPostgresUpsertIntent
 
         class MockEffect:
             """Mock effect for testing workflow execution."""
 
             def __init__(self):
                 self.call_count = 0
-                self.executed_intents: list[ModelRegistrationIntent] = []
+                self.executed_intents: list[ConcreteIntent] = []
                 self.received_correlation_ids: list[UUID] = []
                 self.should_fail = False
                 self.fail_on_kind: str | None = None
 
             async def execute_intent(
                 self,
-                intent: ModelRegistrationIntent,
+                intent: ConcreteIntent,
                 correlation_id: UUID,
             ) -> ModelIntentExecutionResult:
                 """Execute a single intent."""
@@ -942,15 +1172,15 @@ class TestWorkflowExecutionWithMocks:
     ) -> None:
         """Test that effect executes intents and returns success results."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelRegistrationIntent,
+            ModelConsulIntentPayload,
+            ModelConsulRegistrationIntent,
         )
 
-        intent = ModelRegistrationIntent(
-            kind="consul",
+        intent = ModelConsulRegistrationIntent(
             operation="register",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload={"service_name": "test-node"},
+            payload=ModelConsulIntentPayload(service_name="test-node"),
         )
 
         result = await mock_effect.execute_intent(intent, correlation_id)
@@ -972,17 +1202,17 @@ class TestWorkflowExecutionWithMocks:
     ) -> None:
         """Test that effect returns failure result when configured to fail."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelRegistrationIntent,
+            ModelConsulIntentPayload,
+            ModelConsulRegistrationIntent,
         )
 
         mock_effect.should_fail = True
 
-        intent = ModelRegistrationIntent(
-            kind="consul",
+        intent = ModelConsulRegistrationIntent(
             operation="register",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload={},
+            payload=ModelConsulIntentPayload(service_name="test-node"),
         )
 
         result = await mock_effect.execute_intent(intent, correlation_id)
@@ -1019,15 +1249,20 @@ class TestWorkflowExecutionWithMocks:
     ) -> None:
         """Test correlation ID is passed to effect execution."""
         from omnibase_infra.nodes.node_registration_orchestrator.models import (
-            ModelRegistrationIntent,
+            ModelPostgresIntentPayload,
+            ModelPostgresUpsertIntent,
         )
 
-        intent = ModelRegistrationIntent(
-            kind="postgres",
+        intent = ModelPostgresUpsertIntent(
             operation="upsert",
             node_id=node_id,
             correlation_id=correlation_id,
-            payload={},
+            payload=ModelPostgresIntentPayload(
+                node_id=node_id,
+                node_type="effect",
+                correlation_id=correlation_id,
+                timestamp="2025-01-01T00:00:00Z",
+            ),
         )
 
         await mock_effect.execute_intent(intent, correlation_id)
@@ -1260,9 +1495,31 @@ class TestWorkflowExecutionWithMocks:
         self,
         orchestrator_with_mocks,
     ) -> None:
-        """Test that orchestrator can be instantiated with mock container."""
-        assert orchestrator_with_mocks is not None
-        assert isinstance(orchestrator_with_mocks, NodeRegistrationOrchestrator)
+        """Test that orchestrator can be instantiated with mock container.
+
+        Verifies via duck typing (per ONEX conventions):
+        - Orchestrator has expected class identity
+        - Orchestrator has required methods and attributes
+        """
+        # Verify type via duck typing (check class name, not isinstance)
+        assert orchestrator_with_mocks.__class__.__name__ == "NodeRegistrationOrchestrator", (
+            f"Expected NodeRegistrationOrchestrator, got {orchestrator_with_mocks.__class__.__name__}"
+        )
+
+        # Verify orchestrator has required methods from NodeOrchestrator base
+        required_methods = ["process", "execute_workflow_from_contract", "get_node_type"]
+        for method_name in required_methods:
+            assert hasattr(orchestrator_with_mocks, method_name), (
+                f"Orchestrator must have '{method_name}' method"
+            )
+            assert callable(getattr(orchestrator_with_mocks, method_name)), (
+                f"'{method_name}' must be callable"
+            )
+
+        # Verify container is properly injected
+        assert hasattr(orchestrator_with_mocks, "container"), (
+            "Orchestrator must have 'container' attribute"
+        )
 
     def test_mock_container_provides_dependencies(
         self,

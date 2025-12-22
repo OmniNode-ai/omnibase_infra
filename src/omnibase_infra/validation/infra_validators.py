@@ -723,7 +723,8 @@ def validate_infra_union_usage(
     violation_count = len(filtered_errors)
 
     # Log informational union statistics
-    total_unions = base_result.metadata.total_unions if base_result.metadata else 0
+    # Guard against missing metadata or total_unions attribute
+    total_unions = getattr(base_result.metadata, "total_unions", 0) if base_result.metadata else 0
     logger.debug(
         "Union validation: %d violations (threshold: %d), %d total unions",
         violation_count,

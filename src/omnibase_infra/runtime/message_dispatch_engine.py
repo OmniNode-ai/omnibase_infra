@@ -1200,9 +1200,36 @@ class MessageDispatchEngine:
             )
 
         # Convert list of output topics to ModelDispatchOutputs
-        dispatch_outputs: ModelDispatchOutputs | None = (
-            ModelDispatchOutputs(topics=outputs) if outputs else None
-        )
+        # Handle Pydantic validation errors (e.g., invalid topic format)
+        dispatch_outputs: ModelDispatchOutputs | None = None
+        if outputs:
+            try:
+                dispatch_outputs = ModelDispatchOutputs(topics=outputs)
+            except ValueError as validation_error:
+                # Log validation failure with context (no secrets in topic names)
+                # Note: Using _sanitize_error_message for consistency, though topic
+                # validation errors typically don't contain sensitive data
+                sanitized_validation_error = _sanitize_error_message(validation_error)
+                self._logger.error(
+                    "Failed to validate dispatch outputs (%d topics): %s",
+                    len(outputs),
+                    sanitized_validation_error,
+                    extra=self._build_log_context(
+                        topic=topic,
+                        category=topic_category,
+                        message_type=message_type,
+                        correlation_id=correlation_id,
+                        trace_id=trace_id,
+                        error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+                    ),
+                )
+                # Add validation error to dispatcher_errors for result
+                validation_error_msg = (
+                    f"Output validation failed: {sanitized_validation_error}"
+                )
+                dispatcher_errors.append(validation_error_msg)
+                # Update status to reflect validation error
+                status = EnumDispatchStatus.HANDLER_ERROR
 
         return ModelDispatchResult(
             dispatch_id=dispatch_id,

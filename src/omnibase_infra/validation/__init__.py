@@ -167,6 +167,17 @@ from omnibase_infra.validation.topic_category_validator import (
     validate_topic_categories_in_file,
 )
 
+# Contract linting for CI gate (PR #57)
+from omnibase_infra.validation.contract_linter import (
+    ContractLinter,
+    EnumContractViolationSeverity,
+    ModelContractLintResult,
+    ModelContractViolation,
+    lint_contract_file,
+    lint_contracts_ci,
+    lint_contracts_in_directory,
+)
+
 __all__ = [
     # Direct re-exports from omnibase_core
     "validate_architecture",
@@ -219,4 +230,12 @@ __all__ = [
     "ChainPropagationValidator",
     "enforce_chain_propagation",
     "validate_message_chain",
+    # Contract linting (PR #57)
+    "ContractLinter",
+    "EnumContractViolationSeverity",
+    "ModelContractLintResult",
+    "ModelContractViolation",
+    "lint_contract_file",
+    "lint_contracts_ci",
+    "lint_contracts_in_directory",
 ]
