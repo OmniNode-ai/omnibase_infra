@@ -54,6 +54,17 @@ if TYPE_CHECKING:
 
 
 # -----------------------------------------------------------------------------
+# Test Constants
+# -----------------------------------------------------------------------------
+
+# Expected intents for a complete registration operation
+# The RegistrationReducer emits exactly 2 intents per introspection event:
+# 1. consul.register - Register node with Consul service discovery
+# 2. postgres.upsert_registration - Upsert node metadata in PostgreSQL
+EXPECTED_REGISTRATION_INTENTS = 2
+
+
+# -----------------------------------------------------------------------------
 # Fixtures
 # -----------------------------------------------------------------------------
 
@@ -161,7 +172,7 @@ class TestBasicReduce:
         """Test that valid event produces Consul + PostgreSQL intents."""
         output = reducer.reduce(initial_state, valid_event)
 
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         intent_types = {intent.intent_type for intent in output.intents}
         assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
@@ -222,7 +233,7 @@ class TestBasicReduce:
             event = create_introspection_event(node_type=node_type)
             output = reducer.reduce(initial_state, event)
 
-            assert len(output.intents) == 2, f"Failed for node_type: {node_type}"
+            assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS, f"Failed for node_type: {node_type}"
             assert output.result.status == "pending"
 
 
@@ -375,8 +386,8 @@ class TestIdempotency:
         output2 = reducer.reduce(state_after_first, event2)
 
         # Both should emit intents
-        assert len(output1.intents) == 2
-        assert len(output2.intents) == 2
+        assert len(output1.intents) == EXPECTED_REGISTRATION_INTENTS
+        assert len(output2.intents) == EXPECTED_REGISTRATION_INTENTS
 
     def test_reduce_duplicate_detection_uses_correlation_id(
         self,
@@ -774,6 +785,117 @@ class TestReducerReset:
         assert output.result.consul_confirmed is True
         assert output.items_processed == 1  # Event was processed (caused state change)
 
+    def test_reset_from_all_states(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test reset behavior across the entire FSM state space.
+
+        This comprehensive test validates the reset operation for ALL five
+        FSM states, providing a single authoritative reference for reset
+        behavior. The test documents and validates the following invariants:
+
+        FSM Reset Behavior Matrix:
+        ┌──────────┬──────────────┬────────────────────────────────────────┐
+        │ State    │ Reset Result │ Rationale                              │
+        ├──────────┼──────────────┼────────────────────────────────────────┤
+        │ idle     │ FAILS        │ Nothing to reset; validation error     │
+        │ pending  │ FAILS        │ Would lose in-flight registration      │
+        │ partial  │ FAILS        │ Would cause backend inconsistency      │
+        │ complete │ SUCCEEDS     │ Safe terminal state; returns to idle   │
+        │ failed   │ SUCCEEDS     │ Safe terminal state; enables retry     │
+        └──────────┴──────────────┴────────────────────────────────────────┘
+
+        Design Rationale:
+            Reset is only allowed from terminal states (complete, failed) because:
+            1. Non-terminal states have in-flight operations that would be lost
+            2. Partial state has one backend confirmed; reset would leave
+               inconsistent state between Consul and PostgreSQL
+            3. Terminal states are safe because the registration workflow
+               has completed (successfully or with failure)
+
+        This test complements the individual state tests by:
+            - Providing a single test that validates the complete FSM
+            - Documenting the state machine invariants in one place
+            - Ensuring no state is accidentally omitted from testing
+            - Making FSM behavior changes immediately visible
+
+        Related:
+            - DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md
+            - OMN-950: Reducer test completeness
+        """
+        base_state = ModelRegistrationState()
+        node_id = uuid4()
+
+        # Build states for each FSM position
+        idle_state = base_state
+        pending_state = base_state.with_pending_registration(node_id, uuid4())
+        partial_consul_state = pending_state.with_consul_confirmed(uuid4())
+        partial_postgres_state = pending_state.with_postgres_confirmed(uuid4())
+        complete_state = partial_consul_state.with_postgres_confirmed(uuid4())
+        failed_state = pending_state.with_failure("consul_failed", uuid4())
+
+        # Define expected behaviors for each state
+        # Format: (state, state_name, should_succeed, expected_status, expected_failure_reason)
+        test_cases: list[
+            tuple[
+                ModelRegistrationState,
+                str,
+                bool,
+                str,
+                FailureReason | None,
+            ]
+        ] = [
+            # Terminal states - reset should SUCCEED
+            (complete_state, "complete", True, "idle", None),
+            (failed_state, "failed", True, "idle", None),
+            # Non-terminal states - reset should FAIL with invalid_reset_state
+            (idle_state, "idle", False, "failed", "invalid_reset_state"),
+            (pending_state, "pending", False, "failed", "invalid_reset_state"),
+            (partial_consul_state, "partial (consul confirmed)", False, "failed", "invalid_reset_state"),
+            (partial_postgres_state, "partial (postgres confirmed)", False, "failed", "invalid_reset_state"),
+        ]
+
+        for state, state_name, should_succeed, expected_status, expected_failure in test_cases:
+            reset_event_id = uuid4()
+            output = reducer.reduce_reset(state, reset_event_id)
+
+            # Validate status transition
+            assert output.result.status == expected_status, (
+                f"Reset from {state_name}: expected status '{expected_status}', "
+                f"got '{output.result.status}'"
+            )
+
+            # Validate failure reason
+            assert output.result.failure_reason == expected_failure, (
+                f"Reset from {state_name}: expected failure_reason '{expected_failure}', "
+                f"got '{output.result.failure_reason}'"
+            )
+
+            # Validate processing count (all resets should process the event)
+            assert output.items_processed == 1, (
+                f"Reset from {state_name}: expected items_processed=1, "
+                f"got {output.items_processed}"
+            )
+
+            # Validate no intents emitted (resets never emit intents)
+            assert len(output.intents) == 0, (
+                f"Reset from {state_name}: expected no intents, "
+                f"got {len(output.intents)}"
+            )
+
+            if should_succeed:
+                # Successful reset should clear all state
+                assert output.result.node_id is None, (
+                    f"Reset from {state_name}: node_id should be None after successful reset"
+                )
+                assert output.result.consul_confirmed is False, (
+                    f"Reset from {state_name}: consul_confirmed should be False after successful reset"
+                )
+                assert output.result.postgres_confirmed is False, (
+                    f"Reset from {state_name}: postgres_confirmed should be False after successful reset"
+                )
+
     def test_reduce_reset_emits_no_intents(
         self,
         reducer: RegistrationReducer,
@@ -819,7 +941,7 @@ class TestReducerReset:
         event1 = create_introspection_event()
         output1 = reducer.reduce(initial_state, event1)
         assert output1.result.status == "pending"
-        assert len(output1.intents) == 2
+        assert len(output1.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Simulate failure
         failed_state = output1.result.with_failure("consul_failed", uuid4())
@@ -833,7 +955,7 @@ class TestReducerReset:
         event2 = create_introspection_event()
         retry_output = reducer.reduce(reset_output.result, event2)
         assert retry_output.result.status == "pending"
-        assert len(retry_output.intents) == 2
+        assert len(retry_output.intents) == EXPECTED_REGISTRATION_INTENTS
 
 
 # -----------------------------------------------------------------------------
@@ -1332,7 +1454,7 @@ class TestEdgeCases:
 
         output = reducer.reduce(initial_state, event)
 
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         assert output.result.status == "pending"
 
     def test_reduce_with_empty_capabilities(
@@ -1352,7 +1474,7 @@ class TestEdgeCases:
 
         output = reducer.reduce(initial_state, event)
 
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         assert output.result.status == "pending"
 
     def test_reduce_uses_deterministic_id_when_mock_has_no_correlation_id(
@@ -1447,7 +1569,7 @@ class TestEdgeCases:
 
         output = reducer.reduce(initial_state, event)
 
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         assert output.result.status == "pending"
 
         # Verify PostgreSQL record captures all the data
@@ -1826,7 +1948,7 @@ class TestCompleteStateTransitions:
 
         assert output.result.status == "pending"
         assert output.result.node_id == event.node_id
-        assert len(output.intents) == 2  # Consul + PostgreSQL intents
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS  # Consul + PostgreSQL intents
 
     # -------------------------------------------------------------------------
     # Transition 2: pending -> partial (Consul confirmed first)
@@ -2337,7 +2459,7 @@ class TestCompleteStateTransitions:
         event = create_introspection_event()
         pending_output = reducer.reduce(initial_state, event)
         assert pending_output.result.status == "pending"
-        assert len(pending_output.intents) == 2
+        assert len(pending_output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Step 2: pending -> partial (first confirmation)
         partial_state = pending_output.result.with_consul_confirmed(uuid4())
@@ -2385,7 +2507,7 @@ class TestCompleteStateTransitions:
         retry_event = create_introspection_event()
         retry_output = reducer.reduce(reset_output.result, retry_event)
         assert retry_output.result.status == "pending"
-        assert len(retry_output.intents) == 2
+        assert len(retry_output.intents) == EXPECTED_REGISTRATION_INTENTS
 
 
 # -----------------------------------------------------------------------------
@@ -2453,7 +2575,7 @@ class TestCircuitBreakerNonApplicability:
         output = reducer.reduce(initial_state, valid_event)
 
         # Reducer emits intents, not results of I/O operations
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         for intent in output.intents:
             # Intents are declarative descriptions
@@ -2516,12 +2638,12 @@ except ImportError:
     _F = TypeVar("_F", bound=Callable[..., Any])
 
     def given(*args: Any, **kwargs: Any) -> Callable[[_F], _F]:  # type: ignore[no-redef]
-        def decorator(func: _F) -> Any:
-            return pytest.mark.skip(
+        def decorator(func: _F) -> _F:
+            return pytest.mark.skip(  # type: ignore[no-any-return]
                 reason="hypothesis not installed - add to dev dependencies"
             )(func)
 
-        return decorator  # type: ignore[return-value]
+        return decorator
 
     def settings(*args: Any, **kwargs: Any) -> Callable[[_F], _F]:  # type: ignore[no-redef]
         def decorator(func: _F) -> _F:
@@ -2667,7 +2789,7 @@ class TestDeterminismProperty:
         # First reduce establishes the state
         output = reducer.reduce(initial_state, event)
         state_after_first = output.result
-        assert len(output.intents) == 2  # Consul + PostgreSQL
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS  # Consul + PostgreSQL
 
         # All subsequent replays should be idempotent
         current_state = state_after_first
@@ -2977,7 +3099,7 @@ class TestEdgeCasesComprehensive:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify intents are still built correctly with minimal data
         consul_intent = next(
@@ -3031,7 +3153,7 @@ class TestEdgeCasesComprehensive:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify all endpoints are captured in PostgreSQL intent
         postgres_intent = next(
@@ -3144,7 +3266,7 @@ class TestEdgeCasesComprehensive:
         output2 = reducer.reduce(reset_output.result, event2)
         assert output2.result.status == "pending"
         assert output2.result.node_id == node_id
-        assert len(output2.intents) == 2
+        assert len(output2.intents) == EXPECTED_REGISTRATION_INTENTS
 
     def test_events_with_same_timestamp(
         self,
@@ -3451,7 +3573,7 @@ class TestTimeoutScenarios:
         event2 = create_introspection_event(node_id=node_id)
         output2 = reducer.reduce(reset_output.result, event2)
         assert output2.result.status == "pending"
-        assert len(output2.intents) == 2
+        assert len(output2.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Step 5: Complete successfully
         consul_confirmed = output2.result.with_consul_confirmed(uuid4())
@@ -4731,7 +4853,7 @@ class TestPropertyBasedStateInvariants:
         state_after_first = output1.result
 
         assert output1.items_processed == 1, "First reduce should process 1 item"
-        assert len(output1.intents) == 2, "First reduce should emit 2 intents"
+        assert len(output1.intents) == EXPECTED_REGISTRATION_INTENTS, "First reduce should emit 2 intents"
         assert state_after_first.status == "pending", "State should be pending"
         assert state_after_first.last_processed_event_id == correlation_id
 
@@ -4956,7 +5078,7 @@ class TestBoundaryConditions:
 
         assert output.result.status == "pending"
         assert output.result.node_id == max_uuid
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify max UUID appears correctly in intents
         consul_intent = next(
@@ -5004,7 +5126,7 @@ class TestBoundaryConditions:
 
         assert output.result.status == "pending"
         assert output.result.node_id == min_uuid
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify min UUID appears correctly in intents
         consul_intent = next(
@@ -5063,7 +5185,7 @@ class TestBoundaryConditions:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify minimal version is preserved in intents
         consul_intent = next(
@@ -5111,7 +5233,7 @@ class TestBoundaryConditions:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify long URLs are preserved without truncation
         consul_intent = next(
@@ -5164,7 +5286,7 @@ class TestBoundaryConditions:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify metadata is preserved in PostgreSQL intent
         postgres_intent = next(
@@ -5285,7 +5407,7 @@ class TestBoundaryConditions:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify all endpoints are preserved
         postgres_intent = next(
@@ -5568,7 +5690,7 @@ class TestCommandFoldingProhibited:
 
             # Verify reduce completed successfully
             assert output.result.status == "pending"
-            assert len(output.intents) == 2
+            assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
             # Verify no network calls were made
             mock_socket.assert_not_called()
