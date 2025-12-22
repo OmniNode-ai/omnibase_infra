@@ -223,13 +223,13 @@ Patterns: FAIL
 **Symptom**:
 ```
 Unions: FAIL
-  - Found 405 unions (max: 400)
+  - Found 495 unions (max: 491)
 ```
 
 **Root Cause**: Too many Union types in codebase
 
-**Context**: The current INFRA_MAX_UNIONS threshold is 400, set as a tight buffer above
-the baseline (~379 unions as of 2025-12-20). Most unions are legitimate `X | None`
+**Context**: The current INFRA_MAX_UNIONS threshold is 491, set as a buffer above
+the baseline (~485 unions as of 2025-12-21). Most unions are legitimate `X | None`
 nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged
 as violations. The target is to reduce to <200 through `dict[str, object]` to `JsonValue` migration.
 
@@ -276,9 +276,9 @@ as violations. The target is to reduce to <200 through `dict[str, object]` to `J
 
 4. **Adjust threshold only if absolutely necessary**:
    ```python
-   # Current threshold is 400 (tight buffer above ~379 baseline)
+   # Current threshold is 491 (buffer above ~485 baseline as of 2025-12-21)
    # Only increase with documented justification and ticket reference
-   INFRA_MAX_UNIONS = 410  # Document justification per OMN-XXX
+   INFRA_MAX_UNIONS = 491  # Document justification per OMN-983
    ```
 
 **Prevention**: Prefer protocols/base classes over large unions. Migrate

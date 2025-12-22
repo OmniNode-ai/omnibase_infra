@@ -32,11 +32,11 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
     def test_valid_instantiation_required_fields_only(self) -> None:
         """Test creating event with only required fields."""
         test_node_id = uuid4()
-        test_correlation_id = uuid4()
+        correlation_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
-            correlation_id=test_correlation_id,
+            correlation_id=correlation_id,
         )
         assert event.node_id == test_node_id
         assert event.node_type == "effect"
@@ -45,7 +45,8 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         assert event.endpoints == {}
         assert event.node_role is None
         assert event.metadata == ModelNodeMetadata()
-        assert event.correlation_id == test_correlation_id
+        assert isinstance(event.correlation_id, UUID)
+        assert event.correlation_id == correlation_id
         assert event.network_id is None
         assert event.deployment_id is None
         assert event.epoch is None
@@ -573,56 +574,56 @@ class TestModelNodeIntrospectionEventEquality:
     def test_equal_events_are_equal(self) -> None:
         """Test that two events with same values are equal."""
         test_node_id = uuid4()
-        test_correlation_id = uuid4()
+        correlation_id = uuid4()
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         event1 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
             timestamp=timestamp,
-            correlation_id=test_correlation_id,
+            correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
             timestamp=timestamp,
-            correlation_id=test_correlation_id,
+            correlation_id=correlation_id,
         )
         assert event1 == event2
 
     def test_different_node_id_not_equal(self) -> None:
         """Test that events with different node_id are not equal."""
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
-        test_correlation_id = uuid4()
+        correlation_id = uuid4()
         event1 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
             node_type="effect",
             timestamp=timestamp,
-            correlation_id=test_correlation_id,
+            correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
             node_type="effect",
             timestamp=timestamp,
-            correlation_id=test_correlation_id,
+            correlation_id=correlation_id,
         )
         assert event1 != event2
 
     def test_different_node_type_not_equal(self) -> None:
         """Test that events with different node_type are not equal."""
         test_node_id = uuid4()
-        test_correlation_id = uuid4()
+        correlation_id = uuid4()
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         event1 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
             timestamp=timestamp,
-            correlation_id=test_correlation_id,
+            correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="compute",
             timestamp=timestamp,
-            correlation_id=test_correlation_id,
+            correlation_id=correlation_id,
         )
         assert event1 != event2
 

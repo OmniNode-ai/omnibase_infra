@@ -106,44 +106,62 @@ class DispatchContextEnforcer:
     .. versionadded:: 0.5.0
     """
 
-    def create_context_for_dispatcher(
+    def create_context_for_node_kind(
         self,
-        dispatcher: ProtocolMessageDispatcher,
+        node_kind: EnumNodeKind,
         envelope: ModelEventEnvelope[object],
+        dispatcher_id: str,
     ) -> ModelDispatchContext:
         """
-        Create appropriate dispatch context based on dispatcher's node_kind.
+        Create appropriate dispatch context based on node_kind.
 
-        Examines the dispatcher's node_kind and creates a context with or
-        without time injection according to ONEX rules:
+        This is the core method that implements time injection rules. Both
+        ``create_context_for_dispatcher()`` and external callers (e.g.,
+        ``MessageDispatchEngine._create_context_for_entry()``) delegate to
+        this method to ensure a single source of truth for context creation.
 
-        - REDUCER: No time injection (deterministic)
-        - COMPUTE: No time injection (pure transformation)
-        - ORCHESTRATOR: With time injection (coordination)
-        - EFFECT: With time injection (I/O operations)
-        - RUNTIME_HOST: With time injection (infrastructure)
+        Time Injection Rules:
+            - REDUCER: No time injection (deterministic state aggregation)
+            - COMPUTE: No time injection (pure transformation)
+            - ORCHESTRATOR: With time injection (coordination)
+            - EFFECT: With time injection (I/O operations)
+            - RUNTIME_HOST: With time injection (infrastructure)
 
         Args:
-            dispatcher: The dispatcher to create context for.
+            node_kind: The ONEX node kind determining time injection behavior.
             envelope: The event envelope containing correlation metadata.
+            dispatcher_id: Identifier for the dispatcher (used in error messages).
 
         Returns:
             ModelDispatchContext configured appropriately for the node kind.
 
         Raises:
-            ModelOnexError: If node_kind is unrecognized (VALIDATION_FAILED).
+            ModelOnexError: If node_kind is unrecognized (INTERNAL_ERROR).
+
+        Time Semantics:
+            The ``now`` field is captured at context creation time (dispatch time),
+            NOT at handler execution time. For ORCHESTRATOR, EFFECT, and RUNTIME_HOST
+            nodes, this means:
+
+            - ``now`` represents when the context was created
+            - Handler execution may occur microseconds to milliseconds later
+            - For most use cases, this drift is negligible
+            - If sub-millisecond precision is required, handlers should capture
+              their own time at the start of execution
 
         Example:
-            >>> ctx = enforcer.create_context_for_dispatcher(dispatcher, envelope)
-            >>> if dispatcher.node_kind == EnumNodeKind.REDUCER:
-            ...     assert ctx.now is None
-            ... else:
-            ...     assert ctx.now is not None
+            >>> ctx = enforcer.create_context_for_node_kind(
+            ...     EnumNodeKind.REDUCER, envelope, "my-dispatcher"
+            ... )
+            >>> assert ctx.now is None  # No time for reducers
 
         .. versionadded:: 0.5.0
-        """
-        node_kind = dispatcher.node_kind
 
+        .. versionchanged:: 0.5.x
+            Error code for unrecognized node_kind changed from VALIDATION_ERROR
+            to INTERNAL_ERROR. This reflects that unhandled cases are internal
+            implementation errors (missing switch cases), not validation failures.
+        """
         # Extract correlation metadata from envelope
         correlation_id = envelope.correlation_id or uuid4()
         trace_id = envelope.trace_id
@@ -184,11 +202,54 @@ class DispatchContextEnforcer:
                 now=datetime.now(UTC),
             )
 
-        # Unknown node kind - should not happen with valid EnumNodeKind
+        # Unknown node kind - should never happen as all EnumNodeKind values are handled above.
+        # If we reach here, a new enum value was added without updating this switch.
         raise ModelOnexError(
-            message=f"Unknown node_kind '{node_kind}' for dispatcher "
-            f"'{dispatcher.dispatcher_id}'. Cannot determine time injection rules.",
-            error_code=EnumCoreErrorCode.VALIDATION_FAILED,
+            message=f"Unhandled node_kind '{node_kind}' for dispatcher "
+            f"'{dispatcher_id}'. This is an internal error - missing case handler.",
+            error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+        )
+
+    def create_context_for_dispatcher(
+        self,
+        dispatcher: ProtocolMessageDispatcher,
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchContext:
+        """
+        Create appropriate dispatch context based on dispatcher's node_kind.
+
+        Examines the dispatcher's node_kind and creates a context with or
+        without time injection according to ONEX rules:
+
+        - REDUCER: No time injection (deterministic)
+        - COMPUTE: No time injection (pure transformation)
+        - ORCHESTRATOR: With time injection (coordination)
+        - EFFECT: With time injection (I/O operations)
+        - RUNTIME_HOST: With time injection (infrastructure)
+
+        Args:
+            dispatcher: The dispatcher to create context for.
+            envelope: The event envelope containing correlation metadata.
+
+        Returns:
+            ModelDispatchContext configured appropriately for the node kind.
+
+        Raises:
+            ModelOnexError: If node_kind is unrecognized (INTERNAL_ERROR).
+
+        Example:
+            >>> ctx = enforcer.create_context_for_dispatcher(dispatcher, envelope)
+            >>> if dispatcher.node_kind == EnumNodeKind.REDUCER:
+            ...     assert ctx.now is None
+            ... else:
+            ...     assert ctx.now is not None
+
+        .. versionadded:: 0.5.0
+        """
+        return self.create_context_for_node_kind(
+            node_kind=dispatcher.node_kind,
+            envelope=envelope,
+            dispatcher_id=dispatcher.dispatcher_id,
         )
 
     def validate_no_time_injection_for_reducer(

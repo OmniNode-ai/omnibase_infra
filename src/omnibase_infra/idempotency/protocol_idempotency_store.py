@@ -11,7 +11,7 @@ Migration Note:
     available in omnibase_spi versions 0.4.0/0.4.1. This is a TEMPORARY
     definition that should be migrated to omnibase_spi in a future release.
 
-    Migration Path (OMN-999):
+    Migration Path (TICKET PENDING - create ticket for protocol migration to omnibase_spi):
         1. When omnibase_spi 0.5.0+ is released with ProtocolIdempotencyStore,
            update pyproject.toml to require the new version
         2. Update imports in InMemoryIdempotencyStore and PostgresIdempotencyStore
