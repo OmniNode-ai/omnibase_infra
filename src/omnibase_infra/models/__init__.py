@@ -19,7 +19,9 @@ from omnibase_infra.models.dispatch import (
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
+    ModelRegistrationSnapshot,
     ModelSequenceInfo,
+    ModelSnapshotTopicConfig,
 )
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -48,7 +50,9 @@ __all__ = [
     "ModelHealthCheckResult",
     # Projection models
     "ModelRegistrationProjection",
+    "ModelRegistrationSnapshot",
     "ModelSequenceInfo",
+    "ModelSnapshotTopicConfig",
     # Registration models
     "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",
