@@ -1487,9 +1487,9 @@ class TestPureFunctionContract:
             for attr in dir(reducer)
             if not attr.startswith("_") and not callable(getattr(reducer, attr))
         ]
-        assert len(instance_vars) == 0, (
-            f"Reducer should have no instance state, found: {instance_vars}"
-        )
+        assert (
+            len(instance_vars) == 0
+        ), f"Reducer should have no instance state, found: {instance_vars}"
 
     def test_reduce_does_not_mutate_input_state(
         self,
@@ -1712,9 +1712,9 @@ class TestPerformance:
 
         # Average processing time should be reasonable
         avg_time = total_processing_time / num_events
-        assert avg_time < PERF_THRESHOLD_REDUCE_MS / 2, (
-            f"Average processing time {avg_time}ms is too high"
-        )
+        assert (
+            avg_time < PERF_THRESHOLD_REDUCE_MS / 2
+        ), f"Average processing time {avg_time}ms is too high"
 
 
 # -----------------------------------------------------------------------------
@@ -1791,9 +1791,9 @@ class TestCompleteStateTransitions:
         valid_states = set(get_args(RegistrationStatus))
 
         expected_states = {"idle", "pending", "partial", "complete", "failed"}
-        assert valid_states == expected_states, (
-            f"Expected states {expected_states}, got {valid_states}"
-        )
+        assert (
+            valid_states == expected_states
+        ), f"Expected states {expected_states}, got {valid_states}"
 
     def test_initial_state_is_idle(self) -> None:
         """Verify that the default initial state is idle."""
@@ -2190,9 +2190,9 @@ class TestCompleteStateTransitions:
         # Even if we try both confirmations at once, we must go through partial
         # First confirmation -> partial (not complete)
         after_first = pending_state.with_consul_confirmed(uuid4())
-        assert after_first.status == "partial", (
-            "First confirmation should result in partial, not complete"
-        )
+        assert (
+            after_first.status == "partial"
+        ), "First confirmation should result in partial, not complete"
 
         # Only second confirmation -> complete
         after_second = after_first.with_postgres_confirmed(uuid4())
@@ -2424,9 +2424,9 @@ class TestCircuitBreakerNonApplicability:
 
         for method_name in methods:
             method = getattr(reducer, method_name)
-            assert not inspect.iscoroutinefunction(method), (
-                f"Method {method_name} is async - reducers should be pure/sync"
-            )
+            assert not inspect.iscoroutinefunction(
+                method
+            ), f"Method {method_name} is async - reducers should be pure/sync"
 
     def test_reducer_has_no_circuit_breaker_mixin(self) -> None:
         """Verify reducer does not inherit from MixinAsyncCircuitBreaker."""
@@ -2435,9 +2435,9 @@ class TestCircuitBreakerNonApplicability:
         # Check MRO for circuit breaker mixin
         mro_names = [cls.__name__ for cls in type(reducer).__mro__]
 
-        assert "MixinAsyncCircuitBreaker" not in mro_names, (
-            "Pure reducers should not have circuit breaker mixin"
-        )
+        assert (
+            "MixinAsyncCircuitBreaker" not in mro_names
+        ), "Pure reducers should not have circuit breaker mixin"
 
     def test_reducer_outputs_intents_not_io(
         self,
@@ -2605,9 +2605,9 @@ class TestDeterminismProperty:
         output2 = reducer.reduce(state, event)
 
         # State must be identical
-        assert output1.result == output2.result, (
-            f"State mismatch for node_type={node_type}, version={node_version}"
-        )
+        assert (
+            output1.result == output2.result
+        ), f"State mismatch for node_type={node_type}, version={node_version}"
 
         # Intent count and structure must be identical
         assert len(output1.intents) == len(output2.intents)
@@ -2670,9 +2670,9 @@ class TestDeterminismProperty:
             replay_output = reducer.reduce(current_state, event)
 
             # State should be unchanged
-            assert replay_output.result == state_after_first, (
-                f"State changed on replay {i + 2}"
-            )
+            assert (
+                replay_output.result == state_after_first
+            ), f"State changed on replay {i + 2}"
 
             # No intents should be emitted on replay
             assert len(replay_output.intents) == 0, f"Intents emitted on replay {i + 2}"
@@ -2716,9 +2716,9 @@ class TestDeterminismProperty:
         derived_id_3 = reducer._derive_deterministic_event_id(mock_event)
 
         # All derived IDs must be identical
-        assert derived_id_1 == derived_id_2 == derived_id_3, (
-            f"Derived IDs not deterministic for node_type={node_type}"
-        )
+        assert (
+            derived_id_1 == derived_id_2 == derived_id_3
+        ), f"Derived IDs not deterministic for node_type={node_type}"
 
         # Derived ID must be a valid UUID
         assert isinstance(derived_id_1, UUID)
@@ -2778,13 +2778,13 @@ class TestDeterminismProperty:
                     record2.pop(key, None)
                 payload1["record"] = record1
                 payload2["record"] = record2
-                assert payload1 == payload2, (
-                    f"Payload mismatch for intent_type={intent1.intent_type}"
-                )
+                assert (
+                    payload1 == payload2
+                ), f"Payload mismatch for intent_type={intent1.intent_type}"
             else:
-                assert intent1.payload == intent2.payload, (
-                    f"Payload mismatch for intent_type={intent1.intent_type}"
-                )
+                assert (
+                    intent1.payload == intent2.payload
+                ), f"Payload mismatch for intent_type={intent1.intent_type}"
 
     @given(
         num_reducers=st.integers(min_value=2, max_value=5),
@@ -2818,12 +2818,12 @@ class TestDeterminismProperty:
         # All outputs must have identical results
         first_output = outputs[0]
         for i, output in enumerate(outputs[1:], start=2):
-            assert output.result == first_output.result, (
-                f"Result mismatch between reducer 1 and {i}"
-            )
-            assert len(output.intents) == len(first_output.intents), (
-                f"Intent count mismatch between reducer 1 and {i}"
-            )
+            assert (
+                output.result == first_output.result
+            ), f"Result mismatch between reducer 1 and {i}"
+            assert len(output.intents) == len(
+                first_output.intents
+            ), f"Intent count mismatch between reducer 1 and {i}"
             for j, (intent1, intent2) in enumerate(
                 zip(first_output.intents, output.intents, strict=True)
             ):
@@ -2842,13 +2842,13 @@ class TestDeterminismProperty:
                         record2.pop(key, None)
                     payload1["record"] = record1
                     payload2["record"] = record2
-                    assert payload1 == payload2, (
-                        f"Intent {j} payload mismatch between reducer 1 and {i}"
-                    )
+                    assert (
+                        payload1 == payload2
+                    ), f"Intent {j} payload mismatch between reducer 1 and {i}"
                 else:
-                    assert intent1.payload == intent2.payload, (
-                        f"Intent {j} payload mismatch between reducer 1 and {i}"
-                    )
+                    assert (
+                        intent1.payload == intent2.payload
+                    ), f"Intent {j} payload mismatch between reducer 1 and {i}"
 
     @given(
         reset_attempts=st.integers(min_value=1, max_value=5),
@@ -2882,14 +2882,14 @@ class TestDeterminismProperty:
             replay_output = reducer.reduce_reset(current_state, reset_event_id)
 
             # State should be unchanged (same as idle_state)
-            assert replay_output.result == idle_state, (
-                f"State changed on reset replay {i + 1}"
-            )
+            assert (
+                replay_output.result == idle_state
+            ), f"State changed on reset replay {i + 1}"
 
             # No items processed (duplicate detection)
-            assert replay_output.items_processed == 0, (
-                f"Items processed on reset replay {i + 1}"
-            )
+            assert (
+                replay_output.items_processed == 0
+            ), f"Items processed on reset replay {i + 1}"
 
             current_state = replay_output.result
 
@@ -3610,12 +3610,12 @@ class TestCommandFoldingPrevention:
         )
 
         # Verify parameter names match expected pattern
-        assert params[0].name == "state", (
-            f"First parameter should be 'state', found '{params[0].name}'"
-        )
-        assert params[1].name == "event", (
-            f"Second parameter should be 'event', found '{params[1].name}'"
-        )
+        assert (
+            params[0].name == "state"
+        ), f"First parameter should be 'state', found '{params[0].name}'"
+        assert (
+            params[1].name == "event"
+        ), f"Second parameter should be 'event', found '{params[1].name}'"
 
         # Verify event parameter type annotation is the Event type
         event_param = params[1]

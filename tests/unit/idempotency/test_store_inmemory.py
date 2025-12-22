@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from omnibase_spi.protocols.storage.protocol_idempotency_store import (
+from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
 

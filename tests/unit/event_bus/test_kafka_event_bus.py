@@ -1393,7 +1393,9 @@ enable_auto_commit: false
 
         missing_file = tmp_path / "nonexistent.yaml"
 
-        with pytest.raises(ProtocolConfigurationError, match="Configuration file not found"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="Configuration file not found"
+        ):
             KafkaEventBus.from_yaml(missing_file)
 
     def test_from_yaml_invalid_yaml_syntax(self, tmp_path: Path) -> None:

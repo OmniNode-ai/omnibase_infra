@@ -124,7 +124,7 @@ from omnibase_infra.validation.execution_shape_validator import (
 
 # Infrastructure-specific wrappers will be imported from infra_validators
 from omnibase_infra.validation.infra_validators import (
-    INFRA_MAX_UNION_VIOLATIONS,
+    INFRA_MAX_UNIONS,
     get_validation_summary,
     validate_infra_all,
     validate_infra_architecture,
@@ -188,7 +188,7 @@ __all__ = [
     "ProtocolContractValidator",
     "CircularImportValidator",
     # Infrastructure-specific wrappers
-    "INFRA_MAX_UNION_VIOLATIONS",
+    "INFRA_MAX_UNIONS",
     "validate_infra_architecture",
     "validate_infra_contracts",
     "validate_infra_patterns",

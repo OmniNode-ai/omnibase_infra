@@ -145,20 +145,20 @@ def run_patterns(verbose: bool = False) -> bool:
 def run_unions(verbose: bool = False) -> bool:
     """Run union usage validation.
 
-    Counts actual VIOLATIONS (problematic patterns), not total unions.
-    Valid `X | None` patterns are not counted as violations.
+    Counts total unions in the codebase.
+    Valid `X | None` patterns are counted but not flagged as violations.
     """
     try:
         # Use infrastructure wrapper which includes exemption filtering
         # for documented infrastructure patterns
         from omnibase_infra.validation.infra_validators import (
-            INFRA_MAX_UNION_VIOLATIONS,
+            INFRA_MAX_UNIONS,
             INFRA_UNIONS_STRICT,
             validate_infra_union_usage,
         )
 
         result = validate_infra_union_usage(
-            max_violations=INFRA_MAX_UNION_VIOLATIONS,
+            max_unions=INFRA_MAX_UNIONS,
             strict=INFRA_UNIONS_STRICT,
         )
         if verbose or not result.is_valid:
@@ -168,10 +168,7 @@ def run_unions(verbose: bool = False) -> bool:
             if hasattr(result, "metadata") and result.metadata:
                 meta = result.metadata
                 if hasattr(meta, "total_unions"):
-                    print(
-                        f"  Violations: {len(result.errors)}, max allowed: {INFRA_MAX_UNION_VIOLATIONS}"
-                    )
-                    print(f"  Total unions (informational): {meta.total_unions}")
+                    print(f"  Total unions: {meta.total_unions}, max allowed: {INFRA_MAX_UNIONS}")
         return bool(result.is_valid)
     except ImportError as e:
         print(f"Skipping union validation: {e}")

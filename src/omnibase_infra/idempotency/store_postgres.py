@@ -67,7 +67,7 @@ from datetime import UTC, datetime, timezone
 from uuid import UUID, uuid4
 
 import asyncpg
-from omnibase_spi.protocols.storage.protocol_idempotency_store import (
+from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
 

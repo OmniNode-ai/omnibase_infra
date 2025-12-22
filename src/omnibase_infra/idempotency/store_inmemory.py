@@ -20,7 +20,7 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
-from omnibase_spi.protocols.storage.protocol_idempotency_store import (
+from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
 

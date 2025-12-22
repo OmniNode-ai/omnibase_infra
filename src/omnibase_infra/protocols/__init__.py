@@ -33,12 +33,16 @@ See Also:
     - OMN-947 (F2) for snapshot publishing design
 """
 
+from omnibase_infra.protocols.protocol_idempotency_store import (
+    ProtocolIdempotencyStore,
+)
 from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
 from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
 )
 
 __all__ = [
+    "ProtocolIdempotencyStore",
     "ProtocolPluginCompute",
     "ProtocolSnapshotPublisher",
 ]

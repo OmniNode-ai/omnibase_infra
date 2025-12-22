@@ -64,12 +64,12 @@ from omnibase_infra.runtime.wiring import wire_default_handlers
 if TYPE_CHECKING:
     from omnibase_core.types import JsonValue
     from omnibase_spi.protocols.handlers.protocol_handler import ProtocolHandler
-    from omnibase_spi.protocols.storage.protocol_idempotency_store import (
-        ProtocolIdempotencyStore,
-    )
 
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.idempotency import ModelIdempotencyGuardConfig
+    from omnibase_infra.protocols.protocol_idempotency_store import (
+        ProtocolIdempotencyStore,
+    )
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.runtime_host_process.wire_handlers"

@@ -37,9 +37,7 @@ from omnibase_infra.runtime.validation import load_and_validate_config
 class TestMissingConfigFileScenarios:
     """Tests for missing configuration file handling."""
 
-    def test_missing_config_file_raises_protocol_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_config_file_raises_protocol_error(self, tmp_path: Path) -> None:
         """Test that missing config file raises ProtocolConfigurationError."""
         nonexistent = tmp_path / "does_not_exist.yaml"
 
@@ -51,9 +49,7 @@ class TestMissingConfigFileScenarios:
         # Verify it's the correct error type
         assert isinstance(error, ProtocolConfigurationError)
 
-    def test_missing_config_file_includes_path_in_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_config_file_includes_path_in_error(self, tmp_path: Path) -> None:
         """Test that error message includes the file path for debugging."""
         nonexistent = tmp_path / "missing_config.yaml"
 
@@ -64,9 +60,7 @@ class TestMissingConfigFileScenarios:
         # Path should be in error message for debugging
         assert "missing_config.yaml" in str(error)
 
-    def test_missing_config_file_has_correlation_id(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_config_file_has_correlation_id(self, tmp_path: Path) -> None:
         """Test that error includes correlation_id for distributed tracing."""
         nonexistent = tmp_path / "nonexistent.yaml"
 
@@ -91,7 +85,9 @@ class TestMissingConfigFileScenarios:
         error = exc_info.value
         assert hasattr(error, "model")
         # Should have RUNTIME transport type
-        assert error.model.context.get("transport_type") == EnumInfraTransportType.RUNTIME
+        assert (
+            error.model.context.get("transport_type") == EnumInfraTransportType.RUNTIME
+        )
 
     def test_missing_parent_directory(self, tmp_path: Path) -> None:
         """Test handling when parent directory doesn't exist."""
@@ -128,9 +124,7 @@ class TestMissingConfigFileScenarios:
 class TestInvalidYamlSyntaxScenarios:
     """Tests for invalid YAML syntax handling."""
 
-    def test_invalid_yaml_unclosed_bracket_raises_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_yaml_unclosed_bracket_raises_error(self, tmp_path: Path) -> None:
         """Test that unclosed bracket in YAML raises ProtocolConfigurationError."""
         config_file = tmp_path / "invalid.yaml"
         config_file.write_text("key: [unclosed bracket")
@@ -155,9 +149,7 @@ class TestInvalidYamlSyntaxScenarios:
         error = exc_info.value
         assert "parse" in str(error).lower() or "yaml" in str(error).lower()
 
-    def test_invalid_yaml_tab_indentation_raises_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_yaml_tab_indentation_raises_error(self, tmp_path: Path) -> None:
         """Test that tabs (invalid in YAML) raise appropriate error."""
         config_file = tmp_path / "invalid.yaml"
         config_file.write_text("parent:\n\tchild: value")
@@ -168,9 +160,7 @@ class TestInvalidYamlSyntaxScenarios:
         error = exc_info.value
         assert "parse" in str(error).lower() or "yaml" in str(error).lower()
 
-    def test_invalid_yaml_duplicate_keys_handled(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_yaml_duplicate_keys_handled(self, tmp_path: Path) -> None:
         """Test handling of YAML with duplicate keys."""
         config_file = tmp_path / "duplicate.yaml"
         # PyYAML allows duplicate keys (last one wins), but this tests parsing
@@ -201,9 +191,7 @@ class TestInvalidYamlSyntaxScenarios:
         with pytest.raises((ProtocolConfigurationError, UnicodeDecodeError)):
             load_and_validate_config(config_file)
 
-    def test_invalid_yaml_error_includes_parse_details(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_yaml_error_includes_parse_details(self, tmp_path: Path) -> None:
         """Test that YAML parse error includes helpful details."""
         config_file = tmp_path / "invalid.yaml"
         config_file.write_text("key: [\ninvalid")
@@ -218,9 +206,7 @@ class TestInvalidYamlSyntaxScenarios:
         context = error.model.context
         assert context is not None
 
-    def test_kernel_invalid_yaml_raises_protocol_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_kernel_invalid_yaml_raises_protocol_error(self, tmp_path: Path) -> None:
         """Test that kernel load_runtime_config raises error on invalid YAML."""
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
@@ -237,9 +223,7 @@ class TestInvalidYamlSyntaxScenarios:
 class TestMissingRequiredFieldsScenarios:
     """Tests for missing required fields handling."""
 
-    def test_invalid_input_topic_format_raises_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_input_topic_format_raises_error(self, tmp_path: Path) -> None:
         """Test that invalid input_topic format raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"input_topic": "invalid topic with spaces"}
@@ -253,9 +237,7 @@ class TestMissingRequiredFieldsScenarios:
         assert "validation failed" in str(error).lower()
         assert "input_topic" in str(error).lower()
 
-    def test_invalid_topic_type_raises_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_topic_type_raises_error(self, tmp_path: Path) -> None:
         """Test that non-string topic raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"input_topic": 12345}  # Should be string
@@ -268,9 +250,7 @@ class TestMissingRequiredFieldsScenarios:
         error = exc_info.value
         assert "must be a string" in str(error)
 
-    def test_invalid_event_bus_type_raises_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_event_bus_type_raises_error(self, tmp_path: Path) -> None:
         """Test that invalid event_bus.type raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"event_bus": {"type": "unknown_bus_type"}}
@@ -285,9 +265,7 @@ class TestMissingRequiredFieldsScenarios:
         # Should mention valid types
         assert "inmemory" in str(error) or "kafka" in str(error)
 
-    def test_invalid_grace_period_negative_raises_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_grace_period_negative_raises_error(self, tmp_path: Path) -> None:
         """Test that negative grace_period_seconds raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"shutdown": {"grace_period_seconds": -10}}
@@ -301,9 +279,7 @@ class TestMissingRequiredFieldsScenarios:
         assert "grace_period_seconds" in str(error)
         assert ">=" in str(error)
 
-    def test_invalid_grace_period_too_large_raises_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_grace_period_too_large_raises_error(self, tmp_path: Path) -> None:
         """Test that grace_period_seconds > 300 raises validation error."""
         config_file = tmp_path / "config.yaml"
         config_data = {"shutdown": {"grace_period_seconds": 999}}
@@ -317,9 +293,7 @@ class TestMissingRequiredFieldsScenarios:
         assert "grace_period_seconds" in str(error)
         assert "<=" in str(error)
 
-    def test_multiple_validation_errors_all_reported(
-        self, tmp_path: Path
-    ) -> None:
+    def test_multiple_validation_errors_all_reported(self, tmp_path: Path) -> None:
         """Test that multiple validation errors are all collected and reported."""
         config_file = tmp_path / "config.yaml"
         config_data = {
@@ -368,9 +342,7 @@ class TestMissingRequiredFieldsScenarios:
 class TestErrorSanitization:
     """Tests verifying that errors don't expose sensitive information."""
 
-    def test_error_does_not_expose_file_contents(
-        self, tmp_path: Path
-    ) -> None:
+    def test_error_does_not_expose_file_contents(self, tmp_path: Path) -> None:
         """Test that error messages don't include file contents that could contain secrets."""
         config_file = tmp_path / "config.yaml"
         # Create a config with simulated secret (not a real secret, just a pattern)
@@ -402,9 +374,7 @@ class TestErrorSanitization:
         # Error message should NOT contain the secret value
         assert "secret123" not in error_str
 
-    def test_error_sanitizes_file_path_secrets(
-        self, tmp_path: Path
-    ) -> None:
+    def test_error_sanitizes_file_path_secrets(self, tmp_path: Path) -> None:
         """Test that error doesn't expose secrets that might be in path names."""
         # Create a path that looks like it might contain sensitive info
         safe_path = tmp_path / "config_test.yaml"
@@ -418,9 +388,7 @@ class TestErrorSanitization:
         assert "config_test.yaml" in error_str
         # But no credential-like patterns should be exposed beyond path
 
-    def test_validation_error_sanitizes_values(
-        self, tmp_path: Path
-    ) -> None:
+    def test_validation_error_sanitizes_values(self, tmp_path: Path) -> None:
         """Test that validation errors don't include the actual invalid values if sensitive."""
         config_file = tmp_path / "config.yaml"
         # The topic name itself isn't secret, but testing sanitization pattern
@@ -490,9 +458,7 @@ class TestProperErrorTypesRaised:
         error = exc_info.value
         assert isinstance(error, ProtocolConfigurationError)
 
-    def test_os_error_raises_protocol_configuration_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_os_error_raises_protocol_configuration_error(self, tmp_path: Path) -> None:
         """Test that OSError during read is wrapped as ProtocolConfigurationError.
 
         Note: This test is skipped when running as root (UID 0) because root
@@ -585,9 +551,7 @@ class TestErrorContextCompleteness:
         assert error.model.correlation_id is not None
         assert isinstance(error.model.correlation_id, UUID)
 
-    def test_validation_error_context_has_error_count(
-        self, tmp_path: Path
-    ) -> None:
+    def test_validation_error_context_has_error_count(self, tmp_path: Path) -> None:
         """Test that validation error includes error_count for metrics."""
         config_file = tmp_path / "config.yaml"
         config_data = {
@@ -627,9 +591,7 @@ class TestErrorContextCompleteness:
 class TestKernelSpecificErrorPaths:
     """Tests for kernel-specific error handling paths."""
 
-    def test_kernel_pydantic_validation_error_is_wrapped(
-        self, tmp_path: Path
-    ) -> None:
+    def test_kernel_pydantic_validation_error_is_wrapped(self, tmp_path: Path) -> None:
         """Test that Pydantic ValidationError is wrapped as ProtocolConfigurationError."""
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
@@ -648,9 +610,7 @@ class TestKernelSpecificErrorPaths:
         error = exc_info.value
         assert isinstance(error, ProtocolConfigurationError)
 
-    def test_kernel_contract_validation_before_pydantic(
-        self, tmp_path: Path
-    ) -> None:
+    def test_kernel_contract_validation_before_pydantic(self, tmp_path: Path) -> None:
         """Test that contract validation runs before Pydantic validation."""
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(parents=True)
