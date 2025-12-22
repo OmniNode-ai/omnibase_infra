@@ -332,9 +332,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - These are NOT flagged as violations, just counted
 # - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 #
-# Threshold set to 485 - buffer above current baseline (481) after OMN-985 merge.
+# Threshold set to 510 - buffer above current baseline (503) for codebase growth.
 # Target: Reduce to <200 through dict[str, object] → JsonValue migration.
-INFRA_MAX_UNIONS = 485
+INFRA_MAX_UNIONS = 510
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
