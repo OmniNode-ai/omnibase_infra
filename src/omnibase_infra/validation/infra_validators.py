@@ -710,9 +710,7 @@ def validate_infra_union_usage(
     """
     # Run base validation with a high max_unions to get all violations
     # We don't use max_unions for threshold - we count violations instead
-    base_result = validate_union_usage(
-        str(directory), max_unions=10000, strict=strict
-    )
+    base_result = validate_union_usage(str(directory), max_unions=10000, strict=strict)
 
     # Load exemption patterns from YAML configuration
     # See validation_exemptions.yaml for pattern definitions and rationale

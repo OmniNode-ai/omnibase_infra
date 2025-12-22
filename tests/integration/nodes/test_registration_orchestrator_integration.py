@@ -234,9 +234,9 @@ class TestWorkflowGraphIntegration:
         for node in nodes:
             deps = node.get("depends_on", [])
             for dep in deps:
-                assert (
-                    dep in node_ids
-                ), f"Node {node['node_id']} depends on non-existent node: {dep}"
+                assert dep in node_ids, (
+                    f"Node {node['node_id']} depends on non-existent node: {dep}"
+                )
 
     def test_execution_graph_has_no_cycles(self, contract_data: dict) -> None:
         """Test that execution graph has no circular dependencies."""
@@ -280,9 +280,9 @@ class TestWorkflowGraphIntegration:
 
         for node in nodes:
             node_type = node.get("node_type", "").lower()
-            assert (
-                node_type in valid_types
-            ), f"Invalid node_type '{node_type}' for node {node['node_id']}"
+            assert node_type in valid_types, (
+                f"Invalid node_type '{node_type}' for node {node['node_id']}"
+            )
 
     def test_consul_and_postgres_steps_are_effects(self, contract_data: dict) -> None:
         """Test that registration steps are effect nodes."""
@@ -293,13 +293,13 @@ class TestWorkflowGraphIntegration:
         # Find the registration nodes
         for node in nodes:
             if "consul" in node["node_id"].lower():
-                assert (
-                    node["node_type"] == "effect"
-                ), "Consul registration should be effect type"
+                assert node["node_type"] == "effect", (
+                    "Consul registration should be effect type"
+                )
             if "postgres" in node["node_id"].lower():
-                assert (
-                    node["node_type"] == "effect"
-                ), "Postgres registration should be effect type"
+                assert node["node_type"] == "effect", (
+                    "Postgres registration should be effect type"
+                )
 
     def test_compute_intents_is_reducer(self, contract_data: dict) -> None:
         """Test that compute_intents step is a reducer node."""
@@ -309,9 +309,9 @@ class TestWorkflowGraphIntegration:
 
         for node in nodes:
             if node["node_id"] == "compute_intents":
-                assert (
-                    node["node_type"] == "reducer"
-                ), "compute_intents should be reducer type"
+                assert node["node_type"] == "reducer", (
+                    "compute_intents should be reducer type"
+                )
                 break
         else:
             pytest.fail("compute_intents node not found")
@@ -463,9 +463,9 @@ class TestEventIntegration:
 
             # All subscribed intents should have routing
             for intent in intent_config["subscribed_intents"]:
-                assert (
-                    intent in intent_config["intent_routing_table"]
-                ), f"Missing routing for intent: {intent}"
+                assert intent in intent_config["intent_routing_table"], (
+                    f"Missing routing for intent: {intent}"
+                )
 
 
 # =============================================================================
@@ -537,9 +537,9 @@ class TestNodeIntegration:
         ]
 
         for method in imperative_methods:
-            assert not hasattr(
-                orchestrator, method
-            ), f"Found imperative method: {method}"
+            assert not hasattr(orchestrator, method), (
+                f"Found imperative method: {method}"
+            )
 
 
 # =============================================================================
@@ -572,15 +572,15 @@ class TestDependencyStructure:
         dep_names = [d["name"] for d in deps]
 
         # Each required dependency must be explicitly present - no fallback conditions
-        assert (
-            "reducer_protocol" in dep_names
-        ), "Must declare 'reducer_protocol' dependency for computing intents"
-        assert (
-            "effect_node" in dep_names
-        ), "Must declare 'effect_node' dependency for executing registration operations"
-        assert (
-            "projection_reader" in dep_names
-        ), "Must declare 'projection_reader' dependency for reading state (OMN-930)"
+        assert "reducer_protocol" in dep_names, (
+            "Must declare 'reducer_protocol' dependency for computing intents"
+        )
+        assert "effect_node" in dep_names, (
+            "Must declare 'effect_node' dependency for executing registration operations"
+        )
+        assert "projection_reader" in dep_names, (
+            "Must declare 'projection_reader' dependency for reading state (OMN-930)"
+        )
 
     def test_dependencies_have_required_fields(self, contract_data: dict) -> None:
         """Test that dependencies have required fields."""
@@ -588,12 +588,12 @@ class TestDependencyStructure:
 
         for dep in deps:
             assert "name" in dep, f"Dependency missing 'name' field: {dep}"
-            assert (
-                "type" in dep
-            ), f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
-            assert (
-                "description" in dep
-            ), f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
+            assert "type" in dep, (
+                f"Dependency '{dep.get('name', 'unknown')}' missing 'type' field"
+            )
+            assert "description" in dep, (
+                f"Dependency '{dep.get('name', 'unknown')}' missing 'description' field"
+            )
 
     def test_dependency_types_valid(self, contract_data: dict) -> None:
         """Test that dependency types are valid ONEX types."""
@@ -809,12 +809,12 @@ class TestWorkflowExecutionWithMocks:
 
         # Verify mock implements protocol via duck typing (ONEX convention)
         mock = MockEffect()
-        assert hasattr(
-            mock, "execute_intent"
-        ), "MockEffect must have 'execute_intent' method"
-        assert callable(
-            mock.execute_intent
-        ), "MockEffect.execute_intent must be callable"
+        assert hasattr(mock, "execute_intent"), (
+            "MockEffect must have 'execute_intent' method"
+        )
+        assert callable(mock.execute_intent), (
+            "MockEffect.execute_intent must be callable"
+        )
         return mock
 
     @pytest.fixture
@@ -896,9 +896,9 @@ class TestWorkflowExecutionWithMocks:
         using isinstance checks with Protocol types.
         """
         # Duck typing verification - check method presence and callability
-        assert hasattr(
-            mock_effect, "execute_intent"
-        ), "Must have 'execute_intent' method"
+        assert hasattr(mock_effect, "execute_intent"), (
+            "Must have 'execute_intent' method"
+        )
         assert callable(mock_effect.execute_intent), "'execute_intent' must be callable"
 
     @pytest.mark.asyncio
@@ -1282,20 +1282,20 @@ class TestWorkflowExecutionWithMocks:
 
         # Verify mocks implement protocols via duck typing (ONEX convention)
         # ProtocolReducer requires 'reduce' method
-        assert hasattr(
-            mock_container._test_reducer, "reduce"
-        ), "Reducer must have 'reduce' method"
-        assert callable(
-            mock_container._test_reducer.reduce
-        ), "Reducer.reduce must be callable"
+        assert hasattr(mock_container._test_reducer, "reduce"), (
+            "Reducer must have 'reduce' method"
+        )
+        assert callable(mock_container._test_reducer.reduce), (
+            "Reducer.reduce must be callable"
+        )
 
         # ProtocolEffect requires 'execute_intent' method
-        assert hasattr(
-            mock_container._test_effect, "execute_intent"
-        ), "Effect must have 'execute_intent' method"
-        assert callable(
-            mock_container._test_effect.execute_intent
-        ), "Effect.execute_intent must be callable"
+        assert hasattr(mock_container._test_effect, "execute_intent"), (
+            "Effect must have 'execute_intent' method"
+        )
+        assert callable(mock_container._test_effect.execute_intent), (
+            "Effect.execute_intent must be callable"
+        )
 
 
 __all__ = [
