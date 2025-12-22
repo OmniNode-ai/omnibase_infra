@@ -1366,10 +1366,27 @@ class RuntimeHostProcess:
         idempotency store. If duplicate detected, publishes a duplicate
         response and returns False.
 
-        Fail-Open Behavior:
-            If the idempotency store is unavailable or throws an error,
-            the message is allowed through (logged with warning). This
-            prioritizes availability over exactly-once semantics.
+        Fail-Open Semantics:
+            This method implements **fail-open** error handling: if the
+            idempotency store is unavailable or throws an error, the message
+            is allowed through for processing (with a warning log).
+
+            **Design Rationale**: In distributed event-driven systems, the
+            idempotency store (e.g., Redis/Valkey) is a supporting service,
+            not a critical path dependency. A temporary store outage should
+            not halt message processing entirely, as this would cascade into
+            broader system unavailability.
+
+            **Trade-offs**:
+            - Pro: High availability - processing continues during store outages
+            - Pro: Graceful degradation - system remains functional
+            - Con: May result in duplicate message processing during outages
+            - Con: Downstream handlers must be designed for at-least-once delivery
+
+            **Mitigation**: Handlers consuming messages should implement their
+            own idempotency logic for critical operations (e.g., using database
+            constraints or transaction guards) to ensure correctness even when
+            duplicates slip through.
 
         Args:
             envelope: Validated envelope dict.
@@ -1437,12 +1454,15 @@ class RuntimeHostProcess:
             return True
 
         except Exception as e:
-            # Idempotency check failure - log and allow processing
-            # (fail-open for availability, may result in duplicate processing)
+            # FAIL-OPEN: Allow message through on idempotency store errors.
+            # Rationale: Availability over exactly-once. Store outages should not
+            # halt processing. Downstream handlers must tolerate duplicates.
+            # See docstring for full trade-off analysis.
             logger.warning(
-                "Idempotency check failed, allowing message through",
+                "Idempotency check failed, allowing message through (fail-open)",
                 extra={
                     "error": str(e),
+                    "error_type": type(e).__name__,
                     "message_id": str(message_id),
                     "domain": domain,
                     "correlation_id": str(correlation_id),

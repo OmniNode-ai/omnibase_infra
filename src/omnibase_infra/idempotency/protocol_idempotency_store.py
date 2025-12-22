@@ -6,13 +6,21 @@ This module defines the ProtocolIdempotencyStore protocol that all idempotency
 store implementations must follow. The protocol defines the contract for
 message deduplication in distributed systems.
 
-Note:
+Migration Note:
     This protocol is defined locally in omnibase_infra because it is not
-    available in omnibase_spi versions 0.4.0/0.4.1. The protocol should be
-    migrated to omnibase_spi in a future release.
+    available in omnibase_spi versions 0.4.0/0.4.1. This is a TEMPORARY
+    definition that should be migrated to omnibase_spi in a future release.
 
-    TODO(OMN-XXX): Migrate to omnibase_spi 0.5.0+ and update imports
-    in InMemoryIdempotencyStore and PostgresIdempotencyStore.
+    Migration Path (OMN-999):
+        1. When omnibase_spi 0.5.0+ is released with ProtocolIdempotencyStore,
+           update pyproject.toml to require the new version
+        2. Update imports in InMemoryIdempotencyStore and PostgresIdempotencyStore
+           to use: `from omnibase_spi.protocols import ProtocolIdempotencyStore`
+        3. Remove this local protocol definition
+        4. Run tests to verify compatibility
+
+    The protocol contract is intentionally designed to match the expected
+    omnibase_spi interface to ensure a smooth migration.
 
 Protocol Methods:
     - check_and_record: Atomically check if message was processed and record if not
