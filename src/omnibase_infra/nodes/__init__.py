@@ -9,13 +9,27 @@ This module provides node implementations for the ONEX 4-node architecture:
 - ORCHESTRATOR: Workflow coordination across nodes
 
 Available Submodules:
+- effects: Effect nodes for external I/O operations
 - reducers: Reducer nodes for state aggregation
 
 Available Classes:
 - RegistrationReducer: Pure reducer for dual registration to Consul
   and PostgreSQL backends.
+- NodeRegistryEffect: Effect node for dual-backend registration execution.
 """
 
+from omnibase_infra.nodes.effects import (
+    ModelBackendResult,
+    ModelRegistryRequest,
+    ModelRegistryResponse,
+    NodeRegistryEffect,
+)
 from omnibase_infra.nodes.reducers import RegistrationReducer
 
-__all__ = ["RegistrationReducer"]
+__all__ = [
+    "ModelBackendResult",
+    "ModelRegistryRequest",
+    "ModelRegistryResponse",
+    "NodeRegistryEffect",
+    "RegistrationReducer",
+]
