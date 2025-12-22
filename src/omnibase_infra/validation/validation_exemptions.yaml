@@ -207,6 +207,27 @@ pattern_exemptions:
       Log context builder intentionally takes many optional parameters to build structured log context. Each parameter is a distinct log field.
 
     ticket: OMN-934
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Central dispatch coordinator requires multiple configuration parameters: context_enforcer, topic_parser, default_node_kind, logger, topic_to_dispatcher_map, category_dispatchers. These are distinct required contexts for dispatch orchestration.
+
+    ticket: OMN-990
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function 'register_dispatcher'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Dispatcher registration requires multiple parameters for complete routing configuration: dispatcher, category, node_kind, topic_patterns, priority. These are distinct routing configuration fields.
+
+    ticket: OMN-990
+  - file_pattern: 'message_dispatch_engine\.py'
+    method_pattern: "Function 'register_handler'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Handler registration for backwards compatibility with RuntimeHostProcess. Takes handler, category, node_kind, topic_patterns, priority. Will be deprecated in favor of register_dispatcher.
+
+    ticket: OMN-990
   # ==========================================================================
   # DispatcherRegistry Exemptions (OMN-934)
   # ==========================================================================
