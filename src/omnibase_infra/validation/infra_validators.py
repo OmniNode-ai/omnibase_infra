@@ -327,13 +327,16 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # This is a COUNT threshold, not a violation threshold. The validator counts all
 # unions including the ONEX-preferred `X | None` patterns, which are valid.
 #
-# Current baseline (512 unions as of 2025-12-22):
+# Current baseline (515 unions as of 2025-12-22):
 # - Most unions are legitimate `X | None` nullable patterns
 # - These are NOT flagged as violations, just counted
 # - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 #
-# Threshold set to 515 - buffer above current baseline (512) after main merge.
-# Target: Reduce to <200 through dict[str, object] → JsonValue migration.
+# Threshold history:
+# - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
+# - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~24 unions added)
+#
+# Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
 INFRA_MAX_UNIONS = 515
 
 # Maximum allowed architecture violations in infrastructure code.
@@ -633,7 +636,7 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS (465).
+        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS.
         strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
 
     Returns:
