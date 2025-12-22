@@ -30,7 +30,8 @@ Design Principles:
 
 Thread Safety:
     This implementation is thread-safe for concurrent publishing.
-    Uses asyncio locks for circuit breaker state management.
+    Uses asyncio locks for circuit breaker state management and
+    version tracker synchronization.
 
 Error Handling:
     All methods raise ONEX error types:
@@ -90,6 +91,7 @@ See Also:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -143,6 +145,15 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         The publisher maintains a version tracker per entity to ensure
         monotonically increasing snapshot versions. This enables conflict
         resolution and ordering guarantees during compaction.
+
+        Version Tracker Semantics:
+            - Versions start at 1 for each new entity
+            - Versions increment monotonically per entity within publisher lifetime
+            - Version tracker resets when publisher is recreated (new instance)
+            - delete_snapshot clears the version tracker entry for that entity
+            - For persistent version tracking across restarts, inject a shared
+              snapshot_version_tracker dict in __init__
+            - Thread-safe: Uses asyncio.Lock for concurrent access
 
     NOTE: Snapshots are for READ OPTIMIZATION only. The immutable event
     log remains the authoritative source of truth. Snapshots can be
@@ -198,6 +209,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         self._producer = producer
         self._config = config
         self._version_tracker = snapshot_version_tracker or {}
+        self._version_tracker_lock = asyncio.Lock()
         self._started = False
 
         # Initialize circuit breaker with Kafka-appropriate settings
@@ -285,12 +297,16 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             )
             self._started = False
 
-    def _get_next_version(self, entity_id: str, domain: str) -> int:
+    async def _get_next_version(self, entity_id: str, domain: str) -> int:
         """Get the next snapshot version for an entity.
 
         Increments and returns the version counter for the given entity.
         Versions are monotonically increasing within the lifetime of
         this publisher instance.
+
+        Thread Safety:
+            Uses _version_tracker_lock to ensure atomic read-modify-write
+            operations in concurrent async contexts.
 
         Args:
             entity_id: The entity identifier
@@ -300,10 +316,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             Next version number (starting from 1)
         """
         key = f"{domain}:{entity_id}"
-        current = self._version_tracker.get(key, 0)
-        next_version = current + 1
-        self._version_tracker[key] = next_version
-        return next_version
+        async with self._version_tracker_lock:
+            current = self._version_tracker.get(key, 0)
+            next_version = current + 1
+            self._version_tracker[key] = next_version
+            return next_version
 
     async def publish_snapshot(
         self,
@@ -412,6 +429,8 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
     async def publish_batch(
         self,
         snapshots: list[ModelRegistrationProjection],
+        *,
+        parallel: bool = True,
     ) -> int:
         """Publish multiple snapshots in a batch operation.
 
@@ -422,6 +441,9 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             snapshots: List of projections to publish as snapshots
+            parallel: If True (default), publish concurrently using asyncio.gather.
+                Set to False for sequential publishing (useful for debugging
+                or rate-limited scenarios).
 
         Returns:
             Count of successfully published snapshots.
@@ -434,36 +456,65 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             >>> projections = await reader.get_all()
             >>> count = await publisher.publish_batch(projections)
             >>> print(f"Published {count}/{len(projections)} snapshots")
+            >>>
+            >>> # Sequential publishing for debugging
+            >>> count = await publisher.publish_batch(projections, parallel=False)
         """
         if not snapshots:
             return 0
 
-        success_count = 0
-        for projection in snapshots:
-            try:
-                await self.publish_snapshot(projection)
-                success_count += 1
-            except (
-                InfraConnectionError,
-                InfraTimeoutError,
-                InfraUnavailableError,
-            ) as e:
-                logger.warning(
-                    "Failed to publish snapshot %s:%s: %s",
-                    projection.domain,
-                    str(projection.entity_id),
-                    str(e),
-                    extra={
-                        "entity_id": str(projection.entity_id),
-                        "domain": projection.domain,
-                    },
-                )
-                # Continue with remaining snapshots (best-effort)
+        if parallel:
+            # Parallel publishing using asyncio.gather with return_exceptions=True
+            results = await asyncio.gather(
+                *[self.publish_snapshot(projection) for projection in snapshots],
+                return_exceptions=True,
+            )
+
+            success_count = 0
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    projection = snapshots[i]
+                    logger.warning(
+                        "Failed to publish snapshot %s:%s: %s",
+                        projection.domain,
+                        str(projection.entity_id),
+                        str(result),
+                        extra={
+                            "entity_id": str(projection.entity_id),
+                            "domain": projection.domain,
+                        },
+                    )
+                else:
+                    success_count += 1
+        else:
+            # Sequential publishing (original behavior)
+            success_count = 0
+            for projection in snapshots:
+                try:
+                    await self.publish_snapshot(projection)
+                    success_count += 1
+                except (
+                    InfraConnectionError,
+                    InfraTimeoutError,
+                    InfraUnavailableError,
+                ) as e:
+                    logger.warning(
+                        "Failed to publish snapshot %s:%s: %s",
+                        projection.domain,
+                        str(projection.entity_id),
+                        str(e),
+                        extra={
+                            "entity_id": str(projection.entity_id),
+                            "domain": projection.domain,
+                        },
+                    )
+                    # Continue with remaining snapshots (best-effort)
 
         logger.info(
-            "Batch publish completed: %d/%d snapshots published",
+            "Batch publish completed: %d/%d snapshots published (parallel=%s)",
             success_count,
             len(snapshots),
+            parallel,
             extra={"topic": self._config.topic},
         )
         return success_count
@@ -472,7 +523,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         self,
         entity_id: str,
         domain: str,
-    ) -> ModelRegistrationProjection | None:
+    ) -> ModelRegistrationSnapshot | None:
         """Retrieve the latest snapshot for an entity.
 
         NOTE: This is a consumer operation. For production use, consider
@@ -482,12 +533,17 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         IMPORTANT: Snapshot may be slightly stale. For guaranteed freshness,
         combine with event log events since snapshot.updated_at.
 
+        Note:
+            This is a stub implementation. Reading from compacted topics
+            requires a Kafka consumer, which is beyond this publisher's scope.
+            For production snapshot reads, use a dedicated consumer service.
+
         Args:
             entity_id: The entity identifier (UUID as string)
             domain: The domain namespace (e.g., "registration")
 
         Returns:
-            The latest projection if found, None otherwise.
+            The latest snapshot if found, None otherwise.
             Returns None because reading requires a consumer, which
             is beyond this publisher's scope.
 
@@ -539,7 +595,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             False if publish failed (caller should retry or handle).
 
         Raises:
-            Does not raise - returns False on failure for caller to handle.
+            InfraUnavailableError: If circuit breaker is open (fail-fast).
 
         Example:
             >>> # Handle node deregistration
@@ -549,21 +605,10 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         """
         correlation_id = uuid4()
 
-        # Check circuit breaker before operation
+        # Check circuit breaker before operation - let InfraUnavailableError propagate
+        # per ONEX fail-fast principles (callers need to know service is unavailable)
         async with self._circuit_breaker_lock:
-            try:
-                await self._check_circuit_breaker("delete_snapshot", correlation_id)
-            except Exception as e:
-                logger.warning(
-                    "Circuit breaker prevented delete_snapshot: %s",
-                    str(e),
-                    extra={
-                        "entity_id": entity_id,
-                        "domain": domain,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                return False
+            await self._check_circuit_breaker("delete_snapshot", correlation_id)
 
         try:
             # Build key for tombstone
@@ -580,9 +625,10 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            # Clear version tracker for this entity
+            # Clear version tracker for this entity (thread-safe)
             tracker_key = f"{domain}:{entity_id}"
-            self._version_tracker.pop(tracker_key, None)
+            async with self._version_tracker_lock:
+                self._version_tracker.pop(tracker_key, None)
 
             logger.info(
                 "Published tombstone for %s:%s",
@@ -649,7 +695,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             ... )
         """
         entity_id_str = str(projection.entity_id)
-        version = self._get_next_version(entity_id_str, projection.domain)
+        version = await self._get_next_version(entity_id_str, projection.domain)
 
         # Create snapshot from projection
         snapshot = ModelRegistrationSnapshot.from_projection(

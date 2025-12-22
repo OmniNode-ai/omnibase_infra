@@ -660,10 +660,10 @@ class TestVersionTracking:
         """Test versions increment for each entity independently."""
         entity_id = str(uuid4())
 
-        # Call _get_next_version multiple times
-        v1 = publisher._get_next_version(entity_id, "registration")
-        v2 = publisher._get_next_version(entity_id, "registration")
-        v3 = publisher._get_next_version(entity_id, "registration")
+        # Call _get_next_version multiple times (now async)
+        v1 = await publisher._get_next_version(entity_id, "registration")
+        v2 = await publisher._get_next_version(entity_id, "registration")
+        v3 = await publisher._get_next_version(entity_id, "registration")
 
         assert v1 == 1
         assert v2 == 2
@@ -678,12 +678,12 @@ class TestVersionTracking:
         entity_a = str(uuid4())
         entity_b = str(uuid4())
 
-        # Get versions for entity A
-        v_a1 = publisher._get_next_version(entity_a, "registration")
-        v_a2 = publisher._get_next_version(entity_a, "registration")
+        # Get versions for entity A (now async)
+        v_a1 = await publisher._get_next_version(entity_a, "registration")
+        v_a2 = await publisher._get_next_version(entity_a, "registration")
 
         # Get versions for entity B
-        v_b1 = publisher._get_next_version(entity_b, "registration")
+        v_b1 = await publisher._get_next_version(entity_b, "registration")
 
         # Entity A should be at version 2, entity B should be at version 1
         assert v_a1 == 1
@@ -698,8 +698,8 @@ class TestVersionTracking:
         """Test same entity in different domains has independent versions."""
         entity_id = str(uuid4())
 
-        v_reg = publisher._get_next_version(entity_id, "registration")
-        v_disc = publisher._get_next_version(entity_id, "discovery")
+        v_reg = await publisher._get_next_version(entity_id, "registration")
+        v_disc = await publisher._get_next_version(entity_id, "discovery")
 
         assert v_reg == 1
         assert v_disc == 1
@@ -712,16 +712,16 @@ class TestVersionTracking:
         """Test version is cleared after delete, starts fresh."""
         entity_id = str(uuid4())
 
-        # Build up version
-        publisher._get_next_version(entity_id, "registration")
-        publisher._get_next_version(entity_id, "registration")
+        # Build up version (now async)
+        await publisher._get_next_version(entity_id, "registration")
+        await publisher._get_next_version(entity_id, "registration")
         assert publisher._version_tracker[f"registration:{entity_id}"] == 2
 
         # Delete clears the version
         await publisher.delete_snapshot(entity_id, "registration")
 
         # Next version should be 1 again
-        v_new = publisher._get_next_version(entity_id, "registration")
+        v_new = await publisher._get_next_version(entity_id, "registration")
         assert v_new == 1
 
 
@@ -804,12 +804,16 @@ class TestCircuitBreakerIntegration:
             assert publisher._circuit_breaker_open is False
             assert publisher._circuit_breaker_failures == 0
 
-    async def test_circuit_breaker_on_delete_prevents_operation(
+    async def test_circuit_breaker_on_delete_raises_unavailable(
         self,
         mock_producer: AsyncMock,
         snapshot_config: ModelSnapshotTopicConfig,
     ) -> None:
-        """Test delete_snapshot returns False when circuit is open."""
+        """Test delete_snapshot raises InfraUnavailableError when circuit is open.
+
+        Per ONEX fail-fast principles, circuit breaker errors should propagate
+        so callers know the service is unavailable.
+        """
         import time
 
         publisher = SnapshotPublisherRegistration(mock_producer, snapshot_config)
@@ -822,10 +826,11 @@ class TestCircuitBreakerIntegration:
                 time.time() + 120
             )  # 2 minutes from now
 
-        result = await publisher.delete_snapshot("entity-123", "registration")
+        # Should raise InfraUnavailableError because circuit is open (fail-fast)
+        with pytest.raises(InfraUnavailableError) as exc_info:
+            await publisher.delete_snapshot("entity-123", "registration")
 
-        # Should return False because circuit is open
-        assert result is False
+        assert "Circuit breaker is open" in str(exc_info.value)
 
     async def test_success_resets_circuit_breaker(
         self,
