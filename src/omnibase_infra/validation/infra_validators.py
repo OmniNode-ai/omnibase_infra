@@ -334,8 +334,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #
 # Threshold history:
 # - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
-# - 515 (2025-12-22): OMN-990 MessageDispatchEngine integration added ~22 unions for
-#   dispatcher protocols, context enforcement, and envelope typing patterns
+# - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~24 unions added)
 #
 # Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
 INFRA_MAX_UNIONS = 515

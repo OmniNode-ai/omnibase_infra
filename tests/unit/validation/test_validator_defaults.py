@@ -40,19 +40,19 @@ class TestInfraValidatorConstants:
 
         OMN-983: Strict validation mode enabled.
 
-        Current baseline (~513 unions as of 2025-12-22):
+        Current baseline (~515 unions as of 2025-12-22):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
         Threshold history:
         - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
-        - 515 (2025-12-22): OMN-990 MessageDispatchEngine integration added ~22 unions
+        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots
 
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
         assert INFRA_MAX_UNIONS == 515, (
-            "INFRA_MAX_UNIONS should be 515 (includes OMN-990 dispatcher unions)"
+            "INFRA_MAX_UNIONS should be 515 (OMN-990 + OMN-947)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
