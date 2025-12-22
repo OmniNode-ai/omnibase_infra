@@ -18,7 +18,9 @@ from omnibase_infra.models.dispatch import (
 )
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
+    ModelRegistrationSnapshot,
     ModelSequenceInfo,
+    ModelSnapshotTopicConfig,
 )
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
@@ -45,7 +47,9 @@ __all__ = [
     "ModelTopicParser",
     # Projection models
     "ModelRegistrationProjection",
+    "ModelRegistrationSnapshot",
     "ModelSequenceInfo",
+    "ModelSnapshotTopicConfig",
     # Registration models
     "ModelNodeCapabilities",
     "ModelNodeHeartbeatEvent",
