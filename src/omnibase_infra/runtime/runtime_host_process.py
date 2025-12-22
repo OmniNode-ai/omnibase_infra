@@ -1527,7 +1527,7 @@ class RuntimeHostProcess:
         self,
         message_id: UUID,
         correlation_id: UUID,
-    ) -> ModelDuplicateResponse:
+    ) -> dict[str, object]:
         """Create response for duplicate message detection.
 
         This is NOT an error response - duplicates are expected under
@@ -1539,12 +1539,12 @@ class RuntimeHostProcess:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelDuplicateResponse indicating duplicate detection.
+            Dict representation of ModelDuplicateResponse for envelope publishing.
         """
         return ModelDuplicateResponse(
             message_id=message_id,
             correlation_id=correlation_id,
-        )
+        ).model_dump()
 
     async def _cleanup_idempotency_store(self) -> None:
         """Cleanup idempotency store during shutdown.
