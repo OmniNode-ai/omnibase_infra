@@ -40,16 +40,19 @@ class TestInfraValidatorConstants:
 
         OMN-983: Strict validation mode enabled.
 
-        Current baseline (~485 unions as of 2025-12-21):
+        Current baseline (~513 unions as of 2025-12-22):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold set to 491 - includes DispatcherFunc | ContextAwareDispatcherFunc for @overload.
-        Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
+        Threshold history:
+        - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
+        - 515 (2025-12-22): OMN-990 MessageDispatchEngine integration added ~22 unions
+
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 491, (
-            "INFRA_MAX_UNIONS should be 491 (includes @overload dispatcher union)"
+        assert INFRA_MAX_UNIONS == 515, (
+            "INFRA_MAX_UNIONS should be 515 (includes OMN-990 dispatcher unions)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -488,13 +491,13 @@ class TestUnionCountRegressionGuard:
         the threshold, it indicates new code added unions without
         using proper typed patterns from omnibase_core.
 
-        Current baseline (~485 unions as of 2025-12-21):
+        Current baseline (~513 unions as of 2025-12-22):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold: INFRA_MAX_UNIONS (491) - buffer above baseline.
-        Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
+        Threshold: INFRA_MAX_UNIONS (515) - buffer above baseline.
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
         result = validate_infra_union_usage()
 

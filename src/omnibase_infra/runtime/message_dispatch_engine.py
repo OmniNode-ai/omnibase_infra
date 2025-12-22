@@ -137,16 +137,18 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import cast, overload
+from typing import TYPE_CHECKING, cast, overload
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
-from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
+
+if TYPE_CHECKING:
+    from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 # Patterns that may indicate sensitive data in error messages
 # These patterns are checked case-insensitively

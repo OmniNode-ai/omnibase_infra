@@ -42,6 +42,8 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel
+
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     EnvelopeValidationError,
@@ -1064,15 +1066,20 @@ class RuntimeHostProcess:
             "correlation_id": final_correlation_id,
         }
 
-    def _serialize_envelope(self, envelope: JsonValue) -> JsonValue:
+    def _serialize_envelope(self, envelope: JsonValue | BaseModel) -> JsonValue:
         """Recursively convert UUID objects to strings for JSON serialization.
 
+        Handles both dict envelopes and Pydantic models (e.g., ModelDuplicateResponse).
+
         Args:
-            envelope: Envelope dict that may contain UUID objects.
+            envelope: Envelope dict or Pydantic model that may contain UUID objects.
 
         Returns:
             New dict with all UUIDs converted to strings.
         """
+        # Convert Pydantic models to dict first
+        if isinstance(envelope, BaseModel):
+            envelope = envelope.model_dump()
 
         def convert_value(value: object) -> object:
             if isinstance(value, UUID):
@@ -1085,14 +1092,16 @@ class RuntimeHostProcess:
 
         return {k: convert_value(v) for k, v in envelope.items()}
 
-    async def _publish_envelope_safe(self, envelope: JsonValue, topic: str) -> None:
+    async def _publish_envelope_safe(
+        self, envelope: JsonValue | BaseModel, topic: str
+    ) -> None:
         """Publish envelope with UUID serialization support.
 
         Converts any UUID objects to strings before publishing to ensure
         JSON serialization works correctly.
 
         Args:
-            envelope: Envelope dict (may contain UUID objects).
+            envelope: Envelope dict or Pydantic model (may contain UUID objects).
             topic: Target topic to publish to.
         """
         # Always serialize UUIDs upfront - single code path
