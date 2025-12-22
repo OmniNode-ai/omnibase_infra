@@ -100,6 +100,27 @@ class ModelDispatchOutputs(BaseModel):
         Topics must contain at least one dot to indicate namespace separation
         (e.g., "dev.user.events.v1", "prod.orders.commands.v2").
 
+        Design Note:
+            This validator implements **minimal validation by design**. It only
+            ensures basic namespace separation (at least one dot) to catch obvious
+            errors like single-word topics without any structure.
+
+            Full ONEX topic structure validation ({env}.{namespace}.{category}.{name}.v{N})
+            is handled by ModelParsedTopic, which provides comprehensive parsing and
+            validation of the complete topic format. This separation of concerns allows:
+
+            - Internal/test topics that don't follow full ONEX conventions
+            - Flexibility for infrastructure-level topics with simpler naming
+            - Reduced validation overhead in hot paths (dispatch result creation)
+
+            Stricter validation here would be too restrictive for legitimate use cases
+            like internal heartbeat topics ("infra.heartbeat") or test fixtures.
+
+        Performance:
+            Validation is O(n) where n is the number of topics. Each check involves
+            only simple string operations (emptiness check, substring search for dot),
+            adding minimal overhead to model instantiation.
+
         Args:
             v: List of topic names to validate.
 
@@ -112,6 +133,9 @@ class ModelDispatchOutputs(BaseModel):
         Example:
             >>> ModelDispatchOutputs(topics=["valid.topic"])  # OK
             >>> ModelDispatchOutputs(topics=["invalid"])  # Raises ValueError
+
+        See Also:
+            omnibase_infra.models.dispatch.ModelParsedTopic: Full ONEX topic parsing
         """
         for topic in v:
             if not topic:
