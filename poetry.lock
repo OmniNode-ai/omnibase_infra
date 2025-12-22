@@ -3283,7 +3283,7 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.5.5"
+version = "0.5.6"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = "^3.12"
@@ -3315,8 +3315,8 @@ full = ["psutil"]
 [package.source]
 type = "git"
 url = "https://github.com/OmniNode-ai/omnibase_core.git"
-reference = "v0.5.5"
-resolved_reference = "72fad1abacd95afc0754e41e50ad624b560032da"
+reference = "v0.5.6"
+resolved_reference = "b07bba672876e377ef3c026ab1b0faf03020ce94"
 
 [[package]]
 name = "omnibase-spi"
@@ -6165,4 +6165,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "8c5614c1f22289aa3ab9f001784eb0ae56a75e67094e20348fadd9c544bf1f0b"
+content-hash = "99e78faba16d8af10624f094eabdcbbd4481f57732b4c2e5adbcb23eabd1a204"

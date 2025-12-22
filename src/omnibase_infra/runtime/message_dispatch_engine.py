@@ -243,6 +243,13 @@ DispatcherOutput = str | list[str] | None
 # Module-level logger for fallback when no custom logger is provided
 _module_logger = logging.getLogger(__name__)
 
+# Minimum number of parameters for a dispatcher to be considered context-aware.
+# Context-aware dispatchers have signature: (envelope, context, ...)
+# Non-context-aware dispatchers have signature: (envelope)
+# We use >= MIN_PARAMS_FOR_CONTEXT (not ==) to support dispatchers with additional
+# optional parameters (e.g., for testing, logging, or future extensibility).
+MIN_PARAMS_FOR_CONTEXT = 2
+
 # Type alias for dispatcher functions
 #
 # Design Note (PR #61 Review):
@@ -690,6 +697,18 @@ class MessageDispatchEngine:
                 message=f"Category must be EnumMessageCategory, got {type(category).__name__}.",
                 error_code=EnumCoreErrorCode.INVALID_PARAMETER,
             )
+
+        # Runtime validation for node_kind to catch dynamic dispatch issues
+        # where type checkers can't help (e.g., dynamically constructed arguments)
+        if node_kind is not None:
+            # Import here to avoid circular import at module level
+            # EnumNodeKind is only in TYPE_CHECKING block at top of file
+            from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
+            if not isinstance(node_kind, EnumNodeKind):
+                raise ValueError(
+                    f"node_kind must be EnumNodeKind or None, got {type(node_kind).__name__}"
+                )
 
         with self._registration_lock:
             if self._frozen:
@@ -1631,14 +1650,15 @@ class MessageDispatchEngine:
             # Dispatcher with context has 2+ parameters: (envelope, context, ...)
             # Dispatcher without context has 1 parameter: (envelope)
             #
-            # Design Decision: We use >= 2 (not == 2) intentionally to support:
+            # Design Decision: We use >= MIN_PARAMS_FOR_CONTEXT (not ==) intentionally
+            # to support:
             # - Future extensibility (e.g., envelope, context, **kwargs)
             # - Dispatchers with additional optional parameters for testing/logging
             # - Protocol compliance without strict arity enforcement
             #
-            # Strict == 2 would reject valid dispatchers that happen to have
-            # extra optional parameters, which is unnecessarily restrictive.
-            if len(params) < 2:
+            # Strict == MIN_PARAMS_FOR_CONTEXT would reject valid dispatchers that
+            # happen to have extra optional parameters, which is unnecessarily restrictive.
+            if len(params) < MIN_PARAMS_FOR_CONTEXT:
                 return False
 
             # Type safety enhancement: Warn if second parameter doesn't follow
