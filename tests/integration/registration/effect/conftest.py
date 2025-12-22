@@ -148,13 +148,3 @@ def request_factory() -> Callable[..., ModelRegistryRequest]:
         )
 
     return _create_request
-
-
-__all__ = [
-    "consul_client",
-    "postgres_adapter",
-    "idempotency_store",
-    "registry_effect",
-    "sample_request",
-    "request_factory",
-]

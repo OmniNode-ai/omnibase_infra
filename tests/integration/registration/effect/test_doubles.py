@@ -12,8 +12,8 @@ interfaces required by NodeRegistryEffect. Unlike mocks, these test doubles:
 5. Track call history for assertions
 
 Test Doubles:
-    - TestDoubleConsulClient: Implements ProtocolConsulClient
-    - TestDoublePostgresAdapter: Implements ProtocolPostgresAdapter
+    - StubConsulClient: Implements ProtocolConsulClient
+    - StubPostgresAdapter: Implements ProtocolPostgresAdapter
 
 Design Principles:
     - No mocking: Use real implementations with controllable behavior
@@ -82,7 +82,7 @@ class StubConsulClient:
         - call_count: Number of times register_service was called
 
     Example:
-        >>> client = TestDoubleConsulClient()
+        >>> client = StubConsulClient()
         >>> result = await client.register_service("id-1", "svc", ["tag"])
         >>> assert result["success"] is True
         >>> assert len(client.registrations) == 1
@@ -202,7 +202,7 @@ class StubPostgresAdapter:
         - call_count: Number of times upsert was called
 
     Example:
-        >>> adapter = TestDoublePostgresAdapter()
+        >>> adapter = StubPostgresAdapter()
         >>> result = await adapter.upsert(uuid4(), "effect", "1.0.0", {}, {})
         >>> assert result["success"] is True
         >>> assert len(adapter.registrations) == 1

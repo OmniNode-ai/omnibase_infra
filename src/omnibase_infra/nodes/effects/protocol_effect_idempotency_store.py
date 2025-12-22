@@ -104,6 +104,9 @@ class ProtocolEffectIdempotencyStore(Protocol):
 
         Returns:
             True if the backend is completed, False otherwise.
+
+        Raises:
+            RuntimeError: If the store is unavailable.
         """
         ...
 
@@ -115,6 +118,9 @@ class ProtocolEffectIdempotencyStore(Protocol):
 
         Returns:
             Set of completed backend identifiers. Empty set if none.
+
+        Raises:
+            RuntimeError: If the store is unavailable.
         """
         ...
 
@@ -126,6 +132,9 @@ class ProtocolEffectIdempotencyStore(Protocol):
 
         Args:
             correlation_id: The correlation ID to clear.
+
+        Raises:
+            RuntimeError: If the store is unavailable.
         """
         ...
 

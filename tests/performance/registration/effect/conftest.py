@@ -19,7 +19,6 @@ Related:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -187,20 +186,3 @@ def create_sample_registration(
         registered_at=now,
         updated_at=now,
     )
-
-
-__all__ = [
-    # Store fixtures
-    "default_effect_store",
-    "small_cache_effect_store",
-    "large_cache_effect_store",
-    "inmemory_idempotency_store",
-    # Mock client fixtures
-    "fast_mock_consul_client",
-    "fast_mock_postgres_client",
-    # Sample fixtures
-    "correlation_id",
-    # Factory functions
-    "create_sample_introspection_event",
-    "create_sample_registration",
-]

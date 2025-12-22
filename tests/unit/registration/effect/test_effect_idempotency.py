@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import pytest
 
@@ -59,31 +59,9 @@ from omnibase_infra.models.registration import (
 # -----------------------------------------------------------------------------
 # Fixtures
 # -----------------------------------------------------------------------------
-
-
-@pytest.fixture
-def inmemory_idempotency_store() -> InMemoryIdempotencyStore:
-    """Create an InMemoryIdempotencyStore for testing.
-
-    Returns:
-        A fresh InMemoryIdempotencyStore instance.
-    """
-    return InMemoryIdempotencyStore()
-
-
-@pytest.fixture
-def mock_consul_client() -> MagicMock:
-    """Create a mock Consul client for testing effect execution.
-
-    Returns:
-        MagicMock configured to track registration calls.
-    """
-    client = MagicMock()
-    client.agent = MagicMock()
-    client.agent.service = MagicMock()
-    client.agent.service.register = AsyncMock(return_value=True)
-    client.agent.service.deregister = AsyncMock(return_value=True)
-    return client
+# NOTE: Common fixtures (inmemory_idempotency_store, mock_consul_client,
+# sample_introspection_event, correlation_id) are defined in conftest.py.
+# This file only defines fixtures specific to effect idempotency testing.
 
 
 @pytest.fixture
@@ -111,24 +89,6 @@ def sample_registry_request() -> dict[str, UUID | str]:
         "intent_type": "consul.register",
         "registration_id": uuid4(),
     }
-
-
-@pytest.fixture
-def sample_introspection_event() -> ModelNodeIntrospectionEvent:
-    """Create a sample introspection event for testing.
-
-    Returns:
-        A valid ModelNodeIntrospectionEvent.
-    """
-    return ModelNodeIntrospectionEvent(
-        node_id=uuid4(),
-        node_type="effect",
-        node_version="1.0.0",
-        correlation_id=uuid4(),
-        endpoints={"health": "http://localhost:8080/health"},
-        capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
-        metadata=ModelNodeMetadata(environment="test"),
-    )
 
 
 @pytest.fixture
@@ -295,10 +255,16 @@ class SimulatedEffectExecutor:
         # Build natural key from composite of entity + intent type + registration
         # This ensures that even with different intent_ids, the same logical
         # operation is treated as a duplicate.
+        #
+        # NOTE: uuid5(NAMESPACE_OID, natural_key) is intentionally used here.
+        # uuid5 generates deterministic UUIDs from a namespace and name, which is
+        # exactly what we need for natural key deduplication:
+        # - Same natural_key always produces the same UUID (deterministic)
+        # - Different natural_keys produce different UUIDs (collision-resistant)
+        # - NAMESPACE_OID is a well-known UUID namespace (RFC 4122)
+        # This is NOT a collision risk because uuid5 is designed for this use case.
         natural_key = f"{entity_id}:{intent_type}:{registration_id}"
-        natural_key_uuid = UUID(
-            bytes=natural_key.encode("utf-8")[:16].ljust(16, b"\x00")
-        )
+        natural_key_uuid = uuid5(NAMESPACE_OID, natural_key)
 
         # First check: intent_id deduplication
         is_new_intent = await self.idempotency_store.check_and_record(

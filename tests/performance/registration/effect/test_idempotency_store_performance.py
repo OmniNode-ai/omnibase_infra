@@ -26,9 +26,8 @@ from __future__ import annotations
 import asyncio
 import time
 from statistics import mean
-from typing import TYPE_CHECKING
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -38,10 +37,6 @@ from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import 
 from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
     InMemoryEffectIdempotencyStore,
 )
-
-if TYPE_CHECKING:
-    from uuid import UUID
-
 
 # -----------------------------------------------------------------------------
 # LRU Eviction Efficiency Tests

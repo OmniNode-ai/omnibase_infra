@@ -182,9 +182,11 @@ class TestConsulFailureFlow:
         assert response.consul_result.success is False
         assert response.postgres_result.success is True
 
-        # Assert - Error captured
+        # Assert - Error captured (sanitized to prevent secret exposure)
+        # Raw error "Service unavailable" is sanitized to "service unavailable" safe prefix
         assert response.consul_result.error is not None
-        assert "Service unavailable" in response.consul_result.error
+        assert "Consul operation failed" in response.consul_result.error
+        assert "service unavailable" in response.consul_result.error
         assert response.error_summary is not None
         assert "Consul" in response.error_summary
 
@@ -274,9 +276,11 @@ class TestPostgresFailureFlow:
         assert response.consul_result.success is True
         assert response.postgres_result.success is False
 
-        # Assert - Error captured
+        # Assert - Error captured (sanitized to prevent secret exposure)
+        # Raw error "Connection timeout" is sanitized to "timeout" safe prefix
         assert response.postgres_result.error is not None
-        assert "Connection timeout" in response.postgres_result.error
+        assert "PostgreSQL operation failed" in response.postgres_result.error
+        assert "timeout" in response.postgres_result.error
         assert response.error_summary is not None
         assert "PostgreSQL" in response.error_summary
 
@@ -366,11 +370,12 @@ class TestBothFailFlow:
         assert response.consul_result.success is False
         assert response.postgres_result.success is False
 
-        # Assert - Errors captured
+        # Assert - Errors captured (sanitized to prevent secret exposure)
+        # Raw errors without safe prefix patterns are sanitized to generic message
         assert response.consul_result.error is not None
         assert response.postgres_result.error is not None
-        assert "Consul unavailable" in response.consul_result.error
-        assert "Database down" in response.postgres_result.error
+        assert "Consul operation failed" in response.consul_result.error
+        assert "PostgreSQL operation failed" in response.postgres_result.error
 
         # Assert - Error summary contains both
         assert response.error_summary is not None

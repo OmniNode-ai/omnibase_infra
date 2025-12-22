@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -46,10 +46,6 @@ from omnibase_infra.models.registration import (
     ModelNodeMetadata,
     ModelNodeRegistration,
 )
-
-if TYPE_CHECKING:
-    from typing import Literal
-
 
 # -----------------------------------------------------------------------------
 # Idempotency Fixtures
@@ -118,8 +114,8 @@ def mock_consul_client() -> MagicMock:
     # Mock Agent operations (service registration)
     client.agent = MagicMock()
     client.agent.service = MagicMock()
-    client.agent.service.register = MagicMock(return_value=None)
-    client.agent.service.deregister = MagicMock(return_value=None)
+    client.agent.service.register = AsyncMock(return_value=True)
+    client.agent.service.deregister = AsyncMock(return_value=True)
     client.agent.services = MagicMock(
         return_value={
             "node-service-1": {
@@ -468,24 +464,3 @@ def retry_config() -> dict[str, object]:
         "max_delay_seconds": 1.0,
         "exponential_base": 2.0,
     }
-
-
-__all__ = [
-    # Idempotency fixtures
-    "inmemory_idempotency_store",
-    "initialized_idempotency_store",
-    # Mock fixtures
-    "mock_consul_client",
-    "mock_postgres_handler",
-    # Sample model fixtures
-    "correlation_id",
-    "sample_node_id",
-    "sample_introspection_event",
-    "sample_node_registration",
-    # Factory functions
-    "create_introspection_event",
-    "create_node_registration",
-    # Configuration fixtures
-    "circuit_breaker_config",
-    "retry_config",
-]

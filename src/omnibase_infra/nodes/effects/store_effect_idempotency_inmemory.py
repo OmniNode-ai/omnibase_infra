@@ -189,8 +189,8 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
             backend: Backend identifier (e.g., "consul", "postgres").
         """
         async with self._lock:
-            # Check for TTL cleanup opportunity
-            await self._maybe_cleanup_expired()
+            # Check for TTL cleanup opportunity (sync - lock already held)
+            self._maybe_cleanup_expired()
 
             if correlation_id in self._cache:
                 # Update existing entry and move to end (most recently used)
@@ -201,8 +201,8 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
             else:
                 # Create new entry
                 self._cache[correlation_id] = CacheEntry(backends={backend})
-                # Evict LRU entries if over capacity
-                await self._evict_lru_if_needed()
+                # Evict LRU entries if over capacity (sync - lock already held)
+                self._evict_lru_if_needed()
 
     async def is_completed(self, correlation_id: UUID, backend: str) -> bool:
         """Check if a backend is completed for a correlation ID.
@@ -296,7 +296,50 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
             Number of entries removed.
         """
         async with self._lock:
-            return await self._cleanup_expired_entries()
+            return self._cleanup_expired_entries()
+
+    async def get_estimated_memory_bytes(self) -> int:
+        """Get estimated memory usage of the cache in bytes.
+
+        Calculates approximate memory consumption based on:
+        - UUID key: 16 bytes
+        - CacheEntry object overhead: ~40 bytes
+        - set[str] for backends: ~40 bytes (assumes 2 backends average)
+        - float timestamps (created_at, accessed_at): 16 bytes
+        - Python object overhead per entry: ~40 bytes
+
+        Total estimated per entry: ~152 bytes (rounded to 150 for estimation)
+
+        This is an approximation useful for monitoring and capacity planning.
+        Actual memory usage may vary based on:
+        - Number of backends per entry
+        - Backend string lengths
+        - Python version and implementation
+        - Memory allocator behavior
+
+        Returns:
+            Estimated memory usage in bytes.
+
+        Example:
+            >>> store = InMemoryEffectIdempotencyStore()
+            >>> await store.mark_completed(uuid4(), "consul")
+            >>> memory = await store.get_estimated_memory_bytes()
+            >>> assert memory > 0
+        """
+        # Constants for memory estimation (in bytes)
+        base_overhead = 200  # OrderedDict base overhead
+        per_entry_bytes = 150  # Estimated bytes per cache entry
+
+        async with self._lock:
+            entry_count = len(self._cache)
+
+            # Calculate additional backend string memory
+            total_backend_bytes = 0
+            for entry in self._cache.values():
+                # Each backend string: ~50 bytes average (object + chars)
+                total_backend_bytes += len(entry.backends) * 50
+
+            return base_overhead + (entry_count * per_entry_bytes) + total_backend_bytes
 
     def _is_expired(self, entry: CacheEntry) -> bool:
         """Check if an entry has exceeded TTL.
@@ -311,21 +354,31 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
         age = now - entry.created_at
         return age > self._config.cache_ttl_seconds
 
-    async def _maybe_cleanup_expired(self) -> None:
+    def _maybe_cleanup_expired(self) -> None:
         """Cleanup expired entries if cleanup interval has passed.
 
         Called during write operations to lazily maintain cache hygiene.
         Only runs if cleanup_interval_seconds has passed since last cleanup.
+
+        Note:
+            This is a synchronous method because it performs only in-memory
+            operations (dict iteration, timestamp checks, deletions). It must
+            be called with self._lock held by the caller. The lock provides
+            thread safety; async is not needed for CPU-bound dict operations.
         """
         now = time.monotonic()
         if now - self._last_cleanup >= self._config.cleanup_interval_seconds:
-            await self._cleanup_expired_entries()
+            self._cleanup_expired_entries()
             self._last_cleanup = now
 
-    async def _cleanup_expired_entries(self) -> int:
+    def _cleanup_expired_entries(self) -> int:
         """Remove all expired entries from cache.
 
-        Must be called with lock held.
+        Note:
+            This is a synchronous method because it performs only in-memory
+            operations (dict iteration, timestamp checks, deletions). It must
+            be called with self._lock held by the caller. The lock provides
+            thread safety; async is not needed for CPU-bound dict operations.
 
         Returns:
             Number of entries removed.
@@ -342,13 +395,17 @@ class InMemoryEffectIdempotencyStore(ProtocolEffectIdempotencyStore):
 
         return len(expired_keys)
 
-    async def _evict_lru_if_needed(self) -> int:
+    def _evict_lru_if_needed(self) -> int:
         """Evict least recently used entries if over capacity.
 
         Removes oldest entries (front of OrderedDict) until cache size
         is within max_cache_size limit.
 
-        Must be called with lock held.
+        Note:
+            This is a synchronous method because it performs only in-memory
+            operations (len check, dict popitem). It must be called with
+            self._lock held by the caller. The lock provides thread safety;
+            async is not needed for CPU-bound dict operations.
 
         Returns:
             Number of entries evicted.

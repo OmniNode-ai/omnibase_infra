@@ -19,6 +19,7 @@ from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import 
 )
 from omnibase_infra.nodes.effects.models.model_registry_request import (
     ModelRegistryRequest,
+    NodeType,
 )
 from omnibase_infra.nodes.effects.models.model_registry_response import (
     ModelRegistryResponse,
@@ -29,4 +30,5 @@ __all__ = [
     "ModelEffectIdempotencyConfig",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
+    "NodeType",
 ]

@@ -25,9 +25,13 @@ Related:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Type alias for valid ONEX node types
+NodeType = Literal["effect", "compute", "reducer", "orchestrator"]
 
 
 class ModelRegistryRequest(BaseModel):
@@ -73,7 +77,7 @@ class ModelRegistryRequest(BaseModel):
         ...,
         description="Unique identifier for the node being registered",
     )
-    node_type: str = Field(
+    node_type: NodeType = Field(
         ...,
         description="Type of ONEX node (effect, compute, reducer, orchestrator)",
     )
@@ -111,4 +115,4 @@ class ModelRegistryRequest(BaseModel):
     )
 
 
-__all__ = ["ModelRegistryRequest"]
+__all__ = ["ModelRegistryRequest", "NodeType"]

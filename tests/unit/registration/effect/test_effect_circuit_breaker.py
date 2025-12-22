@@ -29,7 +29,6 @@ requiring actual infrastructure backends.
 from __future__ import annotations
 
 import asyncio
-from typing import TypeVar
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -45,8 +44,6 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import (
     CircuitState,
     MixinAsyncCircuitBreaker,
 )
-
-T = TypeVar("T")
 
 
 class MockConsulBackend:
