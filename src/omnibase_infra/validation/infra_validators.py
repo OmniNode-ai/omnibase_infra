@@ -16,7 +16,6 @@ Exemption System:
 
     See validation_exemptions.yaml for:
     - pattern_exemptions: Method count, parameter count, naming violations
-    - architecture_exemptions: One-model-per-file violations for domain-grouped protocols
     - union_exemptions: Complex union type violations
 
     Adding new exemptions:
@@ -100,9 +99,9 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
     Cache is cleared when the module is reloaded.
 
     Returns:
-        Dictionary with 'pattern_exemptions', 'architecture_exemptions', and
-        'union_exemptions' keys, each containing a list of ExemptionPattern
-        dictionaries. Returns empty lists if file is missing or malformed.
+        Dictionary with 'pattern_exemptions' and 'union_exemptions' keys,
+        each containing a list of ExemptionPattern dictionaries.
+        Returns empty lists if file is missing or malformed.
 
     Note:
         The YAML file is expected to be at validation_exemptions.yaml alongside
@@ -110,35 +109,23 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
     """
     if not EXEMPTIONS_YAML_PATH.exists():
         # Fallback to empty exemptions if file is missing
-        return {
-            "pattern_exemptions": [],
-            "architecture_exemptions": [],
-            "union_exemptions": [],
-        }
+        return {"pattern_exemptions": [], "union_exemptions": []}
 
     try:
         with EXEMPTIONS_YAML_PATH.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         if not isinstance(data, dict):
-            return {
-                "pattern_exemptions": [],
-                "architecture_exemptions": [],
-                "union_exemptions": [],
-            }
+            return {"pattern_exemptions": [], "union_exemptions": []}
 
         # Extract exemption lists, converting YAML structure to ExemptionPattern format
         pattern_exemptions = _convert_yaml_exemptions(
             data.get("pattern_exemptions", [])
         )
-        architecture_exemptions = _convert_yaml_exemptions(
-            data.get("architecture_exemptions", [])
-        )
         union_exemptions = _convert_yaml_exemptions(data.get("union_exemptions", []))
 
         return {
             "pattern_exemptions": pattern_exemptions,
-            "architecture_exemptions": architecture_exemptions,
             "union_exemptions": union_exemptions,
         }
     except (yaml.YAMLError, OSError) as e:
@@ -148,11 +135,7 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
             EXEMPTIONS_YAML_PATH,
             e,
         )
-        return {
-            "pattern_exemptions": [],
-            "architecture_exemptions": [],
-            "union_exemptions": [],
-        }
+        return {"pattern_exemptions": [], "union_exemptions": []}
 
 
 def _convert_yaml_exemptions(yaml_list: list[dict]) -> list[ExemptionPattern]:
@@ -276,20 +259,6 @@ def get_pattern_exemptions() -> list[ExemptionPattern]:
     return _load_exemptions_yaml()["pattern_exemptions"]
 
 
-def get_architecture_exemptions() -> list[ExemptionPattern]:
-    """
-    Get architecture validator exemptions from YAML configuration.
-
-    Architecture exemptions handle violations of the one-model-per-file principle
-    for domain-grouped protocols. Per CLAUDE.md, protocols.py files may contain
-    multiple cohesive protocols that belong to a specific domain or node module.
-
-    Returns:
-        List of ExemptionPattern dictionaries for architecture validation.
-    """
-    return _load_exemptions_yaml()["architecture_exemptions"]
-
-
 def get_union_exemptions() -> list[ExemptionPattern]:
     """
     Get union validator exemptions from YAML configuration.
@@ -354,22 +323,21 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # See exempted_patterns list in validate_infra_patterns() for complete definitions.
 # ============================================================================
 
-# Maximum allowed union VIOLATIONS in infrastructure code.
-# This counts actual problematic patterns, NOT total unions.
+# Maximum allowed union count in infrastructure code.
+# This is a COUNT threshold, not a violation threshold. The validator counts all
+# unions including the ONEX-preferred `X | None` patterns, which are valid.
 #
-# What counts as a VIOLATION (reported in errors):
-# - Primitive soup: `str | int | float | bool` (4+ primitive types)
-# - Mixed type unions: `str | int | MyModel` (primitives mixed with models)
-# - Legacy syntax: `Union[X, None]` instead of `X | None`
+# Current baseline (515 unions as of 2025-12-22):
+# - Most unions are legitimate `X | None` nullable patterns
+# - These are NOT flagged as violations, just counted
+# - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 #
-# What is NOT counted (valid patterns):
-# - `X | None` nullable patterns (ONEX-preferred, PEP 604 compliant)
-# - `ModelA | ModelB` discriminated unions
-# - Simple 2-3 type unions for legitimate use cases
+# Threshold history:
+# - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
+# - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~24 unions added)
 #
-# Current baseline: ~0 violations (all unions are valid X | None patterns)
-# Threshold set to 10 to allow buffer for legitimate edge cases.
-INFRA_MAX_UNION_VIOLATIONS = 10
+# Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
+INFRA_MAX_UNIONS = 515
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
@@ -396,36 +364,14 @@ def validate_infra_architecture(
 
     Enforces ONEX one-model-per-file principle critical for infrastructure nodes.
 
-    Exemptions:
-        Exemption patterns are loaded from validation_exemptions.yaml
-        (architecture_exemptions section). Per CLAUDE.md "Protocol File Naming",
-        domain-grouped protocols in protocols.py files are allowed to contain
-        multiple cohesive protocols that belong to a specific domain or node module.
-
-        Example exemption:
-        - nodes/node_registration_orchestrator/protocols.py: Contains ProtocolReducer
-          and ProtocolEffect for the reducer-effect pattern in node registration.
-
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
         max_violations: Maximum allowed violations. Defaults to INFRA_MAX_VIOLATIONS (0).
 
     Returns:
-        ModelValidationResult with validation status and filtered errors.
-        Documented exemptions are filtered from error list.
+        ModelValidationResult with validation status and any errors.
     """
-    # Run base validation
-    base_result = validate_architecture(str(directory), max_violations=max_violations)
-
-    # Load exemption patterns from YAML configuration
-    # See validation_exemptions.yaml for pattern definitions and rationale
-    exempted_patterns = get_architecture_exemptions()
-
-    # Filter errors using regex-based pattern matching
-    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
-
-    # Create wrapper result (avoid mutation)
-    return _create_filtered_result(base_result, filtered_errors)
+    return validate_architecture(str(directory), max_violations=max_violations)
 
 
 def validate_infra_contracts(
@@ -673,24 +619,13 @@ _contract_validator = ProtocolContractValidator()
 
 def validate_infra_union_usage(
     directory: str | Path = INFRA_SRC_PATH,
-    max_violations: int = INFRA_MAX_UNION_VIOLATIONS,
+    max_unions: int = INFRA_MAX_UNIONS,
     strict: bool = INFRA_UNIONS_STRICT,
 ) -> ValidationResult:
     """
     Validate Union type usage in infrastructure code.
 
-    Counts actual VIOLATIONS (problematic patterns), not total unions.
-    Valid `X | None` patterns are not counted as violations.
-
-    Violation Types (what gets counted):
-        - Primitive soup: `str | int | float | bool` (4+ primitive types)
-        - Mixed type unions: `str | int | MyModel`
-        - Legacy syntax: `Union[X, None]` instead of `X | None`
-
-    Valid Patterns (NOT counted):
-        - `X | None` nullable patterns (ONEX-preferred)
-        - `ModelA | ModelB` discriminated unions
-        - Simple 2-3 type unions for legitimate use cases
+    Prevents overly complex union types that complicate infrastructure code.
 
     Exemptions:
         Exemption patterns are loaded from validation_exemptions.yaml (union_exemptions section).
@@ -701,16 +636,16 @@ def validate_infra_union_usage(
 
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
-        max_violations: Maximum allowed violations. Defaults to INFRA_MAX_UNION_VIOLATIONS (10).
+        max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS.
         strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
 
     Returns:
         ModelValidationResult with validation status and any errors.
-        The errors list contains only actual violations, not valid unions.
     """
-    # Run base validation with a high max_unions to get all violations
-    # We don't use max_unions for threshold - we count violations instead
-    base_result = validate_union_usage(str(directory), max_unions=10000, strict=strict)
+    # Run base validation
+    base_result = validate_union_usage(
+        str(directory), max_unions=max_unions, strict=strict
+    )
 
     # Load exemption patterns from YAML configuration
     # See validation_exemptions.yaml for pattern definitions and rationale
@@ -719,34 +654,8 @@ def validate_infra_union_usage(
     # Filter errors using regex-based pattern matching
     filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
 
-    # Count actual violations (errors), not total unions
-    violation_count = len(filtered_errors)
-
-    # Log informational union statistics
-    # Guard against missing metadata or total_unions attribute
-    total_unions = getattr(base_result.metadata, "total_unions", 0) if base_result.metadata else 0
-    logger.debug(
-        "Union validation: %d violations (threshold: %d), %d total unions",
-        violation_count,
-        max_violations,
-        total_unions,
-    )
-
-    # Determine validity based on violation count, not total unions
-    is_valid = violation_count <= max_violations
-
-    # Create wrapper result with violation-based validity
-    return ModelValidationResult(
-        is_valid=is_valid,
-        validated_value=base_result.validated_value,
-        issues=base_result.issues,
-        errors=filtered_errors,
-        warnings=base_result.warnings,
-        suggestions=base_result.suggestions,
-        summary=f"Union violations: {violation_count} (max: {max_violations}), total unions: {total_unions}",
-        details=base_result.details,
-        metadata=base_result.metadata,
-    )
+    # Create wrapper result (avoid mutation)
+    return _create_filtered_result(base_result, filtered_errors)
 
 
 def validate_infra_circular_imports(
@@ -780,7 +689,7 @@ def validate_infra_all(
     - Architecture (strict, 0 violations)
     - Contracts (nodes directory)
     - Patterns (strict mode)
-    - Union usage (max INFRA_MAX_UNION_VIOLATIONS - counts violations, not total unions)
+    - Union usage (max INFRA_MAX_UNIONS)
     - Circular imports
 
     Args:
@@ -869,14 +778,13 @@ __all__ = [
     # Constants
     "INFRA_SRC_PATH",
     "INFRA_NODES_PATH",
-    "INFRA_MAX_UNION_VIOLATIONS",
+    "INFRA_MAX_UNIONS",
     "INFRA_MAX_VIOLATIONS",
     "INFRA_PATTERNS_STRICT",
     "INFRA_UNIONS_STRICT",
     "EXEMPTIONS_YAML_PATH",
     # Exemption loaders
     "get_pattern_exemptions",
-    "get_architecture_exemptions",
     "get_union_exemptions",
     # Validators
     "validate_infra_architecture",

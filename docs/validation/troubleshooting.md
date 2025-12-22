@@ -218,72 +218,71 @@ Patterns: FAIL
 
 ---
 
-### Issue: Union Violations Threshold Exceeded
+### Issue: Union Usage Threshold Exceeded
 
 **Symptom**:
 ```
 Unions: FAIL
-  - src/myfile.py: Line 42: Union with 4+ primitive types...
-  Violations: 12, max allowed: 10
+  - Found 495 unions (max: 491)
 ```
 
-**Root Cause**: Too many problematic union patterns in codebase
+**Root Cause**: Too many Union types in codebase
 
-**Context**: The validator counts actual VIOLATIONS, not total unions. Valid `X | None`
-patterns are NOT counted. Only problematic patterns are flagged:
-- Primitive soup: `str | int | float | bool` (4+ primitive types)
-- Mixed type unions: `str | int | MyModel`
-- Legacy syntax: `Union[X, None]` instead of `X | None`
-
-Current threshold: INFRA_MAX_UNION_VIOLATIONS = 10
+**Context**: The current INFRA_MAX_UNIONS threshold is 491, set as a buffer above
+the baseline (~485 unions as of 2025-12-21). Most unions are legitimate `X | None`
+nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged
+as violations. The target is to reduce to <200 through `dict[str, object]` to `JsonValue` migration.
 
 **Solution**:
 
-1. **Review violations in output**:
+1. **Identify union-heavy files**:
    ```bash
-   # Run validator to see specific violations
-   poetry run python -c "
-   from omnibase_infra.validation import validate_infra_union_usage
-   r = validate_infra_union_usage()
-   for e in r.errors:
-       print(e)
-   "
+   # Search for Union usage (both old and new syntax)
+   grep -rn "Union\[" src/ | wc -l
+   grep -rn " | None" src/ | wc -l
    ```
 
-2. **Fix primitive soup patterns**:
+2. **Refactor excessive unions**:
    ```python
-   # Before: Primitive soup (VIOLATION)
-   Value = str | int | float | bool | None
+   # Before: Excessive union
+   HandlerType = Union[
+       ConsulAdapter,
+       KafkaAdapter,
+       VaultAdapter,
+       PostgresAdapter,
+       RedisAdapter,
+       # ... 15 more
+   ]
 
-   # After: Use JsonPrimitive from json_types.py
-   from omnibase_infra.models.types.json_types import JsonPrimitive
-   Value = JsonPrimitive  # Centralized, exempted definition
-   ```
-
-3. **Fix mixed type unions**:
-   ```python
-   # Before: Mixed types (VIOLATION)
-   Result = str | int | MyModel
-
-   # After: Use discriminated union or protocol
+   # After: Use protocol or base class
    from typing import Protocol
 
-   class ResultType(Protocol):
-       def get_value(self) -> str: ...
+   class ServiceHandler(Protocol):
+       def handle(self, request: Request) -> Response:
+           ...
+
+   # Now use ServiceHandler instead of Union
    ```
 
-4. **Add exemption if legitimate**:
-   ```yaml
-   # validation_exemptions.yaml
-   union_exemptions:
-     - file_pattern: 'my_file\.py'
-       violation_pattern: 'Union with 4\+ primitive types'
-       reason: Explain why this pattern is necessary
-       ticket: OMN-XXX
+3. **Migrate dict[str, object] to JsonValue** (preferred approach):
+   ```python
+   # Before: Contributes to union count
+   metadata: dict[str, object]
+
+   # After: Strongly typed, reduces union pressure
+   from omnibase_core.types import JsonValue
+   metadata: JsonValue
    ```
 
-**Prevention**: Use strongly-typed models instead of primitive unions.
-Import centralized type definitions from `json_types.py`.
+4. **Adjust threshold only if absolutely necessary**:
+   ```python
+   # Current threshold is 491 (buffer above ~485 baseline as of 2025-12-21)
+   # Only increase with documented justification and ticket reference
+   INFRA_MAX_UNIONS = 491  # Document justification per OMN-983
+   ```
+
+**Prevention**: Prefer protocols/base classes over large unions. Migrate
+`dict[str, object]` patterns to `JsonValue` for stronger typing.
 
 ---
 

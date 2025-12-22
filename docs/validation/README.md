@@ -68,7 +68,7 @@ poetry run python scripts/validate.py all --quick
 **Purpose**: Prevent overly complex union types
 
 **Configuration**:
-- Max unions: `400` (tight buffer above ~379 baseline, target: <200)
+- Max unions: `491` (buffer above ~485 baseline, target: <200)
 - Strict mode: `True` (flags actual violations per OMN-983)
 - Directory: `src/omnibase_infra/`
 
@@ -139,7 +139,7 @@ Validators are pre-configured with infrastructure-appropriate defaults:
 # src/omnibase_infra/validation/infra_validators.py
 INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
-INFRA_MAX_UNION_VIOLATIONS = 10 # Counts violations, not total unions
+INFRA_MAX_UNIONS = 491          # Buffer above ~485 baseline (target: <200)
 INFRA_MAX_VIOLATIONS = 0
 INFRA_PATTERNS_STRICT = True    # Strict mode with documented exemptions (OMN-983)
 INFRA_UNIONS_STRICT = True      # Strict union validation (OMN-983)

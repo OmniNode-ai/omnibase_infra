@@ -327,15 +327,12 @@ if result.suggestions:
 
 Validate Union type usage to prevent overly complex types.
 
-Counts actual **VIOLATIONS** (problematic patterns), not total unions.
-Valid `X | None` patterns are not counted as violations.
-
 ### Signature
 
 ```python
 def validate_infra_union_usage(
     directory: str | Path = INFRA_SRC_PATH,
-    max_violations: int = INFRA_MAX_UNION_VIOLATIONS,
+    max_unions: int = INFRA_MAX_UNIONS,
     strict: bool = INFRA_UNIONS_STRICT,
 ) -> ValidationResult:
 ```
@@ -343,29 +340,23 @@ def validate_infra_union_usage(
 ### Parameters
 
 - **directory** (`str | Path`, optional): Directory to validate. Defaults to `"src/omnibase_infra/"`.
-- **max_violations** (`int`, optional): Maximum allowed union violations. Defaults to `10` (INFRA_MAX_UNION_VIOLATIONS).
+- **max_unions** (`int`, optional): Maximum allowed complex unions. Defaults to `491` (INFRA_MAX_UNIONS).
 - **strict** (`bool`, optional): Enable strict mode. Defaults to `True` (INFRA_UNIONS_STRICT per OMN-983).
 
 ### Returns
 
 `ValidationResult` with:
-- `is_valid`: `True` if violations within threshold
-- `errors`: List of union violations (problematic patterns only)
-- `summary`: Human-readable summary with violation count and total unions
+- `is_valid`: `True` if unions within threshold
+- `errors`: List of union violations
 - `metadata`: `ModelValidationMetadata` with:
-  - `total_unions`: Total count of all unions (informational)
+  - `total_unions`: Count of complex union types found
+  - `max_unions`: Configured threshold
 
-### What Counts as a Violation
+### What It Validates
 
-- **Primitive soup**: `str | int | float | bool` (4+ primitive types)
-- **Mixed type unions**: `str | int | MyModel` (primitives mixed with models)
-- **Legacy syntax**: `Union[X, None]` instead of `X | None`
-
-### What is NOT Counted (Valid Patterns)
-
-- **Nullable patterns**: `X | None` (ONEX-preferred, PEP 604 compliant)
-- **Discriminated unions**: `ModelA | ModelB`
-- **Simple unions**: 2-3 type unions for legitimate use cases
+- **Complex union count**: Total number of Union types
+- **Union complexity**: Number of types in each Union
+- **Type annotation usage**: Proper Union syntax
 
 ### Infrastructure Justification
 
@@ -374,7 +365,7 @@ Infrastructure code needs typed unions for:
 - Message routing and handler dispatch
 - Service integration type safety
 
-**Why max_unions=400**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The threshold is set as a tight buffer above the current baseline (~379 unions as of 2025-12-20). Most unions are legitimate `X | None` nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged as violations. The target is to reduce to <200 through ongoing `dict[str, object]` to `JsonValue` migration.
+**Why max_unions=491**: Infrastructure has many service adapters with typed handlers, protocol implementations, message routing, and registration event models. The threshold is set as a buffer above the current baseline (~485 unions as of 2025-12-21). Most unions are legitimate `X | None` nullable patterns (ONEX-preferred PEP 604 syntax) which are counted but NOT flagged as violations. The target is to reduce to <200 through ongoing `dict[str, object]` to `JsonValue` migration.
 
 ### Example Usage
 
@@ -621,7 +612,7 @@ INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 
 # Validation thresholds
-INFRA_MAX_UNION_VIOLATIONS = 10 # Max union violations (not total unions)
+INFRA_MAX_UNIONS = 491          # Maximum allowed union count (buffer above ~485 baseline)
 INFRA_MAX_VIOLATIONS = 0        # Zero tolerance for architecture violations
 
 # Strict mode flags (OMN-983)

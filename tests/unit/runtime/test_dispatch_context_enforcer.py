@@ -1019,6 +1019,423 @@ class TestFactoryMethodForRuntimeHost:
         assert ctx.has_time_injection is True
 
 
+# =============================================================================
+# Error Case Tests
+# =============================================================================
+
+
+class TestDispatchContextEnforcerErrorCases:
+    """
+    Tests for DispatchContextEnforcer error handling.
+
+    These tests verify that:
+    1. Unhandled node_kind values raise ModelOnexError with INTERNAL_ERROR
+    2. Error messages include dispatcher_id for debugging
+    3. Time injection violations for deterministic nodes raise with VALIDATION_FAILED
+    """
+
+    def test_unrecognized_node_kind_raises_internal_error(
+        self,
+        enforcer: DispatchContextEnforcer,
+        envelope_with_ids: MockEnvelope,
+    ) -> None:
+        """
+        Unrecognized node_kind should raise ModelOnexError with INTERNAL_ERROR.
+
+        This tests the fallback case that should never happen in practice,
+        but guards against new enum values being added without updating
+        the switch statement in create_context_for_dispatcher.
+        """
+
+        # Create a custom class that will never equal any EnumNodeKind value.
+        # This simulates a hypothetical new enum value added without updating
+        # the create_context_for_dispatcher switch statement.
+        class UnknownNodeKind:
+            """A fake node kind that is not in EnumNodeKind."""
+
+            value = "fake_node_kind"
+
+            def __eq__(self, other: object) -> bool:
+                return False  # Never equals any known enum
+
+            def __hash__(self) -> int:
+                return hash(self.value)
+
+        mock_dispatcher = MagicMock(spec=ProtocolMessageDispatcher)
+        mock_dispatcher.dispatcher_id = "mock-unknown-dispatcher"
+        mock_dispatcher.node_kind = UnknownNodeKind()
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.create_context_for_dispatcher(mock_dispatcher, envelope_with_ids)
+
+        # Verify error code is INTERNAL_ERROR
+        assert exc_info.value.error_code == EnumCoreErrorCode.INTERNAL_ERROR
+
+    def test_unrecognized_node_kind_error_contains_dispatcher_id(
+        self,
+        enforcer: DispatchContextEnforcer,
+        envelope_with_ids: MockEnvelope,
+    ) -> None:
+        """
+        Error message for unrecognized node_kind should contain dispatcher_id.
+
+        The dispatcher_id is essential for debugging which dispatcher has
+        an unhandled node_kind.
+        """
+
+        class UnknownNodeKind:
+            """A fake node kind that is not in EnumNodeKind."""
+
+            value = "unknown_node"
+
+            def __eq__(self, other: object) -> bool:
+                return False
+
+            def __hash__(self) -> int:
+                return hash(self.value)
+
+        mock_dispatcher = MagicMock(spec=ProtocolMessageDispatcher)
+        mock_dispatcher.dispatcher_id = "debug-friendly-dispatcher-id"
+        mock_dispatcher.node_kind = UnknownNodeKind()
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.create_context_for_dispatcher(mock_dispatcher, envelope_with_ids)
+
+        # Verify dispatcher_id is in the error message for debugging
+        error_message = exc_info.value.message
+        assert "debug-friendly-dispatcher-id" in error_message
+        assert "internal error" in error_message.lower()
+
+    def test_validate_reducer_with_time_raises_validation_failed(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_reducer should raise VALIDATION_FAILED
+        when reducer context has time injection.
+
+        This tests the case where someone manually constructs an invalid
+        context bypassing the model validators.
+        """
+        # Create a context that bypasses validation by using object.__new__
+        # to directly set attributes. This simulates a hypothetical scenario
+        # where validation is bypassed (e.g., deserialization from untrusted data).
+        # We use MagicMock to simulate an invalid context state.
+        invalid_context = MagicMock(spec=ModelDispatchContext)
+        invalid_context.node_kind = EnumNodeKind.REDUCER
+        invalid_context.now = datetime.now(UTC)  # Invalid: reducer with time
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.validate_no_time_injection_for_reducer(invalid_context)
+
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "REDUCER" in exc_info.value.message
+        assert "time injection" in exc_info.value.message.lower()
+
+    def test_validate_compute_with_time_raises_validation_failed(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_compute should raise VALIDATION_FAILED
+        when compute context has time injection.
+        """
+        invalid_context = MagicMock(spec=ModelDispatchContext)
+        invalid_context.node_kind = EnumNodeKind.COMPUTE
+        invalid_context.now = datetime.now(UTC)  # Invalid: compute with time
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.validate_no_time_injection_for_compute(invalid_context)
+
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "COMPUTE" in exc_info.value.message
+        assert "time injection" in exc_info.value.message.lower()
+
+    def test_validate_deterministic_node_with_reducer_and_time_raises(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_deterministic_node should raise
+        VALIDATION_FAILED for REDUCER with time injection.
+        """
+        invalid_context = MagicMock(spec=ModelDispatchContext)
+        invalid_context.node_kind = EnumNodeKind.REDUCER
+        invalid_context.now = datetime.now(UTC)
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.validate_no_time_injection_for_deterministic_node(invalid_context)
+
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "REDUCER" in exc_info.value.message
+        assert "deterministic" in exc_info.value.message.lower()
+
+    def test_validate_deterministic_node_with_compute_and_time_raises(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_deterministic_node should raise
+        VALIDATION_FAILED for COMPUTE with time injection.
+        """
+        invalid_context = MagicMock(spec=ModelDispatchContext)
+        invalid_context.node_kind = EnumNodeKind.COMPUTE
+        invalid_context.now = datetime.now(UTC)
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.validate_no_time_injection_for_deterministic_node(invalid_context)
+
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "COMPUTE" in exc_info.value.message
+        assert "deterministic" in exc_info.value.message.lower()
+
+    def test_validate_deterministic_node_passes_for_valid_reducer(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_deterministic_node should NOT raise
+        for valid REDUCER context (now=None).
+        """
+        valid_context = ModelDispatchContext.for_reducer(correlation_id=uuid4())
+        # Should not raise
+        enforcer.validate_no_time_injection_for_deterministic_node(valid_context)
+
+    def test_validate_deterministic_node_passes_for_valid_compute(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_deterministic_node should NOT raise
+        for valid COMPUTE context (now=None).
+        """
+        valid_context = ModelDispatchContext.for_compute(correlation_id=uuid4())
+        # Should not raise
+        enforcer.validate_no_time_injection_for_deterministic_node(valid_context)
+
+    def test_validate_deterministic_node_passes_for_orchestrator(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_deterministic_node should NOT raise
+        for ORCHESTRATOR context (time injection is expected).
+        """
+        valid_context = ModelDispatchContext.for_orchestrator(
+            correlation_id=uuid4(),
+            now=datetime.now(UTC),
+        )
+        # Should not raise - orchestrators are not deterministic nodes
+        enforcer.validate_no_time_injection_for_deterministic_node(valid_context)
+
+    def test_validate_reducer_passes_for_non_reducer_with_time(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_reducer should NOT raise for
+        non-reducer contexts that have time injection.
+        """
+        # Effect with time is valid
+        valid_context = ModelDispatchContext.for_effect(
+            correlation_id=uuid4(),
+            now=datetime.now(UTC),
+        )
+        # Should not raise - method only checks reducer contexts
+        enforcer.validate_no_time_injection_for_reducer(valid_context)
+
+    def test_validate_compute_passes_for_non_compute_with_time(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        validate_no_time_injection_for_compute should NOT raise for
+        non-compute contexts that have time injection.
+        """
+        # Orchestrator with time is valid
+        valid_context = ModelDispatchContext.for_orchestrator(
+            correlation_id=uuid4(),
+            now=datetime.now(UTC),
+        )
+        # Should not raise - method only checks compute contexts
+        enforcer.validate_no_time_injection_for_compute(valid_context)
+
+    def test_error_message_includes_actual_now_value_for_reducer(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        Error message should include the actual 'now' value for debugging.
+        """
+        specific_time = datetime(2025, 1, 15, 12, 30, 45, tzinfo=UTC)
+        invalid_context = MagicMock(spec=ModelDispatchContext)
+        invalid_context.node_kind = EnumNodeKind.REDUCER
+        invalid_context.now = specific_time
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.validate_no_time_injection_for_reducer(invalid_context)
+
+        # Error message should include the time value for debugging
+        error_message = exc_info.value.message
+        assert str(specific_time.year) in error_message or "2025" in error_message
+
+    def test_error_message_includes_actual_now_value_for_compute(
+        self,
+        enforcer: DispatchContextEnforcer,
+    ) -> None:
+        """
+        Error message should include the actual 'now' value for debugging.
+        """
+        specific_time = datetime(2025, 6, 20, 8, 0, 0, tzinfo=UTC)
+        invalid_context = MagicMock(spec=ModelDispatchContext)
+        invalid_context.node_kind = EnumNodeKind.COMPUTE
+        invalid_context.now = specific_time
+
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.validate_no_time_injection_for_compute(invalid_context)
+
+        # Error message should mention the now value
+        error_message = exc_info.value.message
+        assert "now=" in error_message
+
+
+# =============================================================================
+# Missing correlation_id Behavior Tests
+# =============================================================================
+
+
+class TestMissingCorrelationIdBehavior:
+    """
+    Tests for behavior when correlation_id is missing from envelope.
+
+    The DispatchContextEnforcer auto-generates a correlation_id when the
+    envelope does not provide one. This ensures every dispatch context
+    has a valid correlation_id for distributed tracing.
+
+    Expected Behavior:
+        - When envelope.correlation_id is None, a new UUID is generated
+        - The generated UUID is valid (proper UUID4 format)
+        - The generated correlation_id is never None in the resulting context
+        - This behavior is consistent across all node kinds
+    """
+
+    def test_missing_correlation_id_generates_new_uuid_for_reducer(
+        self,
+        enforcer: DispatchContextEnforcer,
+        reducer_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        REDUCER context should auto-generate correlation_id when envelope lacks one.
+
+        This tests the case where envelope.correlation_id is None.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
+
+        # correlation_id must NEVER be None in the resulting context
+        assert ctx.correlation_id is not None
+        # Must be a valid UUID
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_missing_correlation_id_generates_new_uuid_for_compute(
+        self,
+        enforcer: DispatchContextEnforcer,
+        compute_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        COMPUTE context should auto-generate correlation_id when envelope lacks one.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(compute_dispatcher, envelope)
+
+        assert ctx.correlation_id is not None
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_missing_correlation_id_generates_new_uuid_for_orchestrator(
+        self,
+        enforcer: DispatchContextEnforcer,
+        orchestrator_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        ORCHESTRATOR context should auto-generate correlation_id when envelope lacks one.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(orchestrator_dispatcher, envelope)
+
+        assert ctx.correlation_id is not None
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_missing_correlation_id_generates_new_uuid_for_effect(
+        self,
+        enforcer: DispatchContextEnforcer,
+        effect_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        EFFECT context should auto-generate correlation_id when envelope lacks one.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(effect_dispatcher, envelope)
+
+        assert ctx.correlation_id is not None
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_missing_correlation_id_generates_new_uuid_for_runtime_host(
+        self,
+        enforcer: DispatchContextEnforcer,
+        runtime_host_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        RUNTIME_HOST context should auto-generate correlation_id when envelope lacks one.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(runtime_host_dispatcher, envelope)
+
+        assert ctx.correlation_id is not None
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_each_missing_correlation_id_generates_unique_uuid(
+        self,
+        enforcer: DispatchContextEnforcer,
+        reducer_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        Each dispatch with missing correlation_id should generate a unique UUID.
+
+        This ensures idempotency keys are unique when not provided by the caller.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx1 = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
+        ctx2 = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
+
+        # Each should generate a different UUID
+        assert ctx1.correlation_id != ctx2.correlation_id
+
+    def test_provided_correlation_id_is_preserved_not_overwritten(
+        self,
+        enforcer: DispatchContextEnforcer,
+        reducer_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        When envelope provides correlation_id, it should NOT be overwritten.
+
+        This is the inverse test - ensuring auto-generation only happens
+        when correlation_id is actually missing.
+        """
+        provided_id = uuid4()
+        envelope = MockEnvelope(correlation_id=provided_id)
+
+        ctx = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
+
+        # Must preserve the provided ID, not generate a new one
+        assert ctx.correlation_id == provided_id
+
+
 class TestOMN973ArchitecturalRationale:
     """
     Tests that document WHY these time injection rules exist.

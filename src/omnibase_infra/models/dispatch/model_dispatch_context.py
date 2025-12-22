@@ -52,6 +52,19 @@ Example:
     >>> assert orchestrator_ctx.now is not None
     >>> assert orchestrator_ctx.has_time_injection
 
+Time Capture Semantics:
+    The ``now`` field represents the time when the dispatch context was created
+    (dispatch time), NOT when the handler begins execution. This is important
+    for understanding the timing model:
+
+    1. MessageDispatchEngine creates ModelDispatchContext with ``now=datetime.now(UTC)``
+    2. Context is passed to the dispatcher function
+    3. Dispatcher function begins execution (microseconds to milliseconds later)
+
+    For most applications, this timing difference is negligible. If your handler
+    requires sub-millisecond timing precision, capture ``datetime.now(UTC)`` at
+    the start of your handler function rather than relying on ``context.now``.
+
 See Also:
     omnibase_core.enums.EnumNodeKind: Node type classification
     omnibase_infra.models.dispatch.ModelDispatcherRegistration: Dispatcher metadata
@@ -120,7 +133,8 @@ class ModelDispatchContext(BaseModel):
     now: datetime | None = Field(
         default=None,
         description=(
-            "Injected current time for time-dependent operations. "
+            "Injected current time for time-dependent operations. Represents dispatch "
+            "time (when context was created), NOT handler execution time. "
             "Must be None for REDUCER and COMPUTE nodes to ensure deterministic execution."
         ),
     )

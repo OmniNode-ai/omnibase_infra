@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 # Import all validators and constants
 from omnibase_infra.validation.infra_validators import (
-    INFRA_MAX_UNION_VIOLATIONS,
+    INFRA_MAX_UNIONS,
     INFRA_MAX_VIOLATIONS,
     INFRA_NODES_PATH,
     INFRA_PATTERNS_STRICT,
@@ -35,23 +35,24 @@ from omnibase_infra.validation.infra_validators import (
 class TestInfraValidatorConstants:
     """Test constants used across validators."""
 
-    def test_infra_max_union_violations_constant(self) -> None:
-        """Verify INFRA_MAX_UNION_VIOLATIONS constant has expected value.
+    def test_infra_max_unions_constant(self) -> None:
+        """Verify INFRA_MAX_UNIONS constant has expected value.
 
         OMN-983: Strict validation mode enabled.
 
-        This constant counts actual VIOLATIONS, not total unions:
-        - Primitive soup: `str | int | float | bool` (4+ primitive types)
-        - Mixed type unions: `str | int | MyModel`
-        - Legacy syntax: `Union[X, None]` instead of `X | None`
+        Current baseline (~515 unions as of 2025-12-22):
+        - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
+        - These are counted but NOT flagged as violations
+        - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Valid patterns like `X | None` are NOT counted.
+        Threshold history:
+        - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
+        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots
 
-        Threshold set to 10 - allows buffer for legitimate edge cases.
-        Current baseline: ~0 violations (all unions are valid X | None patterns).
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNION_VIOLATIONS == 10, (
-            "INFRA_MAX_UNION_VIOLATIONS should be 10 (max allowed violations)"
+        assert INFRA_MAX_UNIONS == 515, (
+            "INFRA_MAX_UNIONS should be 515 (OMN-990 + OMN-947)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -114,19 +115,7 @@ class TestValidateInfraArchitectureDefaults:
     @patch("omnibase_infra.validation.infra_validators.validate_architecture")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
         """Verify defaults are correctly passed to core validator."""
-        # Mock validation result with proper structure for filtered result creation
-        # _create_filtered_result expects real Pydantic model attributes
-        mock_result = MagicMock()
-        mock_result.is_valid = True
-        mock_result.errors = []
-        mock_result.warnings = []
-        mock_result.suggestions = []
-        mock_result.issues = []
-        mock_result.validated_value = None
-        mock_result.summary = ""
-        mock_result.details = ""
-        mock_result.metadata = None
-        mock_validate.return_value = mock_result
+        mock_validate.return_value = MagicMock(is_valid=True, errors=[])
 
         # Call with defaults
         validate_infra_architecture()
@@ -216,10 +205,10 @@ class TestValidateInfraUnionUsageDefaults:
         directory_param = sig.parameters["directory"]
         assert directory_param.default == INFRA_SRC_PATH
 
-        # Check max_violations default (NEW: counts violations, not total unions)
-        max_violations_param = sig.parameters["max_violations"]
-        assert max_violations_param.default == INFRA_MAX_UNION_VIOLATIONS, (
-            f"Should default to INFRA_MAX_UNION_VIOLATIONS ({INFRA_MAX_UNION_VIOLATIONS})"
+        # Check max_unions default
+        max_unions_param = sig.parameters["max_unions"]
+        assert max_unions_param.default == INFRA_MAX_UNIONS, (
+            f"Should default to INFRA_MAX_UNIONS ({INFRA_MAX_UNIONS})"
         )
 
         # Check strict default - True for strict mode (OMN-983)
@@ -232,19 +221,8 @@ class TestValidateInfraUnionUsageDefaults:
     @patch("omnibase_infra.validation.infra_validators.validate_union_usage")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
         """Verify defaults are correctly passed to core validator."""
-        # Import the real metadata model for proper Pydantic validation
-        from omnibase_core.models.common.model_validation_metadata import (
-            ModelValidationMetadata,
-        )
-
-        # Create a real metadata object with total_unions
-        real_metadata = ModelValidationMetadata(
-            validation_type="union_usage",
-            total_unions=100,
-        )
-
         # Mock validation result with proper structure for filtered result creation
-        # (validate_infra_union_usage now creates a new ModelValidationResult)
+        # (validate_infra_union_usage now filters exempted patterns like patterns does)
         mock_result = MagicMock()
         mock_result.is_valid = True
         mock_result.errors = []
@@ -254,17 +232,16 @@ class TestValidateInfraUnionUsageDefaults:
         mock_result.validated_value = None
         mock_result.summary = ""
         mock_result.details = ""
-        mock_result.metadata = real_metadata  # Use real metadata object
+        mock_result.metadata = None
         mock_validate.return_value = mock_result
 
         # Call with defaults
         validate_infra_union_usage()
 
-        # Verify core validator called - uses high max_unions to get all violations
-        # (we count violations, not total unions, so we set max_unions high)
+        # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=10000,  # High value to get all violations (we count violations, not unions)
+            max_unions=INFRA_MAX_UNIONS,  # Default max from constant
             strict=INFRA_UNIONS_STRICT,  # Strict mode (True) per OMN-983
         )
 
@@ -360,16 +337,15 @@ class TestScriptDefaults:
 
         script_content = script_path.read_text()
 
-        # Verify architecture validator uses validate_infra_architecture() which has
-        # built-in defaults including INFRA_MAX_VIOLATIONS and exemption filtering
-        assert "validate_infra_architecture()" in script_content, (
-            "Architecture validator should use validate_infra_architecture() with built-in defaults"
+        # Verify architecture validator uses INFRA_MAX_VIOLATIONS constant
+        assert "max_violations=INFRA_MAX_VIOLATIONS" in script_content, (
+            "Architecture validator should use INFRA_MAX_VIOLATIONS constant"
         )
-        # Check for import - handles both single-line and multi-line import formats
         assert (
-            "from omnibase_infra.validation.infra_validators import" in script_content
-            and "validate_infra_architecture" in script_content
-        ), "Script should import validate_infra_architecture from infra_validators"
+            "from omnibase_infra.validation.infra_validators import INFRA_MAX_VIOLATIONS"
+            in script_content
+        ), "Script should import INFRA_MAX_VIOLATIONS constant"
+        assert "validate_architecture(" in script_content
 
     def test_contracts_script_defaults(self) -> None:
         """Verify contracts validation script uses correct defaults."""
@@ -398,11 +374,11 @@ class TestScriptDefaults:
         script_path = Path("scripts/validate.py")
         script_content = script_path.read_text()
 
-        # Verify unions validator uses INFRA_MAX_UNION_VIOLATIONS constant
-        assert "INFRA_MAX_UNION_VIOLATIONS" in script_content, (
-            "Unions validator should import and use INFRA_MAX_UNION_VIOLATIONS constant"
+        # Verify unions validator uses INFRA_MAX_UNIONS constant
+        assert "INFRA_MAX_UNIONS" in script_content, (
+            "Unions validator should import and use INFRA_MAX_UNIONS constant"
         )
-        assert "max_violations=INFRA_MAX_UNION_VIOLATIONS" in script_content
+        assert "max_unions=INFRA_MAX_UNIONS" in script_content
         # Verify unions validator uses INFRA_UNIONS_STRICT constant
         assert "INFRA_UNIONS_STRICT" in script_content, (
             "Unions validator should import and use INFRA_UNIONS_STRICT constant"
@@ -461,10 +437,10 @@ class TestCLICommandDefaults:
 
         # Get the Click command decorators
         for decorator in validate_unions_cmd.params:
-            if decorator.name == "max_violations":
-                # CLI uses None by default and resolves to INFRA_MAX_UNION_VIOLATIONS in code
+            if decorator.name == "max_unions":
+                # CLI uses None by default and resolves to INFRA_MAX_UNIONS in code
                 assert decorator.default is None, (
-                    "CLI max_violations should default to None (resolved to INFRA_MAX_UNION_VIOLATIONS)"
+                    "CLI max_unions should default to None (resolved to INFRA_MAX_UNIONS)"
                 )
             elif decorator.name == "strict":
                 # CLI uses None by default and resolves to INFRA_UNIONS_STRICT in code
@@ -495,46 +471,46 @@ class TestCLICommandDefaults:
                 assert decorator.default == "src/omnibase_infra/nodes/"
 
 
-class TestUnionViolationRegressionGuard:
-    """Regression tests verifying union violations stay within configured threshold.
+class TestUnionCountRegressionGuard:
+    """Regression tests verifying union count stays within configured threshold.
 
     These tests call the actual validator against the real codebase (not mocked)
-    to ensure that new code additions don't exceed union violation thresholds.
+    to ensure that new code additions don't exceed union count thresholds.
 
     If these tests fail, it indicates one of:
-    1. New code added problematic union patterns (primitive soup, mixed types)
-    2. The INFRA_MAX_UNION_VIOLATIONS threshold needs to be adjusted (with documented rationale)
+    1. New code added unions without using proper typed patterns from omnibase_core
+    2. The INFRA_MAX_UNIONS threshold needs to be adjusted (with documented rationale)
 
-    See OMN-983 for threshold documentation and validation design.
+    See OMN-983 for threshold documentation and migration goals.
     """
 
-    def test_union_violations_within_threshold(self) -> None:
-        """Verify union violations stay within configured threshold.
+    def test_union_count_within_threshold(self) -> None:
+        """Verify union count stays within configured threshold.
 
-        This test acts as a regression guard - if violation count exceeds
-        the threshold, it indicates new code added problematic union patterns.
+        This test acts as a regression guard - if union count exceeds
+        the threshold, it indicates new code added unions without
+        using proper typed patterns from omnibase_core.
 
-        What counts as a VIOLATION:
-        - Primitive soup: `str | int | float | bool` (4+ primitive types)
-        - Mixed type unions: `str | int | MyModel`
-        - Legacy syntax: `Union[X, None]` instead of `X | None`
+        Current baseline (~513 unions as of 2025-12-22):
+        - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
+        - These are counted but NOT flagged as violations
+        - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        What is NOT counted (valid patterns):
-        - `X | None` nullable patterns (ONEX-preferred)
-        - `ModelA | ModelB` discriminated unions
-        - Simple 2-3 type unions for legitimate use cases
-
-        Threshold: INFRA_MAX_UNION_VIOLATIONS (10) - allows buffer for edge cases.
-        Current baseline: ~0 violations (json_types.py is exempted).
+        Threshold: INFRA_MAX_UNIONS (515) - buffer above baseline.
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
         result = validate_infra_union_usage()
 
-        # Extract violation count from errors
-        violation_count = len(result.errors)
+        # Extract actual union count from metadata for clear error messaging
+        actual_count = (
+            result.metadata.total_unions
+            if result.metadata and hasattr(result.metadata, "total_unions")
+            else "unknown"
+        )
 
         assert result.is_valid, (
-            f"Union violations {violation_count} exceeds threshold {INFRA_MAX_UNION_VIOLATIONS}. "
-            f"New code may have added problematic union patterns. "
+            f"Union count {actual_count} exceeds threshold {INFRA_MAX_UNIONS}. "
+            f"New code may have added unions without using typed patterns. "
             f"Errors: {result.errors[:5]}{'...' if len(result.errors) > 5 else ''}"
         )
 
@@ -556,38 +532,14 @@ class TestUnionViolationRegressionGuard:
             "Metadata should contain total_unions count for monitoring"
         )
 
-        # Verify the count is reasonable (positive integer)
+        # Verify the count is reasonable (positive integer, below threshold)
         assert isinstance(result.metadata.total_unions, int), (
             "total_unions should be an integer"
         )
         assert result.metadata.total_unions >= 0, "total_unions should be non-negative"
-
-    def test_violation_count_is_meaningful(self) -> None:
-        """Verify violation count is meaningful and smaller than total unions.
-
-        The new violation-based counting should produce a much smaller
-        number than the total union count (which includes valid patterns).
-        """
-        result = validate_infra_union_usage()
-
-        violation_count = len(result.errors)
-        total_unions = (
-            result.metadata.total_unions
-            if result.metadata and hasattr(result.metadata, "total_unions")
-            else 0
-        )
-
-        # Violations should be much smaller than total unions
-        # (most unions are valid X | None patterns)
-        assert violation_count <= INFRA_MAX_UNION_VIOLATIONS, (
-            f"Violation count {violation_count} exceeds threshold {INFRA_MAX_UNION_VIOLATIONS}"
-        )
-
-        # Total unions should be much larger than violations
-        # This validates that we're counting violations, not total unions
-        assert total_unions > violation_count, (
-            f"Total unions ({total_unions}) should be greater than violations ({violation_count}). "
-            "This indicates the validator is properly counting violations, not total unions."
+        assert result.metadata.total_unions <= INFRA_MAX_UNIONS, (
+            f"total_unions ({result.metadata.total_unions}) should be within "
+            f"threshold ({INFRA_MAX_UNIONS})"
         )
 
 
@@ -632,14 +584,14 @@ class TestDefaultsConsistency:
 
         # Script uses constant (verified in test_patterns_script_defaults)
 
-    def test_unions_max_violations_consistency(self) -> None:
-        """Verify max_violations=INFRA_MAX_UNION_VIOLATIONS across all union entry points."""
+    def test_unions_max_consistency(self) -> None:
+        """Verify max_unions=INFRA_MAX_UNIONS across all union entry points."""
         # Function default
         sig = inspect.signature(validate_infra_union_usage)
-        assert sig.parameters["max_violations"].default == INFRA_MAX_UNION_VIOLATIONS
+        assert sig.parameters["max_unions"].default == INFRA_MAX_UNIONS
 
-        # CLI uses None and resolves to INFRA_MAX_UNION_VIOLATIONS (verified in code review)
-        # Script imports and uses INFRA_MAX_UNION_VIOLATIONS (verified in test_unions_script_defaults)
+        # CLI uses None and resolves to INFRA_MAX_UNIONS (verified in code review)
+        # Script imports and uses INFRA_MAX_UNIONS (verified in test_unions_script_defaults)
 
     def test_unions_strict_consistency(self) -> None:
         """Verify strict=INFRA_UNIONS_STRICT across all union entry points."""
