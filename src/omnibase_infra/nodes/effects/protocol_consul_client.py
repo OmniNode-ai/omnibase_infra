@@ -3,10 +3,10 @@
 """Protocol for Consul service registration client.
 
 This module defines the protocol that Consul clients must implement
-to be used with the RegistryEffect node.
+to be used with the NodeRegistryEffect node.
 
 Related:
-    - RegistryEffect: Effect node that uses this protocol
+    - NodeRegistryEffect: Effect node that uses this protocol
     - ProtocolPostgresAdapter: Protocol for PostgreSQL backend
 """
 

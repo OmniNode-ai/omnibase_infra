@@ -2,7 +2,7 @@
 # Copyright (c) 2025 OmniNode Team
 """Unit tests for Registry Effect partial failure scenarios.
 
-This test suite validates the partial failure handling of the RegistryEffect node,
+This test suite validates the partial failure handling of the NodeRegistryEffect node,
 which operates on TWO backends (Consul + PostgreSQL) and must handle scenarios
 where one backend succeeds while the other fails.
 
@@ -20,7 +20,7 @@ Response Status Semantics:
     - "failed": Both backends failed
 
 Related:
-    - RegistryEffect: Effect node under test
+    - NodeRegistryEffect: Effect node under test
     - ModelRegistryResponse: Response model with partial failure support
     - ModelBackendResult: Individual backend result model
     - OMN-954: Partial failure scenario testing ticket
@@ -38,7 +38,7 @@ from omnibase_infra.nodes.effects import (
     ModelBackendResult,
     ModelRegistryRequest,
     ModelRegistryResponse,
-    RegistryEffect,
+    NodeRegistryEffect,
 )
 
 # -----------------------------------------------------------------------------
@@ -74,17 +74,17 @@ def mock_postgres_handler() -> AsyncMock:
 def registry_effect(
     mock_consul_client: AsyncMock,
     mock_postgres_handler: AsyncMock,
-) -> RegistryEffect:
-    """Create a RegistryEffect with mock backends.
+) -> NodeRegistryEffect:
+    """Create a NodeRegistryEffect with mock backends.
 
     Args:
         mock_consul_client: Mock Consul client.
         mock_postgres_handler: Mock PostgreSQL handler.
 
     Returns:
-        RegistryEffect instance with mocked backends.
+        NodeRegistryEffect instance with mocked backends.
     """
-    return RegistryEffect(mock_consul_client, mock_postgres_handler)
+    return NodeRegistryEffect(mock_consul_client, mock_postgres_handler)
 
 
 @pytest.fixture
@@ -125,7 +125,7 @@ def correlation_id() -> UUID:
 class TestEffectPartialFailure:
     """Test suite for partial failure scenarios (G4 acceptance criteria).
 
-    These tests validate that the RegistryEffect correctly handles scenarios
+    These tests validate that the NodeRegistryEffect correctly handles scenarios
     where one backend succeeds and the other fails, preserving appropriate
     context and enabling targeted retries.
     """
@@ -133,7 +133,7 @@ class TestEffectPartialFailure:
     @pytest.mark.asyncio
     async def test_consul_success_postgres_failure(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
         sample_registry_request: ModelRegistryRequest,
@@ -161,7 +161,11 @@ class TestEffectPartialFailure:
         assert response.status == "partial"
         assert response.consul_result.success is True
         assert response.postgres_result.success is False
-        assert "DB connection failed" in (response.postgres_result.error or "")
+        # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
+        # Format: "{ExceptionType}: PostgreSQL upsert failed"
+        assert "Exception: PostgreSQL upsert failed" in (
+            response.postgres_result.error or ""
+        )
         assert response.correlation_id == sample_registry_request.correlation_id
         assert response.node_id == sample_registry_request.node_id
 
@@ -174,7 +178,7 @@ class TestEffectPartialFailure:
     @pytest.mark.asyncio
     async def test_consul_failure_postgres_success(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
         sample_registry_request: ModelRegistryRequest,
@@ -204,7 +208,11 @@ class TestEffectPartialFailure:
         assert response.status == "partial"
         assert response.consul_result.success is False
         assert response.postgres_result.success is True
-        assert "Consul service unavailable" in (response.consul_result.error or "")
+        # Error message is sanitized to avoid exposing secrets (connection strings, etc.)
+        # Format: "{ExceptionType}: Consul registration failed"
+        assert "Exception: Consul registration failed" in (
+            response.consul_result.error or ""
+        )
         assert response.consul_result.error_code == "CONSUL_CONNECTION_ERROR"
         assert response.correlation_id == sample_registry_request.correlation_id
 
@@ -215,7 +223,7 @@ class TestEffectPartialFailure:
     @pytest.mark.asyncio
     async def test_both_backends_fail(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
         sample_registry_request: ModelRegistryRequest,
@@ -246,9 +254,14 @@ class TestEffectPartialFailure:
         assert response.consul_result.success is False
         assert response.postgres_result.success is False
 
-        # Verify error messages preserved
-        assert "Consul connection refused" in (response.consul_result.error or "")
-        assert "PostgreSQL timeout" in (response.postgres_result.error or "")
+        # Verify error messages are sanitized (no raw exception messages that may contain secrets)
+        # Format: "{ExceptionType}: {Backend} {operation} failed"
+        assert "Exception: Consul registration failed" in (
+            response.consul_result.error or ""
+        )
+        assert "Exception: PostgreSQL upsert failed" in (
+            response.postgres_result.error or ""
+        )
 
         # Verify error summary aggregates both errors
         assert response.error_summary is not None
@@ -256,7 +269,7 @@ class TestEffectPartialFailure:
         assert "PostgreSQL" in response.error_summary
 
         # Verify no partial state left (completed backends cache should be empty)
-        completed = registry_effect.get_completed_backends(
+        completed = await registry_effect.get_completed_backends(
             sample_registry_request.correlation_id
         )
         assert len(completed) == 0
@@ -269,7 +282,7 @@ class TestEffectPartialFailure:
     @pytest.mark.asyncio
     async def test_partial_failure_idempotency(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
     ) -> None:
@@ -310,7 +323,7 @@ class TestEffectPartialFailure:
         assert mock_consul_client.register_service.call_count == 1
 
         # Verify Consul is marked as completed
-        completed = registry_effect.get_completed_backends(correlation_id)
+        completed = await registry_effect.get_completed_backends(correlation_id)
         assert "consul" in completed
         assert "postgres" not in completed
 
@@ -335,7 +348,7 @@ class TestEffectPartialFailure:
     @pytest.mark.asyncio
     async def test_partial_failure_error_aggregation(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
         sample_registry_request: ModelRegistryRequest,
@@ -395,7 +408,7 @@ class TestEffectPartialFailure:
     @pytest.mark.asyncio
     async def test_partial_failure_processing_time(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
         sample_registry_request: ModelRegistryRequest,
@@ -444,8 +457,11 @@ class TestEffectPartialFailure:
         assert response.consul_result.duration_ms >= 10.0  # Consul's 10ms
         assert response.postgres_result.duration_ms >= 100.0  # PostgreSQL's 100ms
 
-        # Assert - Timeout is captured in error
-        assert "timed out" in (response.postgres_result.error or "").lower()
+        # Assert - Timeout exception type is captured in sanitized error message
+        # Format: "TimeoutError: PostgreSQL upsert failed" (exception type preserved for debugging)
+        assert "TimeoutError: PostgreSQL upsert failed" in (
+            response.postgres_result.error or ""
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -460,7 +476,7 @@ class TestPartialFailureEdgeCases:
     @pytest.mark.asyncio
     async def test_success_both_backends(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
         sample_registry_request: ModelRegistryRequest,
@@ -487,7 +503,7 @@ class TestPartialFailureEdgeCases:
     @pytest.mark.asyncio
     async def test_clear_completed_backends_enables_retry(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
     ) -> None:
@@ -510,7 +526,7 @@ class TestPartialFailureEdgeCases:
         assert mock_consul_client.register_service.call_count == 1
 
         # Clear completed backends
-        registry_effect.clear_completed_backends(correlation_id)
+        await registry_effect.clear_completed_backends(correlation_id)
 
         # Second registration - should call both backends again
         response2 = await registry_effect.register_node(request)
@@ -520,7 +536,7 @@ class TestPartialFailureEdgeCases:
     @pytest.mark.asyncio
     async def test_response_helper_methods(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
         sample_registry_request: ModelRegistryRequest,
@@ -543,7 +559,7 @@ class TestPartialFailureEdgeCases:
     @pytest.mark.asyncio
     async def test_skip_backend_flags(
         self,
-        registry_effect: RegistryEffect,
+        registry_effect: NodeRegistryEffect,
         mock_consul_client: AsyncMock,
         mock_postgres_handler: AsyncMock,
         sample_registry_request: ModelRegistryRequest,
@@ -567,7 +583,9 @@ class TestPartialFailureEdgeCases:
         # Reset mocks
         mock_consul_client.reset_mock()
         mock_postgres_handler.reset_mock()
-        registry_effect.clear_completed_backends(sample_registry_request.correlation_id)
+        await registry_effect.clear_completed_backends(
+            sample_registry_request.correlation_id
+        )
 
         # Act - Skip PostgreSQL
         response = await registry_effect.register_node(

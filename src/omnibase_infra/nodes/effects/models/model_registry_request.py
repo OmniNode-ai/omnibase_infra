@@ -3,7 +3,7 @@
 """Registry Request Model for Registry Effect Operations.
 
 This module provides ModelRegistryRequest, representing the input to the
-RegistryEffect node for dual-backend registration operations.
+NodeRegistryEffect node for dual-backend registration operations.
 
 Architecture:
     ModelRegistryRequest captures all information needed to register a node
@@ -16,7 +16,7 @@ Architecture:
     or directly constructed for programmatic registration.
 
 Related:
-    - RegistryEffect: Effect node that consumes this request
+    - NodeRegistryEffect: Effect node that consumes this request
     - ModelRegistryResponse: Response model for registry operations
     - ModelNodeIntrospectionEvent: Source of registration data
     - OMN-954: Partial failure scenario testing
@@ -34,7 +34,7 @@ class ModelRegistryRequest(BaseModel):
     """Request model for dual-backend registration operations.
 
     Contains all information needed to register a node in both Consul
-    and PostgreSQL backends. The RegistryEffect uses this request to
+    and PostgreSQL backends. The NodeRegistryEffect uses this request to
     execute parallel or sequential registration operations.
 
     Immutability:

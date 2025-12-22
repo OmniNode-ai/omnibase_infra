@@ -15,14 +15,14 @@ Available Submodules:
 Available Classes:
 - RegistrationReducer: Pure reducer for dual registration to Consul
   and PostgreSQL backends.
-- RegistryEffect: Effect node for dual-backend registration execution.
+- NodeRegistryEffect: Effect node for dual-backend registration execution.
 """
 
 from omnibase_infra.nodes.effects import (
     ModelBackendResult,
     ModelRegistryRequest,
     ModelRegistryResponse,
-    RegistryEffect,
+    NodeRegistryEffect,
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 
@@ -30,6 +30,6 @@ __all__ = [
     "ModelBackendResult",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
+    "NodeRegistryEffect",
     "RegistrationReducer",
-    "RegistryEffect",
 ]

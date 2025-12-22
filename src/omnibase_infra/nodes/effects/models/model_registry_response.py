@@ -3,7 +3,7 @@
 """Registry Response Model for Dual-Backend Registration Operations.
 
 This module provides ModelRegistryResponse, representing the complete response
-from the RegistryEffect node after executing dual-backend registration.
+from the NodeRegistryEffect node after executing dual-backend registration.
 
 Architecture:
     ModelRegistryResponse captures the outcome of registering a node in both
@@ -28,7 +28,7 @@ Partial Failure Handling:
 
 Related:
     - ModelBackendResult: Individual backend operation result
-    - RegistryEffect: Effect node that produces this response
+    - NodeRegistryEffect: Effect node that produces this response
     - ModelRegistryRequest: Input request model
     - OMN-954: Partial failure scenario testing
 """

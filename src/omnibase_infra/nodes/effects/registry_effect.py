@@ -2,11 +2,11 @@
 # Copyright (c) 2025 OmniNode Team
 """Registry Effect Node for Dual-Backend Registration.
 
-This module provides RegistryEffect, an Effect node responsible for executing
+This module provides NodeRegistryEffect, an Effect node responsible for executing
 registration operations against both Consul and PostgreSQL backends.
 
 Architecture:
-    RegistryEffect follows the ONEX Effect node pattern:
+    NodeRegistryEffect follows the ONEX Effect node pattern:
     - Receives registration requests (from Reducer intents)
     - Executes I/O operations against external backends
     - Returns structured responses with per-backend results
@@ -25,8 +25,19 @@ Partial Failure Handling:
 
 Idempotency:
     For retry scenarios, the Effect tracks which backends have already
-    succeeded. If called with an already-completed backend, it skips
-    that backend and only executes the pending operation.
+    succeeded using an IdempotencyStore. The default in-memory store has:
+    - Bounded size (max 10,000 entries by default) with LRU eviction
+    - TTL-based expiration (1 hour by default)
+    - NOT persistent across restarts
+    - NOT suitable for distributed deployments
+
+    For production distributed deployments, inject a persistent
+    ProtocolEffectIdempotencyStore implementation.
+
+    Memory Characteristics (default config):
+        - Max entries: 10,000
+        - Per-entry size: ~100 bytes
+        - Max memory: ~1MB
 
 Circuit Breaker Integration:
     Backend clients should implement MixinAsyncCircuitBreaker for
@@ -37,6 +48,9 @@ Related:
     - ModelRegistryRequest: Input request model
     - ModelRegistryResponse: Output response model
     - ModelBackendResult: Per-backend result model
+    - ModelEffectIdempotencyConfig: Idempotency store configuration
+    - InMemoryEffectIdempotencyStore: Default bounded cache implementation
+    - ProtocolEffectIdempotencyStore: Protocol for pluggable backends
     - RegistrationReducer: Emits intents consumed by this Effect
     - OMN-954: Partial failure scenario testing
 """
@@ -49,6 +63,9 @@ from uuid import UUID
 from omnibase_infra.nodes.effects.models.model_backend_result import (
     ModelBackendResult,
 )
+from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
+    ModelEffectIdempotencyConfig,
+)
 from omnibase_infra.nodes.effects.models.model_registry_request import (
     ModelRegistryRequest,
 )
@@ -56,49 +73,121 @@ from omnibase_infra.nodes.effects.models.model_registry_response import (
     ModelRegistryResponse,
 )
 from omnibase_infra.nodes.effects.protocol_consul_client import ProtocolConsulClient
+from omnibase_infra.nodes.effects.protocol_effect_idempotency_store import (
+    ProtocolEffectIdempotencyStore,
+)
 from omnibase_infra.nodes.effects.protocol_postgres_adapter import (
     ProtocolPostgresAdapter,
 )
+from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
+    InMemoryEffectIdempotencyStore,
+)
 
 
-class RegistryEffect:
+class NodeRegistryEffect:
     """Effect node for dual-backend node registration.
 
     Executes registration operations against both Consul and PostgreSQL,
     with support for partial failure handling and targeted retries.
 
+    Idempotency Store:
+        Uses a pluggable idempotency store for tracking completed backends.
+        The default InMemoryEffectIdempotencyStore provides:
+        - Bounded size with LRU eviction (default 10,000 entries)
+        - TTL-based expiration (default 1 hour)
+        - ~1MB max memory at default settings
+
+        WARNING: The default in-memory store:
+        - Does NOT persist across restarts
+        - Does NOT work in distributed/multi-instance scenarios
+        - Is suitable only for single-instance deployments or testing
+
+        For production distributed deployments, inject a persistent
+        ProtocolEffectIdempotencyStore implementation backed by
+        Redis, PostgreSQL, or similar.
+
+    Memory Characteristics:
+        Default configuration (~1MB total):
+        - Max entries: 10,000 correlation IDs
+        - Per-entry: ~100 bytes (UUID + backend set + timestamps)
+        - Scales linearly: 100K entries = ~10MB
+
+    Performance Characteristics:
+        Idempotency checks are O(1):
+        - Backend lookup/update: O(1) amortized
+        - LRU eviction: O(1) per evicted entry
+        - Throughput: >5,000 ops/sec (single worker), >10,000 concurrent
+
+        Actual registration latency dominated by backend I/O:
+        - Consul registration: typically 1-10ms (network dependent)
+        - PostgreSQL upsert: typically 1-5ms (network dependent)
+        - Idempotency overhead: <0.1ms
+
     Thread Safety:
-        This class is NOT thread-safe. Each instance should be used
-        from a single async context. For concurrent use, create
-        separate instances.
+        This class is async-safe. The underlying idempotency store
+        uses asyncio.Lock for thread-safe operations.
 
     Attributes:
         consul_client: Client for Consul service registration.
         postgres_handler: Handler for PostgreSQL record persistence.
+        idempotency_store: Store for tracking completed backends.
 
     Example:
         >>> from unittest.mock import AsyncMock
         >>> consul = AsyncMock()
         >>> postgres = AsyncMock()
-        >>> effect = RegistryEffect(consul, postgres)
+        >>> effect = NodeRegistryEffect(consul, postgres)
         >>> # Configure mocks and call register_node...
+
+        >>> # With custom idempotency config (smaller cache, shorter TTL):
+        >>> from omnibase_infra.nodes.effects.models import ModelEffectIdempotencyConfig
+        >>> config = ModelEffectIdempotencyConfig(
+        ...     max_cache_size=1000,
+        ...     cache_ttl_seconds=300.0,
+        ... )
+        >>> effect = NodeRegistryEffect(consul, postgres, idempotency_config=config)
+
+    See Also:
+        - README.md: Comprehensive documentation with configuration guide
+        - InMemoryEffectIdempotencyStore: Default store implementation details
+        - ProtocolEffectIdempotencyStore: Protocol for custom backends
     """
 
     def __init__(
         self,
         consul_client: ProtocolConsulClient,
         postgres_adapter: ProtocolPostgresAdapter,
+        *,
+        idempotency_store: ProtocolEffectIdempotencyStore | None = None,
+        idempotency_config: ModelEffectIdempotencyConfig | None = None,
     ) -> None:
-        """Initialize the RegistryEffect with backend clients.
+        """Initialize the NodeRegistryEffect with backend clients.
 
         Args:
             consul_client: Client for Consul service registration.
             postgres_adapter: Adapter for PostgreSQL record persistence.
+            idempotency_store: Optional custom idempotency store.
+                If provided, idempotency_config is ignored.
+            idempotency_config: Optional configuration for the default
+                in-memory idempotency store. Ignored if idempotency_store
+                is provided.
+
+        Memory Characteristics (default config):
+            - Max entries: 10,000
+            - Per-entry size: ~100 bytes
+            - Max memory: ~1MB
+            - TTL: 1 hour
         """
         self._consul_client = consul_client
         self._postgres_adapter = postgres_adapter
-        # Track completed backends for idempotent retries
-        self._completed_backends: dict[UUID, set[str]] = {}
+
+        # Use provided store or create default with optional config
+        if idempotency_store is not None:
+            self._idempotency_store: ProtocolEffectIdempotencyStore = idempotency_store
+        else:
+            self._idempotency_store = InMemoryEffectIdempotencyStore(
+                config=idempotency_config
+            )
 
     async def register_node(
         self,
@@ -118,6 +207,13 @@ class RegistryEffect:
             it will be skipped on retry. This enables safe retries after
             partial failures.
 
+            The idempotency store has bounded memory (default 10K entries, ~1MB)
+            and TTL-based expiration (default 1 hour). Long-running operations
+            may see entries expire. For production, consider:
+            - Shorter operation durations than TTL
+            - Larger cache size for high-volume scenarios
+            - Persistent store for distributed deployments
+
         Args:
             request: Registration request with node details.
             skip_consul: If True, skip Consul registration (for retry scenarios).
@@ -126,11 +222,10 @@ class RegistryEffect:
         Returns:
             ModelRegistryResponse with per-backend results and overall status.
         """
-        start_time = time.perf_counter()
         correlation_id = request.correlation_id
 
         # Check for already-completed backends (idempotency)
-        completed = self._completed_backends.get(correlation_id, set())
+        completed = await self._idempotency_store.get_completed_backends(correlation_id)
 
         # Execute Consul registration if not skipped and not already completed
         if skip_consul or "consul" in completed:
@@ -143,7 +238,7 @@ class RegistryEffect:
         else:
             consul_result = await self._register_consul(request)
             if consul_result.success:
-                completed.add("consul")
+                await self._idempotency_store.mark_completed(correlation_id, "consul")
 
         # Execute PostgreSQL upsert if not skipped and not already completed
         if skip_postgres or "postgres" in completed:
@@ -156,11 +251,7 @@ class RegistryEffect:
         else:
             postgres_result = await self._upsert_postgres(request)
             if postgres_result.success:
-                completed.add("postgres")
-
-        # Update completed backends cache
-        if completed:
-            self._completed_backends[correlation_id] = completed
+                await self._idempotency_store.mark_completed(correlation_id, "postgres")
 
         return ModelRegistryResponse.from_backend_results(
             node_id=request.node_id,
@@ -218,9 +309,12 @@ class RegistryEffect:
 
         except Exception as e:
             duration_ms = (time.perf_counter() - start_time) * 1000
+            # Sanitize error message to avoid exposing secrets (connection strings, credentials)
+            # Use exception type name for debugging without exposing raw message
+            sanitized_error = f"{type(e).__name__}: Consul registration failed"
             return ModelBackendResult(
                 success=False,
-                error=str(e),
+                error=sanitized_error,
                 error_code="CONSUL_CONNECTION_ERROR",
                 duration_ms=duration_ms,
                 retries=retries,
@@ -275,9 +369,12 @@ class RegistryEffect:
 
         except Exception as e:
             duration_ms = (time.perf_counter() - start_time) * 1000
+            # Sanitize error message to avoid exposing secrets (connection strings, credentials)
+            # Use exception type name for debugging without exposing raw message
+            sanitized_error = f"{type(e).__name__}: PostgreSQL upsert failed"
             return ModelBackendResult(
                 success=False,
-                error=str(e),
+                error=sanitized_error,
                 error_code="POSTGRES_CONNECTION_ERROR",
                 duration_ms=duration_ms,
                 retries=retries,
@@ -285,7 +382,7 @@ class RegistryEffect:
                 correlation_id=request.correlation_id,
             )
 
-    def clear_completed_backends(self, correlation_id: UUID) -> None:
+    async def clear_completed_backends(self, correlation_id: UUID) -> None:
         """Clear completed backends cache for a correlation ID.
 
         Used for testing or to force re-registration.
@@ -293,9 +390,9 @@ class RegistryEffect:
         Args:
             correlation_id: The correlation ID to clear.
         """
-        self._completed_backends.pop(correlation_id, None)
+        await self._idempotency_store.clear(correlation_id)
 
-    def get_completed_backends(self, correlation_id: UUID) -> set[str]:
+    async def get_completed_backends(self, correlation_id: UUID) -> set[str]:
         """Get the set of completed backends for a correlation ID.
 
         Args:
@@ -304,9 +401,9 @@ class RegistryEffect:
         Returns:
             Set of backend names that have completed ("consul", "postgres").
         """
-        return self._completed_backends.get(correlation_id, set()).copy()
+        return await self._idempotency_store.get_completed_backends(correlation_id)
 
 
 __all__ = [
-    "RegistryEffect",
+    "NodeRegistryEffect",
 ]

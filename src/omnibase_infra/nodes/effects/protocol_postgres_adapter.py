@@ -3,10 +3,10 @@
 """Protocol for PostgreSQL registration persistence.
 
 This module defines the protocol that PostgreSQL adapters must implement
-to be used with the RegistryEffect node.
+to be used with the NodeRegistryEffect node.
 
 Related:
-    - RegistryEffect: Effect node that uses this protocol
+    - NodeRegistryEffect: Effect node that uses this protocol
     - ProtocolConsulClient: Protocol for Consul backend
 """
 

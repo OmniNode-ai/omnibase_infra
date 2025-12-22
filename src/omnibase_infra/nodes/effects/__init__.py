@@ -6,7 +6,7 @@ This module exports Effect layer nodes responsible for external I/O operations
 such as Consul registration and PostgreSQL persistence.
 
 Available:
-    - RegistryEffect: Dual-backend registration effect node
+    - NodeRegistryEffect: Dual-backend registration effect node
     - ModelRegistryResponse: Response model for registry operations
     - ModelBackendResult: Individual backend result model
 """
@@ -16,11 +16,11 @@ from omnibase_infra.nodes.effects.models import (
     ModelRegistryRequest,
     ModelRegistryResponse,
 )
-from omnibase_infra.nodes.effects.registry_effect import RegistryEffect
+from omnibase_infra.nodes.effects.registry_effect import NodeRegistryEffect
 
 __all__ = [
     "ModelBackendResult",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
-    "RegistryEffect",
+    "NodeRegistryEffect",
 ]

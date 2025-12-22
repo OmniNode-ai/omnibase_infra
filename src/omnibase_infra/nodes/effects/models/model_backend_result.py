@@ -25,7 +25,7 @@ Security:
 
 Related:
     - ModelRegistryResponse: Uses this model for consul_result and postgres_result
-    - RegistryEffect: Effect node that produces these results
+    - NodeRegistryEffect: Effect node that produces these results
     - OMN-954: Partial failure scenario testing
 """
 

@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRegistryEffect
+#
+# This contract defines the interface for the Registry Effect node,
+# which handles dual-backend node registration against Consul and PostgreSQL.
+# Required root-level fields per ModelYamlContract schema
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: EFFECT_GENERIC
+description: >
+  Effect node for dual-backend node registration. Executes registration operations against both Consul (service discovery) and PostgreSQL (registration record persistence), with support for partial failure handling and targeted retries.
