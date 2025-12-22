@@ -1428,9 +1428,9 @@ class RuntimeHostProcess:
                     message_id=message_id,
                     correlation_id=correlation_id,
                 )
-                # Convert Pydantic model to dict for serialization
+                # duplicate_response is already a dict from _create_duplicate_response
                 await self._publish_envelope_safe(
-                    duplicate_response.model_dump(), self._output_topic
+                    duplicate_response, self._output_topic
                 )
                 return False
 
