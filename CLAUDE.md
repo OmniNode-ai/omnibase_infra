@@ -6,6 +6,7 @@
 - `container_dependency_injection.md` - Complete DI patterns
 - `error_handling_patterns.md` - Error hierarchy and usage
 - `error_recovery_patterns.md` - Backoff, circuit breakers, degradation
+- `retry_backoff_compensation_strategy.md` - Retry policies, compensation for partial failures
 - `correlation_id_tracking.md` - Request tracing
 - `circuit_breaker_implementation.md` - Circuit breaker details
 
@@ -360,6 +361,7 @@ raise InfraConnectionError("Failed to connect", context=context) from original_e
 **See Also**:
 - `docs/patterns/error_handling_patterns.md` - Complete error hierarchy and usage
 - `docs/patterns/error_recovery_patterns.md` - Recovery strategies (backoff, circuit breaker, degradation)
+- `docs/patterns/retry_backoff_compensation_strategy.md` - Retry policies, backoff formulas, compensation for partial failures
 - `docs/patterns/correlation_id_tracking.md` - Request tracing patterns
 - `docs/patterns/circuit_breaker_implementation.md` - Circuit breaker details
 
