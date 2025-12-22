@@ -168,7 +168,9 @@ def run_unions(verbose: bool = False) -> bool:
             if hasattr(result, "metadata") and result.metadata:
                 meta = result.metadata
                 if hasattr(meta, "total_unions"):
-                    print(f"  Total unions: {meta.total_unions}, max allowed: {INFRA_MAX_UNIONS}")
+                    print(
+                        f"  Total unions: {meta.total_unions}, max allowed: {INFRA_MAX_UNIONS}"
+                    )
         return bool(result.is_valid)
     except ImportError as e:
         print(f"Skipping union validation: {e}")

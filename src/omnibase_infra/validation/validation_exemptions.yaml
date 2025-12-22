@@ -343,6 +343,20 @@ pattern_exemptions:
       table_name is a database configuration parameter specifying the PostgreSQL table name for storing idempotency records (default: "idempotency_records"). This is infrastructure configuration, not an entity reference.
 
     ticket: OMN-945
+  # ==========================================================================
+  # Consul Intent Payload Exemptions (OMN-888)
+  # ==========================================================================
+  # service_name in ModelConsulIntentPayload is the Consul service name to register,
+  # NOT a reference to an internal entity. It is a Consul-specific configuration field.
+  - file_pattern: 'model_registration_intent\.py'
+    violation_pattern: "Field 'service_name' might reference an entity"
+    reason: >
+      service_name is the Consul service name to register in service discovery
+      (e.g., "node-effect-123"). This is Consul-specific configuration, not an
+      entity reference. The field specifies how the node appears in Consul's
+      service catalog.
+
+    ticket: OMN-888
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -385,6 +399,25 @@ architecture_exemptions:
       - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors
       - Protocol contracts with examples in docstrings
     documentation: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
+    ticket: OMN-888
+  # ==========================================================================
+  # Registration Intent Models Exemption (OMN-888)
+  # ==========================================================================
+  # model_registration_intent.py contains a discriminated union pattern with
+  # typed intent models that must be defined together for type narrowing.
+  # The models form a cohesive discriminated union:
+  # - ModelConsulIntentPayload + ModelConsulRegistrationIntent (consul kind)
+  # - ModelPostgresIntentPayload + ModelPostgresUpsertIntent (postgres kind)
+  # - ModelRegistrationIntent = Annotated[Union, Field(discriminator="kind")]
+  - file_pattern: 'models/model_registration_intent\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      Discriminated union pattern for registration intents. The 4 models form
+      a cohesive type-safe union: payload models (ModelConsulIntentPayload,
+      ModelPostgresIntentPayload) paired with intent models that contain them
+      (ModelConsulRegistrationIntent, ModelPostgresUpsertIntent). The union
+      ModelRegistrationIntent uses Annotated[..., Field(discriminator="kind")]
+      for type narrowing. Splitting would break the discriminated union pattern.
     ticket: OMN-888
 
 # Union usage validator exemptions

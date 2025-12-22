@@ -99,8 +99,9 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
     Cache is cleared when the module is reloaded.
 
     Returns:
-        Dictionary with 'pattern_exemptions' and 'union_exemptions' keys,
-        each containing a list of ExemptionPattern dictionaries.
+        Dictionary with 'pattern_exemptions', 'union_exemptions', and
+        'architecture_exemptions' keys, each containing a list of
+        ExemptionPattern dictionaries.
         Returns empty lists if file is missing or malformed.
 
     Note:
@@ -109,24 +110,36 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
     """
     if not EXEMPTIONS_YAML_PATH.exists():
         # Fallback to empty exemptions if file is missing
-        return {"pattern_exemptions": [], "union_exemptions": []}
+        return {
+            "pattern_exemptions": [],
+            "union_exemptions": [],
+            "architecture_exemptions": [],
+        }
 
     try:
         with EXEMPTIONS_YAML_PATH.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         if not isinstance(data, dict):
-            return {"pattern_exemptions": [], "union_exemptions": []}
+            return {
+                "pattern_exemptions": [],
+                "union_exemptions": [],
+                "architecture_exemptions": [],
+            }
 
         # Extract exemption lists, converting YAML structure to ExemptionPattern format
         pattern_exemptions = _convert_yaml_exemptions(
             data.get("pattern_exemptions", [])
         )
         union_exemptions = _convert_yaml_exemptions(data.get("union_exemptions", []))
+        architecture_exemptions = _convert_yaml_exemptions(
+            data.get("architecture_exemptions", [])
+        )
 
         return {
             "pattern_exemptions": pattern_exemptions,
             "union_exemptions": union_exemptions,
+            "architecture_exemptions": architecture_exemptions,
         }
     except (yaml.YAMLError, OSError) as e:
         # Log warning but continue with empty exemptions
@@ -135,7 +148,11 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
             EXEMPTIONS_YAML_PATH,
             e,
         )
-        return {"pattern_exemptions": [], "union_exemptions": []}
+        return {
+            "pattern_exemptions": [],
+            "union_exemptions": [],
+            "architecture_exemptions": [],
+        }
 
 
 def _convert_yaml_exemptions(yaml_list: list[dict]) -> list[ExemptionPattern]:
@@ -269,6 +286,17 @@ def get_union_exemptions() -> list[ExemptionPattern]:
     return _load_exemptions_yaml()["union_exemptions"]
 
 
+def get_architecture_exemptions() -> list[ExemptionPattern]:
+    """
+    Get architecture validator exemptions from YAML configuration.
+
+    Returns:
+        List of ExemptionPattern dictionaries for architecture validation.
+    """
+    exemptions = _load_exemptions_yaml()
+    return exemptions.get("architecture_exemptions", [])
+
+
 # Default paths for infrastructure validation
 INFRA_SRC_PATH = "src/omnibase_infra/"
 INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
@@ -365,14 +393,34 @@ def validate_infra_architecture(
 
     Enforces ONEX one-model-per-file principle critical for infrastructure nodes.
 
+    Exemptions:
+        Exemption patterns are loaded from validation_exemptions.yaml (architecture_exemptions section).
+        See that file for the complete list of exemptions with rationale and ticket references.
+
+        Key exemption categories:
+        - contract_linter.py: Domain-grouped validation models (PR-57)
+        - protocols.py: Domain-grouped protocols per CLAUDE.md convention (OMN-888)
+
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
         max_violations: Maximum allowed violations. Defaults to INFRA_MAX_VIOLATIONS (0).
 
     Returns:
-        ModelValidationResult with validation status and any errors.
+        ModelValidationResult with validation status and filtered errors.
+        Documented exemptions are filtered from error list but logged for transparency.
     """
-    return validate_architecture(str(directory), max_violations=max_violations)
+    # Run base validation
+    base_result = validate_architecture(str(directory), max_violations=max_violations)
+
+    # Load exemption patterns from YAML configuration
+    # See validation_exemptions.yaml for pattern definitions and rationale
+    exempted_patterns = get_architecture_exemptions()
+
+    # Filter errors using regex-based pattern matching
+    filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
+
+    # Create wrapper result (avoid mutation)
+    return _create_filtered_result(base_result, filtered_errors)
 
 
 def validate_infra_contracts(

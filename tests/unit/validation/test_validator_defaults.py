@@ -116,7 +116,23 @@ class TestValidateInfraArchitectureDefaults:
     @patch("omnibase_infra.validation.infra_validators.validate_architecture")
     def test_default_parameters_passed_to_core(self, mock_validate: MagicMock) -> None:
         """Verify defaults are correctly passed to core validator."""
-        mock_validate.return_value = MagicMock(is_valid=True, errors=[])
+        from omnibase_core.models.common.model_validation_metadata import (
+            ModelValidationMetadata,
+        )
+        from omnibase_core.validation import ModelValidationResult
+
+        # Create a proper ModelValidationResult for the mock
+        mock_validate.return_value = ModelValidationResult(
+            is_valid=True,
+            errors=[],
+            summary="Test validation",
+            details="No issues",
+            metadata=ModelValidationMetadata(
+                files_processed=0,
+                violations_found=0,
+                max_violations=0,
+            ),
+        )
 
         # Call with defaults
         validate_infra_architecture()

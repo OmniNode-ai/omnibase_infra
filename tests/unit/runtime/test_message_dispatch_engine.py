@@ -2307,7 +2307,7 @@ class TestConcurrentDispatchAdvanced:
             await asyncio.sleep(delay)
             with lock:
                 execution_order.append(f"{user_id}-delay-{delay:.3f}")
-            return f"output-{user_id}"
+            return f"output.user.{user_id}"
 
         dispatch_engine.register_dispatcher(
             dispatcher_id="variable-handler",

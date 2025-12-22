@@ -109,7 +109,9 @@ def validate_unions_cmd(
     # Use constants if no override provided
     effective_max_unions = max_unions if max_unions is not None else INFRA_MAX_UNIONS
     effective_strict = strict if strict is not None else INFRA_UNIONS_STRICT
-    result = validate_infra_union_usage(directory, effective_max_unions, effective_strict)
+    result = validate_infra_union_usage(
+        directory, effective_max_unions, effective_strict
+    )
     _print_result("Union Usage", result)
     raise SystemExit(0 if result.is_valid else 1)
 
