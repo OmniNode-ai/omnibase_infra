@@ -11,6 +11,9 @@ Note:
     available in omnibase_spi versions 0.4.0/0.4.1. The protocol should be
     migrated to omnibase_spi in a future release.
 
+    TODO(OMN-XXX): Migrate to omnibase_spi 0.5.0+ and update imports
+    in InMemoryIdempotencyStore and PostgresIdempotencyStore.
+
 Protocol Methods:
     - check_and_record: Atomically check if message was processed and record if not
     - is_processed: Check if a message was already processed (read-only)

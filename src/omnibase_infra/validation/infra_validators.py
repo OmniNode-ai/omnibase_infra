@@ -332,7 +332,15 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - These are NOT flagged as violations, just counted
 # - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 #
-# Threshold set to 515 - buffer above current baseline (512) after main merge.
+# Threshold History (PR #77 - fix/ci-test-failures):
+# - Previous baseline: 481 unions
+# - New baseline: 503 unions (+22 unions)
+# - Root cause of increase:
+#   - ProtocolIdempotencyStore protocol addition (local definition pending omnibase_spi 0.5.0)
+#   - ModelNodeIntrospectionEvent correlation_id field additions (UUID | None patterns)
+#   - Additional nullable fields for CI test failure fixes on main branch
+# - Buffer: 12 unions above baseline (515 - 503) for codebase growth
+#
 # Target: Reduce to <200 through dict[str, object] → JsonValue migration.
 INFRA_MAX_UNIONS = 515
 
