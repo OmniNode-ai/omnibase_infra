@@ -225,7 +225,7 @@ pattern_exemptions:
     method_pattern: "Function 'register_handler'"
     violation_pattern: 'has \d+ parameters'
     reason: >
-      Handler registration for backwards compatibility with RuntimeHostProcess. Takes handler, category, node_kind, topic_patterns, priority. Will be deprecated in favor of register_dispatcher.
+      Handler registration for backwards compatibility with RuntimeHostProcess. Takes handler_id, handler, category, message_types, node_kind. Legacy alias for register_dispatcher.
 
     ticket: OMN-990
   # ==========================================================================

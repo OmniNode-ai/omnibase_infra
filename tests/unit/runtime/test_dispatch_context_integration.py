@@ -758,34 +758,101 @@ class TestMultipleDispatchersWithDifferentNodeKinds:
 
 
 class TestUninspectableDispatcherFallback:
-    """Tests for dispatchers whose signature cannot be inspected.
+    """Tests for dispatchers whose signature cannot be inspected by inspect.signature().
 
-    When inspect.signature() fails (e.g., C extensions, certain decorators,
-    wrapped functions), the engine should gracefully fall back to treating
-    the dispatcher as not accepting context, calling it with only the envelope.
+    Background on inspect.signature() Behavior
+    ------------------------------------------
+    Python's inspect.signature() function retrieves the call signature of a callable.
+    It works by examining the callable's __signature__ attribute, or by introspecting
+    the __code__ object for functions. However, signature inspection can fail in
+    several scenarios:
 
-    This covers the edge case identified in CodeRabbit review for PR #73.
+    1. **C Extensions**: Functions implemented in C (e.g., `len`, `str.upper`) don't
+       have Python bytecode, so inspect.signature() raises ValueError.
+
+    2. **__signature__ Property Exceptions**: If a callable's __signature__ property
+       raises an exception when accessed, inspect.signature() propagates that exception.
+       This test suite uses this mechanism to simulate uninspectable callables.
+
+    3. **Built-in Functions**: Many built-in functions and methods raise ValueError
+       because they lack introspectable signatures.
+
+    4. **Certain Decorators**: Some decorators that wrap callables in ways that hide
+       the original signature (e.g., `functools.wraps` without proper __wrapped__
+       preservation, or C-level wrappers).
+
+    Exception Types from inspect.signature()
+    ----------------------------------------
+    - **ValueError**: Most common. Raised when the callable doesn't have a retrievable
+      signature (C extensions, built-ins, missing __signature__).
+
+    - **TypeError**: Raised when the object isn't callable or has an invalid signature
+      specification.
+
+    How These Tests Simulate Uninspectable Callables
+    -------------------------------------------------
+    These tests define classes with a `__signature__` property that raises exceptions:
+
+        @property
+        def __signature__(self) -> None:
+            raise ValueError("No signature available")
+
+    This mimics the behavior of C extensions and built-in functions. When
+    inspect.signature() calls `getattr(obj, '__signature__')`, the property
+    raises ValueError, which inspect.signature() doesn't catch - it propagates
+    the exception.
+
+    Expected Engine Behavior
+    ------------------------
+    When signature inspection fails (ValueError or TypeError), the engine:
+    1. Catches the exception in _dispatcher_accepts_context()
+    2. Logs a warning explaining the fallback behavior
+    3. Returns accepts_context=False, meaning the dispatcher will only receive
+       the envelope parameter, not the ModelDispatchContext
+    4. Does NOT raise an exception - registration and dispatch succeed
+
+    This is a deliberate design choice for backwards compatibility and robustness.
+    Dispatchers that need context but are uninspectable should be wrapped in an
+    inspectable Python function.
 
     Related:
         - OMN-990: Dispatcher signature inspection edge cases
-        - src/omnibase_infra/runtime/message_dispatch_engine.py lines 1664-1672
+        - PR #73: CodeRabbit review identified need for this test coverage
+        - src/omnibase_infra/runtime/message_dispatch_engine.py _dispatcher_accepts_context()
     """
 
     @pytest.mark.asyncio
     async def test_uninspectable_dispatcher_called_with_envelope_only(self) -> None:
-        """Verify dispatchers that cannot be inspected are called with envelope only.
+        """Verify dispatchers that fail signature inspection receive envelope only.
 
-        When inspect.signature() raises ValueError or TypeError (which can happen
-        with C extensions, built-in functions, or certain decorators), the engine
-        should:
-        1. Log a warning about the signature inspection failure
-        2. Treat the dispatcher as not accepting context (accepts_context=False)
-        3. Call the dispatcher with only the envelope parameter
-        4. Not raise any exceptions
+        Test Scenario:
+            A callable class with a __signature__ property that raises ValueError.
+            This simulates C extensions and built-in functions that cannot be
+            introspected by inspect.signature().
 
-        This test uses a sync callable class with __signature__ property that raises
-        ValueError, simulating the behavior of uninspectable callables like
-        C extensions.
+        What inspect.signature() Does:
+            When called on our UninspectableDispatcher, it attempts to access
+            the __signature__ property, which raises ValueError. This is the
+            same behavior as calling inspect.signature(len) on the built-in
+            len function.
+
+        Expected Engine Behavior:
+            1. During registration: _dispatcher_accepts_context() catches the
+               ValueError, logs a warning, and sets accepts_context=False
+            2. During dispatch: Engine calls dispatcher with only the envelope
+               parameter (no ModelDispatchContext)
+            3. No exceptions are raised - dispatch completes successfully
+
+        Why Use __signature__ Property:
+            We use a property that raises ValueError rather than just omitting
+            __signature__ because inspect.signature() has complex fallback logic.
+            Simply not having __signature__ might still allow introspection via
+            __code__. Raising ValueError explicitly simulates the "genuinely
+            uninspectable" case like C extensions.
+
+        See Also:
+            - test_uninspectable_dispatcher_registration_succeeds: Tests registration
+            - test_uninspectable_dispatcher_with_context_param_works: Documents edge case
         """
         # Track what the dispatcher receives
         received_args: list[object] = []
@@ -795,15 +862,36 @@ class TestUninspectableDispatcherFallback:
         # class instances with __call__, so this is treated as a sync dispatcher
         # and executed via run_in_executor.
         class UninspectableDispatcher:
-            """A dispatcher class that cannot be inspected.
+            """A dispatcher class whose signature cannot be inspected.
 
-            Setting __signature__ to raise ValueError mimics C extensions
-            and other uninspectable callables.
+            Mechanism:
+                The __signature__ property raises ValueError when accessed.
+                This is how inspect.signature() behaves with C extensions:
+
+                >>> import inspect
+                >>> inspect.signature(len)
+                ValueError: no signature found for builtin <built-in function len>
+
+            Why Property vs Missing Attribute:
+                Using a property that raises (vs just not having __signature__)
+                is important because inspect.signature() has fallback logic:
+
+                1. First tries obj.__signature__
+                2. Falls back to inspecting obj.__code__ (for functions)
+                3. Falls back to inspecting obj.__func__ (for bound methods)
+
+                By raising ValueError from __signature__, we prevent any fallback
+                and force the "genuinely uninspectable" code path.
             """
 
             @property
             def __signature__(self) -> None:
-                """Raise ValueError to simulate uninspectable callable."""
+                """Raise ValueError to simulate C extension / built-in behavior.
+
+                When inspect.signature() accesses this property, the ValueError
+                propagates, causing signature inspection to fail identically to
+                how it fails for built-in functions like len() or str.upper().
+                """
                 raise ValueError("No signature available")
 
             def __call__(self, *args: object) -> str | None:
@@ -834,16 +922,44 @@ class TestUninspectableDispatcherFallback:
     async def test_uninspectable_dispatcher_registration_succeeds(self) -> None:
         """Verify uninspectable dispatchers can be registered without error.
 
-        Even if signature inspection fails, the dispatcher should be registered
-        successfully with accepts_context=False in its internal entry.
+        Test Scenario:
+            A callable class with a __signature__ property that raises TypeError.
+            This tests the TypeError exception path (as opposed to ValueError).
+
+        Why TypeError:
+            While ValueError is more common from inspect.signature(), TypeError
+            can also occur in certain edge cases:
+            - When the object isn't recognized as callable
+            - When __signature__ contains an invalid signature specification
+            - Certain C extension edge cases
+
+        Expected Behavior:
+            1. register_dispatcher() completes successfully
+            2. No exception is raised
+            3. Internal entry has accepts_context=False
+            4. dispatcher_count increases by 1
+
+        This test verifies robustness: registration should never fail due to
+        signature inspection problems. The worst case is that the dispatcher
+        won't receive context, which is logged as a warning.
         """
 
         class UninspectableDispatcher:
-            """A dispatcher class that raises TypeError on signature inspection."""
+            """A dispatcher that raises TypeError during signature inspection.
+
+            This tests the TypeError code path in _dispatcher_accepts_context().
+            While ValueError is more common, TypeError can occur with certain
+            C extension patterns and invalid __signature__ specifications.
+            """
 
             @property
             def __signature__(self) -> None:
-                """Raise TypeError to simulate certain built-in functions."""
+                """Raise TypeError to test the TypeError exception path.
+
+                inspect.signature() catches and re-raises both ValueError and
+                TypeError. The engine's _dispatcher_accepts_context() must
+                handle both exception types gracefully.
+                """
                 raise TypeError("No signature available for built-in")
 
             def __call__(self, envelope: object) -> str | None:
@@ -868,23 +984,60 @@ class TestUninspectableDispatcherFallback:
 
     @pytest.mark.asyncio
     async def test_uninspectable_dispatcher_with_context_param_works(self) -> None:
-        """Verify uninspectable dispatcher with context param falls back gracefully.
+        """Document edge case: uninspectable dispatcher that accepts context.
 
-        Even if a dispatcher actually accepts a context parameter, if its signature
-        cannot be inspected, it will only receive the envelope. This is the
-        documented fallback behavior - the dispatcher must handle this gracefully.
+        Test Scenario:
+            A dispatcher that:
+            1. Has a __call__ method that accepts (envelope, context=None)
+            2. Has a __signature__ property that raises ValueError
 
-        This test documents this edge case: if you have an uninspectable dispatcher
-        that needs context, you must wrap it in an inspectable function.
+            Even though the dispatcher CAN accept a context parameter, the engine
+            cannot know this because signature inspection fails.
+
+        What Happens:
+            1. During registration: _dispatcher_accepts_context() raises ValueError,
+               catches it, logs warning, returns False
+            2. Internal entry stores accepts_context=False
+            3. During dispatch: Engine passes only envelope, not context
+            4. Dispatcher receives (envelope,) - context defaults to None
+
+        Why This Matters:
+            This is the documented trade-off of the fallback behavior. If you have
+            a callable that:
+            - Cannot be inspected (C extension, complex decorator)
+            - Needs to receive ModelDispatchContext
+
+            You MUST wrap it in an inspectable Python function:
+
+                def inspectable_wrapper(envelope, context):
+                    return my_c_extension_dispatcher(envelope, context)
+
+                engine.register_dispatcher(..., dispatcher=inspectable_wrapper, ...)
+
+        Verification:
+            The test confirms the dispatcher receives only the envelope (1 arg),
+            and the context parameter uses its default value (None), not an
+            injected ModelDispatchContext.
         """
         received_args: list[object] = []
 
         class UninspectableWithContextDispatcher:
-            """Dispatcher that could accept context but can't be inspected."""
+            """Dispatcher that accepts context but cannot be inspected.
+
+            This represents a real-world edge case: a C extension or wrapped
+            callable that has a context parameter but cannot be introspected.
+
+            The engine will NOT pass context because it cannot determine that
+            the dispatcher accepts it. This is documented fallback behavior.
+            """
 
             @property
             def __signature__(self) -> None:
-                """Raise ValueError to simulate uninspectable callable."""
+                """Raise ValueError to simulate uninspectable callable.
+
+                This makes the dispatcher uninspectable, even though __call__
+                clearly accepts two parameters.
+                """
                 raise ValueError("No signature available")
 
             def __call__(
@@ -894,8 +1047,14 @@ class TestUninspectableDispatcherFallback:
             ) -> str | None:
                 """Accept envelope and optional context.
 
-                Due to uninspectable signature, context will always be None
-                when called by the engine (engine passes envelope only).
+                Important: Due to uninspectable signature, the engine will call
+                this with only (envelope,). The context parameter will use its
+                default value (None), NOT a ModelDispatchContext from the engine.
+
+                If you need context in an uninspectable dispatcher, wrap it:
+
+                    def wrapper(envelope, context):
+                        return uninspectable_dispatcher(envelope, context)
                 """
                 received_args.append(envelope)
                 received_args.append(context)

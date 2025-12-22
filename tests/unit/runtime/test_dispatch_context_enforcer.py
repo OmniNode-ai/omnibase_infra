@@ -1066,7 +1066,7 @@ class TestDispatchContextEnforcerErrorCases:
             enforcer.create_context_for_dispatcher(mock_dispatcher, envelope_with_ids)
 
         # Verify error code is INTERNAL_ERROR
-        assert exc_info.value.model.error_code == EnumCoreErrorCode.INTERNAL_ERROR
+        assert exc_info.value.error_code == EnumCoreErrorCode.INTERNAL_ERROR
 
     def test_unrecognized_node_kind_error_contains_dispatcher_id(
         self,
@@ -1099,7 +1099,7 @@ class TestDispatchContextEnforcerErrorCases:
             enforcer.create_context_for_dispatcher(mock_dispatcher, envelope_with_ids)
 
         # Verify dispatcher_id is in the error message for debugging
-        error_message = exc_info.value.model.message
+        error_message = exc_info.value.message
         assert "debug-friendly-dispatcher-id" in error_message
         assert "internal error" in error_message.lower()
 
@@ -1125,9 +1125,9 @@ class TestDispatchContextEnforcerErrorCases:
         with pytest.raises(ModelOnexError) as exc_info:
             enforcer.validate_no_time_injection_for_reducer(invalid_context)
 
-        assert exc_info.value.model.error_code == EnumCoreErrorCode.VALIDATION_FAILED
-        assert "REDUCER" in exc_info.value.model.message
-        assert "time injection" in exc_info.value.model.message.lower()
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "REDUCER" in exc_info.value.message
+        assert "time injection" in exc_info.value.message.lower()
 
     def test_validate_compute_with_time_raises_validation_failed(
         self,
@@ -1144,9 +1144,9 @@ class TestDispatchContextEnforcerErrorCases:
         with pytest.raises(ModelOnexError) as exc_info:
             enforcer.validate_no_time_injection_for_compute(invalid_context)
 
-        assert exc_info.value.model.error_code == EnumCoreErrorCode.VALIDATION_FAILED
-        assert "COMPUTE" in exc_info.value.model.message
-        assert "time injection" in exc_info.value.model.message.lower()
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "COMPUTE" in exc_info.value.message
+        assert "time injection" in exc_info.value.message.lower()
 
     def test_validate_deterministic_node_with_reducer_and_time_raises(
         self,
@@ -1163,9 +1163,9 @@ class TestDispatchContextEnforcerErrorCases:
         with pytest.raises(ModelOnexError) as exc_info:
             enforcer.validate_no_time_injection_for_deterministic_node(invalid_context)
 
-        assert exc_info.value.model.error_code == EnumCoreErrorCode.VALIDATION_FAILED
-        assert "REDUCER" in exc_info.value.model.message
-        assert "deterministic" in exc_info.value.model.message.lower()
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "REDUCER" in exc_info.value.message
+        assert "deterministic" in exc_info.value.message.lower()
 
     def test_validate_deterministic_node_with_compute_and_time_raises(
         self,
@@ -1182,9 +1182,9 @@ class TestDispatchContextEnforcerErrorCases:
         with pytest.raises(ModelOnexError) as exc_info:
             enforcer.validate_no_time_injection_for_deterministic_node(invalid_context)
 
-        assert exc_info.value.model.error_code == EnumCoreErrorCode.VALIDATION_FAILED
-        assert "COMPUTE" in exc_info.value.model.message
-        assert "deterministic" in exc_info.value.model.message.lower()
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "COMPUTE" in exc_info.value.message
+        assert "deterministic" in exc_info.value.message.lower()
 
     def test_validate_deterministic_node_passes_for_valid_reducer(
         self,
@@ -1273,7 +1273,7 @@ class TestDispatchContextEnforcerErrorCases:
             enforcer.validate_no_time_injection_for_reducer(invalid_context)
 
         # Error message should include the time value for debugging
-        error_message = exc_info.value.model.message
+        error_message = exc_info.value.message
         assert str(specific_time.year) in error_message or "2025" in error_message
 
     def test_error_message_includes_actual_now_value_for_compute(
@@ -1292,8 +1292,145 @@ class TestDispatchContextEnforcerErrorCases:
             enforcer.validate_no_time_injection_for_compute(invalid_context)
 
         # Error message should mention the now value
-        error_message = exc_info.value.model.message
+        error_message = exc_info.value.message
         assert "now=" in error_message
+
+
+# =============================================================================
+# Missing correlation_id Behavior Tests
+# =============================================================================
+
+
+class TestMissingCorrelationIdBehavior:
+    """
+    Tests for behavior when correlation_id is missing from envelope.
+
+    The DispatchContextEnforcer auto-generates a correlation_id when the
+    envelope does not provide one. This ensures every dispatch context
+    has a valid correlation_id for distributed tracing.
+
+    Expected Behavior:
+        - When envelope.correlation_id is None, a new UUID is generated
+        - The generated UUID is valid (proper UUID4 format)
+        - The generated correlation_id is never None in the resulting context
+        - This behavior is consistent across all node kinds
+    """
+
+    def test_missing_correlation_id_generates_new_uuid_for_reducer(
+        self,
+        enforcer: DispatchContextEnforcer,
+        reducer_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        REDUCER context should auto-generate correlation_id when envelope lacks one.
+
+        This tests the case where envelope.correlation_id is None.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
+
+        # correlation_id must NEVER be None in the resulting context
+        assert ctx.correlation_id is not None
+        # Must be a valid UUID
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_missing_correlation_id_generates_new_uuid_for_compute(
+        self,
+        enforcer: DispatchContextEnforcer,
+        compute_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        COMPUTE context should auto-generate correlation_id when envelope lacks one.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(compute_dispatcher, envelope)
+
+        assert ctx.correlation_id is not None
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_missing_correlation_id_generates_new_uuid_for_orchestrator(
+        self,
+        enforcer: DispatchContextEnforcer,
+        orchestrator_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        ORCHESTRATOR context should auto-generate correlation_id when envelope lacks one.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(orchestrator_dispatcher, envelope)
+
+        assert ctx.correlation_id is not None
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_missing_correlation_id_generates_new_uuid_for_effect(
+        self,
+        enforcer: DispatchContextEnforcer,
+        effect_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        EFFECT context should auto-generate correlation_id when envelope lacks one.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(effect_dispatcher, envelope)
+
+        assert ctx.correlation_id is not None
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_missing_correlation_id_generates_new_uuid_for_runtime_host(
+        self,
+        enforcer: DispatchContextEnforcer,
+        runtime_host_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        RUNTIME_HOST context should auto-generate correlation_id when envelope lacks one.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx = enforcer.create_context_for_dispatcher(runtime_host_dispatcher, envelope)
+
+        assert ctx.correlation_id is not None
+        assert isinstance(ctx.correlation_id, UUID)
+
+    def test_each_missing_correlation_id_generates_unique_uuid(
+        self,
+        enforcer: DispatchContextEnforcer,
+        reducer_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        Each dispatch with missing correlation_id should generate a unique UUID.
+
+        This ensures idempotency keys are unique when not provided by the caller.
+        """
+        envelope = MockEnvelope(correlation_id=None)
+
+        ctx1 = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
+        ctx2 = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
+
+        # Each should generate a different UUID
+        assert ctx1.correlation_id != ctx2.correlation_id
+
+    def test_provided_correlation_id_is_preserved_not_overwritten(
+        self,
+        enforcer: DispatchContextEnforcer,
+        reducer_dispatcher: MockMessageDispatcher,
+    ) -> None:
+        """
+        When envelope provides correlation_id, it should NOT be overwritten.
+
+        This is the inverse test - ensuring auto-generation only happens
+        when correlation_id is actually missing.
+        """
+        provided_id = uuid4()
+        envelope = MockEnvelope(correlation_id=provided_id)
+
+        ctx = enforcer.create_context_for_dispatcher(reducer_dispatcher, envelope)
+
+        # Must preserve the provided ID, not generate a new one
+        assert ctx.correlation_id == provided_id
 
 
 class TestOMN973ArchitecturalRationale:

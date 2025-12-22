@@ -3316,19 +3316,42 @@ class TestContextAwareDispatch:
         self,
         context_engine: MessageDispatchEngine,
     ) -> None:
-        """Test that _dispatcher_accepts_context returns False for non-inspectable callables.
+        """Test _dispatcher_accepts_context() returns False when signature inspection fails.
 
-        Some callables (built-in C functions, certain wrapped objects) raise
-        ValueError or TypeError when inspect.signature() is called on them.
-        The method should gracefully handle this and return False.
+        Test Scenario:
+            A class with __call__ assigned to a built-in function (len).
+            When inspect.signature() is called on this, it fails because
+            len is a C extension with no introspectable signature.
+
+        Why This Approach:
+            Assigning a built-in to __call__ is a realistic way to create
+            an uninspectable callable. This happens in practice when:
+            - C extensions expose callable objects
+            - Certain wrapper patterns delegate to built-ins
+            - Performance-critical code uses built-in operations
+
+        How inspect.signature() Fails:
+            >>> import inspect
+            >>> class C:
+            ...     __call__ = len
+            >>> inspect.signature(C())
+            ValueError: no signature found for builtin <built-in function len>
+
+        Expected Behavior:
+            _dispatcher_accepts_context() catches the ValueError and returns False,
+            allowing the dispatcher to be registered without context support.
         """
 
         # Create a mock callable that raises ValueError when inspected
         class NonInspectableCallable:
             """A callable that breaks signature inspection.
 
-            Uses __call__ defined in a way that inspect.signature() cannot
-            introspect. We achieve this by making the __call__ a builtin.
+            By assigning len (a C built-in) to __call__, we create a callable
+            instance where inspect.signature() raises ValueError. This mimics
+            C extensions and certain wrapper patterns.
+
+            Note: This is a real technique used in some Python libraries that
+            wrap C functions, making it a valid test case.
             """
 
             # Use a builtin as __call__ - inspect.signature() fails on builtins
@@ -3345,9 +3368,28 @@ class TestContextAwareDispatch:
         self,
         context_engine: MessageDispatchEngine,
     ) -> None:
-        """Test that _dispatcher_accepts_context handles ValueError from signature inspection.
+        """Test _dispatcher_accepts_context() handles built-in functions directly.
 
-        This uses a known pattern where inspect.signature raises ValueError.
+        Test Scenario:
+            Passing a built-in function (len) directly to _dispatcher_accepts_context().
+            This is the simplest way to trigger signature inspection failure.
+
+        What Happens with Built-ins:
+            >>> import inspect
+            >>> inspect.signature(len)
+            ValueError: no signature found for builtin <built-in function len>
+
+            Built-in functions implemented in C don't have Python bytecode or
+            a __code__ object, so inspect.signature() cannot determine their
+            parameters.
+
+        Expected Behavior:
+            The method catches ValueError and returns False, logging a warning
+            that explains the fallback behavior.
+
+        Note:
+            While passing len() as a dispatcher is unrealistic (wrong signature),
+            this test verifies the exception handling path is robust.
         """
         # Use a builtin function directly - these often raise ValueError
         # when inspect.signature is called on them
@@ -4051,11 +4093,30 @@ class TestDispatcherSignatureInspection:
         self,
         engine: MessageDispatchEngine,
     ) -> None:
-        """Test that _dispatcher_accepts_context returns False on inspection failure.
+        """Test _dispatcher_accepts_context() returns False when mocked signature fails.
 
-        When inspect.signature() raises ValueError or TypeError, the method
-        should gracefully return False rather than propagating the exception.
-        This test uses unittest.mock to simulate the failure.
+        Test Scenario:
+            Using unittest.mock to make inspect.signature() raise ValueError,
+            simulating what happens with C extensions and built-in functions.
+
+        Why Mock Instead of Real Uninspectable Callable:
+            This test uses mocking to precisely control when and how
+            inspect.signature() fails. It complements the other tests that
+            use real uninspectable callables (like built-in functions).
+
+        What This Tests:
+            The exception handling path in _dispatcher_accepts_context():
+
+            try:
+                sig = inspect.signature(dispatcher)
+                # ... parameter inspection
+            except (ValueError, TypeError) as e:
+                self._logger.warning(...)
+                return False  # <-- This line
+
+        Expected Behavior:
+            ValueError is caught, warning is logged, False is returned.
+            The exception is NOT propagated to the caller.
         """
         from unittest.mock import patch
 
@@ -4078,10 +4139,24 @@ class TestDispatcherSignatureInspection:
         self,
         engine: MessageDispatchEngine,
     ) -> None:
-        """Test that TypeError from inspect.signature() also returns False.
+        """Test _dispatcher_accepts_context() handles TypeError from inspect.signature().
 
-        Some callables can raise TypeError instead of ValueError during
-        signature inspection. The method should handle both exception types.
+        Test Scenario:
+            Using unittest.mock to make inspect.signature() raise TypeError.
+
+        Why Test TypeError Separately:
+            While ValueError is more common, TypeError can occur when:
+            - The object isn't recognized as callable
+            - The __signature__ attribute contains an invalid specification
+            - Certain C extension edge cases
+
+            The method should handle BOTH exception types identically:
+            catch the exception, log warning, return False.
+
+        Code Path Tested:
+            except (ValueError, TypeError) as e:  # <-- Testing TypeError path
+                self._logger.warning(...)
+                return False
         """
         from unittest.mock import patch
 
@@ -4106,11 +4181,28 @@ class TestDispatcherSignatureInspection:
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that inspection failure logs a warning message.
+        """Test that signature inspection failure logs a descriptive warning.
 
-        When signature inspection fails, a warning should be logged to help
-        developers understand why their dispatcher won't receive context.
-        The warning should include the original exception message.
+        Test Scenario:
+            Mock inspect.signature() to fail, verify the warning message
+            contains helpful information for debugging.
+
+        Why Warnings Matter:
+            When a dispatcher's signature cannot be inspected, it won't receive
+            ModelDispatchContext. This might be unexpected behavior, so the
+            warning helps developers understand:
+            1. Why their dispatcher isn't getting context
+            2. What caused the inspection failure (original exception message)
+            3. How to work around it (wrap in inspectable function)
+
+        Warning Message Content:
+            - "Failed to inspect dispatcher signature" - explains what happened
+            - Original exception message - helps identify the cause
+            - "Uninspectable dispatchers" - provides context about fallback
+
+        Note:
+            This is a user-facing message that helps with debugging, so we
+            verify its content is informative and actionable.
         """
         import logging
         from unittest.mock import patch
