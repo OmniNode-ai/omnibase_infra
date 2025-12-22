@@ -137,7 +137,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import cast
+from typing import TYPE_CHECKING, cast, overload
 from uuid import UUID, uuid4
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
@@ -145,6 +145,10 @@ from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
+from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
+
+if TYPE_CHECKING:
+    from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 # Patterns that may indicate sensitive data in error messages
 # These patterns are checked case-insensitively
@@ -221,6 +225,7 @@ def _sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
 
 
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
+from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
@@ -237,6 +242,13 @@ DispatcherOutput = str | list[str] | None
 
 # Module-level logger for fallback when no custom logger is provided
 _module_logger = logging.getLogger(__name__)
+
+# Minimum number of parameters for a dispatcher to be considered context-aware.
+# Context-aware dispatchers have signature: (envelope, context, ...)
+# Non-context-aware dispatchers have signature: (envelope)
+# We use >= MIN_PARAMS_FOR_CONTEXT (not ==) to support dispatchers with additional
+# optional parameters (e.g., for testing, logging, or future extensibility).
+MIN_PARAMS_FOR_CONTEXT = 2
 
 # Type alias for dispatcher functions
 #
@@ -264,9 +276,26 @@ DispatcherFunc = Callable[
     [ModelEventEnvelope[object]], DispatcherOutput | Awaitable[DispatcherOutput]
 ]
 
+# Context-aware dispatcher type (for dispatchers registered with node_kind)
+# These dispatchers receive a ModelDispatchContext with time injection based on node_kind:
+# - REDUCER/COMPUTE: now=None (deterministic)
+# - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
+#
+# This type is used when register_dispatcher() is called with node_kind parameter.
+# The dispatch engine inspects the callable's signature to determine if it accepts context.
+ContextAwareDispatcherFunc = Callable[
+    [ModelEventEnvelope[object], ModelDispatchContext],
+    DispatcherOutput | Awaitable[DispatcherOutput],
+]
+
 # Sync-only dispatcher type for use with run_in_executor
 # Used internally after runtime type narrowing via inspect.iscoroutinefunction
 _SyncDispatcherFunc = Callable[[ModelEventEnvelope[object]], DispatcherOutput]
+
+# Sync-only context-aware dispatcher type for use with run_in_executor
+_SyncContextAwareDispatcherFunc = Callable[
+    [ModelEventEnvelope[object], ModelDispatchContext], DispatcherOutput
+]
 
 
 class DispatchEntryInternal:
@@ -276,21 +305,46 @@ class DispatchEntryInternal:
     This class is an implementation detail and not part of the public API.
     It stores the dispatcher callable and associated metadata for the
     MessageDispatchEngine's internal routing.
+
+    Attributes:
+        dispatcher_id: Unique identifier for this dispatcher.
+        dispatcher: The callable that processes messages.
+        category: Message category this dispatcher handles.
+        message_types: Specific message types to handle (None = all types).
+        node_kind: Optional ONEX node kind for time injection context.
+            When set, the dispatcher receives a ModelDispatchContext with
+            appropriate time injection based on ONEX rules:
+            - REDUCER/COMPUTE: now=None (deterministic)
+            - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
+        accepts_context: Cached result of signature inspection indicating
+            whether the dispatcher accepts a context parameter (2+ params).
+            Computed once at registration time for performance.
     """
 
-    __slots__ = ("category", "dispatcher", "dispatcher_id", "message_types")
+    __slots__ = (
+        "accepts_context",
+        "category",
+        "dispatcher",
+        "dispatcher_id",
+        "message_types",
+        "node_kind",
+    )
 
     def __init__(
         self,
         dispatcher_id: str,
-        dispatcher: DispatcherFunc,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None,
+        node_kind: EnumNodeKind | None = None,
+        accepts_context: bool = False,
     ) -> None:
         self.dispatcher_id = dispatcher_id
         self.dispatcher = dispatcher
         self.category = category
         self.message_types = message_types  # None means "all types"
+        self.node_kind = node_kind  # None means no context injection
+        self.accepts_context = accepts_context  # Cached: dispatcher has 2+ params
 
 
 class MessageDispatchEngine:
@@ -439,7 +493,23 @@ class MessageDispatchEngine:
         # Structured metrics (Pydantic model)
         self._structured_metrics: ModelDispatchMetrics = ModelDispatchMetrics()
 
+        # Context enforcer for creating dispatch contexts based on node_kind.
+        # Delegates time injection rule enforcement to a single source of truth.
+        self._context_enforcer: DispatchContextEnforcer = DispatchContextEnforcer()
+
         # Legacy metrics dict (for backwards compatibility)
+        #
+        # DEPRECATION NOTICE:
+        # This dict-based metrics format is deprecated in favor of the structured
+        # ModelDispatchMetrics accessible via get_structured_metrics(). The legacy
+        # format is retained only for backwards compatibility with existing consumers.
+        #
+        # Why not convert to a Pydantic model?
+        # - ModelDispatchMetrics already exists and provides full typed metrics
+        # - This dict duplicates that functionality for legacy API support
+        # - Converting would add a third format without benefit
+        # - The proper migration path is: consumers should switch to get_structured_metrics()
+        #
         # Type: int | float covers all metric values (counts are int, latency is float)
         self._metrics: dict[str, int | float] = {
             "dispatch_count": 0,
@@ -513,12 +583,39 @@ class MessageDispatchEngine:
                 route.dispatcher_id,
             )
 
+    # --- @overload stubs for static type safety ---
+    # These overloads enable type checkers to validate dispatcher signatures
+    # based on the presence/absence of node_kind parameter.
+    # See ADR_DISPATCHER_TYPE_SAFETY.md Option 4 for design rationale.
+
+    @overload
     def register_dispatcher(
         self,
         dispatcher_id: str,
         dispatcher: DispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
+        node_kind: None = None,
+    ) -> None: ...
+
+    @overload
+    def register_dispatcher(
+        self,
+        dispatcher_id: str,
+        dispatcher: ContextAwareDispatcherFunc,
+        category: EnumMessageCategory,
+        message_types: set[str] | None = None,
+        *,
+        node_kind: EnumNodeKind,
+    ) -> None: ...
+
+    def register_dispatcher(
+        self,
+        dispatcher_id: str,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
+        category: EnumMessageCategory,
+        message_types: set[str] | None = None,
+        node_kind: EnumNodeKind | None = None,
     ) -> None:
         """
         Register a message dispatcher.
@@ -531,9 +628,17 @@ class MessageDispatchEngine:
             dispatcher_id: Unique identifier for this dispatcher
             dispatcher: Callable that processes messages. Can be sync or async.
                 Signature: (envelope: ModelEventEnvelope[object]) -> DispatcherOutput
+                Or with context:
+                (envelope: ModelEventEnvelope[object], context: ModelDispatchContext) -> DispatcherOutput
             category: Message category this dispatcher processes
             message_types: Optional set of specific message types to handle.
                 When None, handles all message types in the category.
+            node_kind: Optional ONEX node kind for time injection context.
+                When provided, the dispatcher receives a ModelDispatchContext
+                with appropriate time injection based on ONEX rules:
+                - REDUCER/COMPUTE: now=None (deterministic execution)
+                - ORCHESTRATOR/EFFECT/RUNTIME_HOST: now=datetime.now(UTC)
+                When None, dispatcher is called without context (backwards compatible).
 
         Raises:
             ModelOnexError: If engine is frozen (INVALID_STATE)
@@ -553,10 +658,25 @@ class MessageDispatchEngine:
             ...     category=EnumMessageCategory.EVENT,
             ...     message_types={"UserCreated", "UserUpdated"},
             ... )
+            >>>
+            >>> # With time injection context for orchestrator
+            >>> async def process_with_context(envelope, context):
+            ...     current_time = context.now  # Injected time
+            ...     return "processed"
+            >>>
+            >>> engine.register_dispatcher(
+            ...     dispatcher_id="orchestrator-dispatcher",
+            ...     dispatcher=process_with_context,
+            ...     category=EnumMessageCategory.COMMAND,
+            ...     node_kind=EnumNodeKind.ORCHESTRATOR,
+            ... )
 
         Note:
             Dispatchers are NOT automatically linked to routes. You must register
             routes separately that reference the dispatcher_id.
+
+        .. versionchanged:: 0.5.0
+            Added ``node_kind`` parameter for time injection context support.
         """
         # Validate inputs before acquiring lock
         if not dispatcher_id or not dispatcher_id.strip():
@@ -578,6 +698,18 @@ class MessageDispatchEngine:
                 error_code=EnumCoreErrorCode.INVALID_PARAMETER,
             )
 
+        # Runtime validation for node_kind to catch dynamic dispatch issues
+        # where type checkers can't help (e.g., dynamically constructed arguments)
+        if node_kind is not None:
+            # Import here to avoid circular import at module level
+            # EnumNodeKind is only in TYPE_CHECKING block at top of file
+            from omnibase_core.enums.enum_node_kind import EnumNodeKind
+
+            if not isinstance(node_kind, EnumNodeKind):
+                raise ValueError(
+                    f"node_kind must be EnumNodeKind or None, got {type(node_kind).__name__}"
+                )
+
         with self._registration_lock:
             if self._frozen:
                 raise ModelOnexError(
@@ -593,12 +725,18 @@ class MessageDispatchEngine:
                     error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
                 )
 
+            # Compute accepts_context once at registration time (cached)
+            # This avoids expensive inspect.signature() calls on every dispatch
+            accepts_context = self._dispatcher_accepts_context(dispatcher)
+
             # Store dispatcher entry
             entry = DispatchEntryInternal(
                 dispatcher_id=dispatcher_id,
                 dispatcher=dispatcher,
                 category=category,
                 message_types=message_types,
+                node_kind=node_kind,
+                accepts_context=accepts_context,
             )
             self._dispatchers[dispatcher_id] = entry
 
@@ -606,10 +744,11 @@ class MessageDispatchEngine:
             self._dispatchers_by_category[category].append(dispatcher_id)
 
             self._logger.debug(
-                "Registered dispatcher '%s' for category %s (message_types=%s)",
+                "Registered dispatcher '%s' for category %s (message_types=%s, node_kind=%s)",
                 dispatcher_id,
                 category,
                 message_types if message_types else "all",
+                node_kind.value if node_kind else "none",
             )
 
     def freeze(self) -> None:
@@ -688,6 +827,30 @@ class MessageDispatchEngine:
     ) -> dict[str, str | int | float]:
         """
         Build structured log context dictionary.
+
+        Design Note (PR Review - Dict vs Pydantic Model):
+            This method returns a plain dict rather than a Pydantic model because:
+
+            1. **Ephemeral Data**: Log context is created, passed to logger.info/debug/error,
+               and immediately discarded. No persistence or validation benefit.
+
+            2. **Logger API Compatibility**: Python's logging.Logger.info(..., extra={})
+               expects dict[str, Any]. A Pydantic model would need .model_dump() on every
+               log call, adding overhead without benefit.
+
+            3. **No Validation Needed**: All fields are computed from already-validated
+               sources (enums, UUIDs, timestamps). Double-validating adds latency.
+
+            4. **Performance**: This method is called on every dispatch operation and
+               every log statement. Pydantic model creation overhead (~5-10 microseconds)
+               would accumulate across high-throughput dispatch scenarios.
+
+            5. **Convention**: Using dict for logger extra context is standard Python
+               practice followed by logging frameworks.
+
+            If a structured log context model becomes valuable (e.g., for log aggregation
+            with strict schema enforcement), consider creating ModelLogContext in the
+            models/dispatch/ directory.
 
         Args:
             topic: The topic being dispatched to.
@@ -1327,11 +1490,28 @@ class MessageDispatchEngine:
             Sync dispatchers that block for extended periods (> 100ms) can
             severely degrade dispatch engine throughput. Prefer async dispatchers
             for any operation involving I/O or external service calls.
+
+        .. versionchanged:: 0.5.0
+            Added support for context-aware dispatchers via ``node_kind``.
         """
         dispatcher = entry.dispatcher
 
+        # Create context ONLY if both conditions are met:
+        # 1. node_kind is set (time injection rules apply)
+        # 2. dispatcher accepts context (will actually use it)
+        # This avoids unnecessary object creation on the dispatch hot path when
+        # a dispatcher has node_kind set but doesn't accept a context parameter.
+        context: ModelDispatchContext | None = None
+        if entry.node_kind is not None and entry.accepts_context:
+            context = self._create_context_for_entry(entry, envelope)
+
         # Check if dispatcher is async
+        # Note: context is only non-None when entry.accepts_context is True,
+        # so checking `context is not None` is sufficient to determine whether
+        # to pass context to the dispatcher.
         if inspect.iscoroutinefunction(dispatcher):
+            if context is not None:
+                return await dispatcher(envelope, context)  # type: ignore[call-arg,no-any-return]
             return await dispatcher(envelope)  # type: ignore[no-any-return]
         else:
             # Sync dispatcher execution via ThreadPoolExecutor
@@ -1344,14 +1524,174 @@ class MessageDispatchEngine:
             #
             # For blocking I/O operations, use async dispatchers instead.
             loop = asyncio.get_running_loop()
-            # Cast to sync-only type - safe because iscoroutinefunction check above
-            # guarantees this branch only executes for non-async callables
-            sync_dispatcher = cast(_SyncDispatcherFunc, dispatcher)
-            return await loop.run_in_executor(
-                None,
-                sync_dispatcher,
-                envelope,  # type: ignore[arg-type]
+
+            if context is not None:
+                # Context-aware sync dispatcher
+                sync_ctx_dispatcher = cast(_SyncContextAwareDispatcherFunc, dispatcher)
+                return await loop.run_in_executor(
+                    None,
+                    sync_ctx_dispatcher,
+                    envelope,  # type: ignore[arg-type]
+                    context,
+                )
+            else:
+                # Cast to sync-only type - safe because iscoroutinefunction check above
+                # guarantees this branch only executes for non-async callables
+                sync_dispatcher = cast(_SyncDispatcherFunc, dispatcher)
+                return await loop.run_in_executor(
+                    None,
+                    sync_dispatcher,
+                    envelope,  # type: ignore[arg-type]
+                )
+
+    def _create_context_for_entry(
+        self,
+        entry: DispatchEntryInternal,
+        envelope: ModelEventEnvelope[object],
+    ) -> ModelDispatchContext:
+        """
+        Create dispatch context based on entry's node_kind.
+
+        Delegates to DispatchContextEnforcer.create_context_for_node_kind() to
+        ensure a single source of truth for time injection rules. This method
+        is a thin wrapper that validates node_kind is not None before delegation.
+
+        Creates a ModelDispatchContext with appropriate time injection based on
+        the ONEX node kind:
+        - REDUCER: now=None (deterministic state aggregation)
+        - COMPUTE: now=None (pure transformation)
+        - ORCHESTRATOR: now=datetime.now(UTC) (coordination)
+        - EFFECT: now=datetime.now(UTC) (I/O operations)
+        - RUNTIME_HOST: now=datetime.now(UTC) (infrastructure)
+
+        Args:
+            entry: The dispatcher entry containing node_kind.
+            envelope: The event envelope containing correlation metadata.
+
+        Returns:
+            ModelDispatchContext configured appropriately for the node kind.
+
+        Raises:
+            ModelOnexError: If node_kind is None or unrecognized.
+
+        Note:
+            This is an internal method. Callers should ensure entry.node_kind
+            is not None before calling.
+
+        Time Semantics:
+            The ``now`` field is captured at context creation time (dispatch time),
+            NOT at handler execution time. For ORCHESTRATOR, EFFECT, and RUNTIME_HOST
+            nodes, this means:
+
+            - ``now`` represents when MessageDispatchEngine created the context
+            - Handler execution may occur microseconds to milliseconds later
+            - For most use cases, this drift is negligible
+            - If sub-millisecond precision is required, handlers should capture
+              their own time at the start of execution
+
+        .. versionadded:: 0.5.0
+        .. versionchanged:: 0.5.1
+            Now delegates to DispatchContextEnforcer.create_context_for_node_kind()
+            to eliminate code duplication.
+        """
+        node_kind = entry.node_kind
+        if node_kind is None:
+            raise ModelOnexError(
+                message=f"Cannot create context for dispatcher '{entry.dispatcher_id}': "
+                "node_kind is None. This is an internal error.",
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
             )
+
+        # Delegate to the shared context enforcer for time injection rules.
+        # This eliminates duplication between MessageDispatchEngine and any
+        # other components that need to create contexts based on node_kind.
+        return self._context_enforcer.create_context_for_node_kind(
+            node_kind=node_kind,
+            envelope=envelope,
+            dispatcher_id=entry.dispatcher_id,
+        )
+
+    def _dispatcher_accepts_context(
+        self,
+        dispatcher: DispatcherFunc | ContextAwareDispatcherFunc,
+    ) -> bool:
+        """
+        Check if a dispatcher callable accepts a context parameter.
+
+        Uses inspect.signature to determine if the dispatcher has a second
+        parameter for ModelDispatchContext. This enables backwards-compatible
+        context injection - dispatchers without a context parameter will be
+        called with just the envelope.
+
+        This method is called once at registration time and the result is
+        cached in DispatchEntryInternal.accepts_context for performance.
+        No signature inspection occurs during dispatch execution.
+
+        Type Safety Warnings:
+            When a dispatcher has 2+ parameters but the second parameter doesn't
+            follow conventional naming (containing 'context' or 'ctx'), a warning
+            is logged to help developers identify potential signature mismatches.
+            This is non-blocking - the method still returns True for backwards
+            compatibility with existing dispatchers.
+
+        Args:
+            dispatcher: The dispatcher callable to inspect.
+
+        Returns:
+            True if dispatcher accepts a context parameter, False otherwise.
+
+        .. versionadded:: 0.5.0
+        .. versionchanged:: 0.5.1
+            Added warning logging for unconventional parameter naming.
+        """
+        try:
+            sig = inspect.signature(dispatcher)
+            params = list(sig.parameters.values())
+            # Dispatcher with context has 2+ parameters: (envelope, context, ...)
+            # Dispatcher without context has 1 parameter: (envelope)
+            #
+            # Design Decision: We use >= MIN_PARAMS_FOR_CONTEXT (not ==) intentionally
+            # to support:
+            # - Future extensibility (e.g., envelope, context, **kwargs)
+            # - Dispatchers with additional optional parameters for testing/logging
+            # - Protocol compliance without strict arity enforcement
+            #
+            # Strict == MIN_PARAMS_FOR_CONTEXT would reject valid dispatchers that
+            # happen to have extra optional parameters, which is unnecessarily restrictive.
+            if len(params) < MIN_PARAMS_FOR_CONTEXT:
+                return False
+
+            # Type safety enhancement: Warn if second parameter doesn't follow
+            # context naming convention. This helps developers identify potential
+            # signature mismatches where a 2+ parameter dispatcher might not
+            # actually expect a ModelDispatchContext.
+            #
+            # This is NON-BLOCKING - we still return True for backwards compatibility.
+            # The warning is informational to help improve code quality.
+            second_param = params[1]
+            second_name = second_param.name.lower()
+            if "context" not in second_name and "ctx" not in second_name:
+                dispatcher_name = getattr(dispatcher, "__name__", str(dispatcher))
+                self._logger.warning(
+                    "Dispatcher '%s' has 2+ parameters but second parameter '%s' "
+                    "doesn't follow context naming convention. "
+                    "Expected parameter name containing 'context' or 'ctx'. "
+                    "If this dispatcher expects a ModelDispatchContext, consider "
+                    "renaming the parameter for clarity.",
+                    dispatcher_name,
+                    second_param.name,
+                )
+
+            return True
+        except (ValueError, TypeError) as e:
+            # If we can't inspect the signature, assume no context and log warning
+            self._logger.warning(
+                "Failed to inspect dispatcher signature: %s. "
+                "Assuming no context parameter. Uninspectable dispatchers "
+                "(C extensions, certain decorators) will receive envelope only.",
+                e,
+            )
+            return False
 
     def get_metrics(self) -> dict[str, int | float]:
         """
@@ -1540,6 +1880,7 @@ class MessageDispatchEngine:
         handler: DispatcherFunc,
         category: EnumMessageCategory,
         message_types: set[str] | None = None,
+        node_kind: EnumNodeKind | None = None,
     ) -> None:
         """Register a message handler (legacy alias for register_dispatcher)."""
         return self.register_dispatcher(
@@ -1547,6 +1888,7 @@ class MessageDispatchEngine:
             dispatcher=handler,
             category=category,
             message_types=message_types,
+            node_kind=node_kind,
         )
 
     def get_handler_metrics(self, handler_id: str) -> ModelDispatcherMetrics | None:

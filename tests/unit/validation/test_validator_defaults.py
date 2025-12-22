@@ -40,16 +40,19 @@ class TestInfraValidatorConstants:
 
         OMN-983: Strict validation mode enabled.
 
-        Current baseline (~462 unions as of 2025-12-20):
+        Current baseline (~515 unions as of 2025-12-22):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold set to 485 - buffer above current baseline (481) after OMN-985 merge.
-        Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
+        Threshold history:
+        - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
+        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots
+
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 485, (
-            "INFRA_MAX_UNIONS should be 485 (buffer after OMN-985 merge)"
+        assert INFRA_MAX_UNIONS == 515, (
+            "INFRA_MAX_UNIONS should be 515 (OMN-990 + OMN-947)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -238,7 +241,7 @@ class TestValidateInfraUnionUsageDefaults:
         # Verify core validator called with correct defaults
         mock_validate.assert_called_once_with(
             INFRA_SRC_PATH,  # Default directory
-            max_unions=INFRA_MAX_UNIONS,  # Default max (410)
+            max_unions=INFRA_MAX_UNIONS,  # Default max from constant
             strict=INFRA_UNIONS_STRICT,  # Strict mode (True) per OMN-983
         )
 
@@ -488,13 +491,13 @@ class TestUnionCountRegressionGuard:
         the threshold, it indicates new code added unions without
         using proper typed patterns from omnibase_core.
 
-        Current baseline (~402 unions as of 2025-12-20):
+        Current baseline (~513 unions as of 2025-12-22):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold: INFRA_MAX_UNIONS (410) - buffer above baseline after json_types.py.
-        Target: Reduce to <200 through ongoing dict[str, object] → JsonValue migration.
+        Threshold: INFRA_MAX_UNIONS (515) - buffer above baseline.
+        Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
         result = validate_infra_union_usage()
 
