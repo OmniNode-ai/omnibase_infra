@@ -225,11 +225,20 @@ OrderPlacedEvent -> (failure) -> OrderCancelledEvent      # This is correct
 When partial failure occurs, emit a compensating event that reverses the logical effect:
 
 ```python
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from uuid import UUID, uuid4
 
 from omnibase_core.models.events import ModelEventEnvelope
-from omnibase_infra.errors import InfraConnectionError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+
+
+class ModelUserData(BaseModel):
+    """Input data for user creation."""
+
+    email: EmailStr
+    username: str
+    display_name: str | None = None
 
 
 class UserCreatedEvent(BaseModel):
@@ -246,7 +255,7 @@ class UserCreationFailedEvent(BaseModel):
 
 
 async def create_user_with_compensation(
-    user_data: dict,
+    user_data: ModelUserData,
     db_client: DatabaseClient,
     event_bus: EventBus,
     correlation_id: UUID,
@@ -260,8 +269,16 @@ async def create_user_with_compensation(
     # Step 2: Create domain event
     created_event = UserCreatedEvent(
         user_id=user_id,
-        email=user_data["email"],
+        email=user_data.email,
         created_at=datetime.utcnow().isoformat(),
+    )
+
+    # Create error context for Kafka operations (per ONEX error handling patterns)
+    kafka_error_context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.KAFKA,
+        operation="publish_event",
+        target_name="kafka-broker",
+        correlation_id=correlation_id,
     )
 
     try:
@@ -272,7 +289,21 @@ async def create_user_with_compensation(
             correlation_id=correlation_id,
         )
     except InfraConnectionError as e:
-        # Kafka failed - emit compensating event and cleanup
+        # Kafka failed - log with full error context and initiate compensation
+        # The error already contains context from the event bus,
+        # but we log additional context for debugging
+        logger.warning(
+            "Kafka publish failed, initiating compensation",
+            extra={
+                "user_id": str(user_id),
+                "correlation_id": str(correlation_id),
+                "transport_type": kafka_error_context.transport_type.value,
+                "operation": kafka_error_context.operation,
+                "target_name": kafka_error_context.target_name,
+                "error": str(e),
+            },
+        )
+
         failed_event = UserCreationFailedEvent(
             user_id=user_id,
             original_event_id=correlation_id,
@@ -289,12 +320,15 @@ async def create_user_with_compensation(
                 correlation_id=correlation_id,
             )
         except Exception:
-            # Log for manual intervention
+            # Log for manual intervention with full context
             logger.error(
                 "Failed to publish compensation event",
                 extra={
                     "user_id": str(user_id),
                     "correlation_id": str(correlation_id),
+                    "transport_type": kafka_error_context.transport_type.value,
+                    "operation": "publish_compensation_event",
+                    "target_name": kafka_error_context.target_name,
                 },
             )
 
@@ -322,6 +356,26 @@ class SagaStep:
     compensate: Callable[[], Awaitable[None]]
 
 
+class CompensationFailedError(Exception):
+    """Raised when one or more saga compensations fail.
+
+    This error aggregates all compensation failures that occurred during
+    saga rollback, providing visibility into which steps failed to compensate
+    and why. This is critical for operational awareness when the system is
+    left in an inconsistent state.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        failed_steps: list[str],
+        errors: list[Exception],
+    ):
+        super().__init__(message)
+        self.failed_steps = failed_steps
+        self.errors = errors
+
+
 class SagaExecutor:
     """Execute saga with automatic compensation on failure."""
 
@@ -335,6 +389,11 @@ class SagaExecutor:
         Args:
             steps: Ordered list of saga steps
             correlation_id: Request correlation ID
+
+        Raises:
+            CompensationFailedError: If any compensation steps fail during rollback.
+                The original exception is preserved via exception chaining.
+            Exception: The original exception if all compensations succeed.
         """
         completed_steps: list[SagaStep] = []
 
@@ -344,11 +403,14 @@ class SagaExecutor:
                 completed_steps.append(step)
 
         except Exception as e:
-            # Compensate in reverse order
+            # Compensate in reverse order, collecting errors
+            compensation_errors: list[tuple[str, Exception]] = []
+
             for step in reversed(completed_steps):
                 try:
                     await step.compensate()
                 except Exception as comp_error:
+                    compensation_errors.append((step.name, comp_error))
                     logger.error(
                         "Compensation failed for step %s",
                         step.name,
@@ -357,6 +419,15 @@ class SagaExecutor:
                             "error": str(comp_error),
                         },
                     )
+
+            # If any compensations failed, raise aggregate error
+            if compensation_errors:
+                raise CompensationFailedError(
+                    f"Saga failed and {len(compensation_errors)} compensation(s) also failed",
+                    failed_steps=[name for name, _ in compensation_errors],
+                    errors=[err for _, err in compensation_errors],
+                ) from e
+
             raise
 
 
@@ -414,18 +485,27 @@ from datetime import datetime
 
 class OutboxEntry(BaseModel):
     """Entry in the outbox table for reliable event publishing."""
+
     id: UUID
     aggregate_type: str
     aggregate_id: UUID
     event_type: str
-    payload: dict
+    payload: BaseModel  # Accepts any Pydantic model for type safety
     created_at: datetime
     published_at: datetime | None = None
     retry_count: int = 0
 
 
+class ModelUserCreatedPayload(BaseModel):
+    """Payload for user created outbox event."""
+
+    user_id: str
+    email: str
+    created_at: str
+
+
 async def create_user_with_outbox(
-    user_data: dict,
+    user_data: ModelUserData,
     db_client: DatabaseClient,
     correlation_id: UUID,
 ) -> UUID:
@@ -449,11 +529,11 @@ async def create_user_with_outbox(
             aggregate_type="User",
             aggregate_id=user_id,
             event_type="user.created.v1",
-            payload={
-                "user_id": str(user_id),
-                "email": user_data["email"],
-                "created_at": datetime.utcnow().isoformat(),
-            },
+            payload=ModelUserCreatedPayload(
+                user_id=str(user_id),
+                email=user_data.email,
+                created_at=datetime.utcnow().isoformat(),
+            ),
             created_at=datetime.utcnow(),
         )
         await db_client.insert_outbox(outbox_entry)
