@@ -313,7 +313,9 @@ class TestPolicyRegistryContainerIntegration:
                 )
 
         # Verify basic operations work
-        assert len(handler_registry) == 0  # Empty initially (also verifies __len__ works)
+        assert (
+            len(handler_registry) == 0
+        )  # Empty initially (also verifies __len__ works)
         assert handler_registry.list_protocols() == []
 
     @pytest.mark.asyncio

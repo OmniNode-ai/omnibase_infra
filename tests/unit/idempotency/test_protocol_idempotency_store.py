@@ -513,11 +513,14 @@ class TestNonConformingImplementation:
         # Verify all methods exist
         for method_name in required_methods:
             assert hasattr(store, method_name), f"Should have {method_name}"
-            assert callable(getattr(store, method_name)), f"{method_name} should be callable"
+            assert callable(getattr(store, method_name)), (
+                f"{method_name} should be callable"
+            )
 
         # Verify none of the methods are async (this is the non-conformance)
         non_async_methods = [
-            m for m in required_methods
+            m
+            for m in required_methods
             if not inspect.iscoroutinefunction(getattr(store, m))
         ]
         assert len(non_async_methods) == 4, (
