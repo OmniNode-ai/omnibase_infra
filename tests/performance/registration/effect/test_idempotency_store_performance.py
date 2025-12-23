@@ -297,14 +297,18 @@ class TestConcurrentAccessScaling:
         # due to serialization. The key invariant is that throughput doesn't
         # collapse completely under concurrent load.
         #
-        # NOTE: CI environments have highly variable performance due to shared
-        # resources, container overhead, and CPU throttling. A 10% threshold
-        # ensures the test validates basic functionality without being flaky.
-        # Local testing typically shows 50%+ efficiency.
-        min_acceptable_throughput = results[1] * 0.10  # At least 10% of single-worker
+        # CI environments (GitHub Actions) have limited resources and high
+        # context-switch overhead with 16 workers, so we use a lenient threshold.
+        # Local development can use stricter thresholds if needed.
+        from omnibase_infra.testing import is_ci_environment
+
+        is_ci = is_ci_environment()
+        threshold_pct = 0.10 if is_ci else 0.50  # 10% in CI, 50% locally
+        min_acceptable_throughput = results[1] * threshold_pct
         assert results[16] > min_acceptable_throughput, (
             f"16-worker throughput {results[16]:.0f} too low, "
-            f"expected > {min_acceptable_throughput:.0f} (10% of single-worker)"
+            f"expected > {min_acceptable_throughput:.0f} "
+            f"({int(threshold_pct * 100)}% of single-worker)"
         )
 
     @pytest.mark.asyncio
