@@ -187,6 +187,7 @@ class ModelPostgresUpsertIntent(BaseModel):
 
 # Discriminated union of all intent types using Annotated pattern
 # This enables type narrowing based on the `kind` field
+# TODO(OMN-912): Migrate to discriminated intent unions once available in omnibase_core
 ModelRegistrationIntent = Annotated[
     ModelConsulRegistrationIntent | ModelPostgresUpsertIntent,
     Field(discriminator="kind"),

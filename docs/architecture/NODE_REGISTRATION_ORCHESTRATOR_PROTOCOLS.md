@@ -162,11 +162,24 @@ This exemption should be reviewed if:
 
 ## Implementation Status
 
-| Component | Status | Location |
-|-----------|--------|----------|
-| Protocols | Complete | `protocols.py` |
-| Models | Complete | `models/` |
-| Orchestrator Node | Complete | `node.py` |
-| Reducer Implementation | Pending | OMN-889 |
-| Effect Implementation | Partial | `nodes/node_registry_effect/` |
-| Intent Models (Core) | Pending | OMN-912 |
+| Component | Status | Location | Ticket |
+|-----------|--------|----------|--------|
+| Protocols | **Complete** | `protocols.py` | OMN-888 |
+| Models | **Complete** | `models/` | OMN-888 |
+| Orchestrator Node | **Complete** | `node.py` | OMN-888 |
+| Reducer Implementation | **Pending** | N/A | OMN-889 |
+| Effect Implementation | **Placeholder** | `nodes/node_registry_effect/` | OMN-890 |
+| Intent Models (Core) | **Pending** | N/A | OMN-912 |
+| Projection Reader | **Pending** | N/A | OMN-930 |
+| Time Injection Wiring | **Pending** | N/A | OMN-973 |
+
+### Effect Node Status (OMN-890)
+
+The `node_registry_effect` module at `src/omnibase_infra/nodes/node_registry_effect/` is currently a **placeholder**:
+
+- The `__init__.py` exists but exports nothing (`__all__: list[str] = []`)
+- No `node.py` or `contract.yaml` implementation
+- Cannot execute Consul or PostgreSQL registration intents
+- Blocked by: OMN-889 (reducer must generate intents first)
+
+This is documented in the module docstring and tracked by OMN-890.

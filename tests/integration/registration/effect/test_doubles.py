@@ -306,11 +306,3 @@ class StubPostgresAdapter:
         self.registrations.append(registration)
 
         return {"success": True}
-
-
-__all__ = [
-    "ConsulRegistration",
-    "PostgresRegistration",
-    "StubConsulClient",
-    "StubPostgresAdapter",
-]

@@ -481,10 +481,57 @@ payload: ModelPostgresIntentPayload
 
 This orchestrator is **NOT thread-safe**. Each instance should handle one workflow at a time. For concurrent workflows, create multiple instances.
 
+## Limitations & Implementation Status
+
+This node is part of the MVP implementation for OMN-888. The following limitations apply:
+
+### Current Limitations
+
+| Limitation | Ticket | Description |
+|------------|--------|-------------|
+| Effect Node Placeholder | OMN-890 | `node_registry_effect` module exists but contains no implementation. Intents cannot be executed until this is implemented. |
+| Reducer Not Implemented | OMN-889 | `ProtocolReducer` is defined but no concrete implementation exists. Intent computation is pending. |
+| Projection Reader Not Wired | OMN-930 | `ProtocolProjectionReader` protocol does not exist in `omnibase_spi.protocols`. The `read_projection` workflow step cannot execute. |
+| Time Injection Not Wired | OMN-973 | Contract declares time injection but orchestrator does not parse or use it. Timeout evaluation uses implicit dispatch context. |
+| Intent Models in Infra | OMN-912 | Intent models are currently in `omnibase_infra`. Should be moved to `omnibase_core` for broader reuse. |
+
+### Implementation Status
+
+| Component | Status | Location | Notes |
+|-----------|--------|----------|-------|
+| Orchestrator Node | **Complete** | `node.py` | Declarative pattern, extends `NodeOrchestrator` |
+| Contract | **Complete** | `contract.yaml` | Full workflow definition with coordination rules |
+| Protocols | **Complete** | `protocols.py` | `ProtocolReducer`, `ProtocolEffect` defined |
+| Models | **Complete** | `models/` | Input, output, intent, state models |
+| README | **Complete** | `README.md` | This file |
+| Effect Node | **Placeholder** | `nodes/node_registry_effect/` | Empty module (OMN-890) |
+| Reducer Impl | **Pending** | N/A | No implementation yet (OMN-889) |
+| Projection Reader | **Pending** | N/A | SPI protocol needed (OMN-930) |
+
+### What Works Today
+
+1. **Contract Parsing**: The contract.yaml is valid and fully defines the workflow
+2. **Model Validation**: All input/output models work with Pydantic validation
+3. **Protocol Definitions**: Type contracts for reducer and effect are complete
+4. **Workflow Structure**: Execution graph with dependencies is defined
+
+### What Does NOT Work Today
+
+1. **End-to-End Registration**: Cannot register nodes (effect node is placeholder)
+2. **Intent Computation**: Cannot generate intents (reducer not implemented)
+3. **Projection Reading**: Cannot read current state (protocol not in SPI)
+4. **Timeout Evaluation**: Uses implicit time, not contract-driven injection
+
 ## Related Tickets
 
 - **OMN-888**: Infrastructure MVP Node Registration Orchestrator Workflow
 - **OMN-889**: Reducer Implementation (pending)
+- **OMN-890**: Effect Node Implementation (pending)
 - **OMN-912**: Intent Models in omnibase_core (pending)
 - **OMN-930**: Projection Reader Integration
 - **OMN-973**: Time Injection Context for Timeout Evaluation
+
+## Related Documentation
+
+- [Protocol Architecture](../../../docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md) - Detailed protocol design
+- [Validation Exemptions](../../validation/validation_exemptions.yaml) - Exemption for domain-grouped protocols

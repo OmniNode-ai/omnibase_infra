@@ -455,6 +455,7 @@ class ValidationResult:
         )
 
 
+# TODO(OMN-889): Complete pure reducer implementation - add reduce_confirmation() method
 class RegistrationReducer:
     """Pure reducer for node registration workflow.
 

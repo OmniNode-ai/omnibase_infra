@@ -60,8 +60,22 @@ class TestPolicyRegistryContainerIntegration:
         # Resolve PolicyRegistry from container
         registry = await get_policy_registry_from_container(container)
 
-        # Verify it's a real PolicyRegistry instance
-        assert isinstance(registry, PolicyRegistry)
+        # Verify it implements PolicyRegistry interface via duck typing
+        # Per ONEX conventions, check for required methods rather than isinstance
+        required_methods = [
+            "register",
+            "register_policy",
+            "get",
+            "list_keys",
+            "is_registered",
+        ]
+        for method_name in required_methods:
+            assert hasattr(registry, method_name), (
+                f"Policy registry must have '{method_name}' method"
+            )
+            assert callable(getattr(registry, method_name)), (
+                f"'{method_name}' must be callable"
+            )
         assert len(registry) == 0  # Empty initially
 
     @pytest.mark.asyncio
@@ -210,7 +224,23 @@ class TestPolicyRegistryContainerIntegration:
 
         # get_or_create should create and register PolicyRegistry
         registry1 = await get_or_create_policy_registry(container)
-        assert isinstance(registry1, PolicyRegistry)
+
+        # Verify it implements PolicyRegistry interface via duck typing
+        # Per ONEX conventions, check for required methods rather than isinstance
+        required_methods = [
+            "register",
+            "register_policy",
+            "get",
+            "list_keys",
+            "is_registered",
+        ]
+        for method_name in required_methods:
+            assert hasattr(registry1, method_name), (
+                f"Policy registry must have '{method_name}' method"
+            )
+            assert callable(getattr(registry1, method_name)), (
+                f"'{method_name}' must be callable"
+            )
 
         # Second call should return same instance
         registry2 = await get_or_create_policy_registry(container)
@@ -428,7 +458,23 @@ class TestContainerWithRegistriesFixture:
                 PolicyRegistry
             )
         )
-        assert isinstance(policy_registry, PolicyRegistry)
+
+        # Verify it implements PolicyRegistry interface via duck typing
+        # Per ONEX conventions, check for required methods rather than isinstance
+        required_methods = [
+            "register",
+            "register_policy",
+            "get",
+            "list_keys",
+            "is_registered",
+        ]
+        for method_name in required_methods:
+            assert hasattr(policy_registry, method_name), (
+                f"Policy registry must have '{method_name}' method"
+            )
+            assert callable(getattr(policy_registry, method_name)), (
+                f"'{method_name}' must be callable"
+            )
 
         # Resolve ProtocolBindingRegistry
         handler_registry = (

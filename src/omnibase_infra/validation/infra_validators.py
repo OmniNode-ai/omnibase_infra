@@ -599,12 +599,14 @@ def _create_filtered_result(
     all_violations_exempted = violations_filtered > 0 and len(filtered_errors) == 0
 
     # Create new metadata if present (avoid mutation)
+    # Use getattr to guard against missing metadata attribute on base_result
     new_metadata = None
-    if base_result.metadata is not None:
+    base_metadata = getattr(base_result, "metadata", None)
+    if base_metadata is not None:
         # Use model_copy for deep copy with updates (Pydantic v2 pattern)
         # This works with both real Pydantic models and test mocks
         try:
-            new_metadata = base_result.metadata.model_copy(deep=True)
+            new_metadata = base_metadata.model_copy(deep=True)
             # Update violations_found if the field exists and is writable
             # Guard against None return from model_copy and missing/read-only attributes
             if new_metadata is not None and hasattr(new_metadata, "violations_found"):
@@ -616,7 +618,7 @@ def _create_filtered_result(
         except AttributeError:
             # Fallback for test mocks that don't support model_copy
             # Use original metadata without modification to avoid mutation
-            new_metadata = base_result.metadata
+            new_metadata = base_metadata
 
     # Create new result (wrapper pattern - no mutation)
     return ModelValidationResult(

@@ -1795,17 +1795,3 @@ class TestParallelExecutionStructure:
         assert rules["max_parallel_branches"] >= 2, (
             f"max_parallel_branches should be at least 2, got {rules['max_parallel_branches']}"
         )
-
-
-__all__ = [
-    "TestContractIntegration",
-    "TestWorkflowGraphIntegration",
-    "TestCoordinationRulesIntegration",
-    "TestErrorHandlingIntegration",
-    "TestEventIntegration",
-    "TestModelContractAlignment",
-    "TestNodeIntegration",
-    "TestDependencyStructure",
-    "TestWorkflowExecutionWithMocks",
-    "TestParallelExecutionStructure",
-]

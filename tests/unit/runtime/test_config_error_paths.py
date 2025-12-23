@@ -156,7 +156,12 @@ class TestInvalidYamlSyntaxScenarios:
         assert "parse" in str(error).lower() or "yaml" in str(error).lower()
 
     def test_invalid_yaml_tab_indentation_raises_error(self, tmp_path: Path) -> None:
-        """Test that tabs (invalid in YAML) raise appropriate error."""
+        """Test that tabs used for indentation in YAML raise appropriate error.
+
+        Note: Tabs are invalid as indentation in YAML per the YAML 1.1 and 1.2
+        specifications, though some lenient parsers may accept them. PyYAML
+        follows the spec strictly and rejects tab indentation.
+        """
         config_file = tmp_path / "invalid.yaml"
         config_file.write_text("parent:\n\tchild: value")
 
@@ -179,23 +184,24 @@ class TestInvalidYamlSyntaxScenarios:
     def test_invalid_yaml_with_binary_content_raises_error(
         self, tmp_path: Path
     ) -> None:
-        """Test that binary content in YAML file raises error.
+        """Test that binary content in YAML file raises ProtocolConfigurationError.
 
-        Binary content causes either UnicodeDecodeError (when opening with utf-8)
-        or yaml.YAMLError (if somehow parsed). Both should result in an error.
-        Currently, the UnicodeDecodeError is raised directly since it happens
-        during file open with encoding="utf-8", before yaml.safe_load is called.
-
-        This test documents the current behavior where binary content causes
-        an error, though not specifically wrapped as ProtocolConfigurationError.
+        Binary content causes UnicodeDecodeError when opening with utf-8 encoding.
+        The load_and_validate_config function properly catches this exception and
+        wraps it as ProtocolConfigurationError with encoding error details.
         """
         config_file = tmp_path / "binary.yaml"
         config_file.write_bytes(b"\x00\x01\x02\x03\xff\xfe")
 
-        # Binary content causes UnicodeDecodeError during file read
-        # This is expected behavior - the file is not valid UTF-8
-        with pytest.raises((ProtocolConfigurationError, UnicodeDecodeError)):
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
             load_and_validate_config(config_file)
+
+        error = exc_info.value
+        # Should mention binary/non-UTF-8 content
+        assert "binary" in str(error).lower() or "utf-8" in str(error).lower()
+        # Original UnicodeDecodeError should be chained
+        assert error.__cause__ is not None
+        assert isinstance(error.__cause__, UnicodeDecodeError)
 
     def test_invalid_yaml_error_includes_parse_details(self, tmp_path: Path) -> None:
         """Test that YAML parse error includes helpful details."""

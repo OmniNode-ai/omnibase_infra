@@ -36,7 +36,6 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -61,9 +60,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
     ProtocolEffect,
     ProtocolReducer,
 )
-
-if TYPE_CHECKING:
-    pass
 
 # Module-level markers - all tests in this file are integration tests
 pytestmark = [
@@ -256,7 +252,9 @@ def node_id() -> UUID:
 
 
 @pytest.fixture
-def introspection_event(node_id: UUID, correlation_id: UUID) -> ModelNodeIntrospectionEvent:
+def introspection_event(
+    node_id: UUID, correlation_id: UUID
+) -> ModelNodeIntrospectionEvent:
     """Create a test introspection event."""
     return ModelNodeIntrospectionEvent(
         node_id=node_id,
@@ -720,9 +718,7 @@ class TestEventFlowCoordination:
         any_success = consul_applied or postgres_applied
         all_success = consul_applied and postgres_applied
 
-        status = (
-            "success" if all_success else ("partial" if any_success else "failed")
-        )
+        status = "success" if all_success else ("partial" if any_success else "failed")
         consul_error = next((r.error for r in consul_results if not r.success), None)
 
         output = ModelOrchestratorOutput(
@@ -759,9 +755,7 @@ class TestEventFlowCoordination:
             result = await mock_effect.execute_intent(intent, correlation_id)
             results.append(result)
 
-        consul_applied = any(
-            r.success for r in results if r.intent_kind == "consul"
-        )
+        consul_applied = any(r.success for r in results if r.intent_kind == "consul")
         postgres_applied = any(
             r.success for r in results if r.intent_kind == "postgres"
         )
@@ -1193,21 +1187,3 @@ class TestConcurrencyAndThreadSafety:
         assert len(state.processed_node_ids) == 5
         for event in events:
             assert event.node_id in state.processed_node_ids
-
-
-# =============================================================================
-# Module Exports
-# =============================================================================
-
-
-__all__ = [
-    "TestWorkflowSequenceExecution",
-    "TestStateTransitions",
-    "TestEventFlowCoordination",
-    "TestErrorHandlingAndRecovery",
-    "TestCorrelationTracking",
-    "TestOrchestratorIntegration",
-    "TestConcurrencyAndThreadSafety",
-    "MockReducerImpl",
-    "MockEffectImpl",
-]
