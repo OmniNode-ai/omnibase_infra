@@ -23,7 +23,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.models.types.json_types import JsonValue
+from omnibase_infra.models.types import JsonValue
 
 
 class ModelConsulIntentPayload(BaseModel):
