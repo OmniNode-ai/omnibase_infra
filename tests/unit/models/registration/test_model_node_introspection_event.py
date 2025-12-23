@@ -32,9 +32,11 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
     def test_valid_instantiation_required_fields_only(self) -> None:
         """Test creating event with only required fields."""
         test_node_id = uuid4()
+        correlation_id = uuid4()
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=correlation_id,
         )
         assert event.node_id == test_node_id
         assert event.node_type == "effect"
@@ -43,7 +45,8 @@ class TestModelNodeIntrospectionEventBasicInstantiation:
         assert event.endpoints == {}
         assert event.node_role is None
         assert event.metadata == ModelNodeMetadata()
-        assert event.correlation_id is None
+        assert isinstance(event.correlation_id, UUID)
+        assert event.correlation_id == correlation_id
         assert event.network_id is None
         assert event.deployment_id is None
         assert event.epoch is None
@@ -100,6 +103,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         assert event.node_version == "1.0.0"
 
@@ -110,6 +114,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_id=test_node_id,
             node_type="effect",
             node_version="2.3.4",
+            correlation_id=uuid4(),
         )
         assert event.node_version == "2.3.4"
 
@@ -120,6 +125,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_id=test_node_id,
             node_type="effect",
             node_version="1.0.0-beta.2",
+            correlation_id=uuid4(),
         )
         assert event.node_version == "1.0.0-beta.2"
 
@@ -130,6 +136,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_id=test_node_id,
             node_type="effect",
             node_version="1.0.0+build.456",
+            correlation_id=uuid4(),
         )
         assert event.node_version == "1.0.0+build.456"
 
@@ -140,6 +147,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_id=test_node_id,
             node_type="effect",
             node_version="3.2.1",
+            correlation_id=uuid4(),
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
@@ -152,6 +160,7 @@ class TestModelNodeIntrospectionEventNodeVersion:
             node_id=test_node_id,
             node_type="effect",
             node_version="4.5.6",
+            correlation_id=uuid4(),
         )
         data = event.model_dump()
         assert "node_version" in data
@@ -164,26 +173,32 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
     def test_valid_node_type_effect(self) -> None:
         """Test that 'effect' is a valid node_type."""
         test_node_id = uuid4()
-        event = ModelNodeIntrospectionEvent(node_id=test_node_id, node_type="effect")
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id, node_type="effect", correlation_id=uuid4()
+        )
         assert event.node_type == "effect"
 
     def test_valid_node_type_compute(self) -> None:
         """Test that 'compute' is a valid node_type."""
         test_node_id = uuid4()
-        event = ModelNodeIntrospectionEvent(node_id=test_node_id, node_type="compute")
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id, node_type="compute", correlation_id=uuid4()
+        )
         assert event.node_type == "compute"
 
     def test_valid_node_type_reducer(self) -> None:
         """Test that 'reducer' is a valid node_type."""
         test_node_id = uuid4()
-        event = ModelNodeIntrospectionEvent(node_id=test_node_id, node_type="reducer")
+        event = ModelNodeIntrospectionEvent(
+            node_id=test_node_id, node_type="reducer", correlation_id=uuid4()
+        )
         assert event.node_type == "reducer"
 
     def test_valid_node_type_orchestrator(self) -> None:
         """Test that 'orchestrator' is a valid node_type."""
         test_node_id = uuid4()
         event = ModelNodeIntrospectionEvent(
-            node_id=test_node_id, node_type="orchestrator"
+            node_id=test_node_id, node_type="orchestrator", correlation_id=uuid4()
         )
         assert event.node_type == "orchestrator"
 
@@ -194,6 +209,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
                 node_type="invalid_type",  # type: ignore[arg-type]
+                correlation_id=uuid4(),
             )
         assert "node_type" in str(exc_info.value)
 
@@ -204,6 +220,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
                 node_type="",  # type: ignore[arg-type]
+                correlation_id=uuid4(),
             )
 
     def test_invalid_node_type_none(self) -> None:
@@ -213,6 +230,7 @@ class TestModelNodeIntrospectionEventNodeTypeValidation:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
                 node_type=None,  # type: ignore[arg-type]
+                correlation_id=uuid4(),
             )
 
 
@@ -225,6 +243,7 @@ class TestModelNodeIntrospectionEventSerialization:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="reducer",
+            correlation_id=uuid4(),
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
@@ -272,6 +291,7 @@ class TestModelNodeIntrospectionEventSerialization:
             node_id=test_node_id,
             node_type="effect",
             capabilities=ModelNodeCapabilities(database=True),
+            correlation_id=uuid4(),
         )
         data = event.model_dump()
         assert isinstance(data, dict)
@@ -309,6 +329,7 @@ class TestModelNodeIntrospectionEventTimestamp:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="orchestrator",
+            correlation_id=uuid4(),
         )
         after = datetime.now(UTC)
         assert event.timestamp is not None
@@ -322,6 +343,7 @@ class TestModelNodeIntrospectionEventTimestamp:
             node_id=test_node_id,
             node_type="effect",
             timestamp=explicit_time,
+            correlation_id=uuid4(),
         )
         assert event.timestamp == explicit_time
 
@@ -331,6 +353,7 @@ class TestModelNodeIntrospectionEventTimestamp:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="compute",
+            correlation_id=uuid4(),
         )
         assert isinstance(event.timestamp, datetime)
 
@@ -344,6 +367,7 @@ class TestModelNodeIntrospectionEventImmutability:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         with pytest.raises(ValidationError):
             event.node_id = uuid4()  # type: ignore[misc]
@@ -354,6 +378,7 @@ class TestModelNodeIntrospectionEventImmutability:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         with pytest.raises(ValidationError):
             event.node_type = "compute"  # type: ignore[misc]
@@ -365,6 +390,7 @@ class TestModelNodeIntrospectionEventImmutability:
             node_id=test_node_id,
             node_type="effect",
             node_version="1.0.0",
+            correlation_id=uuid4(),
         )
         with pytest.raises(ValidationError):
             event.node_version = "2.0.0"  # type: ignore[misc]
@@ -376,6 +402,7 @@ class TestModelNodeIntrospectionEventImmutability:
             node_id=test_node_id,
             node_type="effect",
             capabilities={"original": True},
+            correlation_id=uuid4(),
         )
         with pytest.raises(ValidationError):
             event.capabilities = {"modified": True}  # type: ignore[misc]
@@ -397,6 +424,7 @@ class TestModelNodeIntrospectionEventImmutability:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         with pytest.raises(ValidationError):
             event.timestamp = datetime.now(UTC)  # type: ignore[misc]
@@ -411,6 +439,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             ModelNodeIntrospectionEvent(
                 node_id="",  # type: ignore[arg-type]
                 node_type="effect",
+                correlation_id=uuid4(),
             )
 
     def test_complex_capabilities_dict(self) -> None:
@@ -425,6 +454,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
                 "supported_types": ["json", "xml", "csv"],
                 "config": {"timeout": 30, "retries": 3},
             },
+            correlation_id=uuid4(),
         )
         assert event.capabilities.processing is True
         assert event.capabilities.max_batch == 1000
@@ -439,6 +469,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             node_type="effect",
             node_role="处理器",
             metadata={"description": "Узел обработки"},
+            correlation_id=uuid4(),
         )
         assert event.node_id == test_node_id
         assert event.node_role == "处理器"
@@ -451,6 +482,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             ModelNodeIntrospectionEvent(
                 node_id=test_node_id,
                 node_type="effect",
+                correlation_id=uuid4(),
                 extra_field="not_allowed",  # type: ignore[call-arg]
             )
         assert "extra_field" in str(exc_info.value)
@@ -467,6 +499,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
                 node_id=test_node_id,
                 node_type="effect",
                 epoch=-1,
+                correlation_id=uuid4(),
             )
         assert "epoch" in str(exc_info.value)
 
@@ -477,6 +510,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             node_id=test_node_id,
             node_type="effect",
             epoch=0,
+            correlation_id=uuid4(),
         )
         assert event.epoch == 0
 
@@ -487,6 +521,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             node_id=test_node_id,
             node_type="effect",
             epoch=42,
+            correlation_id=uuid4(),
         )
         assert event.epoch == 42
 
@@ -497,6 +532,7 @@ class TestModelNodeIntrospectionEventEdgeCases:
             node_id=test_node_id,
             node_type="effect",
             epoch=2**31,
+            correlation_id=uuid4(),
         )
         assert event.epoch == 2**31
 
@@ -507,9 +543,10 @@ class TestModelNodeIntrospectionEventFromAttributes:
     def test_from_dict_like_object(self) -> None:
         """Test creating model from dict-like object."""
         test_node_id = uuid4()
+        test_correlation_id = uuid4()
 
         class DictLike:
-            def __init__(self, node_id: UUID) -> None:
+            def __init__(self, node_id: UUID, correlation_id: UUID) -> None:
                 self.node_id = node_id
                 self.node_type = "compute"
                 self.node_version = "1.0.0"
@@ -517,17 +554,18 @@ class TestModelNodeIntrospectionEventFromAttributes:
                 self.endpoints: dict[str, str] = {}
                 self.node_role = None
                 self.metadata: dict[str, str] = {}
-                self.correlation_id = None
+                self.correlation_id = correlation_id
                 self.network_id = None
                 self.deployment_id = None
                 self.epoch = None
                 self.timestamp = datetime.now(UTC)
 
-        obj = DictLike(test_node_id)
+        obj = DictLike(test_node_id, test_correlation_id)
         event = ModelNodeIntrospectionEvent.model_validate(obj)
         assert event.node_id == test_node_id
         assert event.node_type == "compute"
         assert event.node_version == "1.0.0"
+        assert event.correlation_id == test_correlation_id
 
 
 class TestModelNodeIntrospectionEventEquality:
@@ -536,47 +574,56 @@ class TestModelNodeIntrospectionEventEquality:
     def test_equal_events_are_equal(self) -> None:
         """Test that two events with same values are equal."""
         test_node_id = uuid4()
+        correlation_id = uuid4()
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         event1 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
             timestamp=timestamp,
+            correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
             timestamp=timestamp,
+            correlation_id=correlation_id,
         )
         assert event1 == event2
 
     def test_different_node_id_not_equal(self) -> None:
         """Test that events with different node_id are not equal."""
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        correlation_id = uuid4()
         event1 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
             node_type="effect",
             timestamp=timestamp,
+            correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=uuid4(),
             node_type="effect",
             timestamp=timestamp,
+            correlation_id=correlation_id,
         )
         assert event1 != event2
 
     def test_different_node_type_not_equal(self) -> None:
         """Test that events with different node_type are not equal."""
         test_node_id = uuid4()
+        correlation_id = uuid4()
         timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         event1 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
             timestamp=timestamp,
+            correlation_id=correlation_id,
         )
         event2 = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="compute",
             timestamp=timestamp,
+            correlation_id=correlation_id,
         )
         assert event1 != event2
 
@@ -586,6 +633,7 @@ class TestModelNodeIntrospectionEventEquality:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         assert event != "not a model"
         assert event != 42
@@ -614,6 +662,7 @@ class TestModelNodeIntrospectionEventHashing:
             node_id=test_node_id,
             node_type="effect",
             timestamp=timestamp,
+            correlation_id=uuid4(),
         )
         # Model has dict fields (capabilities, endpoints, metadata) so it's not hashable
         with pytest.raises(TypeError):
@@ -629,6 +678,7 @@ class TestModelNodeIntrospectionEventStringRepresentation:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         str_repr = str(event)
         # Pydantic models include field values in string representation
@@ -640,6 +690,7 @@ class TestModelNodeIntrospectionEventStringRepresentation:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         repr_str = repr(event)
         assert isinstance(repr_str, str)
@@ -651,6 +702,7 @@ class TestModelNodeIntrospectionEventStringRepresentation:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="orchestrator",
+            correlation_id=uuid4(),
         )
         str_repr = str(event)
         repr_str = repr(event)
@@ -667,6 +719,7 @@ class TestModelNodeIntrospectionEventCopying:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         copied = event.model_copy()
         assert copied is not event
@@ -679,6 +732,7 @@ class TestModelNodeIntrospectionEventCopying:
         event = ModelNodeIntrospectionEvent(
             node_id=test_node_id,
             node_type="effect",
+            correlation_id=uuid4(),
         )
         copied = event.model_copy(update={"node_id": new_node_id})
         assert copied.node_id == new_node_id
@@ -693,6 +747,7 @@ class TestModelNodeIntrospectionEventCopying:
             node_id=test_node_id,
             node_type="effect",
             capabilities={"key": "value"},
+            correlation_id=uuid4(),
         )
         copied = event.model_copy(deep=True)
         # Both should have same values
@@ -716,6 +771,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 "health": "http://localhost:8080/health",
                 "metrics": "http://localhost:8080/metrics",
             },
+            correlation_id=uuid4(),
         )
         assert event.endpoints["health"] == "http://localhost:8080/health"
         assert event.endpoints["metrics"] == "http://localhost:8080/metrics"
@@ -730,6 +786,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 "api": "https://api.example.com:443/v1",
                 "health": "https://api.example.com/health",
             },
+            correlation_id=uuid4(),
         )
         assert event.endpoints["api"] == "https://api.example.com:443/v1"
         assert event.endpoints["health"] == "https://api.example.com/health"
@@ -743,6 +800,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
             endpoints={
                 "health": "http://localhost:8080/api/v1/health?timeout=30&verbose=true",
             },
+            correlation_id=uuid4(),
         )
         assert (
             event.endpoints["health"]
@@ -756,6 +814,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
             node_id=test_node_id,
             node_type="effect",
             endpoints={},
+            correlation_id=uuid4(),
         )
         assert event.endpoints == {}
 
@@ -767,6 +826,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_id=test_node_id,
                 node_type="effect",
                 endpoints={"health": "localhost:8080/health"},
+                correlation_id=uuid4(),
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -781,6 +841,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_id=test_node_id,
                 node_type="effect",
                 endpoints={"health": "http:///health"},
+                correlation_id=uuid4(),
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -794,6 +855,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_id=test_node_id,
                 node_type="effect",
                 endpoints={"api": "not-a-url"},
+                correlation_id=uuid4(),
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -808,6 +870,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_id=test_node_id,
                 node_type="effect",
                 endpoints={"health": ""},
+                correlation_id=uuid4(),
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -821,6 +884,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_id=test_node_id,
                 node_type="effect",
                 endpoints={"health": "/health"},
+                correlation_id=uuid4(),
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -838,6 +902,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                     "metrics": "invalid-url",
                     "api": "http://localhost:8080/api",
                 },
+                correlation_id=uuid4(),
             )
         error_str = str(exc_info.value)
         assert "endpoints" in error_str
@@ -852,6 +917,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 node_id=test_node_id,
                 node_type="effect",
                 endpoints={"my_bad_endpoint": "no-scheme"},
+                correlation_id=uuid4(),
             )
         error_str = str(exc_info.value)
         assert "my_bad_endpoint" in error_str
@@ -866,6 +932,7 @@ class TestModelNodeIntrospectionEventEndpointUrlValidation:
                 "health": "http://localhost:8080/health",
                 "metrics": "https://api.example.com/metrics",
             },
+            correlation_id=uuid4(),
         )
         json_str = event.model_dump_json()
         restored = ModelNodeIntrospectionEvent.model_validate_json(json_str)
