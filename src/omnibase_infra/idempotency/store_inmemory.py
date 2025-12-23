@@ -20,11 +20,10 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
-from omnibase_infra.protocols.protocol_idempotency_store import (
+from omnibase_infra.idempotency.models import ModelIdempotencyRecord
+from omnibase_infra.idempotency.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
-
-from omnibase_infra.idempotency.models import ModelIdempotencyRecord
 
 
 class InMemoryIdempotencyStore(ProtocolIdempotencyStore):

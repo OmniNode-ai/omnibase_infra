@@ -17,7 +17,11 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.idempotency import InMemoryIdempotencyStore, ModelIdempotencyRecord
+from omnibase_infra.idempotency import (
+    InMemoryIdempotencyStore,
+    ModelIdempotencyRecord,
+    ProtocolIdempotencyStore,
+)
 
 
 class TestInMemoryIdempotencyStoreProtocol:
