@@ -328,9 +328,7 @@ class TestSyncEnforcement:
 
         assert registry.is_registered("private_async")
 
-    def test_sync_plugin_registration_succeeds(
-        self, registry: RegistryCompute
-    ) -> None:
+    def test_sync_plugin_registration_succeeds(self, registry: RegistryCompute) -> None:
         """Test that synchronous plugin registers without issues."""
         # Should not raise - sync plugin with default deterministic_async=False
         registry.register_plugin(
@@ -535,9 +533,7 @@ class TestThreadSafety:
                     errors.append(e)
 
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [
-                executor.submit(lookup, f"plugin_{i % 10}") for i in range(1000)
-            ]
+            futures = [executor.submit(lookup, f"plugin_{i % 10}") for i in range(1000)]
             for future in futures:
                 future.result()
 
@@ -850,9 +846,7 @@ class TestIsRegistered:
         """Test is_registered returns False when plugin doesn't exist."""
         assert not registry.is_registered("nonexistent_plugin")
 
-    def test_is_registered_with_version_filter(
-        self, registry: RegistryCompute
-    ) -> None:
+    def test_is_registered_with_version_filter(self, registry: RegistryCompute) -> None:
         """Test is_registered with version filter."""
         registry.register_plugin("versioned_plugin", SyncComputePlugin, "1.0.0")
 

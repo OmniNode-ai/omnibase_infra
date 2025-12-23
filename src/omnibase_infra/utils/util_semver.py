@@ -106,9 +106,7 @@ def validate_version_lenient(v: str) -> str:
     # Parse major.minor.patch components
     parts = version_part.split(".")
     if len(parts) < 1 or len(parts) > 3:
-        raise ValueError(
-            f"Invalid version '{v}': expected format 'major.minor.patch'"
-        )
+        raise ValueError(f"Invalid version '{v}': expected format 'major.minor.patch'")
 
     for part in parts:
         if not part:
