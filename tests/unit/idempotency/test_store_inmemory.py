@@ -16,11 +16,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from omnibase_spi.protocols.storage.protocol_idempotency_store import (
+
+from omnibase_infra.idempotency import (
+    InMemoryIdempotencyStore,
+    ModelIdempotencyRecord,
     ProtocolIdempotencyStore,
 )
-
-from omnibase_infra.idempotency import InMemoryIdempotencyStore, ModelIdempotencyRecord
 
 
 class TestInMemoryIdempotencyStoreProtocol:
