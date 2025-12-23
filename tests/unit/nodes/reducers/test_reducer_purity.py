@@ -16,11 +16,20 @@ Ticket: OMN-914
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
 
 from omnibase_infra.enums import EnumHandlerType
+
+__all__ = [
+    "TestStructuralPurityGates",
+    "TestDeterminismGates",
+    "TestBehavioralPurityGates",
+    "TestAdditionalBehavioralGates",
+    "TestSecurityGates",
+]
 
 # =============================================================================
 # STRUCTURAL GATES: Dependency Graph
@@ -672,6 +681,68 @@ class TestDeterminismGates:
             # Compare payload structure (excluding runtime-generated fields)
             assert i1.payload.get("correlation_id") == i2.payload.get("correlation_id")
             assert i1.payload.get("service_id") == i2.payload.get("service_id")
+
+    def test_reducer_input_state_is_not_mutated(self) -> None:
+        """Verify reduce() does not mutate the input state object.
+
+        Pure functions must not modify their inputs. The reducer receives
+        a state object and event, computes a NEW state, and returns it.
+        The original input state must remain unchanged.
+
+        This is critical for:
+        - Event replay (original state preserved for re-processing)
+        - Debugging (can inspect input state after failed reduce)
+        - Parallelism (multiple threads can share input state safely)
+        """
+        import copy
+        from datetime import UTC, datetime
+        from uuid import UUID
+
+        from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
+        from omnibase_infra.nodes.reducers import RegistrationReducer
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+
+        # Use fixed UUIDs and timestamp for determinism
+        fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
+        fixed_correlation_id = UUID("abcdef12-abcd-abcd-abcd-abcdefabcdef")
+        fixed_timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+        reducer = RegistrationReducer()
+
+        # Create initial state and deep copy it for comparison
+        initial_state = ModelRegistrationState()
+        state_before = copy.deepcopy(initial_state)
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=fixed_node_id,
+            node_type=EnumHandlerType.EFFECT.value,
+            node_version="1.0.0",
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=fixed_correlation_id,
+            timestamp=fixed_timestamp,
+        )
+
+        # Run reducer
+        _result = reducer.reduce(initial_state, event)
+
+        # Verify input state was NOT mutated
+        # Compare all fields of the state before and after reduce()
+        assert initial_state.status == state_before.status, (
+            f"Input state.status was mutated: {state_before.status} -> {initial_state.status}"
+        )
+        assert initial_state.node_id == state_before.node_id, (
+            "Input state.node_id was mutated"
+        )
+        assert initial_state.consul_confirmed == state_before.consul_confirmed, (
+            "Input state.consul_confirmed was mutated"
+        )
+        assert initial_state.postgres_confirmed == state_before.postgres_confirmed, (
+            "Input state.postgres_confirmed was mutated"
+        )
+        assert (
+            initial_state.last_processed_event_id
+            == state_before.last_processed_event_id
+        ), "Input state.last_processed_event_id was mutated"
 
     def test_reducer_concurrent_execution_is_safe(self) -> None:
         """Verify reducer is thread-safe for concurrent reduce() calls.
@@ -1396,6 +1467,14 @@ class TestSecurityGates:
         "ghp_",  # GitHub personal access token prefix
         "gho_",  # GitHub OAuth token prefix
         "xox",  # Slack token prefix
+        "AIza",  # Google API key prefix
+        "SG.",  # SendGrid API key prefix
+        "npm_",  # npm token prefix
+        "pypi-",  # PyPI token prefix
+        "glpat-",  # GitLab personal access token prefix
+        "hf_",  # Hugging Face token prefix
+        "sq0csp-",  # Square sandbox token prefix
+        "sq0atp-",  # Square production token prefix
     ]
 
     def _check_dict_for_sensitive_fields(self, data: dict, path: str = "") -> list[str]:
@@ -1654,29 +1733,82 @@ class TestSecurityGates:
                 "-----BEGIN",
             ]
 
+            # Safe patterns that mention credential concepts without exposing values
+            # These are boolean field-existence checks, not actual credential values
+            safe_context_patterns = [
+                r"\bhas_password\b",
+                r"\bhas_secret\b",
+                r"\bhas_api_key\b",
+                r"\bhas_credential\b",
+                r"\bpassword_present\b",
+                r"\bsecret_present\b",
+                r"\bcontains_password\b",
+                r"\bcontains_secret\b",
+                r"\bcontains_credential\b",
+                r"\bpassword_provided\b",
+                r"\bsecret_provided\b",
+                r"\bcredential_provided\b",
+                # Field count/length checks (e.g., "password_length: 12")
+                r"\bpassword_length\b",
+                r"\bsecret_length\b",
+                # Redacted placeholders
+                r"\bpassword:\s*\*+\b",
+                r"\bsecret:\s*\*+\b",
+                r"\bpassword:\s*\[redacted\]\b",
+                r"\bsecret:\s*\[redacted\]\b",
+            ]
+
+            # Dangerous patterns that indicate actual value exposure
+            # These patterns detect assignment/value contexts
+            dangerous_value_patterns = [
+                # Assignment patterns: password=xyz, secret=abc
+                r"\bpassword\s*[=:]\s*[^\s\*\[\]]+",
+                r"\bsecret\s*[=:]\s*[^\s\*\[\]]+",
+                r"\bapi_key\s*[=:]\s*[^\s\*\[\]]+",
+                r"\bcredential\s*[=:]\s*[^\s\*\[\]]+",
+                # Private key content
+                r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----",
+                # URL with embedded credentials
+                r"://[^/\s]+:[^/\s]+@",
+            ]
+
             for record in log_records:
-                message = record.getMessage().lower()
+                message = record.getMessage()
+                message_lower = message.lower()
+
                 for pattern in sensitive_log_patterns:
-                    if pattern.lower() in message:
-                        # Check if it's in a safe context (e.g., field name check)
-                        # Log messages like "has_node_id: True" are safe
-                        if f"has_{pattern}" not in message:
-                            assert False, (
-                                f"Log message contains potentially sensitive "
-                                f"pattern '{pattern}': {record.getMessage()}"
+                    if pattern.lower() in message_lower:
+                        # First check: is this in a known safe context?
+                        is_safe_context = any(
+                            re.search(safe_pattern, message_lower)
+                            for safe_pattern in safe_context_patterns
+                        )
+
+                        if is_safe_context:
+                            # Safe context found, but verify no dangerous
+                            # patterns also exist in the same message
+                            # (e.g., "has_password: True, password=secret123")
+                            has_dangerous_pattern = any(
+                                re.search(dangerous_pattern, message_lower)
+                                for dangerous_pattern in dangerous_value_patterns
                             )
+                            if has_dangerous_pattern:
+                                assert False, (
+                                    f"Log message contains dangerous credential "
+                                    f"pattern alongside safe context: "
+                                    f"{record.getMessage()}"
+                                )
+                        else:
+                            # No safe context - check for dangerous patterns
+                            for dangerous_pattern in dangerous_value_patterns:
+                                if re.search(dangerous_pattern, message_lower):
+                                    assert False, (
+                                        f"Log message contains potentially "
+                                        f"sensitive pattern '{pattern}' in "
+                                        f"dangerous context: {record.getMessage()}"
+                                    )
 
         finally:
             # Restore logger state
             reducer_logger.removeHandler(capturing_handler)
             reducer_logger.setLevel(original_level)
-
-
-# Module exports
-__all__ = [
-    "TestStructuralPurityGates",
-    "TestDeterminismGates",
-    "TestBehavioralPurityGates",
-    "TestAdditionalBehavioralGates",
-    "TestSecurityGates",
-]

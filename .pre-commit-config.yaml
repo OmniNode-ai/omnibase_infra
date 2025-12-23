@@ -127,7 +127,7 @@ repos:
       # Timeout: 60s prevents hanging if tests get stuck (normal runtime: <5s)
       - id: reducer-purity-check
         name: Reducer Purity Enforcement
-        entry: timeout 60 poetry run pytest tests/unit/nodes/reducers/test_reducer_purity.py -v --tb=short
+        entry: poetry run pytest tests/unit/nodes/reducers/test_reducer_purity.py -v --tb=short --timeout=60 --timeout-method=thread
         language: system
         types: [python]
         files: ^src/omnibase_infra/nodes/reducers/
