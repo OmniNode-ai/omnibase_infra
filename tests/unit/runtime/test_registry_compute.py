@@ -19,7 +19,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import pytest
-
 from pydantic import ValidationError
 
 from omnibase_infra.errors import ComputeRegistryError, ProtocolConfigurationError
@@ -72,7 +71,6 @@ class PrivateAsyncPlugin:
 
     async def _internal_async(self) -> None:
         """Private async method - should NOT trigger rejection."""
-        pass
 
     def _transform(self, data: dict[str, object]) -> dict[str, object]:
         """Transform data synchronously."""

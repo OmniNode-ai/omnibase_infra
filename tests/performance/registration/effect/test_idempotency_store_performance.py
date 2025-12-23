@@ -86,9 +86,9 @@ class TestLRUEvictionEfficiency:
 
         # Eviction latency (at 1100) should not be > 10x non-eviction
         eviction_ratio = avg_latencies[1100] / avg_latencies[500]
-        assert (
-            eviction_ratio < 10.0
-        ), f"Eviction slowdown {eviction_ratio:.1f}x, expected < 10x"
+        assert eviction_ratio < 10.0, (
+            f"Eviction slowdown {eviction_ratio:.1f}x, expected < 10x"
+        )
 
         print("\nLRU Eviction Latency by Fill Level:")
         for level, avg in avg_latencies.items():

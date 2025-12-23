@@ -58,9 +58,9 @@ class TestProtocolDefinition:
             "cleanup_expired",
         ]
         for method in required_methods:
-            assert hasattr(
-                ProtocolIdempotencyStore, method
-            ), f"Protocol missing method: {method}"
+            assert hasattr(ProtocolIdempotencyStore, method), (
+                f"Protocol missing method: {method}"
+            )
 
     def test_protocol_methods_are_async(self) -> None:
         """All protocol methods should be coroutine functions.
@@ -234,9 +234,9 @@ class TestProtocolConformance:
             assert hasattr(store, method_name), f"Missing method: {method_name}"
             method = getattr(store, method_name)
             assert callable(method), f"Method {method_name} is not callable"
-            assert inspect.iscoroutinefunction(
-                method
-            ), f"Method {method_name} should be async"
+            assert inspect.iscoroutinefunction(method), (
+                f"Method {method_name} should be async"
+            )
 
     def test_postgres_has_all_protocol_methods(self) -> None:
         """PostgresIdempotencyStore should implement all protocol methods.
@@ -259,9 +259,9 @@ class TestProtocolConformance:
             assert hasattr(store, method_name), f"Missing method: {method_name}"
             method = getattr(store, method_name)
             assert callable(method), f"Method {method_name} is not callable"
-            assert inspect.iscoroutinefunction(
-                method
-            ), f"Method {method_name} should be async"
+            assert inspect.iscoroutinefunction(method), (
+                f"Method {method_name} should be async"
+            )
 
 
 class TestProtocolTypeAnnotations:
@@ -306,14 +306,14 @@ class TestProtocolTypeAnnotations:
         assert hints["message_id"] is UUID
 
         # domain should be str | None
-        assert self._is_optional_type(
-            hints["domain"], str
-        ), f"Expected str | None, got {hints['domain']}"
+        assert self._is_optional_type(hints["domain"], str), (
+            f"Expected str | None, got {hints['domain']}"
+        )
 
         # correlation_id should be UUID | None
-        assert self._is_optional_type(
-            hints["correlation_id"], UUID
-        ), f"Expected UUID | None, got {hints['correlation_id']}"
+        assert self._is_optional_type(hints["correlation_id"], UUID), (
+            f"Expected UUID | None, got {hints['correlation_id']}"
+        )
 
         # Return type should be bool
         assert hints["return"] is bool
@@ -326,9 +326,9 @@ class TestProtocolTypeAnnotations:
         assert hints["message_id"] is UUID
 
         # domain should be str | None
-        assert self._is_optional_type(
-            hints["domain"], str
-        ), f"Expected str | None, got {hints['domain']}"
+        assert self._is_optional_type(hints["domain"], str), (
+            f"Expected str | None, got {hints['domain']}"
+        )
 
         # Return type should be bool
         assert hints["return"] is bool
@@ -341,19 +341,19 @@ class TestProtocolTypeAnnotations:
         assert hints["message_id"] is UUID
 
         # domain should be str | None
-        assert self._is_optional_type(
-            hints["domain"], str
-        ), f"Expected str | None, got {hints['domain']}"
+        assert self._is_optional_type(hints["domain"], str), (
+            f"Expected str | None, got {hints['domain']}"
+        )
 
         # correlation_id should be UUID | None
-        assert self._is_optional_type(
-            hints["correlation_id"], UUID
-        ), f"Expected UUID | None, got {hints['correlation_id']}"
+        assert self._is_optional_type(hints["correlation_id"], UUID), (
+            f"Expected UUID | None, got {hints['correlation_id']}"
+        )
 
         # processed_at should be datetime | None
-        assert self._is_optional_type(
-            hints["processed_at"], datetime
-        ), f"Expected datetime | None, got {hints['processed_at']}"
+        assert self._is_optional_type(hints["processed_at"], datetime), (
+            f"Expected datetime | None, got {hints['processed_at']}"
+        )
 
         # Return type should be None
         assert hints["return"] is type(None)
