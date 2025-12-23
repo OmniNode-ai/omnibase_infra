@@ -73,10 +73,15 @@ from omnibase_infra.idempotency.models import (
     ModelIdempotencyStoreMetrics,
     ModelPostgresIdempotencyStoreConfig,
 )
+from omnibase_infra.idempotency.protocol_idempotency_store import (
+    ProtocolIdempotencyStore,
+)
 from omnibase_infra.idempotency.store_inmemory import InMemoryIdempotencyStore
 from omnibase_infra.idempotency.store_postgres import PostgresIdempotencyStore
 
 __all__ = [
+    # Protocol
+    "ProtocolIdempotencyStore",
     # Models
     "ModelIdempotencyCheckResult",
     "ModelIdempotencyGuardConfig",
