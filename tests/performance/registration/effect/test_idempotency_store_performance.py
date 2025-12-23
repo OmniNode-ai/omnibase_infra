@@ -300,9 +300,9 @@ class TestConcurrentAccessScaling:
         # CI environments (GitHub Actions) have limited resources and high
         # context-switch overhead with 16 workers, so we use a lenient threshold.
         # Local development can use stricter thresholds if needed.
-        import os
+        from omnibase_infra.testing import is_ci_environment
 
-        is_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
+        is_ci = is_ci_environment()
         threshold_pct = 0.10 if is_ci else 0.50  # 10% in CI, 50% locally
         min_acceptable_throughput = results[1] * threshold_pct
         assert results[16] > min_acceptable_throughput, (

@@ -763,13 +763,13 @@ class TestDeterminismGates:
         - High-throughput event processing pipelines
         """
         import concurrent.futures
-        import os
         from datetime import UTC, datetime
         from uuid import UUID
 
         from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
         from omnibase_infra.nodes.reducers import RegistrationReducer
         from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+        from omnibase_infra.testing import is_ci_environment
 
         # Use fixed UUIDs and timestamp for determinism
         fixed_node_id = UUID("12345678-1234-1234-1234-123456789abc")
@@ -795,7 +795,7 @@ class TestDeterminismGates:
             return reducer.reduce(state, event)
 
         # Determine concurrency level - reduce in CI to avoid resource contention
-        is_ci = os.environ.get("CI", "").lower() in ("true", "1", "yes")
+        is_ci = is_ci_environment()
         num_concurrent = 4 if is_ci else 10
 
         # Execute reduce() concurrently from multiple threads
