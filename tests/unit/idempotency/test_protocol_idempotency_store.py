@@ -20,7 +20,6 @@ from datetime import datetime
 from typing import get_type_hints
 from uuid import UUID
 
-import pytest
 
 from omnibase_infra.idempotency import (
     InMemoryIdempotencyStore,
@@ -58,9 +57,9 @@ class TestProtocolDefinition:
             "cleanup_expired",
         ]
         for method in required_methods:
-            assert hasattr(ProtocolIdempotencyStore, method), (
-                f"Protocol missing method: {method}"
-            )
+            assert hasattr(
+                ProtocolIdempotencyStore, method
+            ), f"Protocol missing method: {method}"
 
     def test_protocol_methods_are_async(self) -> None:
         """All protocol methods should be coroutine functions.
@@ -212,9 +211,9 @@ class TestProtocolConformance:
             assert hasattr(store, method_name), f"Missing method: {method_name}"
             method = getattr(store, method_name)
             assert callable(method), f"Method {method_name} is not callable"
-            assert inspect.iscoroutinefunction(method), (
-                f"Method {method_name} should be async"
-            )
+            assert inspect.iscoroutinefunction(
+                method
+            ), f"Method {method_name} should be async"
 
     def test_postgres_conforms_to_protocol(self) -> None:
         """PostgresIdempotencyStore should conform to ProtocolIdempotencyStore.
@@ -243,9 +242,9 @@ class TestProtocolConformance:
             assert hasattr(store, method_name), f"Missing method: {method_name}"
             method = getattr(store, method_name)
             assert callable(method), f"Method {method_name} is not callable"
-            assert inspect.iscoroutinefunction(method), (
-                f"Method {method_name} should be async"
-            )
+            assert inspect.iscoroutinefunction(
+                method
+            ), f"Method {method_name} should be async"
 
     def test_inmemory_has_all_protocol_methods(self) -> None:
         """InMemoryIdempotencyStore should implement all protocol methods.
@@ -263,9 +262,9 @@ class TestProtocolConformance:
             assert hasattr(store, method_name), f"Missing method: {method_name}"
             method = getattr(store, method_name)
             assert callable(method), f"Method {method_name} is not callable"
-            assert inspect.iscoroutinefunction(method), (
-                f"Method {method_name} should be async"
-            )
+            assert inspect.iscoroutinefunction(
+                method
+            ), f"Method {method_name} should be async"
 
     def test_postgres_has_all_protocol_methods(self) -> None:
         """PostgresIdempotencyStore should implement all protocol methods.
@@ -288,9 +287,9 @@ class TestProtocolConformance:
             assert hasattr(store, method_name), f"Missing method: {method_name}"
             method = getattr(store, method_name)
             assert callable(method), f"Method {method_name} is not callable"
-            assert inspect.iscoroutinefunction(method), (
-                f"Method {method_name} should be async"
-            )
+            assert inspect.iscoroutinefunction(
+                method
+            ), f"Method {method_name} should be async"
 
 
 class TestProtocolTypeAnnotations:
@@ -335,14 +334,14 @@ class TestProtocolTypeAnnotations:
         assert hints["message_id"] is UUID
 
         # domain should be str | None
-        assert self._is_optional_type(hints["domain"], str), (
-            f"Expected str | None, got {hints['domain']}"
-        )
+        assert self._is_optional_type(
+            hints["domain"], str
+        ), f"Expected str | None, got {hints['domain']}"
 
         # correlation_id should be UUID | None
-        assert self._is_optional_type(hints["correlation_id"], UUID), (
-            f"Expected UUID | None, got {hints['correlation_id']}"
-        )
+        assert self._is_optional_type(
+            hints["correlation_id"], UUID
+        ), f"Expected UUID | None, got {hints['correlation_id']}"
 
         # Return type should be bool
         assert hints["return"] is bool
@@ -355,9 +354,9 @@ class TestProtocolTypeAnnotations:
         assert hints["message_id"] is UUID
 
         # domain should be str | None
-        assert self._is_optional_type(hints["domain"], str), (
-            f"Expected str | None, got {hints['domain']}"
-        )
+        assert self._is_optional_type(
+            hints["domain"], str
+        ), f"Expected str | None, got {hints['domain']}"
 
         # Return type should be bool
         assert hints["return"] is bool
@@ -370,19 +369,19 @@ class TestProtocolTypeAnnotations:
         assert hints["message_id"] is UUID
 
         # domain should be str | None
-        assert self._is_optional_type(hints["domain"], str), (
-            f"Expected str | None, got {hints['domain']}"
-        )
+        assert self._is_optional_type(
+            hints["domain"], str
+        ), f"Expected str | None, got {hints['domain']}"
 
         # correlation_id should be UUID | None
-        assert self._is_optional_type(hints["correlation_id"], UUID), (
-            f"Expected UUID | None, got {hints['correlation_id']}"
-        )
+        assert self._is_optional_type(
+            hints["correlation_id"], UUID
+        ), f"Expected UUID | None, got {hints['correlation_id']}"
 
         # processed_at should be datetime | None
-        assert self._is_optional_type(hints["processed_at"], datetime), (
-            f"Expected datetime | None, got {hints['processed_at']}"
-        )
+        assert self._is_optional_type(
+            hints["processed_at"], datetime
+        ), f"Expected datetime | None, got {hints['processed_at']}"
 
         # Return type should be None
         assert hints["return"] is type(None)
@@ -425,9 +424,9 @@ class TestNonConformingImplementation:
             "cleanup_expired",
         ]
         missing_methods = [m for m in required_methods if not hasattr(store, m)]
-        assert len(missing_methods) == 4, (
-            f"Empty class should be missing all methods, but only missing: {missing_methods}"
-        )
+        assert (
+            len(missing_methods) == 4
+        ), f"Empty class should be missing all methods, but only missing: {missing_methods}"
 
     def test_partial_implementation_does_not_conform(self) -> None:
         """A class with only some methods should not conform.
@@ -456,9 +455,9 @@ class TestNonConformingImplementation:
             "cleanup_expired",
         ]
         missing_methods = [m for m in required_methods if not hasattr(store, m)]
-        assert len(missing_methods) == 3, (
-            f"Partial class should be missing 3 methods: {missing_methods}"
-        )
+        assert (
+            len(missing_methods) == 3
+        ), f"Partial class should be missing 3 methods: {missing_methods}"
         assert "is_processed" in missing_methods
         assert "mark_processed" in missing_methods
         assert "cleanup_expired" in missing_methods
@@ -513,9 +512,9 @@ class TestNonConformingImplementation:
         # Verify all methods exist
         for method_name in required_methods:
             assert hasattr(store, method_name), f"Should have {method_name}"
-            assert callable(getattr(store, method_name)), (
-                f"{method_name} should be callable"
-            )
+            assert callable(
+                getattr(store, method_name)
+            ), f"{method_name} should be callable"
 
         # Verify none of the methods are async (this is the non-conformance)
         non_async_methods = [
@@ -523,6 +522,6 @@ class TestNonConformingImplementation:
             for m in required_methods
             if not inspect.iscoroutinefunction(getattr(store, m))
         ]
-        assert len(non_async_methods) == 4, (
-            "All methods should be sync (non-async), failing conformance check"
-        )
+        assert (
+            len(non_async_methods) == 4
+        ), "All methods should be sync (non-async), failing conformance check"

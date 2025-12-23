@@ -68,7 +68,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker

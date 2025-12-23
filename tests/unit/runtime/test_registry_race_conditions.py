@@ -21,7 +21,6 @@ All tests are designed to be deterministic and not flaky.
 
 from __future__ import annotations
 
-import asyncio
 import threading
 import time
 from collections.abc import Iterator
@@ -34,18 +33,9 @@ from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError
 from omnibase_infra.runtime import handler_registry as registry_module
 from omnibase_infra.runtime.handler_registry import (
-    EVENT_BUS_INMEMORY,
-    EVENT_BUS_KAFKA,
-    HANDLER_TYPE_CONSUL,
-    HANDLER_TYPE_DATABASE,
-    HANDLER_TYPE_GRPC,
     HANDLER_TYPE_HTTP,
-    HANDLER_TYPE_KAFKA,
-    HANDLER_TYPE_VALKEY,
-    HANDLER_TYPE_VAULT,
     EventBusBindingRegistry,
     ProtocolBindingRegistry,
-    RegistryError,
     get_event_bus_registry,
     get_handler_registry,
 )
@@ -279,9 +269,9 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
         for i in range(num_threads):
             policy_id = f"policy-{i}"
             versions = policy_registry.list_versions(policy_id)
-            assert len(versions) == 5, (
-                f"Policy {policy_id} has {len(versions)} versions, expected 5"
-            )
+            assert (
+                len(versions) == 5
+            ), f"Policy {policy_id} has {len(versions)} versions, expected 5"
 
     def test_secondary_index_consistency_during_unregister(
         self, policy_registry: PolicyRegistry
@@ -327,9 +317,9 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
         # Verify remaining versions
         for i in range(num_policies):
             versions = policy_registry.list_versions(f"policy-{i}")
-            assert len(versions) == 2, (
-                f"Policy policy-{i} should have 2 versions remaining"
-            )
+            assert (
+                len(versions) == 2
+            ), f"Policy policy-{i} should have 2 versions remaining"
 
 
 class TestPolicyRegistrySemverCacheRaceConditions:
@@ -393,9 +383,9 @@ class TestPolicyRegistrySemverCacheRaceConditions:
         # Each version should have consistent results
         for version, version_results in results.items():
             first = version_results[0]
-            assert all(r == first for r in version_results), (
-                f"Inconsistent results for {version}: {set(version_results)}"
-            )
+            assert all(
+                r == first for r in version_results
+            ), f"Inconsistent results for {version}: {set(version_results)}"
 
 
 class TestPolicyRegistryStressTest:

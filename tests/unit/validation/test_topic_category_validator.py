@@ -18,7 +18,6 @@ Note:
 import ast
 from pathlib import Path
 
-import pytest
 
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,

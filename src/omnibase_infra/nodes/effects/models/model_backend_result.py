@@ -31,9 +31,21 @@ Related:
 
 from __future__ import annotations
 
+import logging
+import re
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Compiled regex for secret pattern detection (module-level for performance)
+# Used by ModelBackendResult._warn_on_potential_secrets validator
+_SECRET_PATTERNS: re.Pattern[str] = re.compile(
+    r"(password\s*=|api_key\s*=|token\s*=|secret\s*=|credentials|"
+    r"connection_string\s*=.*@)",
+    re.IGNORECASE,
+)
+
+_logger = logging.getLogger(__name__)
 
 
 class ModelBackendResult(BaseModel):
@@ -76,6 +88,52 @@ class ModelBackendResult(BaseModel):
         False
         >>> result.error
         'Connection refused to database host'
+
+    Migration Notes:
+        Changed: [OMN-1001] Union Reduction Phase 1
+
+        Previous Pattern (DEPRECATED):
+            Backend results were returned as ``dict[str, bool | str]`` with
+            keys "success" and "error". This pattern had several issues:
+
+            - No type safety: ``result["success"]`` could raise KeyError
+            - Union types required runtime type checking
+            - IDE autocompletion and type hints were limited
+            - No validation of field values or constraints
+
+            Example of old pattern::
+
+                # Old pattern - dict-based (DO NOT USE)
+                result: dict[str, bool | str] = {"success": True, "error": ""}
+                if result.get("success", False):
+                    process_success()
+                error_msg = result.get("error")
+
+        New Pattern (CURRENT):
+            This Pydantic model provides strong typing, type-safe attribute
+            access, built-in validation, and immutability guarantees.
+
+            Example of new pattern::
+
+                # New pattern - Pydantic model (USE THIS)
+                result = ModelBackendResult(success=True, duration_ms=45.2)
+                if result.success:
+                    process_success()
+                error_msg = result.error  # Type-safe, None if not set
+
+        Migration Guide:
+            Replace dict access patterns with attribute access:
+
+            - ``result.get("success", False)`` -> ``result.success``
+            - ``result.get("error")`` -> ``result.error``
+            - ``result["success"]`` -> ``result.success``
+            - ``"success" in result`` -> always available as attribute
+            - ``result.get("error_code")`` -> ``result.error_code``
+
+        Breaking Change:
+            This is a breaking change. Code using the old dict-based pattern
+            will fail with AttributeError when accessing dict methods on the
+            model instance. Update all call sites to use attribute access.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -110,6 +168,54 @@ class ModelBackendResult(BaseModel):
         default=None,
         description="Correlation ID for tracing the operation",
     )
+
+    @field_validator("error", mode="after")
+    @classmethod
+    def _warn_on_potential_secrets(cls, value: str | None) -> str | None:
+        """Defense-in-depth validator to detect potential secret exposure in error messages.
+
+        This validator checks if the error string contains common patterns that might
+        indicate accidental secret exposure. It logs a warning if detected but does NOT
+        block or modify the value - this is defense-in-depth, not enforcement.
+
+        The actual sanitization should happen at the error source (see CLAUDE.md
+        "Error Sanitization Guidelines"). This validator serves as a safety net
+        to detect when sanitization was missed.
+
+        Detected Patterns:
+            - password= (case insensitive)
+            - api_key= (case insensitive)
+            - token= (case insensitive)
+            - secret= (case insensitive)
+            - credentials (case insensitive)
+            - connection_string=...@ (indicates embedded credentials)
+
+        Args:
+            value: The error string to check, or None.
+
+        Returns:
+            The original value unchanged.
+
+        Security:
+            This validator intentionally does NOT raise an exception or modify
+            the value. It only logs a warning to alert operators that a potential
+            secret may have been exposed. The rationale:
+            1. Blocking could cause unexpected runtime failures
+            2. Modification could mask debugging information
+            3. Warning provides observability without breaking functionality
+        """
+        if value is None:
+            return value
+
+        if _SECRET_PATTERNS.search(value):
+            _logger.warning(
+                "Potential secret pattern detected in error message. "
+                "Error messages should be sanitized at the source. "
+                "See CLAUDE.md 'Error Sanitization Guidelines' for rules. "
+                "Pattern detected in error field of ModelBackendResult."
+            )
+
+        return value
 
 
 __all__ = ["ModelBackendResult"]

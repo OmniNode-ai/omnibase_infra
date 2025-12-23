@@ -29,7 +29,6 @@ from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatcher_registry import (
     DispatcherRegistry,
-    ProtocolMessageDispatcher,
 )
 
 
@@ -168,14 +167,14 @@ class TestProtocolMessageDispatcher:
         # Verify required properties via duck typing
         required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
         for prop in required_props:
-            assert hasattr(event_reducer_dispatcher, prop), (
-                f"Dispatcher must have '{prop}' property"
-            )
+            assert hasattr(
+                event_reducer_dispatcher, prop
+            ), f"Dispatcher must have '{prop}' property"
 
         # Verify handle method exists and is callable
-        assert hasattr(event_reducer_dispatcher, "handle"), (
-            "Dispatcher must have 'handle' method"
-        )
+        assert hasattr(
+            event_reducer_dispatcher, "handle"
+        ), "Dispatcher must have 'handle' method"
         assert callable(event_reducer_dispatcher.handle), "'handle' must be callable"
 
     def test_duck_typing_rejects_non_dispatcher(self) -> None:

@@ -638,6 +638,13 @@ class ModelKafkaEventBusConfig(BaseModel):
                 config_path=str(path),
                 error_details=str(e),
             ) from e
+        except UnicodeDecodeError as e:
+            raise ProtocolConfigurationError(
+                f"Configuration file contains binary or non-UTF-8 content: {path}",
+                context=context,
+                config_path=str(path),
+                error_details=f"Encoding error at position {e.start}-{e.end}: {e.reason}",
+            ) from e
         except OSError as e:
             raise ProtocolConfigurationError(
                 f"Failed to read configuration file: {path}: {e}",

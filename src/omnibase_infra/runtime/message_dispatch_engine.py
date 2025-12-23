@@ -150,6 +150,7 @@ from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnfo
 
 if TYPE_CHECKING:
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
+    from omnibase_core.types import JsonValue
 
 # Patterns that may indicate sensitive data in error messages
 # These patterns are checked case-insensitively
@@ -826,7 +827,7 @@ class MessageDispatchEngine:
         correlation_id: UUID | None = None,
         trace_id: UUID | None = None,
         error_code: EnumCoreErrorCode | None = None,
-    ) -> dict[str, str | int | float]:
+    ) -> dict[str, JsonValue]:
         """
         Build structured log context dictionary.
 
@@ -869,7 +870,7 @@ class MessageDispatchEngine:
             Dictionary with non-None values for structured logging.
             UUID values are converted to strings at serialization time.
         """
-        context: dict[str, str | int | float] = {}
+        context: dict[str, JsonValue] = {}
         if topic is not None:
             context["topic"] = topic
         if category is not None:

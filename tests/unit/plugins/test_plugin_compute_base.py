@@ -11,7 +11,6 @@ NOTE: Tests are marked as skipped until PluginComputeBase and PluginJsonNormaliz
 are implemented. Uncomment imports below once implementation is complete.
 """
 
-import abc
 from typing import Any
 
 import pytest

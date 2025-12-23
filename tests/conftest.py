@@ -31,7 +31,6 @@ def mock_container() -> MagicMock:
         ...     mock_container.service_registry.resolve_service.return_value = some_service
     """
     from unittest.mock import AsyncMock
-    from unittest.mock import MagicMock as SyncMock
 
     container = MagicMock()
 
@@ -121,9 +120,10 @@ async def container_with_registries() -> ModelONEXContainer:
         ...     policy_reg = await container_with_registries.service_registry.resolve_service(PolicyRegistry)
         ...     handler_reg = await container_with_registries.service_registry.resolve_service(ProtocolBindingRegistry)
         ...
-        ...     # Use registries
-        ...     assert isinstance(policy_reg, PolicyRegistry)
-        ...     assert isinstance(handler_reg, ProtocolBindingRegistry)
+        ...     # Verify interface via duck typing (ONEX convention)
+        ...     # Per ONEX conventions, check for required methods rather than isinstance
+        ...     assert hasattr(policy_reg, "register_policy")
+        ...     assert hasattr(handler_reg, "register")
     """
     from omnibase_core.container import ModelONEXContainer
 

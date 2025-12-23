@@ -427,25 +427,30 @@ class TestValidateNoTimeInjectionForReducer:
         self,
         enforcer: DispatchContextEnforcer,
     ) -> None:
-        """Reducer context with time injection should raise."""
-        # Create invalid context by bypassing factory (simulates manual construction)
-        # This is a theoretical case - the model validator should catch this
-        # but we test the enforcer's explicit validation
-        ctx = ModelDispatchContext(
-            correlation_id=uuid4(),
-            node_kind=EnumNodeKind.ORCHESTRATOR,  # Use different node kind to create
-            now=datetime.now(UTC),
-        )
-        # Manually modify to simulate a reducer with time (bypassing Pydantic validation)
-        # Since the model is frozen, we create a new context directly
-        # This tests what happens if someone constructs an invalid context
-        invalid_ctx = ModelDispatchContext(
-            correlation_id=uuid4(),
-            node_kind=EnumNodeKind.REDUCER,
-            now=None,  # Valid
-        )
-        # The valid context should pass
-        enforcer.validate_no_time_injection_for_reducer(invalid_ctx)
+        """Reducer context with time injection should raise.
+
+        This test uses MagicMock to simulate an invalid context where a REDUCER
+        has time injection, bypassing Pydantic validation. This represents a
+        hypothetical scenario where validation is bypassed (e.g., deserialization
+        from untrusted data).
+
+        The enforcer's validate_no_time_injection_for_reducer() must catch this
+        invalid state and raise ModelOnexError with VALIDATION_FAILED code.
+        """
+        # Create invalid context using MagicMock to bypass Pydantic validation
+        # This simulates a reducer with time injection (which is an architectural violation)
+        invalid_ctx = MagicMock(spec=ModelDispatchContext)
+        invalid_ctx.node_kind = EnumNodeKind.REDUCER
+        invalid_ctx.now = datetime.now(UTC)  # Invalid: reducer with time
+
+        # Should raise ModelOnexError with VALIDATION_FAILED
+        with pytest.raises(ModelOnexError) as exc_info:
+            enforcer.validate_no_time_injection_for_reducer(invalid_ctx)
+
+        # Verify the error has correct code and message
+        assert exc_info.value.error_code == EnumCoreErrorCode.VALIDATION_FAILED
+        assert "REDUCER" in exc_info.value.message
+        assert "time injection" in exc_info.value.message.lower()
 
     def test_non_reducer_context_passes(
         self,
@@ -563,14 +568,14 @@ class TestProtocolCompliance:
         # Verify required properties via duck typing
         required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
         for prop in required_props:
-            assert hasattr(reducer_dispatcher, prop), (
-                f"Dispatcher must have '{prop}' property"
-            )
+            assert hasattr(
+                reducer_dispatcher, prop
+            ), f"Dispatcher must have '{prop}' property"
 
         # Verify handle method exists and is callable
-        assert hasattr(reducer_dispatcher, "handle"), (
-            "Dispatcher must have 'handle' method"
-        )
+        assert hasattr(
+            reducer_dispatcher, "handle"
+        ), "Dispatcher must have 'handle' method"
         assert callable(reducer_dispatcher.handle), "'handle' must be callable"
 
     def test_enforcer_works_with_protocol_dispatcher(
@@ -632,9 +637,9 @@ class TestOMN973ReducerCannotAccessNow:
         )
 
         # SECONDARY ASSERTION: has_time_injection property must be False
-        assert context.has_time_injection is False, (
-            "has_time_injection reports True despite now=None"
-        )
+        assert (
+            context.has_time_injection is False
+        ), "has_time_injection reports True despite now=None"
 
     def test_cannot_manually_inject_time_into_reducer_via_model(self) -> None:
         """
@@ -804,9 +809,9 @@ class TestOMN973ComputeCannotAccessNow:
         )
 
         # SECONDARY ASSERTION: has_time_injection property must be False
-        assert context.has_time_injection is False, (
-            "has_time_injection reports True despite now=None"
-        )
+        assert (
+            context.has_time_injection is False
+        ), "has_time_injection reports True despite now=None"
 
 
 class TestOMN973OrchestratorReceivesTime:

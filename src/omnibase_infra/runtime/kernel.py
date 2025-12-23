@@ -217,6 +217,13 @@ def load_runtime_config(contracts_dir: Path) -> ModelRuntimeConfig:
                 validation_errors=pydantic_errors,
                 error_count=error_count,
             ) from e
+        except UnicodeDecodeError as e:
+            raise ProtocolConfigurationError(
+                f"Runtime config file contains binary or non-UTF-8 content: {config_path}",
+                context=context,
+                config_path=str(config_path),
+                error_details=f"Encoding error at position {e.start}-{e.end}: {e.reason}",
+            ) from e
         except OSError as e:
             raise ProtocolConfigurationError(
                 f"Failed to read runtime config at {config_path}: {e}",

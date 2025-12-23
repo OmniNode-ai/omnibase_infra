@@ -13,11 +13,14 @@ Thread Safety:
 Related:
     - NodeRegistryEffect: Effect node that uses this protocol
     - ProtocolPostgresAdapter: Protocol for PostgreSQL backend
+    - ModelBackendResult: Structured result model for backend operations
 """
 
 from __future__ import annotations
 
 from typing import Protocol
+
+from omnibase_infra.nodes.effects.models import ModelBackendResult
 
 
 class ProtocolConsulClient(Protocol):
@@ -45,7 +48,7 @@ class ProtocolConsulClient(Protocol):
         service_name: str,
         tags: list[str],
         health_check: dict[str, str] | None = None,
-    ) -> dict[str, bool | str]:
+    ) -> ModelBackendResult:
         """Register a service in Consul.
 
         Args:
@@ -55,7 +58,8 @@ class ProtocolConsulClient(Protocol):
             health_check: Optional health check configuration.
 
         Returns:
-            Dict with "success" bool and optional "error" string.
+            ModelBackendResult with success status, optional error message,
+            timing information, and correlation context.
         """
         ...
 

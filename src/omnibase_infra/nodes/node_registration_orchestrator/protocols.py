@@ -72,10 +72,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_st
     ModelReducerState,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_registration_intent import (
-    ModelConsulIntentPayload,
-    ModelConsulRegistrationIntent,
-    ModelPostgresIntentPayload,
-    ModelPostgresUpsertIntent,
     ModelRegistrationIntent,
 )
 

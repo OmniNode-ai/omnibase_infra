@@ -226,6 +226,22 @@ class ContractLinter:
                 files_checked=1,
                 files_with_errors=1,
             )
+        except UnicodeDecodeError as e:
+            violations.append(
+                ModelContractViolation(
+                    file_path=file_str,
+                    field_path="",
+                    message=f"Contract file contains binary or non-UTF-8 content: "
+                    f"encoding error at position {e.start}-{e.end}: {e.reason}",
+                    severity=EnumContractViolationSeverity.ERROR,
+                )
+            )
+            return ModelContractLintResult(
+                is_valid=False,
+                violations=violations,
+                files_checked=1,
+                files_with_errors=1,
+            )
 
         if not isinstance(content, dict):
             violations.append(

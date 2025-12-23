@@ -864,6 +864,7 @@ __all__ = [
     # Exemption loaders
     "get_pattern_exemptions",
     "get_union_exemptions",
+    "get_architecture_exemptions",
     # Validators
     "validate_infra_architecture",
     "validate_infra_contracts",

@@ -42,7 +42,7 @@ import sys
 import time
 from statistics import mean, quantiles, stdev
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -670,9 +670,9 @@ class TestThroughput:
         ops_per_second = operations / actual_duration
 
         # Should achieve reasonable throughput (at least 10k ops/sec with async)
-        assert ops_per_second > 5000, (
-            f"Throughput {ops_per_second:.0f} ops/s, expected > 5000"
-        )
+        assert (
+            ops_per_second > 5000
+        ), f"Throughput {ops_per_second:.0f} ops/s, expected > 5000"
 
         print("\nSustained Throughput:")
         print(f"  Operations: {operations}")
@@ -706,9 +706,9 @@ class TestThroughput:
 
         assert total_ops == num_workers * ops_per_worker
         # Concurrent should be faster than sequential
-        assert ops_per_second > 10000, (
-            f"Concurrent throughput {ops_per_second:.0f} ops/s"
-        )
+        assert (
+            ops_per_second > 10000
+        ), f"Concurrent throughput {ops_per_second:.0f} ops/s"
 
         print(f"\nConcurrent Throughput ({num_workers} workers):")
         print(f"  Total Operations: {total_ops}")

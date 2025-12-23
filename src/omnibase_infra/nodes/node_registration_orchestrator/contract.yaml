@@ -188,7 +188,7 @@ workflow_coordination:
       # │ DISTINCT FROM: error_handling.retry_policy.max_retries (see below)  │
       # │ which provides error-specific retries with exponential backoff.     │
       # │                                                                     │
-      # │ Cross-reference: See error_handling section (line ~222) for         │
+      # │ Cross-reference: See error_handling section (line ~289) for         │
       # │ error-level retry configuration.                                    │
       # └─────────────────────────────────────────────────────────────────────┘
       failure_recovery_strategy: retry
@@ -275,7 +275,7 @@ dependencies:
 # │ Use Case: Transient infrastructure errors that may resolve quickly,         │
 # │ such as database connection timeouts or temporary service unavailability.   │
 # │                                                                             │
-# │ DISTINCT FROM: coordination_rules.max_retries (see line ~139) which         │
+# │ DISTINCT FROM: coordination_rules.max_retries (see line ~195) which         │
 # │ retries entire workflow steps without backoff delays.                       │
 # │                                                                             │
 # │ Interaction: Both retry mechanisms can be active simultaneously:            │
@@ -283,7 +283,7 @@ dependencies:
 # │   2. If all error-level retries fail, the step fails                        │
 # │   3. Workflow step retry then retries the entire step                       │
 # │                                                                             │
-# │ Cross-reference: See coordination_rules.max_retries (line ~139) for         │
+# │ Cross-reference: See coordination_rules.max_retries (line ~195) for         │
 # │ workflow step retry configuration.                                          │
 # └─────────────────────────────────────────────────────────────────────────────┘
 error_handling:

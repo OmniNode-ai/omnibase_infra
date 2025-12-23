@@ -12,9 +12,8 @@ These tests ensure architectural integrity and prevent violations of the
 COMPUTE layer contract.
 """
 
-import io
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

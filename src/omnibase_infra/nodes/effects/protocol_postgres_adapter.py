@@ -13,12 +13,15 @@ Thread Safety:
 Related:
     - NodeRegistryEffect: Effect node that uses this protocol
     - ProtocolConsulClient: Protocol for Consul backend
+    - ModelBackendResult: Structured result model for backend operations
 """
 
 from __future__ import annotations
 
 from typing import Protocol
 from uuid import UUID
+
+from omnibase_infra.nodes.effects.models import ModelBackendResult
 
 
 class ProtocolPostgresAdapter(Protocol):
@@ -48,7 +51,7 @@ class ProtocolPostgresAdapter(Protocol):
         node_version: str,
         endpoints: dict[str, str],
         metadata: dict[str, str],
-    ) -> dict[str, bool | str]:
+    ) -> ModelBackendResult:
         """Upsert a node registration record.
 
         Args:
@@ -59,7 +62,8 @@ class ProtocolPostgresAdapter(Protocol):
             metadata: Additional metadata.
 
         Returns:
-            Dict with "success" bool and optional "error" string.
+            ModelBackendResult with success status, optional error message,
+            timing information, and correlation context.
         """
         ...
 

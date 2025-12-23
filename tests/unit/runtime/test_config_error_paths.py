@@ -25,7 +25,6 @@ import yaml
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
-    ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
 from omnibase_infra.runtime.kernel import load_runtime_config
@@ -354,10 +353,21 @@ class TestMissingRequiredFieldsScenarios:
 class TestErrorSanitization:
     """Tests verifying that errors don't expose sensitive information."""
 
-    def test_error_does_not_expose_file_contents(self, tmp_path: Path) -> None:
-        """Test that error messages don't include file contents that could contain secrets."""
+    def test_valid_config_with_extra_fields_loads_successfully(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that valid config with extra fields (like credentials) loads without error.
+
+        This verifies that the config loader:
+        1. Accepts valid topic names
+        2. Ignores extra fields that may contain sensitive values
+        3. Does not expose these values in any success or error path
+
+        Note: This is a success-path test that validates the config loader handles
+        extra fields gracefully. Error sanitization tests are in other methods.
+        """
         config_file = tmp_path / "config.yaml"
-        # Create a config with simulated secret (not a real secret, just a pattern)
+        # Create a config with extra fields (simulating credentials)
         config_data = {
             "input_topic": "valid-topic",
             "password": "super_secret_password_12345",

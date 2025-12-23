@@ -35,7 +35,6 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatcher_registry import (
     DispatcherRegistry,
-    ProtocolMessageDispatcher,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 
