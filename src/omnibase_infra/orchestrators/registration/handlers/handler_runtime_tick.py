@@ -195,6 +195,10 @@ class HandlerRuntimeTick:
             ack_deadline = projection.ack_deadline
             if ack_deadline is None:
                 # This shouldn't happen since needs_ack_timeout_event checks this
+                logger.warning(
+                    "Unexpected None ack_deadline for overdue projection",
+                    extra={"entity_id": str(projection.entity_id)},
+                )
                 continue
 
             event = ModelNodeRegistrationAckTimedOut(
