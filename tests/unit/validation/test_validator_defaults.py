@@ -48,11 +48,12 @@ class TestInfraValidatorConstants:
         Threshold history:
         - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
         - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots
+        - 540 (2025-12-23): OMN-914 reducer purity tests + OMN-954 effect idempotency
 
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 515, (
-            "INFRA_MAX_UNIONS should be 515 (OMN-990 + OMN-947)"
+        assert INFRA_MAX_UNIONS == 540, (
+            "INFRA_MAX_UNIONS should be 540 (OMN-914 + OMN-954)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
@@ -491,12 +492,12 @@ class TestUnionCountRegressionGuard:
         the threshold, it indicates new code added unions without
         using proper typed patterns from omnibase_core.
 
-        Current baseline (~513 unions as of 2025-12-22):
+        Current baseline (~538 unions as of 2025-12-23):
         - Most unions are legitimate `X | None` nullable patterns (ONEX-preferred)
         - These are counted but NOT flagged as violations
         - Actual violations (primitive soup, Union[X,None] syntax) are reported separately
 
-        Threshold: INFRA_MAX_UNIONS (515) - buffer above baseline.
+        Threshold: INFRA_MAX_UNIONS (540) - buffer above baseline.
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
         result = validate_infra_union_usage()

@@ -335,9 +335,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Threshold history:
 # - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
 # - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~24 unions added)
+# - 540 (2025-12-23): OMN-914 reducer purity tests + OMN-954 effect idempotency (~23 unions added)
 #
 # Target: Reduce to <200 through dict[str, object] -> JsonValue migration.
-INFRA_MAX_UNIONS = 515
+INFRA_MAX_UNIONS = 540
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
