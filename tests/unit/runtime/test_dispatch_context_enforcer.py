@@ -555,8 +555,23 @@ class TestProtocolCompliance:
         self,
         reducer_dispatcher: MockMessageDispatcher,
     ) -> None:
-        """MockMessageDispatcher should implement ProtocolMessageDispatcher."""
-        assert isinstance(reducer_dispatcher, ProtocolMessageDispatcher)
+        """MockMessageDispatcher should implement ProtocolMessageDispatcher.
+
+        Per ONEX conventions, protocol conformance is verified via duck typing
+        by checking for required properties and methods.
+        """
+        # Verify required properties via duck typing
+        required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
+        for prop in required_props:
+            assert hasattr(
+                reducer_dispatcher, prop
+            ), f"Dispatcher must have '{prop}' property"
+
+        # Verify handle method exists and is callable
+        assert hasattr(
+            reducer_dispatcher, "handle"
+        ), "Dispatcher must have 'handle' method"
+        assert callable(reducer_dispatcher.handle), "'handle' must be callable"
 
     def test_enforcer_works_with_protocol_dispatcher(
         self,

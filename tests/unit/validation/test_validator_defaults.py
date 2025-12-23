@@ -559,6 +559,152 @@ class TestUnionCountRegressionGuard:
         )
 
 
+class TestUnionValidatorEdgeCases:
+    """Tests for edge cases with zero or few unions.
+
+    PR #57 review flagged that tests assume non-zero union count and should
+    handle edge cases for codebases with few unions. These tests verify the
+    validator behaves correctly for:
+    - Empty directories (no Python files)
+    - Directories with Python files but zero unions
+    - Directories with very few unions (below any threshold)
+    - max_unions=0 with zero actual unions
+    """
+
+    def test_empty_directory_is_valid(self, tmp_path: Path) -> None:
+        """Verify empty directory validates successfully with zero unions.
+
+        An empty directory should be valid - no unions means no violations.
+        """
+        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+
+        assert result.is_valid, "Empty directory should be valid"
+        assert result.errors == [], "Empty directory should have no errors"
+
+    def test_empty_python_file_zero_unions(self, tmp_path: Path) -> None:
+        """Verify Python file with no unions reports zero unions correctly.
+
+        A file with only comments or empty content should report zero unions.
+        """
+        (tmp_path / "empty.py").write_text("# Empty file\n")
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+
+        assert result.is_valid, "Directory with empty Python file should be valid"
+        assert result.errors == [], "Should have no errors for zero unions"
+        if result.metadata and hasattr(result.metadata, "total_unions"):
+            assert (
+                result.metadata.total_unions == 0
+            ), "Should report exactly zero unions"
+
+    def test_code_without_unions_is_valid(self, tmp_path: Path) -> None:
+        """Verify code without any union types validates successfully.
+
+        Python code that doesn't use union types should pass validation
+        with zero unions counted.
+        """
+        (tmp_path / "no_unions.py").write_text(
+            "def hello(name: str) -> str:\n    return f'Hello, {name}!'\n"
+        )
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+
+        assert result.is_valid, "Code without unions should be valid"
+        assert result.errors == [], "Should have no errors for zero unions"
+        if result.metadata and hasattr(result.metadata, "total_unions"):
+            assert (
+                result.metadata.total_unions == 0
+            ), "Should report exactly zero unions"
+
+    def test_max_unions_zero_with_zero_unions(self, tmp_path: Path) -> None:
+        """Verify max_unions=0 works correctly when there are zero unions.
+
+        Edge case: Setting max_unions=0 should pass if there are no unions
+        (0 <= 0 is valid, not a violation).
+        """
+        (tmp_path / "no_unions.py").write_text("def hello() -> str:\n    return 'hi'\n")
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=0, strict=True)
+
+        assert result.is_valid, "Zero unions should be valid even with max_unions=0"
+        assert result.errors == [], "No violation when actual count equals max"
+
+    def test_single_union_below_threshold(self, tmp_path: Path) -> None:
+        """Verify single union counts correctly and passes validation.
+
+        A file with just one union (e.g., `str | None`) should be valid
+        when threshold is above 1.
+        """
+        (tmp_path / "one_union.py").write_text(
+            "def greet(name: str | None = None) -> str:\n"
+            "    return f'Hello, {name or \"World\"}!'\n"
+        )
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+
+        assert result.is_valid, "Single union should be valid when below threshold"
+        assert result.errors == [], "Should have no errors for single union"
+        if result.metadata and hasattr(result.metadata, "total_unions"):
+            assert (
+                result.metadata.total_unions == 1
+            ), "Should report exactly one union"
+
+    def test_few_unions_all_valid_patterns(self, tmp_path: Path) -> None:
+        """Verify few unions using valid patterns pass validation.
+
+        Using the ONEX-preferred `X | None` pattern should not cause violations,
+        even with strict mode enabled.
+        """
+        (tmp_path / "few_unions.py").write_text(
+            "from pydantic import BaseModel\n\n"
+            "class ModelConfig(BaseModel):\n"
+            "    name: str\n"
+            "    value: int | None = None\n"
+            "    description: str | None = None\n"
+        )
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+
+        assert result.is_valid, "Few valid unions should pass validation"
+        assert result.errors == [], "Valid union patterns should not cause errors"
+        if result.metadata and hasattr(result.metadata, "total_unions"):
+            # Should have 2 unions (value and description)
+            assert result.metadata.total_unions == 2, "Should count both unions"
+
+    def test_no_division_by_zero_with_empty_codebase(self, tmp_path: Path) -> None:
+        """Verify no division errors occur with empty or minimal codebases.
+
+        This test guards against division by zero or similar errors that might
+        occur when calculating percentages or ratios with zero counts.
+        """
+        # Test with truly empty directory (no files at all)
+        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+
+        # Should not raise any exceptions and should return valid result
+        assert result.is_valid, "Should not crash on empty directory"
+        assert isinstance(result.errors, list), "Errors should be a list"
+
+    def test_metadata_present_even_with_zero_unions(self, tmp_path: Path) -> None:
+        """Verify metadata is properly populated even with zero unions.
+
+        The validator should always return consistent metadata structure,
+        even when no unions are found.
+        """
+        (tmp_path / "simple.py").write_text("x: int = 42\n")
+
+        result = validate_infra_union_usage(str(tmp_path), max_unions=10, strict=True)
+
+        assert result.is_valid, "Simple code should be valid"
+        # Metadata should be present (may have None for some fields)
+        assert result.metadata is not None, "Metadata should be present"
+        # If total_unions is available, it should be 0
+        if hasattr(result.metadata, "total_unions"):
+            assert (
+                result.metadata.total_unions is None
+                or result.metadata.total_unions == 0
+            ), "total_unions should be 0 or None for code without unions"
+
+
 class TestDefaultsConsistency:
     """Test that defaults are consistent across all entry points."""
 

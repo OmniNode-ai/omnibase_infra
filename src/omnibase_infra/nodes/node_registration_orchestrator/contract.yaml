@@ -135,11 +135,26 @@ workflow_coordination:
       parallel_execution_allowed: false
       max_parallel_branches: 1
 
-      # Failure handling (workflow-level step retries)
-      # Note: This controls workflow step retry behavior, not error-level retries.
-      # For error-specific retry configuration, see error_handling.retry_policy.
+      # ┌─────────────────────────────────────────────────────────────────────┐
+      # │ WORKFLOW STEP RETRIES (coordination_rules.max_retries)              │
+      # ├─────────────────────────────────────────────────────────────────────┤
+      # │ Purpose: Retry an entire workflow step when it fails.               │
+      # │                                                                     │
+      # │ Behavior: If a step (e.g., execute_consul_registration) fails,      │
+      # │ the orchestrator will retry the ENTIRE step up to max_retries       │
+      # │ times before marking the workflow as failed.                        │
+      # │                                                                     │
+      # │ Use Case: Transient failures at the workflow coordination level,    │
+      # │ such as temporary network partitions or resource contention.        │
+      # │                                                                     │
+      # │ DISTINCT FROM: error_handling.retry_policy.max_retries (see below)  │
+      # │ which provides error-specific retries with exponential backoff.     │
+      # │                                                                     │
+      # │ Cross-reference: See error_handling section (line ~222) for         │
+      # │ error-level retry configuration.                                    │
+      # └─────────────────────────────────────────────────────────────────────┘
       failure_recovery_strategy: retry
-      max_retries: 3  # Workflow step retry count
+      max_retries: 3  # Workflow step retry count (see box above)
       recovery_enabled: true
 
       # Timeout configuration
@@ -206,13 +221,34 @@ dependencies:
 
 # Error Handling Configuration
 # =============================
-# Note: This section controls error-specific retry behavior with exponential backoff.
-# This is distinct from coordination_rules.max_retries which controls workflow step retries.
-# - coordination_rules.max_retries: How many times to retry a failed workflow step
-# - error_handling.retry_policy: How to handle specific error types with backoff
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ ERROR-LEVEL RETRIES (error_handling.retry_policy.max_retries)               │
+# ├─────────────────────────────────────────────────────────────────────────────┤
+# │ Purpose: Retry specific error types with exponential backoff.               │
+# │                                                                             │
+# │ Behavior: When a specific error type occurs (e.g., ConnectionError),        │
+# │ retry the failing operation with exponential backoff delays:                │
+# │   - 1st retry: 100ms delay                                                  │
+# │   - 2nd retry: 200ms delay                                                  │
+# │   - 3rd retry: 400ms delay (capped at max_delay_ms)                         │
+# │                                                                             │
+# │ Use Case: Transient infrastructure errors that may resolve quickly,         │
+# │ such as database connection timeouts or temporary service unavailability.   │
+# │                                                                             │
+# │ DISTINCT FROM: coordination_rules.max_retries (see line ~139) which         │
+# │ retries entire workflow steps without backoff delays.                       │
+# │                                                                             │
+# │ Interaction: Both retry mechanisms can be active simultaneously:            │
+# │   1. Error-level retry attempts the operation with backoff                  │
+# │   2. If all error-level retries fail, the step fails                        │
+# │   3. Workflow step retry then retries the entire step                       │
+# │                                                                             │
+# │ Cross-reference: See coordination_rules.max_retries (line ~139) for         │
+# │ workflow step retry configuration.                                          │
+# └─────────────────────────────────────────────────────────────────────────────┘
 error_handling:
   retry_policy:
-    max_retries: 3  # Error-level retry with exponential backoff
+    max_retries: 3  # Error-level retry count (see box above)
     initial_delay_ms: 100
     max_delay_ms: 5000
     exponential_base: 2

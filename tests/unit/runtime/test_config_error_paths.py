@@ -135,12 +135,18 @@ class TestInvalidYamlSyntaxScenarios:
         error = exc_info.value
         assert "parse" in str(error).lower() or "yaml" in str(error).lower()
 
-    def test_invalid_yaml_colon_without_space_raises_error(
+    def test_invalid_yaml_ambiguous_mapping_context_raises_error(
         self, tmp_path: Path
     ) -> None:
-        """Test that invalid YAML with colon without space raises error."""
+        """Test that ambiguous YAML mapping context raises error.
+
+        Note: 'key:value' alone is valid YAML (a plain string without space
+        after colon). However, when followed by 'other:stuff:' which tries
+        to be a mapping key (trailing colon), YAML parsers fail with
+        'mapping values are not allowed here' because the context is ambiguous.
+        """
         config_file = tmp_path / "invalid.yaml"
-        # This is valid in some contexts, testing edge case
+        # First line is valid as string, second line creates mapping ambiguity
         config_file.write_text("key:value\nother:stuff:")
 
         with pytest.raises(ProtocolConfigurationError) as exc_info:

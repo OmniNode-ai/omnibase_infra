@@ -145,13 +145,12 @@ class TestProtocolMessageDispatcher:
     """Tests for ProtocolMessageDispatcher protocol.
 
     These tests demonstrate protocol validation patterns for dispatchers.
-    The ProtocolMessageDispatcher is marked @runtime_checkable, enabling
-    isinstance() checks for structural type verification.
+    Per ONEX conventions, protocol conformance is verified via duck typing
+    by checking for required properties and methods.
 
     Validation Approaches:
-        1. isinstance(obj, ProtocolMessageDispatcher): Quick structural check
-           that verifies required attributes exist. Useful for type guards
-           or early rejection of invalid objects.
+        1. Duck typing: Check for required attributes/methods using hasattr()
+           and callable(). This is the ONEX-preferred approach.
 
         2. DispatcherRegistry.register_dispatcher(): Comprehensive validation
            including property type checking, execution shape validation,
@@ -163,27 +162,39 @@ class TestProtocolMessageDispatcher:
     ) -> None:
         """MockMessageDispatcher should implement ProtocolMessageDispatcher.
 
-        This test demonstrates using isinstance() for protocol validation.
-        The @runtime_checkable decorator on ProtocolMessageDispatcher enables
-        this structural type checking at runtime.
+        Per ONEX conventions, protocol conformance is verified via duck typing
+        by checking for required properties and methods.
         """
-        # Quick structural check - verifies required attributes exist
-        assert isinstance(event_reducer_dispatcher, ProtocolMessageDispatcher)
+        # Verify required properties via duck typing
+        required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
+        for prop in required_props:
+            assert hasattr(
+                event_reducer_dispatcher, prop
+            ), f"Dispatcher must have '{prop}' property"
 
-    def test_isinstance_rejects_non_dispatcher(self) -> None:
-        """isinstance() should reject objects that don't implement the protocol.
+        # Verify handle method exists and is callable
+        assert hasattr(
+            event_reducer_dispatcher, "handle"
+        ), "Dispatcher must have 'handle' method"
+        assert callable(event_reducer_dispatcher.handle), "'handle' must be callable"
 
-        This demonstrates using isinstance() as a type guard to reject
-        objects that don't have the required dispatcher interface.
+    def test_duck_typing_rejects_non_dispatcher(self) -> None:
+        """Duck typing should identify objects that don't implement the protocol.
+
+        This demonstrates using duck typing to reject objects that don't have
+        the required dispatcher interface.
         """
 
-        # A plain object without dispatcher properties should fail isinstance check
+        # A plain object without dispatcher properties fails duck typing check
         class NotADispatcher:
             pass
 
-        assert not isinstance(NotADispatcher(), ProtocolMessageDispatcher)
+        required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
+        not_a_dispatcher = NotADispatcher()
+        has_all_props = all(hasattr(not_a_dispatcher, prop) for prop in required_props)
+        assert not has_all_props, "NotADispatcher should not have all required props"
 
-        # An object with some but not all properties should also fail
+        # An object with some but not all properties also fails
         class PartialDispatcher:
             @property
             def dispatcher_id(self) -> str:
@@ -191,19 +202,32 @@ class TestProtocolMessageDispatcher:
 
             # Missing: category, message_types, node_kind, handle
 
-        assert not isinstance(PartialDispatcher(), ProtocolMessageDispatcher)
+        partial_dispatcher = PartialDispatcher()
+        has_all_props = all(hasattr(partial_dispatcher, prop) for prop in required_props)
+        assert not has_all_props, "PartialDispatcher should not have all required props"
 
-    def test_isinstance_for_protocol_validation_pattern(
+    def test_duck_typing_for_protocol_validation_pattern(
         self, event_reducer_dispatcher: MockMessageDispatcher
     ) -> None:
         """Demonstrate the recommended pattern for protocol validation.
 
-        Use isinstance() for quick structural checks, then let
+        Use duck typing for quick structural checks, then let
         DispatcherRegistry.register_dispatcher() perform comprehensive
         validation including execution shape checking.
         """
-        # Pattern: Quick isinstance check before registration
-        if isinstance(event_reducer_dispatcher, ProtocolMessageDispatcher):
+        # Pattern: Duck typing check before registration (ONEX convention)
+        required_attrs = [
+            "dispatcher_id",
+            "category",
+            "message_types",
+            "node_kind",
+            "handle",
+        ]
+        has_required = all(
+            hasattr(event_reducer_dispatcher, attr) for attr in required_attrs
+        )
+
+        if has_required and callable(event_reducer_dispatcher.handle):
             # Proceed with registration - comprehensive validation happens here
             registry = DispatcherRegistry()
             registry.register_dispatcher(event_reducer_dispatcher)

@@ -375,6 +375,34 @@ class TestWorkflowGraphIntegration:
         else:
             pytest.fail("compute_intents node not found")
 
+    def test_execution_graph_node_count_is_exactly_8(
+        self, contract_data: dict
+    ) -> None:
+        """Test that execution graph has exactly 8 nodes (not more, not fewer).
+
+        This is a strict count check that will fail if:
+        - Any of the 8 required nodes is missing
+        - Any unexpected nodes are added
+
+        The 8 nodes are:
+        1. receive_introspection
+        2. read_projection
+        3. evaluate_timeout
+        4. compute_intents
+        5. execute_consul_registration
+        6. execute_postgres_registration
+        7. aggregate_results
+        8. publish_outcome
+        """
+        nodes = contract_data["workflow_coordination"]["workflow_definition"][
+            "execution_graph"
+        ]["nodes"]
+
+        assert len(nodes) == 8, (
+            f"Execution graph must have exactly 8 nodes, found {len(nodes)}. "
+            f"Node IDs found: {[n['node_id'] for n in nodes]}"
+        )
+
     def test_all_8_nodes_have_correct_properties(self, contract_data: dict) -> None:
         """Test that all 8 execution graph nodes have correct types and dependencies.
 
@@ -772,34 +800,38 @@ class TestDependencyStructure:
     def test_dependencies_declared(self, contract_data: dict) -> None:
         """Test that required dependencies are declared in contract.
 
-        The registration orchestrator requires specific dependencies:
+        The registration orchestrator requires exactly 3 dependencies:
         - reducer_protocol: For computing registration intents
         - effect_node: For executing registration operations
         - projection_reader: For reading current state (OMN-930)
 
         This test ensures all required dependencies are present with strict
-        assertions that will fail if any dependency is missing.
+        assertions that will fail if any dependency is missing or if extra
+        unexpected dependencies are added.
         """
         deps = contract_data.get("dependencies", [])
+        dep_names = {d["name"] for d in deps}
 
-        # Must have at least the required dependencies
-        assert len(deps) >= 3, (
-            f"Contract must declare at least 3 dependencies "
-            f"(reducer_protocol, effect_node, projection_reader), found {len(deps)}"
+        # Define the exact set of required dependencies
+        expected_dependencies = {
+            "reducer_protocol",
+            "effect_node",
+            "projection_reader",
+        }
+
+        # Strict equality check - must have exactly these dependencies
+        assert expected_dependencies == dep_names, (
+            f"Dependencies mismatch.\n"
+            f"Missing: {expected_dependencies - dep_names}\n"
+            f"Extra: {dep_names - expected_dependencies}\n"
+            f"Expected exactly 3 dependencies: {expected_dependencies}"
         )
 
-        dep_names = [d["name"] for d in deps]
-
-        # Each required dependency must be explicitly present - no fallback conditions
-        assert (
-            "reducer_protocol" in dep_names
-        ), "Must declare 'reducer_protocol' dependency for computing intents"
-        assert (
-            "effect_node" in dep_names
-        ), "Must declare 'effect_node' dependency for executing registration operations"
-        assert (
-            "projection_reader" in dep_names
-        ), "Must declare 'projection_reader' dependency for reading state (OMN-930)"
+        # Also verify count explicitly for clarity
+        assert len(deps) == 3, (
+            f"Contract must declare exactly 3 dependencies, found {len(deps)}. "
+            f"Expected: reducer_protocol, effect_node, projection_reader"
+        )
 
     def test_dependencies_have_required_fields(self, contract_data: dict) -> None:
         """Test that dependencies have required fields."""
@@ -826,6 +858,63 @@ class TestDependencyStructure:
                 f"Dependency '{dep.get('name')}' has invalid type '{dep_type}', "
                 f"expected one of: {valid_types}"
             )
+
+    def test_each_dependency_has_correct_properties(self, contract_data: dict) -> None:
+        """Test that each dependency has correct type and description.
+
+        This test validates the exact properties of each dependency to ensure
+        the contract accurately describes the orchestrator's requirements.
+        Missing or incorrect properties will cause test failures.
+        """
+        deps = contract_data.get("dependencies", [])
+        dep_map = {d["name"]: d for d in deps}
+
+        # Expected properties for each dependency
+        # Format: name -> (type, description_substring, optional_module)
+        expected_properties = {
+            "reducer_protocol": {
+                "type": "protocol",
+                "description_contains": "reducer",
+            },
+            "effect_node": {
+                "type": "node",
+                "description_contains": "effect",
+                "module": "omnibase_infra.nodes.node_registry_effect",
+            },
+            "projection_reader": {
+                "type": "protocol",
+                "description_contains": "projection",
+                "module": "omnibase_spi.protocols",
+            },
+        }
+
+        for dep_name, expected in expected_properties.items():
+            assert dep_name in dep_map, f"Missing dependency: {dep_name}"
+            dep = dep_map[dep_name]
+
+            # Validate type
+            assert dep["type"] == expected["type"], (
+                f"Dependency '{dep_name}' has type '{dep['type']}', "
+                f"expected '{expected['type']}'"
+            )
+
+            # Validate description contains expected keyword
+            desc_keyword = expected["description_contains"]
+            assert desc_keyword.lower() in dep["description"].lower(), (
+                f"Dependency '{dep_name}' description '{dep['description']}' "
+                f"should contain '{desc_keyword}'"
+            )
+
+            # Validate module if expected
+            if "module" in expected:
+                assert "module" in dep, (
+                    f"Dependency '{dep_name}' should have 'module' field, "
+                    f"expected '{expected['module']}'"
+                )
+                assert dep["module"] == expected["module"], (
+                    f"Dependency '{dep_name}' has module '{dep['module']}', "
+                    f"expected '{expected['module']}'"
+                )
 
 
 # =============================================================================

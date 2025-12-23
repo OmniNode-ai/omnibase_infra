@@ -143,6 +143,7 @@ from uuid import UUID, uuid4
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
@@ -1368,12 +1369,15 @@ class MessageDispatchEngine:
         if outputs:
             try:
                 dispatch_outputs = ModelDispatchOutputs(topics=outputs)
-            except ValueError as validation_error:
+            except (ValueError, ValidationError) as validation_error:
                 # Log validation failure with context (no secrets in topic names)
                 # Note: Using _sanitize_error_message for consistency, though topic
                 # validation errors typically don't contain sensitive data
                 sanitized_validation_error = _sanitize_error_message(validation_error)
-                self._logger.error(
+                # TRY400: Intentionally using error() instead of exception() for security
+                # - exception() would log stack trace which may expose internal paths
+                # - sanitized_validation_error already contains safe error details
+                self._logger.error(  # noqa: TRY400
                     "Failed to validate dispatch outputs (%d topics): %s",
                     len(outputs),
                     sanitized_validation_error,

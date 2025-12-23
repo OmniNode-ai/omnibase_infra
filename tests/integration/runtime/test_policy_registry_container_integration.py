@@ -254,8 +254,16 @@ class TestPolicyRegistryContainerIntegration:
         # Resolve handler registry
         handler_registry = await get_handler_registry_from_container(container)
 
-        # Verify it's a ProtocolBindingRegistry instance
-        assert isinstance(handler_registry, ProtocolBindingRegistry)
+        # Verify it implements ProtocolBindingRegistry interface via duck typing
+        # Per ONEX conventions, check for required methods rather than isinstance
+        required_methods = ["register", "get", "list_protocols", "is_registered"]
+        for method_name in required_methods:
+            assert hasattr(
+                handler_registry, method_name
+            ), f"Handler registry must have '{method_name}' method"
+            assert callable(
+                getattr(handler_registry, method_name)
+            ), f"'{method_name}' must be callable"
 
         # Verify basic operations work
         assert len(handler_registry) == 0  # Empty initially
@@ -428,7 +436,11 @@ class TestContainerWithRegistriesFixture:
                 ProtocolBindingRegistry
             )
         )
-        assert isinstance(handler_registry, ProtocolBindingRegistry)
+        # Verify interface via duck typing (ONEX convention)
+        assert hasattr(handler_registry, "register"), "Must have 'register' method"
+        assert hasattr(
+            handler_registry, "list_protocols"
+        ), "Must have 'list_protocols' method"
 
     @pytest.mark.asyncio
     async def test_fixture_registries_are_functional(

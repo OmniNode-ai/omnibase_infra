@@ -20,11 +20,15 @@ from omnibase_infra.plugins.examples.plugin_json_normalizer import PluginJsonNor
 
 # Implementations are now complete - imports activated
 from omnibase_infra.plugins.plugin_compute_base import PluginComputeBase
-from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
 
 
 class TestProtocolConformance:
-    """Test that implementations conform to ProtocolPluginCompute."""
+    """Test that implementations conform to ProtocolPluginCompute.
+
+    Per ONEX conventions, protocol conformance is verified via duck typing
+    by checking for required method presence and callability, rather than
+    using isinstance checks with Protocol types.
+    """
 
     def test_protocol_conformance_with_base_class(self) -> None:
         """PluginComputeBase conforms to ProtocolPluginCompute."""
@@ -36,16 +40,20 @@ class TestProtocolConformance:
 
         instance = ConcretePlugin()
 
-        # Act & Assert: Verify protocol conformance
-        assert isinstance(instance, ProtocolPluginCompute)
+        # Act & Assert: Verify protocol conformance via duck typing
+        # ProtocolPluginCompute requires 'execute' method
+        assert hasattr(instance, "execute"), "Must have 'execute' method"
+        assert callable(instance.execute), "'execute' must be callable"
 
     def test_protocol_conformance_with_example(self) -> None:
         """PluginJsonNormalizer conforms to ProtocolPluginCompute."""
         # Arrange
         instance = PluginJsonNormalizer()
 
-        # Act & Assert: Verify protocol conformance
-        assert isinstance(instance, ProtocolPluginCompute)
+        # Act & Assert: Verify protocol conformance via duck typing
+        # ProtocolPluginCompute requires 'execute' method
+        assert hasattr(instance, "execute"), "Must have 'execute' method"
+        assert callable(instance.execute), "'execute' must be callable"
 
 
 class TestBaseClassAbstraction:

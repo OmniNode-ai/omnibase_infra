@@ -597,16 +597,22 @@ def _create_filtered_result(
 
     # Create new metadata if present (avoid mutation)
     new_metadata = None
-    if base_result.metadata:
+    if base_result.metadata is not None:
         # Use model_copy for deep copy with updates (Pydantic v2 pattern)
         # This works with both real Pydantic models and test mocks
         try:
             new_metadata = base_result.metadata.model_copy(deep=True)
-            # Update violations_found if the field exists
-            if hasattr(new_metadata, "violations_found"):
-                new_metadata.violations_found = len(filtered_errors)
+            # Update violations_found if the field exists and is writable
+            # Guard against None return from model_copy and missing/read-only attributes
+            if new_metadata is not None and hasattr(new_metadata, "violations_found"):
+                try:
+                    new_metadata.violations_found = len(filtered_errors)
+                except (AttributeError, TypeError):
+                    # violations_found may be a read-only property or frozen field
+                    pass
         except AttributeError:
             # Fallback for test mocks that don't support model_copy
+            # Use original metadata without modification to avoid mutation
             new_metadata = base_result.metadata
 
     # Create new result (wrapper pattern - no mutation)
@@ -792,23 +798,24 @@ def get_validation_summary(
         # Skip entries with non-string keys
         if not isinstance(name, str):
             continue
-        # NOTE: isinstance usage here is justified as CircularImportValidationResult
-        # and ValidationResult have different APIs (has_circular_imports vs is_valid).
-        # Duck typing would require protocol definitions in omnibase_core.
-        # This is acceptable for result type discrimination in summary generation.
-        if isinstance(result, CircularImportValidationResult):
+        # Use duck typing to determine result API:
+        # - CircularImportValidationResult has 'has_circular_imports' attribute
+        # - ModelValidationResult has 'is_valid' attribute
+        # This follows ONEX convention of duck typing over isinstance for protocols.
+        if hasattr(result, "has_circular_imports"):
             # Circular import validator uses has_circular_imports
             if not result.has_circular_imports:
                 passed += 1
             else:
                 failed += 1
                 failed_validators.append(name)
-        # Standard ModelValidationResult uses is_valid
-        elif result.is_valid:
-            passed += 1
-        else:
-            failed += 1
-            failed_validators.append(name)
+        elif hasattr(result, "is_valid"):
+            # Standard ModelValidationResult uses is_valid
+            if result.is_valid:
+                passed += 1
+            else:
+                failed += 1
+                failed_validators.append(name)
 
     return {
         "total_validators": passed + failed,

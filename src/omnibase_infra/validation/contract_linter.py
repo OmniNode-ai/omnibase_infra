@@ -33,6 +33,7 @@ Exit Codes (for CI):
 
 import importlib
 import logging
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Literal
@@ -595,8 +596,6 @@ class ContractLinter:
             return violations  # Already caught by required fields check
 
         # Check snake_case pattern
-        import re
-
         if not re.match(r"^[a-z][a-z0-9_]*$", name):
             violations.append(
                 ModelContractViolation(
