@@ -140,9 +140,9 @@ class DeterministicClock:
             The current datetime value of the simulated clock.
 
         Example:
-            >>> clock = DeterministicClock(start=datetime(2024, 6, 15, 12, 0, 0))
+            >>> clock = DeterministicClock(start=datetime(2025, 6, 15, 12, 0, 0))
             >>> clock.now()
-            datetime.datetime(2024, 6, 15, 12, 0)
+            datetime.datetime(2025, 6, 15, 12, 0)
         """
         return self._now
 

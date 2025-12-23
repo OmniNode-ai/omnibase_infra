@@ -38,6 +38,9 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.models.projection.model_registration_projection import (
+    ModelRegistrationProjection,
+)
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -238,7 +241,7 @@ class HandlerNodeRegistrationAcked:
         command: ModelNodeRegistrationAcked,
         now: datetime,
         correlation_id: UUID,
-        projection: object,  # ModelRegistrationProjection
+        projection: ModelRegistrationProjection,
     ) -> list[BaseModel]:
         """Emit events for successful registration acknowledgment.
 
@@ -254,12 +257,6 @@ class HandlerNodeRegistrationAcked:
         Returns:
             List containing [NodeRegistrationAckReceived, NodeBecameActive].
         """
-        from omnibase_infra.models.projection.model_registration_projection import (
-            ModelRegistrationProjection,
-        )
-
-        # Type assertion for projection
-        assert isinstance(projection, ModelRegistrationProjection)
 
         node_id = command.node_id
         liveness_deadline = now + timedelta(seconds=self._liveness_interval_seconds)

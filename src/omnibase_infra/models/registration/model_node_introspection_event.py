@@ -8,7 +8,7 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -134,9 +134,9 @@ class ModelNodeIntrospectionEvent(BaseModel):
         description="Registration epoch for ordering (monotonically increasing counter)",
     )
 
-    # Timestamps
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        ...,
         description="Event timestamp",
     )
 

@@ -8,7 +8,7 @@ in the ONEX 2-way registration pattern.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -90,9 +90,8 @@ class ModelNodeHeartbeatEvent(BaseModel):
     correlation_id: UUID | None = Field(
         default=None, description="Request correlation ID for tracing"
     )
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), description="Event timestamp"
-    )
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
+    timestamp: datetime = Field(..., description="Event timestamp")
 
 
 __all__ = ["ModelNodeHeartbeatEvent"]

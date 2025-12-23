@@ -71,12 +71,14 @@ def create_projection(
 
 def create_introspection_event(
     node_id: UUID | None = None,
+    timestamp: datetime | None = None,
 ) -> ModelNodeIntrospectionEvent:
     """Create a test introspection event."""
     return ModelNodeIntrospectionEvent(
         node_id=node_id or uuid4(),
         node_type="effect",
         correlation_id=uuid4(),
+        timestamp=timestamp or TEST_NOW,
     )
 
 
@@ -118,6 +120,8 @@ class TestHandlerNodeIntrospectedEmitsInitiated:
         assert initiated.causation_id == introspection_event.correlation_id
         # Registration attempt ID should be generated
         assert initiated.registration_attempt_id is not None
+        # Verify time injection: emitted_at must equal injected `now`
+        assert initiated.emitted_at == TEST_NOW
 
     @pytest.mark.asyncio
     async def test_emits_initiated_for_new_node(self) -> None:
@@ -356,6 +360,7 @@ class TestHandlerNodeIntrospectedEventFields:
             node_id=uuid4(),
             node_type="effect",
             correlation_id=introspection_correlation_id,
+            timestamp=TEST_NOW,
         )
 
         events = await handler.handle(

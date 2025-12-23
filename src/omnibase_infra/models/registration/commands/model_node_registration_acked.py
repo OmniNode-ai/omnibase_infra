@@ -20,7 +20,7 @@ Related Tickets:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -92,9 +92,9 @@ class ModelNodeRegistrationAcked(BaseModel):
         ),
     )
 
-    # Timestamp
+    # Timestamp - MUST be explicitly injected (no default_factory for testability)
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        ...,
         description="When the node sent the acknowledgment.",
     )
 

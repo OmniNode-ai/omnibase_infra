@@ -13,7 +13,7 @@ See Also:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -78,9 +78,9 @@ class ModelNodeRegistrationInitiated(BaseModel):
         description="Message ID of the triggering NodeIntrospected event",
     )
 
-    # Timestamps
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     emitted_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        ...,
         description="Timestamp when the orchestrator emitted this event (UTC)",
     )
 

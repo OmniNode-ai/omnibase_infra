@@ -259,13 +259,18 @@ class HandlerRuntimeTick:
                 continue
 
             # Determine last heartbeat time for the event.
-            # The projection stores liveness_deadline (expected next heartbeat) but not
-            # last_heartbeat_at directly. We use detection time (now) as the best
-            # approximation since:
-            # 1. registered_at could be very stale for long-running nodes
-            # 2. liveness_deadline is when we expected, not when we received
-            # 3. Detection time is the last moment we confirmed the node unreachable
-            last_heartbeat_at = now
+            # The projection does NOT currently store last_heartbeat_at directly.
+            # ModelNodeLivenessExpired.last_heartbeat_at accepts None to indicate
+            # "never received a heartbeat" or "heartbeat timestamp not tracked".
+            #
+            # Semantic correctness:
+            #   - Using `now` would incorrectly imply the last heartbeat was just received
+            #   - Using `registered_at` would conflate registration with heartbeat receipt
+            #   - Using `None` accurately indicates we don't have heartbeat timestamp data
+            #
+            # TODO: Add last_heartbeat_at field to ModelRegistrationProjection and
+            # update it when heartbeats are received. See projection schema for details.
+            last_heartbeat_at = None
 
             event = ModelNodeLivenessExpired(
                 entity_id=projection.entity_id,

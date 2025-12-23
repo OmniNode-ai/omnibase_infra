@@ -51,6 +51,9 @@ from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 if TYPE_CHECKING:
     from typing import Literal
 
+# Fixed test timestamp for deterministic testing (time injection pattern)
+TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+
 
 # -----------------------------------------------------------------------------
 # Fixtures
@@ -92,6 +95,7 @@ def valid_event() -> ModelNodeIntrospectionEvent:
         endpoints={"health": "http://localhost:8080/health"},
         capabilities=ModelNodeCapabilities(postgres=True, read=True, write=True),
         metadata=ModelNodeMetadata(environment="test"),
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -110,6 +114,7 @@ def event_without_health_endpoint() -> ModelNodeIntrospectionEvent:
         endpoints={},
         capabilities=ModelNodeCapabilities(),
         metadata=ModelNodeMetadata(),
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -139,6 +144,7 @@ def create_introspection_event(
         if endpoints is not None
         else {"health": "http://localhost:8080/health"},
         correlation_id=correlation_id or uuid4(),
+        timestamp=TEST_TIMESTAMP,
     )
 
 
@@ -875,6 +881,7 @@ class TestConsulIntentBuilding:
             node_version="2.3.4",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1130,6 +1137,7 @@ class TestPostgresIntentBuilding:
             endpoints={"health": "http://localhost:8080/health"},
             capabilities=ModelNodeCapabilities(postgres=True, consul=True, read=True),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1327,6 +1335,7 @@ class TestEdgeCases:
             node_version="1.0.0",
             endpoints={},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1347,6 +1356,7 @@ class TestEdgeCases:
             endpoints={"health": "http://localhost:8080/health"},
             capabilities=ModelNodeCapabilities(),
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -1399,6 +1409,7 @@ class TestEdgeCases:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=correlation_id,
+            timestamp=TEST_TIMESTAMP,
         )
 
         output1 = reducer.reduce(state, event)
@@ -2967,6 +2978,7 @@ class TestEdgeCasesComprehensive:
             node_version="1.0.0",
             endpoints={},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3021,6 +3033,7 @@ class TestEdgeCasesComprehensive:
             node_version="2.5.0",
             endpoints=many_endpoints,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3064,6 +3077,7 @@ class TestEdgeCasesComprehensive:
             node_version=long_version,
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3210,6 +3224,7 @@ class TestEdgeCasesComprehensive:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -3244,6 +3259,7 @@ class TestEdgeCasesComprehensive:
                 "docs": "http://localhost:8080/wendang/index",
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)

@@ -108,9 +108,6 @@ from omnibase_infra.models.dispatch.model_topic_parser import (
     clear_topic_parse_cache,
     get_topic_parse_cache_info,
 )
-from omnibase_infra.orchestrators.registration.models.model_orchestrator_context import (
-    ModelOrchestratorContext,
-)
 
 __all__ = [
     # Enums
@@ -123,7 +120,6 @@ __all__ = [
     "ModelDispatchRoute",
     "ModelDispatcherMetrics",
     "ModelDispatcherRegistration",
-    "ModelOrchestratorContext",
     "ModelParsedTopic",
     "ModelTopicParser",
     # Cache utilities

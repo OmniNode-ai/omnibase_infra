@@ -77,11 +77,15 @@ def create_projection(
     )
 
 
-def create_ack_command(node_id: UUID) -> ModelNodeRegistrationAcked:
+def create_ack_command(
+    node_id: UUID,
+    timestamp: datetime | None = None,
+) -> ModelNodeRegistrationAcked:
     """Create a test ack command."""
     return ModelNodeRegistrationAcked(
         node_id=node_id,
         correlation_id=uuid4(),
+        timestamp=timestamp or TEST_NOW,
     )
 
 
@@ -111,6 +115,7 @@ class TestHandlerAckedEmitsActiveEvents:
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
             correlation_id=correlation_id,
+            timestamp=TEST_NOW,
         )
 
         # Act
@@ -130,6 +135,8 @@ class TestHandlerAckedEmitsActiveEvents:
         assert ack_received.entity_id == node_id
         assert ack_received.correlation_id == correlation_id
         assert ack_received.causation_id == ack_command.command_id
+        # Verify time injection: emitted_at must equal injected `now`
+        assert ack_received.emitted_at == TEST_NOW
         # Liveness deadline = now + 60 seconds
         expected_deadline = TEST_NOW + timedelta(
             seconds=DEFAULT_LIVENESS_INTERVAL_SECONDS
@@ -143,6 +150,8 @@ class TestHandlerAckedEmitsActiveEvents:
         assert became_active.entity_id == node_id
         assert became_active.correlation_id == correlation_id
         assert became_active.causation_id == ack_command.command_id
+        # Verify time injection: emitted_at must equal injected `now`
+        assert became_active.emitted_at == TEST_NOW
         assert became_active.capabilities == capabilities
 
     @pytest.mark.asyncio
@@ -495,6 +504,7 @@ class TestHandlerAckedProjectionQueries:
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
             correlation_id=correlation_id,
+            timestamp=TEST_NOW,
         )
 
         await handler.handle(

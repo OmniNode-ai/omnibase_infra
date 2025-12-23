@@ -166,6 +166,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
@@ -1411,6 +1412,7 @@ class MixinNodeIntrospection:
                 node_type = "unknown"
 
             # Create heartbeat event
+            now = datetime.now(UTC)
             heartbeat = ModelNodeHeartbeatEvent(
                 node_id=node_id,
                 node_type=node_type,
@@ -1424,6 +1426,7 @@ class MixinNodeIntrospection:
                 # is implemented. See MixinNodeIntrospection docstring note.
                 active_operations_count=0,
                 correlation_id=uuid4(),
+                timestamp=now,  # Required: time injection pattern
             )
 
             # Publish to event bus
@@ -1644,7 +1647,7 @@ class MixinNodeIntrospection:
                 if not hasattr(message, "value") or not message.value:
                     await self.publish_introspection(
                         reason="request",
-                        correlation_id=None,
+                        correlation_id=uuid4(),
                     )
                     self._registry_callback_consecutive_failures = 0
                     return

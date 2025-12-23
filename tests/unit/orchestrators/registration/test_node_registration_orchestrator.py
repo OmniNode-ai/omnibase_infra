@@ -20,7 +20,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -118,6 +118,7 @@ class TestOrchestratorEmitsEventsOnlyNoIO:
             node_id=node_id,
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
         envelope = create_mock_envelope(introspection_event)
 
@@ -197,6 +198,7 @@ class TestOrchestratorEmitsEventsOnlyNoIO:
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
         envelope = create_mock_envelope(ack_command)
 
@@ -219,10 +221,10 @@ class TestOrchestratorUsesInjectedNow:
     @pytest.mark.asyncio
     async def test_orchestrator_uses_injected_now_not_system_clock(self) -> None:
         """Given orchestrator with mocked projection reader,
-        And injected `now = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)`,
+        And injected `now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)`,
         When processing RuntimeTick event,
         Then all timeout calculations use injected `now`,
-        And `datetime.now()` is never called (verify via mock.patch).
+        And `datetime.now()` is never called (verified via mock reader assertions).
         """
         # Arrange
         mock_reader = create_mock_projection_reader()
@@ -242,31 +244,28 @@ class TestOrchestratorUsesInjectedNow:
         )
         envelope = create_mock_envelope(tick)
 
-        # Act - Patch datetime.now to ensure it's never called
-        with patch("datetime.datetime") as mock_datetime:
-            # Preserve the real datetime class for type checking
-            mock_datetime.side_effect = lambda *args, **kwargs: datetime(
-                *args, **kwargs
-            )
+        # Act - The orchestrator should use injected `now`, not system clock.
+        # We verify this by asserting the mock reader receives the injected time.
+        # Note: Patching `datetime.datetime` directly is ineffective since modules
+        # import datetime at load time. The correct approach is to verify the
+        # injected `now` is passed through to all time-dependent operations.
+        events = await orchestrator.handle(
+            envelope=envelope,
+            now=TEST_NOW,
+            correlation_id=tick.correlation_id,
+        )
 
-            # The orchestrator should NOT call datetime.now()
-            events = await orchestrator.handle(
-                envelope=envelope,
-                now=TEST_NOW,
-                correlation_id=tick.correlation_id,
-            )
-
-            # Assert - deadline queries use injected now
-            mock_reader.get_overdue_ack_registrations.assert_called_once_with(
-                now=TEST_NOW,
-                domain="registration",
-                correlation_id=tick.correlation_id,
-            )
-            mock_reader.get_overdue_liveness_registrations.assert_called_once_with(
-                now=TEST_NOW,
-                domain="registration",
-                correlation_id=tick.correlation_id,
-            )
+        # Assert - deadline queries use injected now (proves time injection works)
+        mock_reader.get_overdue_ack_registrations.assert_called_once_with(
+            now=TEST_NOW,
+            domain="registration",
+            correlation_id=tick.correlation_id,
+        )
+        mock_reader.get_overdue_liveness_registrations.assert_called_once_with(
+            now=TEST_NOW,
+            domain="registration",
+            correlation_id=tick.correlation_id,
+        )
 
     @pytest.mark.asyncio
     async def test_ack_command_uses_injected_now_for_liveness_deadline(self) -> None:
@@ -287,6 +286,7 @@ class TestOrchestratorUsesInjectedNow:
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
         envelope = create_mock_envelope(ack_command)
 
@@ -321,6 +321,7 @@ class TestOrchestratorRoutesPayloads:
             node_id=uuid4(),
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
         envelope = create_mock_envelope(introspection_event)
 
@@ -377,6 +378,7 @@ class TestOrchestratorRoutesPayloads:
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
         envelope = create_mock_envelope(ack_command)
 
@@ -427,6 +429,7 @@ class TestOrchestratorCorrelationIdHandling:
             node_id=uuid4(),
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
         envelope = create_mock_envelope(introspection_event)
 
@@ -452,6 +455,7 @@ class TestOrchestratorCorrelationIdHandling:
             node_id=uuid4(),
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
         envelope = create_mock_envelope(introspection_event)
         envelope.correlation_id = envelope_corr_id
@@ -481,6 +485,7 @@ class TestOrchestratorConvenienceMethods:
             node_id=uuid4(),
             node_type="effect",
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
 
         events = await orchestrator.handle_introspection(
@@ -534,6 +539,7 @@ class TestOrchestratorConvenienceMethods:
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
             correlation_id=uuid4(),
+            timestamp=TEST_NOW,
         )
 
         events = await orchestrator.handle_registration_ack(

@@ -305,6 +305,7 @@ def sample_introspection_event(
         network_id="test-network",
         deployment_id="test-deployment",
         epoch=1,
+        timestamp=datetime.now(UTC),  # Required: time injection pattern
     )
 
 
@@ -388,6 +389,7 @@ def create_introspection_event(
         if endpoints is not None
         else {"health": "http://localhost:8080/health"},
         capabilities=ModelNodeCapabilities(postgres=True, read=True),
+        timestamp=datetime.now(UTC),  # Required: time injection pattern
     )
 
 
