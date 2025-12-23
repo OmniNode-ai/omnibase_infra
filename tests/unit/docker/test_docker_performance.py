@@ -29,9 +29,9 @@ class TestDockerfilePerformance:
 
         # Should have multiple FROM statements (multi-stage)
         from_statements = re.findall(r"^FROM\s+", content, re.MULTILINE)
-        assert (
-            len(from_statements) >= 2
-        ), "Should use multi-stage build (at least 2 FROM statements)"
+        assert len(from_statements) >= 2, (
+            "Should use multi-stage build (at least 2 FROM statements)"
+        )
 
         # Should have AS builder pattern
         assert "AS builder" in content or "as builder" in content
@@ -70,9 +70,9 @@ class TestDockerfilePerformance:
 
                 # Check that build-essential is not in runtime RUN commands
                 for cmd in runtime_run_commands:
-                    assert (
-                        "build-essential" not in cmd
-                    ), "Runtime stage should not install build-essential"
+                    assert "build-essential" not in cmd, (
+                        "Runtime stage should not install build-essential"
+                    )
 
 
 class TestDockerComposePerformance:
@@ -98,13 +98,13 @@ class TestDockerComposePerformance:
         for interval in interval_matches:
             interval_sec = int(interval)
             # Health checks should not be more frequent than every 10 seconds
-            assert (
-                interval_sec >= 10
-            ), f"Health check interval {interval_sec}s is too aggressive"
+            assert interval_sec >= 10, (
+                f"Health check interval {interval_sec}s is too aggressive"
+            )
             # But also not too infrequent (> 120s)
-            assert (
-                interval_sec <= 120
-            ), f"Health check interval {interval_sec}s is too long"
+            assert interval_sec <= 120, (
+                f"Health check interval {interval_sec}s is too long"
+            )
 
     def test_worker_replicas_reasonable(self) -> None:
         """Verify default worker replicas is reasonable."""
@@ -123,9 +123,9 @@ class TestDockerComposePerformance:
                     match = re.search(r"\$\{[^}]*:-(\d+)\}", replicas)
                     if match:
                         default_replicas = int(match.group(1))
-                        assert (
-                            1 <= default_replicas <= 10
-                        ), f"Default replicas {default_replicas} seems unusual"
+                        assert 1 <= default_replicas <= 10, (
+                            f"Default replicas {default_replicas} seems unusual"
+                        )
                 elif isinstance(replicas, int):
                     assert 1 <= replicas <= 10, f"Replicas {replicas} seems unusual"
 
@@ -212,13 +212,13 @@ class TestDockerHealthChecks:
             retries = int(healthcheck_match.group(4))
 
             # Validate parameters
-            assert (
-                10 <= interval <= 120
-            ), f"Interval {interval}s should be between 10-120s"
+            assert 10 <= interval <= 120, (
+                f"Interval {interval}s should be between 10-120s"
+            )
             assert 5 <= timeout <= 30, f"Timeout {timeout}s should be between 5-30s"
-            assert (
-                20 <= start_period <= 120
-            ), f"Start period {start_period}s should be between 20-120s"
+            assert 20 <= start_period <= 120, (
+                f"Start period {start_period}s should be between 20-120s"
+            )
             assert 1 <= retries <= 5, f"Retries {retries} should be between 1-5"
 
     def test_compose_healthcheck_matches_dockerfile(self) -> None:
@@ -266,9 +266,9 @@ class TestDockerSecurityBestPractices:
 
         if runtime_from:
             # Check that runtime uses slim variant
-            assert any(
-                "slim" in line or "alpine" in line for line in runtime_from
-            ), "Runtime should use slim or alpine base"
+            assert any("slim" in line or "alpine" in line for line in runtime_from), (
+                "Runtime should use slim or alpine base"
+            )
 
 
 class TestDockerBuildOptimization:
@@ -304,9 +304,9 @@ class TestDockerBuildOptimization:
                 )
 
                 if pyproject_index is not None and src_index is not None:
-                    assert (
-                        pyproject_index < src_index
-                    ), "pyproject.toml should be copied before src/ for better caching"
+                    assert pyproject_index < src_index, (
+                        "pyproject.toml should be copied before src/ for better caching"
+                    )
 
     def test_apt_cache_optimization(self) -> None:
         """Verify apt commands use cache mounts for faster builds."""
@@ -318,6 +318,6 @@ class TestDockerBuildOptimization:
 
         # At least one apt command should use cache mount
         if apt_commands:
-            assert any(
-                "--mount=type=cache" in cmd for cmd in apt_commands
-            ), "apt-get should use cache mounts"
+            assert any("--mount=type=cache" in cmd for cmd in apt_commands), (
+                "apt-get should use cache mounts"
+            )

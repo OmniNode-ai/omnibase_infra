@@ -109,6 +109,17 @@ from omnibase_infra.validation.chain_propagation_validator import (
     validate_message_chain,
 )
 
+# Contract linting for CI gate (PR #57)
+from omnibase_infra.validation.contract_linter import (
+    ContractLinter,
+    EnumContractViolationSeverity,
+    ModelContractLintResult,
+    ModelContractViolation,
+    lint_contract_file,
+    lint_contracts_ci,
+    lint_contracts_in_directory,
+)
+
 # AST-based execution shape validation for CI gate (OMN-958)
 # NOTE: EXECUTION_SHAPE_RULES is defined ONLY in execution_shape_validator.py
 # (the canonical single source of truth). This import re-exports it for public API
@@ -165,17 +176,6 @@ from omnibase_infra.validation.topic_category_validator import (
     validate_message_on_topic,
     validate_topic_categories_in_directory,
     validate_topic_categories_in_file,
-)
-
-# Contract linting for CI gate (PR #57)
-from omnibase_infra.validation.contract_linter import (
-    ContractLinter,
-    EnumContractViolationSeverity,
-    ModelContractLintResult,
-    ModelContractViolation,
-    lint_contract_file,
-    lint_contracts_ci,
-    lint_contracts_in_directory,
 )
 
 __all__ = [

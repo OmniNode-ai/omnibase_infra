@@ -168,14 +168,14 @@ class TestProtocolMessageDispatcher:
         # Verify required properties via duck typing
         required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
         for prop in required_props:
-            assert hasattr(
-                event_reducer_dispatcher, prop
-            ), f"Dispatcher must have '{prop}' property"
+            assert hasattr(event_reducer_dispatcher, prop), (
+                f"Dispatcher must have '{prop}' property"
+            )
 
         # Verify handle method exists and is callable
-        assert hasattr(
-            event_reducer_dispatcher, "handle"
-        ), "Dispatcher must have 'handle' method"
+        assert hasattr(event_reducer_dispatcher, "handle"), (
+            "Dispatcher must have 'handle' method"
+        )
         assert callable(event_reducer_dispatcher.handle), "'handle' must be callable"
 
     def test_duck_typing_rejects_non_dispatcher(self) -> None:
@@ -203,7 +203,9 @@ class TestProtocolMessageDispatcher:
             # Missing: category, message_types, node_kind, handle
 
         partial_dispatcher = PartialDispatcher()
-        has_all_props = all(hasattr(partial_dispatcher, prop) for prop in required_props)
+        has_all_props = all(
+            hasattr(partial_dispatcher, prop) for prop in required_props
+        )
         assert not has_all_props, "PartialDispatcher should not have all required props"
 
     def test_duck_typing_for_protocol_validation_pattern(
