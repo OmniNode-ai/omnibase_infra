@@ -54,9 +54,9 @@ class TestInfraValidatorConstants:
         Threshold: 555 (11 buffer above 544 baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
         """
-        assert INFRA_MAX_UNIONS == 555, (
-            "INFRA_MAX_UNIONS should be 555 (11 buffer above 544 baseline)"
-        )
+        assert (
+            INFRA_MAX_UNIONS == 555
+        ), "INFRA_MAX_UNIONS should be 555 (11 buffer above 544 baseline)"
 
     def test_infra_max_violations_constant(self) -> None:
         """Verify INFRA_MAX_VIOLATIONS constant has expected value."""

@@ -343,6 +343,53 @@ pattern_exemptions:
       table_name is a database configuration parameter specifying the PostgreSQL table name for storing idempotency records (default: "idempotency_records"). This is infrastructure configuration, not an entity reference.
 
     ticket: OMN-945
+  # ==========================================================================
+  # RegistryCompute Exemptions (OMN-811)
+  # ==========================================================================
+  # Central registry pattern for compute plugins follows same patterns as
+  # PolicyRegistry, MessageTypeRegistry, and DispatcherRegistry.
+  - file_pattern: 'registry_compute\.py'
+    class_pattern: "Class 'RegistryCompute'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Central registry pattern requires comprehensive plugin management: CRUD operations (register, unregister, get), query operations (list_keys, list_plugins, get_all), version resolution (get_latest_version, _parse_version), validation (protocol compliance, async detection), and container integration. This is an established domain registry pattern consistent with PolicyRegistry, MessageTypeRegistry.
+
+    ticket: OMN-811
+  - file_pattern: 'registry_compute\.py'
+    method_pattern: "Function 'register_plugin'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Plugin registration requires multiple parameters for complete registration: plugin_id, plugin_class, version, description, deterministic_async. This is a convenience method; the model-based register() method is the preferred API.
+
+    ticket: OMN-811
+  # ==========================================================================
+  # ComputeRegistryError Exemptions (OMN-811)
+  # ==========================================================================
+  # Error classes require multiple context parameters for comprehensive error reporting.
+  - file_pattern: 'error_compute_registry\.py'
+    method_pattern: "Function '__init__'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Error class requires multiple contextual parameters for debugging: message, plugin_id, version, registered_plugins, context, and **extra_context. These are distinct error context fields needed for comprehensive error reporting.
+
+    ticket: OMN-811
+  # ==========================================================================
+  # Compute Plugin ID Exemptions (OMN-811)
+  # ==========================================================================
+  # plugin_id is a semantic identifier (e.g., 'json_normalizer'), NOT a UUID.
+  # Follows same pattern as policy_id, dispatcher_id, scheduler_id.
+  - file_pattern: 'model_compute_key\.py'
+    violation_pattern: "Field 'plugin_id' should use UUID"
+    reason: >
+      plugin_id is a human-readable semantic identifier (e.g., 'json_normalizer'), not a UUID. This follows the same pattern as policy_id, dispatcher_id, and scheduler_id.
+
+    ticket: OMN-811
+  - file_pattern: 'model_compute_registration\.py'
+    violation_pattern: "Field 'plugin_id' should use UUID"
+    reason: >
+      plugin_id is a human-readable semantic identifier, consistent with ModelComputeKey. Follows the policy_id/dispatcher_id pattern.
+
+    ticket: OMN-811
 # Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:
