@@ -2068,7 +2068,7 @@ class TestHttpRestAdapterDeterministicIntegration:
         mock_response = create_mock_streaming_response(
             status_code=200,
             headers={"content-type": "application/json"},
-            body_bytes=b'{"timestamp": "2024-01-01T00:00:00Z"}',
+            body_bytes=b'{"timestamp": "2025-01-01T00:00:00Z"}',
         )
 
         with patch.object(handler._client, "stream") as mock_stream:

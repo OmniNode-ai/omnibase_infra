@@ -305,7 +305,7 @@ class TestPluginJsonNormalizer:
                     {"name": "Alice", "id": 2},
                     {"name": "Bob", "id": 1},
                 ],
-                "metadata": {"version": "1.0", "created": "2024-01-01"},
+                "metadata": {"version": "1.0", "created": "2025-01-01"},
             }
         }
         context = {"correlation_id": "test-123"}

@@ -50,7 +50,7 @@ from omnibase_infra.projectors.projection_reader_registration import (
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 
 # Fixed test time for deterministic testing
-TEST_NOW = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
+TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def create_mock_projection_reader() -> AsyncMock:

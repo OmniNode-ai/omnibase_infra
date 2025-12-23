@@ -125,12 +125,12 @@ class DeterministicClock:
 
         Args:
             start: The initial time for the clock. If None, defaults to
-                2024-01-01 00:00:00 UTC. The datetime should be timezone-aware
+                2025-01-01 00:00:00 UTC. The datetime should be timezone-aware
                 for consistency; naive datetimes are accepted but may cause
                 comparison issues with timezone-aware datetimes.
         """
         if start is None:
-            start = datetime(2024, 1, 1, tzinfo=UTC)
+            start = datetime(2025, 1, 1, tzinfo=UTC)
         self._now: datetime = start
 
     def now(self) -> datetime:
@@ -198,8 +198,8 @@ class DeterministicClock:
 
         Args:
             start: The time to reset to. If None, resets to the default
-                start time (2024-01-01 00:00:00 UTC).
+                start time (2025-01-01 00:00:00 UTC).
         """
         if start is None:
-            start = datetime(2024, 1, 1, tzinfo=UTC)
+            start = datetime(2025, 1, 1, tzinfo=UTC)
         self._now = start

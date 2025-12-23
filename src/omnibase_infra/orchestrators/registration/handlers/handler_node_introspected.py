@@ -198,6 +198,7 @@ class HandlerNodeIntrospected:
             node_id=node_id,
             correlation_id=correlation_id,
             causation_id=event.correlation_id,  # Link to triggering event
+            emitted_at=now,  # Use injected time for consistency
             registration_attempt_id=uuid4(),
         )
 

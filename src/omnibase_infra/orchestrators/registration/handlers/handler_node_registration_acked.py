@@ -270,6 +270,7 @@ class HandlerNodeRegistrationAcked:
             node_id=node_id,
             correlation_id=correlation_id,
             causation_id=command.command_id,
+            emitted_at=now,  # Use injected time for consistency
             liveness_deadline=liveness_deadline,
         )
 
@@ -279,6 +280,7 @@ class HandlerNodeRegistrationAcked:
             node_id=node_id,
             correlation_id=correlation_id,
             causation_id=command.command_id,
+            emitted_at=now,  # Use injected time for consistency
             capabilities=projection.capabilities,
         )
 

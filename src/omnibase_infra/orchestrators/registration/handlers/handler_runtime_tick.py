@@ -190,13 +190,20 @@ class HandlerRuntimeTick:
             if not projection.needs_ack_timeout_event(now):
                 continue
 
+            # Type narrowing: needs_ack_timeout_event() checks ack_deadline is not None,
+            # but the type checker doesn't know this. Explicit narrowing required.
+            ack_deadline = projection.ack_deadline
+            if ack_deadline is None:
+                # This shouldn't happen since needs_ack_timeout_event checks this
+                continue
+
             event = ModelNodeRegistrationAckTimedOut(
                 entity_id=projection.entity_id,
                 node_id=projection.entity_id,
                 correlation_id=correlation_id,
                 causation_id=tick.tick_id,  # Link to triggering tick
                 emitted_at=now,
-                deadline_at=projection.ack_deadline,  # type: ignore[arg-type]
+                deadline_at=ack_deadline,
             )
             events.append(event)
 
@@ -251,13 +258,14 @@ class HandlerRuntimeTick:
             if not projection.needs_liveness_timeout_event(now):
                 continue
 
-            # Compute last heartbeat time from projection
-            # The liveness_deadline was set based on last heartbeat + interval
-            # We can estimate the last heartbeat by subtracting a typical interval
-            # However, for accuracy, this should be stored in projection
-            last_heartbeat_at = (
-                projection.registered_at
-            )  # Fallback to registration time
+            # Determine last heartbeat time for the event.
+            # The projection stores liveness_deadline (expected next heartbeat) but not
+            # last_heartbeat_at directly. We use detection time (now) as the best
+            # approximation since:
+            # 1. registered_at could be very stale for long-running nodes
+            # 2. liveness_deadline is when we expected, not when we received
+            # 3. Detection time is the last moment we confirmed the node unreachable
+            last_heartbeat_at = now
 
             event = ModelNodeLivenessExpired(
                 entity_id=projection.entity_id,

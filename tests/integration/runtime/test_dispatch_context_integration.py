@@ -208,7 +208,7 @@ class DeterministicResultDispatcher(ContextCapturingDispatcher):
 @pytest.fixture
 def deterministic_clock() -> DeterministicClock:
     """Create a deterministic clock for predictable time testing."""
-    return DeterministicClock(start=datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC))
+    return DeterministicClock(start=datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC))
 
 
 @pytest.fixture

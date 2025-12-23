@@ -12,7 +12,7 @@ See Also:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,6 +43,7 @@ class ModelNodeBecameActive(BaseModel):
             Used for routing and service discovery decisions.
 
     Example:
+        >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
         >>> from omnibase_infra.models.registration import ModelNodeCapabilities
         >>> event = ModelNodeBecameActive(
@@ -50,6 +51,7 @@ class ModelNodeBecameActive(BaseModel):
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
+        ...     emitted_at=datetime.now(UTC),
         ...     capabilities=ModelNodeCapabilities(postgres=True, read=True),
         ... )
     """
@@ -82,7 +84,7 @@ class ModelNodeBecameActive(BaseModel):
 
     # Timestamps
     emitted_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        ...,
         description="Timestamp when the orchestrator emitted this event (UTC)",
     )
 

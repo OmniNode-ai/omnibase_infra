@@ -42,7 +42,7 @@ from omnibase_infra.projectors.projection_reader_registration import (
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 
 # Fixed test time for deterministic testing
-TEST_NOW = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
+TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def create_mock_projection_reader() -> AsyncMock:
@@ -431,7 +431,7 @@ class TestHandlerRuntimeTickInjectedNow:
 
         handler = HandlerRuntimeTick(mock_reader)
 
-        custom_now = datetime(2024, 6, 15, 10, 30, 0, tzinfo=UTC)
+        custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
         correlation_id = uuid4()
         tick = create_runtime_tick(now=custom_now)
 
@@ -457,7 +457,7 @@ class TestHandlerRuntimeTickInjectedNow:
 
         handler = HandlerRuntimeTick(mock_reader)
 
-        custom_now = datetime(2024, 6, 15, 10, 30, 0, tzinfo=UTC)
+        custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
         correlation_id = uuid4()
         tick = create_runtime_tick(now=custom_now)
 
@@ -479,7 +479,7 @@ class TestHandlerRuntimeTickInjectedNow:
         """Test that timeout events use injected now for emitted_at field."""
         mock_reader = create_mock_projection_reader()
 
-        custom_now = datetime(2024, 6, 15, 10, 30, 0, tzinfo=UTC)
+        custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
         node_id = uuid4()
         overdue_projection = create_projection(
             entity_id=node_id,

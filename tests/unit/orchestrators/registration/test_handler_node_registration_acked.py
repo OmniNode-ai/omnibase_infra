@@ -44,7 +44,7 @@ from omnibase_infra.projectors.projection_reader_registration import (
 )
 
 # Fixed test time for deterministic testing
-TEST_NOW = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
+TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 # Default liveness interval (same as handler default)
 DEFAULT_LIVENESS_INTERVAL_SECONDS = 60
@@ -356,7 +356,7 @@ class TestHandlerAckedLivenessDeadline:
         handler = HandlerNodeRegistrationAcked(mock_reader)
         ack_command = create_ack_command(node_id)
 
-        custom_now = datetime(2024, 6, 15, 10, 30, 0, tzinfo=UTC)
+        custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
 
         events = await handler.handle(
             command=ack_command,

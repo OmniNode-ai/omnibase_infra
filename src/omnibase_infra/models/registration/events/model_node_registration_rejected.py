@@ -12,7 +12,7 @@ See Also:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,12 +43,14 @@ class ModelNodeRegistrationRejected(BaseModel):
             Should be safe to expose to the node (no internal details).
 
     Example:
+        >>> from datetime import UTC, datetime
         >>> from uuid import uuid4
         >>> event = ModelNodeRegistrationRejected(
         ...     entity_id=uuid4(),
         ...     node_id=uuid4(),
         ...     correlation_id=uuid4(),
         ...     causation_id=uuid4(),
+        ...     emitted_at=datetime.now(UTC),
         ...     rejection_reason="Node version 0.9.0 is below minimum required 1.0.0",
         ... )
     """
@@ -81,7 +83,7 @@ class ModelNodeRegistrationRejected(BaseModel):
 
     # Timestamps
     emitted_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        ...,
         description="Timestamp when the orchestrator emitted this event (UTC)",
     )
 
