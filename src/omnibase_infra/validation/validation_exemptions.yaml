@@ -347,19 +347,6 @@ pattern_exemptions:
 # These handle complex union type violations
 union_exemptions:
   # ==========================================================================
-  # Central JSON Types Definition Exemption (OMN-951)
-  # ==========================================================================
-  # json_types.py is the canonical source for JSON-serializable type definitions.
-  # The JsonPrimitive union (str | int | float | bool | None) is intentional
-  # and represents the complete set of JSON primitive types per RFC 8259.
-  # All other modules should import from this file rather than redefining.
-  - file_pattern: 'json_types\.py'
-    violation_pattern: 'Union with 4\+ primitive types.*bool.*float.*int.*str'
-    reason: >
-      json_types.py is the canonical definition for JSON primitive types per RFC 8259. The 5-member union (str | int | float | bool | None) represents all JSON primitive types. This file exists specifically to centralize this definition and reduce duplicate unions elsewhere in the codebase.
-
-    ticket: OMN-951
-  # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption
   # ==========================================================================
   - file_pattern: 'model_node_capabilities\.py'
@@ -368,12 +355,3 @@ union_exemptions:
       The config field uses dict[str, int | str | bool | float] for nested configuration values. This is a standard JSON-like config pattern where values can be any primitive type. Creating a ModelConfigValue wrapper would add unnecessary complexity without real benefit for this infrastructure domain.
 
     ticket: null
-  # ==========================================================================
-  # JsonPrimitive Type Alias Exemption (OMN-983)
-  # ==========================================================================
-  - file_pattern: 'json_types\.py'
-    violation_pattern: 'Union with 4\+ primitive types.*bool.*float.*int.*str'
-    reason: >
-      JsonPrimitive is a fundamental type alias defining JSON primitive types (str | int | float | bool | None). This is the canonical definition for JSON primitives in the infrastructure layer. Cannot be reduced - represents JSON specification primitives.
-
-    ticket: OMN-983

@@ -54,7 +54,7 @@ def mock_consul_client() -> AsyncMock:
         AsyncMock implementing ProtocolConsulClient interface.
     """
     mock = AsyncMock()
-    mock.register_service = AsyncMock(return_value={"success": True})
+    mock.register_service = AsyncMock(return_value=ModelBackendResult(success=True))
     return mock
 
 
@@ -66,7 +66,7 @@ def mock_postgres_handler() -> AsyncMock:
         AsyncMock implementing ProtocolPostgresAdapter interface.
     """
     mock = AsyncMock()
-    mock.upsert = AsyncMock(return_value={"success": True})
+    mock.upsert = AsyncMock(return_value=ModelBackendResult(success=True))
     return mock
 
 
@@ -151,7 +151,9 @@ class TestEffectPartialFailure:
             - correlation_id is preserved in both results
         """
         # Arrange
-        mock_consul_client.register_service.return_value = {"success": True}
+        mock_consul_client.register_service.return_value = ModelBackendResult(
+            success=True
+        )
         mock_postgres_handler.upsert.side_effect = Exception("DB connection failed")
 
         # Act
@@ -199,7 +201,7 @@ class TestEffectPartialFailure:
         mock_consul_client.register_service.side_effect = Exception(
             "Consul service unavailable"
         )
-        mock_postgres_handler.upsert.return_value = {"success": True}
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
 
         # Act
         response = await registry_effect.register_node(sample_registry_request)
@@ -310,7 +312,9 @@ class TestEffectPartialFailure:
         )
 
         # Arrange - First attempt: Consul succeeds, PostgreSQL fails
-        mock_consul_client.register_service.return_value = {"success": True}
+        mock_consul_client.register_service.return_value = ModelBackendResult(
+            success=True
+        )
         mock_postgres_handler.upsert.side_effect = Exception("DB connection failed")
 
         # Act - First attempt
@@ -329,7 +333,7 @@ class TestEffectPartialFailure:
 
         # Arrange - Second attempt: PostgreSQL now succeeds
         mock_postgres_handler.upsert.side_effect = None
-        mock_postgres_handler.upsert.return_value = {"success": True}
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
 
         # Act - Second attempt (retry)
         response2 = await registry_effect.register_node(request)
@@ -372,14 +376,14 @@ class TestEffectPartialFailure:
         """
         # Arrange - Both backends fail with distinct errors
         # Note: "unavailable" is a safe pattern that passes through sanitization
-        mock_consul_client.register_service.return_value = {
-            "success": False,
-            "error": "Service unavailable",
-        }
-        mock_postgres_handler.upsert.return_value = {
-            "success": False,
-            "error": "Connection timeout",
-        }
+        mock_consul_client.register_service.return_value = ModelBackendResult(
+            success=False,
+            error="Service unavailable",
+        )
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(
+            success=False,
+            error="Connection timeout",
+        )
 
         # Act
         response = await registry_effect.register_node(sample_registry_request)
@@ -434,14 +438,14 @@ class TestEffectPartialFailure:
         # Arrange - Consul succeeds quickly
         async def quick_consul_success(
             *args: object, **kwargs: object
-        ) -> dict[str, bool]:
+        ) -> ModelBackendResult:
             await asyncio.sleep(0.01)  # 10ms
-            return {"success": True}
+            return ModelBackendResult(success=True)
 
         # Arrange - PostgreSQL times out (simulated with slower operation + failure)
         async def slow_postgres_timeout(
             *args: object, **kwargs: object
-        ) -> dict[str, bool | str]:
+        ) -> ModelBackendResult:
             await asyncio.sleep(0.1)  # 100ms
             raise TimeoutError("PostgreSQL operation timed out")
 
@@ -492,8 +496,10 @@ class TestPartialFailureEdgeCases:
         This is the baseline test to ensure normal operation works.
         """
         # Arrange
-        mock_consul_client.register_service.return_value = {"success": True}
-        mock_postgres_handler.upsert.return_value = {"success": True}
+        mock_consul_client.register_service.return_value = ModelBackendResult(
+            success=True
+        )
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
 
         # Act
         response = await registry_effect.register_node(sample_registry_request)
@@ -524,8 +530,10 @@ class TestPartialFailureEdgeCases:
         )
 
         # First registration - both succeed
-        mock_consul_client.register_service.return_value = {"success": True}
-        mock_postgres_handler.upsert.return_value = {"success": True}
+        mock_consul_client.register_service.return_value = ModelBackendResult(
+            success=True
+        )
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
 
         response1 = await registry_effect.register_node(request)
         assert response1.status == "success"
@@ -549,7 +557,9 @@ class TestPartialFailureEdgeCases:
     ) -> None:
         """Test ModelRegistryResponse helper methods work correctly."""
         # Arrange - Partial failure
-        mock_consul_client.register_service.return_value = {"success": True}
+        mock_consul_client.register_service.return_value = ModelBackendResult(
+            success=True
+        )
         mock_postgres_handler.upsert.side_effect = Exception("DB error")
 
         # Act
@@ -572,8 +582,10 @@ class TestPartialFailureEdgeCases:
     ) -> None:
         """Test that skip_consul and skip_postgres flags work correctly."""
         # Arrange
-        mock_consul_client.register_service.return_value = {"success": True}
-        mock_postgres_handler.upsert.return_value = {"success": True}
+        mock_consul_client.register_service.return_value = ModelBackendResult(
+            success=True
+        )
+        mock_postgres_handler.upsert.return_value = ModelBackendResult(success=True)
 
         # Act - Skip Consul
         response = await registry_effect.register_node(
