@@ -6,6 +6,8 @@ This module exports Pydantic models for runtime configuration and events.
 All models are strongly typed to eliminate Any usage.
 
 Exports:
+    ModelComputeKey: Strongly-typed compute registry key model
+    ModelComputeRegistration: Compute plugin registration parameters model
     ModelEventBusConfig: Event bus configuration model
     ModelEnabledProtocolsConfig: Enabled protocols configuration model
     ModelProtocolRegistrationConfig: Individual protocol registration config model
@@ -24,6 +26,10 @@ Exports:
     ModelDuplicateResponse: Response for duplicate message detection
 """
 
+from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
+from omnibase_infra.runtime.models.model_compute_registration import (
+    ModelComputeRegistration,
+)
 from omnibase_infra.runtime.models.model_duplicate_response import (
     ModelDuplicateResponse,
 )
@@ -56,6 +62,8 @@ from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.runtime.models.model_shutdown_config import ModelShutdownConfig
 
 __all__: list[str] = [
+    "ModelComputeKey",
+    "ModelComputeRegistration",
     "ModelDuplicateResponse",
     "ModelEventBusConfig",
     "ModelEnabledProtocolsConfig",
