@@ -476,13 +476,7 @@ class TestBehavioralPurityGates:
             _result = reducer.reduce(state, event)
 
             # Assert no network calls were made
-            (
-                mock_socket.assert_not_called(),
-                (
-                    "Reducer made network call during reduce(). "
-                    "Reducers must be pure - no I/O allowed."
-                ),
-            )
+            mock_socket.assert_not_called()
 
     def test_reducer_no_file_access(self) -> None:
         """Reducer must not access filesystem during reduce().
