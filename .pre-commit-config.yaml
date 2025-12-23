@@ -122,6 +122,16 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
+      # Reducer purity enforcement (OMN-914)
+      # Ensures reducers remain pure functions with no I/O dependencies
+      - id: reducer-purity-check
+        name: Reducer Purity Enforcement
+        entry: poetry run pytest tests/unit/nodes/reducers/test_reducer_purity.py -v --tb=short
+        language: system
+        types: [python]
+        files: ^src/omnibase_infra/nodes/reducers/
+        pass_filenames: false
+        stages: [pre-commit]
 # Configuration
 default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
