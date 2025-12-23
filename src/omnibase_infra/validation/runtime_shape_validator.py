@@ -165,7 +165,6 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
-from omnibase_infra.enums.types import MessageOutputType
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
 )
@@ -201,7 +200,7 @@ F = TypeVar("F", bound=Callable[..., object])
 # These implicit violations use FORBIDDEN_RETURN_TYPE as the fallback, which is
 # semantically correct: the handler is returning a type that's not in its allow-list.
 _VIOLATION_TYPE_MAP: dict[
-    tuple[EnumHandlerType, MessageOutputType],
+    tuple[EnumHandlerType, EnumMessageCategory | EnumNodeOutputType],
     EnumExecutionShapeViolation,
 ] = {
     (
@@ -304,7 +303,7 @@ _MESSAGE_CATEGORY_TO_NODE_OUTPUT: dict[EnumMessageCategory, EnumNodeOutputType] 
 
 
 def _to_node_output_type(
-    category: MessageOutputType,
+    category: EnumMessageCategory | EnumNodeOutputType,
 ) -> EnumNodeOutputType:
     """Convert a message category or node output type to EnumNodeOutputType.
 
@@ -344,7 +343,7 @@ def _to_node_output_type(
 
 def detect_message_category(
     message: object,
-) -> MessageOutputType | None:
+) -> EnumMessageCategory | EnumNodeOutputType | None:
     """Detect message category or node output type from object type or attributes.
 
     This function attempts to determine the message category or node output type
@@ -401,7 +400,7 @@ def detect_message_category(
 
     # Check for common naming patterns
     # Note: PROJECTION returns EnumNodeOutputType since it's a node output type
-    name_patterns: list[tuple[str, MessageOutputType]] = [
+    name_patterns: list[tuple[str, EnumMessageCategory | EnumNodeOutputType]] = [
         ("Event", EnumMessageCategory.EVENT),
         ("Command", EnumMessageCategory.COMMAND),
         ("Intent", EnumMessageCategory.INTENT),
@@ -528,7 +527,7 @@ class RuntimeShapeValidator:
     def is_output_allowed(
         self,
         handler_type: EnumHandlerType,
-        output_category: MessageOutputType,
+        output_category: EnumMessageCategory | EnumNodeOutputType,
     ) -> bool:
         """Check if an output category is allowed for a handler type.
 
@@ -582,7 +581,7 @@ class RuntimeShapeValidator:
         self,
         handler_type: EnumHandlerType,
         output: object,
-        output_category: MessageOutputType,
+        output_category: EnumMessageCategory | EnumNodeOutputType,
         file_path: str = "<runtime>",
         line_number: int = 0,
     ) -> ModelExecutionShapeViolationResult | None:
@@ -684,7 +683,7 @@ class RuntimeShapeValidator:
         self,
         handler_type: EnumHandlerType,
         output: object,
-        output_category: MessageOutputType,
+        output_category: EnumMessageCategory | EnumNodeOutputType,
         file_path: str = "<runtime>",
         line_number: int = 0,
         correlation_id: UUID | None = None,
