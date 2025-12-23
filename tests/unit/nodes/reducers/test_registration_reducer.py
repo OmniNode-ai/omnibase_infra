@@ -5114,6 +5114,7 @@ class TestBoundaryConditions:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=max_uuid,  # Also test max correlation_id
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5162,6 +5163,7 @@ class TestBoundaryConditions:
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=min_uuid,  # Also test min correlation_id
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5222,6 +5224,7 @@ class TestBoundaryConditions:
             node_version="0.0.0",  # Minimal valid version
             endpoints={"health": "http://localhost:8080/health"},
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5272,6 +5275,7 @@ class TestBoundaryConditions:
                 "api": very_long_url,
             },
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5325,6 +5329,7 @@ class TestBoundaryConditions:
             endpoints={"health": "http://localhost:8080/health"},
             metadata=special_metadata,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5446,6 +5451,7 @@ class TestBoundaryConditions:
             capabilities=full_capabilities,
             metadata=extensive_metadata,
             correlation_id=uuid4(),
+            timestamp=TEST_TIMESTAMP,
         )
 
         output = reducer.reduce(initial_state, event)
@@ -5507,6 +5513,7 @@ class TestBoundaryConditions:
                 node_version="1.0.0",
                 endpoints={"health": "http://localhost:8080/health"},
                 correlation_id=uuid4(),
+                timestamp=TEST_TIMESTAMP,
             )
 
             output = reducer.reduce(initial_state, event)
