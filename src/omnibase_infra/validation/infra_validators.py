@@ -587,6 +587,9 @@ def _create_filtered_result(
     Avoids mutating the original result object for better functional programming practices.
     Creates new metadata using model_validate to prevent mutation of Pydantic models.
 
+    Guards against missing attributes on base_result to handle edge cases where
+    validation results may have incomplete or missing fields.
+
     Args:
         base_result: Original validation result.
         filtered_errors: Filtered error list.
@@ -594,8 +597,12 @@ def _create_filtered_result(
     Returns:
         New ValidationResult with filtered errors and updated metadata.
     """
+    # Guard against missing errors attribute on base_result
+    base_errors = getattr(base_result, "errors", None)
+    base_errors_count = len(base_errors) if base_errors is not None else 0
+
     # Calculate filtering statistics
-    violations_filtered = len(base_result.errors) - len(filtered_errors)
+    violations_filtered = base_errors_count - len(filtered_errors)
     all_violations_exempted = violations_filtered > 0 and len(filtered_errors) == 0
 
     # Create new metadata if present (avoid mutation)
@@ -620,16 +627,26 @@ def _create_filtered_result(
             # Use original metadata without modification to avoid mutation
             new_metadata = base_metadata
 
+    # Guard against missing attributes on base_result
+    # Use getattr with sensible defaults to handle incomplete validation results
+    base_is_valid = getattr(base_result, "is_valid", False)
+    base_validated_value = getattr(base_result, "validated_value", None)
+    base_issues = getattr(base_result, "issues", [])
+    base_warnings = getattr(base_result, "warnings", [])
+    base_suggestions = getattr(base_result, "suggestions", [])
+    base_summary = getattr(base_result, "summary", None)
+    base_details = getattr(base_result, "details", None)
+
     # Create new result (wrapper pattern - no mutation)
     return ModelValidationResult(
-        is_valid=all_violations_exempted or base_result.is_valid,
-        validated_value=base_result.validated_value,
-        issues=base_result.issues,
+        is_valid=all_violations_exempted or base_is_valid,
+        validated_value=base_validated_value,
+        issues=base_issues if base_issues is not None else [],
         errors=filtered_errors,
-        warnings=base_result.warnings,
-        suggestions=base_result.suggestions,
-        summary=base_result.summary,
-        details=base_result.details,
+        warnings=base_warnings if base_warnings is not None else [],
+        suggestions=base_suggestions if base_suggestions is not None else [],
+        summary=base_summary,
+        details=base_details,
         metadata=new_metadata,
     )
 

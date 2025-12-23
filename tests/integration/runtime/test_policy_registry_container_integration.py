@@ -62,21 +62,25 @@ class TestPolicyRegistryContainerIntegration:
 
         # Verify it implements PolicyRegistry interface via duck typing
         # Per ONEX conventions, check for required methods rather than isinstance
+        # Collection-like protocols must include __len__ for complete duck typing
         required_methods = [
             "register",
             "register_policy",
             "get",
             "list_keys",
             "is_registered",
+            "__len__",
         ]
         for method_name in required_methods:
             assert hasattr(registry, method_name), (
                 f"Policy registry must have '{method_name}' method"
             )
-            assert callable(getattr(registry, method_name)), (
-                f"'{method_name}' must be callable"
-            )
-        assert len(registry) == 0  # Empty initially
+            # __len__ is callable but verified separately via len() below
+            if method_name != "__len__":
+                assert callable(getattr(registry, method_name)), (
+                    f"'{method_name}' must be callable"
+                )
+        assert len(registry) == 0  # Empty initially (also verifies __len__ works)
 
     @pytest.mark.asyncio
     async def test_policy_registration_through_container(self) -> None:
@@ -227,20 +231,24 @@ class TestPolicyRegistryContainerIntegration:
 
         # Verify it implements PolicyRegistry interface via duck typing
         # Per ONEX conventions, check for required methods rather than isinstance
+        # Collection-like protocols must include __len__ for complete duck typing
         required_methods = [
             "register",
             "register_policy",
             "get",
             "list_keys",
             "is_registered",
+            "__len__",
         ]
         for method_name in required_methods:
             assert hasattr(registry1, method_name), (
                 f"Policy registry must have '{method_name}' method"
             )
-            assert callable(getattr(registry1, method_name)), (
-                f"'{method_name}' must be callable"
-            )
+            # __len__ is callable but verified separately via len() usage
+            if method_name != "__len__":
+                assert callable(getattr(registry1, method_name)), (
+                    f"'{method_name}' must be callable"
+                )
 
         # Second call should return same instance
         registry2 = await get_or_create_policy_registry(container)
@@ -286,17 +294,26 @@ class TestPolicyRegistryContainerIntegration:
 
         # Verify it implements ProtocolBindingRegistry interface via duck typing
         # Per ONEX conventions, check for required methods rather than isinstance
-        required_methods = ["register", "get", "list_protocols", "is_registered"]
+        # Collection-like protocols must include __len__ for complete duck typing
+        required_methods = [
+            "register",
+            "get",
+            "list_protocols",
+            "is_registered",
+            "__len__",
+        ]
         for method_name in required_methods:
             assert hasattr(handler_registry, method_name), (
                 f"Handler registry must have '{method_name}' method"
             )
-            assert callable(getattr(handler_registry, method_name)), (
-                f"'{method_name}' must be callable"
-            )
+            # __len__ is callable but verified separately via len() below
+            if method_name != "__len__":
+                assert callable(getattr(handler_registry, method_name)), (
+                    f"'{method_name}' must be callable"
+                )
 
         # Verify basic operations work
-        assert len(handler_registry) == 0  # Empty initially
+        assert len(handler_registry) == 0  # Empty initially (also verifies __len__ works)
         assert handler_registry.list_protocols() == []
 
     @pytest.mark.asyncio
@@ -461,20 +478,24 @@ class TestContainerWithRegistriesFixture:
 
         # Verify it implements PolicyRegistry interface via duck typing
         # Per ONEX conventions, check for required methods rather than isinstance
+        # Collection-like protocols must include __len__ for complete duck typing
         required_methods = [
             "register",
             "register_policy",
             "get",
             "list_keys",
             "is_registered",
+            "__len__",
         ]
         for method_name in required_methods:
             assert hasattr(policy_registry, method_name), (
                 f"Policy registry must have '{method_name}' method"
             )
-            assert callable(getattr(policy_registry, method_name)), (
-                f"'{method_name}' must be callable"
-            )
+            # __len__ is callable but verified separately via len() usage
+            if method_name != "__len__":
+                assert callable(getattr(policy_registry, method_name)), (
+                    f"'{method_name}' must be callable"
+                )
 
         # Resolve ProtocolBindingRegistry
         handler_registry = (

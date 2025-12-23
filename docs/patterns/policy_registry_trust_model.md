@@ -121,7 +121,7 @@ class ImpurePolicy:
         external_score = requests.get(f"https://api.example.com/score/{context['id']}").json()
 
         # BAD: File I/O
-        with open("/var/log/policy.log", "a") as f:
+        with open("/var/log/policy.log", "a", encoding="utf-8") as f:
             f.write(f"Evaluated at {datetime.now()}\n")
 
         # BAD: Side effect (state mutation)

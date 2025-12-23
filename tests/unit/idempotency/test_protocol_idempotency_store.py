@@ -196,17 +196,33 @@ class TestProtocolConformance:
     def test_inmemory_conforms_to_protocol(self) -> None:
         """InMemoryIdempotencyStore should conform to ProtocolIdempotencyStore.
 
-        Verifies that isinstance() check passes for InMemoryIdempotencyStore,
-        which requires the class to implement all protocol methods with
-        compatible signatures.
+        Per ONEX conventions, protocol conformance is verified via duck typing
+        by checking for required method presence and callability, rather than
+        using isinstance checks with Protocol types.
         """
         store = InMemoryIdempotencyStore()
-        assert isinstance(store, ProtocolIdempotencyStore)
+        # Duck typing verification - check all protocol methods exist and are callable
+        required_methods = [
+            "check_and_record",
+            "is_processed",
+            "mark_processed",
+            "cleanup_expired",
+        ]
+        for method_name in required_methods:
+            assert hasattr(store, method_name), f"Missing method: {method_name}"
+            method = getattr(store, method_name)
+            assert callable(method), f"Method {method_name} is not callable"
+            assert inspect.iscoroutinefunction(method), (
+                f"Method {method_name} should be async"
+            )
 
     def test_postgres_conforms_to_protocol(self) -> None:
         """PostgresIdempotencyStore should conform to ProtocolIdempotencyStore.
 
-        Verifies that isinstance() check passes for PostgresIdempotencyStore.
+        Per ONEX conventions, protocol conformance is verified via duck typing
+        by checking for required method presence and callability, rather than
+        using isinstance checks with Protocol types.
+
         Note: This test uses a mock configuration since we're only testing
         protocol conformance, not actual database connectivity.
         """
@@ -216,7 +232,20 @@ class TestProtocolConformance:
             dsn="postgresql://user:pass@localhost:5432/testdb",
         )
         store = PostgresIdempotencyStore(config)
-        assert isinstance(store, ProtocolIdempotencyStore)
+        # Duck typing verification - check all protocol methods exist and are callable
+        required_methods = [
+            "check_and_record",
+            "is_processed",
+            "mark_processed",
+            "cleanup_expired",
+        ]
+        for method_name in required_methods:
+            assert hasattr(store, method_name), f"Missing method: {method_name}"
+            method = getattr(store, method_name)
+            assert callable(method), f"Method {method_name} is not callable"
+            assert inspect.iscoroutinefunction(method), (
+                f"Method {method_name} should be async"
+            )
 
     def test_inmemory_has_all_protocol_methods(self) -> None:
         """InMemoryIdempotencyStore should implement all protocol methods.
@@ -370,26 +399,41 @@ class TestProtocolTypeAnnotations:
 
 
 class TestNonConformingImplementation:
-    """Tests for classes that should NOT conform to the protocol."""
+    """Tests for classes that should NOT conform to the protocol.
+
+    Per ONEX conventions, protocol conformance is verified via duck typing
+    by checking for required method presence and callability, rather than
+    using isinstance checks with Protocol types.
+    """
 
     def test_empty_class_does_not_conform(self) -> None:
-        """An empty class should not pass isinstance check.
+        """An empty class should not pass duck typing conformance check.
 
-        Verifies that the protocol properly rejects classes that don't
-        implement the required methods.
+        Verifies via duck typing that classes without required methods
+        do not conform to the protocol.
         """
 
         class EmptyStore:
             pass
 
         store = EmptyStore()
-        assert not isinstance(store, ProtocolIdempotencyStore)
+        # Duck typing verification - empty class lacks all required methods
+        required_methods = [
+            "check_and_record",
+            "is_processed",
+            "mark_processed",
+            "cleanup_expired",
+        ]
+        missing_methods = [m for m in required_methods if not hasattr(store, m)]
+        assert len(missing_methods) == 4, (
+            f"Empty class should be missing all methods, but only missing: {missing_methods}"
+        )
 
     def test_partial_implementation_does_not_conform(self) -> None:
         """A class with only some methods should not conform.
 
-        Verifies that partial implementations are rejected by the
-        protocol's isinstance check.
+        Verifies via duck typing that partial implementations are detected
+        as non-conforming to the protocol.
         """
 
         class PartialStore:
@@ -404,13 +448,27 @@ class TestNonConformingImplementation:
             # Missing: is_processed, mark_processed, cleanup_expired
 
         store = PartialStore()
-        assert not isinstance(store, ProtocolIdempotencyStore)
+        # Duck typing verification - partial class is missing some methods
+        required_methods = [
+            "check_and_record",
+            "is_processed",
+            "mark_processed",
+            "cleanup_expired",
+        ]
+        missing_methods = [m for m in required_methods if not hasattr(store, m)]
+        assert len(missing_methods) == 3, (
+            f"Partial class should be missing 3 methods: {missing_methods}"
+        )
+        assert "is_processed" in missing_methods
+        assert "mark_processed" in missing_methods
+        assert "cleanup_expired" in missing_methods
 
     def test_sync_methods_do_not_conform(self) -> None:
         """A class with sync (non-async) methods should not conform.
 
         The protocol requires async methods, so sync implementations
-        should not pass the isinstance check.
+        should be detected as non-conforming via duck typing checks
+        that verify methods are coroutine functions.
         """
 
         class SyncStore:
@@ -445,9 +503,23 @@ class TestNonConformingImplementation:
                 return 0
 
         store = SyncStore()
-        # Note: runtime_checkable only checks method existence, not signatures.
-        # This is a known limitation of typing.Protocol.
-        # The sync implementation will pass isinstance() but fail at runtime.
-        # This test documents the expected behavior rather than a strict check.
-        # In practice, type checkers like mypy will catch this.
-        assert isinstance(store, ProtocolIdempotencyStore)
+        # Duck typing verification - all methods exist but are not async
+        required_methods = [
+            "check_and_record",
+            "is_processed",
+            "mark_processed",
+            "cleanup_expired",
+        ]
+        # Verify all methods exist
+        for method_name in required_methods:
+            assert hasattr(store, method_name), f"Should have {method_name}"
+            assert callable(getattr(store, method_name)), f"{method_name} should be callable"
+
+        # Verify none of the methods are async (this is the non-conformance)
+        non_async_methods = [
+            m for m in required_methods
+            if not inspect.iscoroutinefunction(getattr(store, m))
+        ]
+        assert len(non_async_methods) == 4, (
+            "All methods should be sync (non-async), failing conformance check"
+        )
