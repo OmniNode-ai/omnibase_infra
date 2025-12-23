@@ -82,7 +82,7 @@ class ModelNodeRegistrationAckTimedOut(BaseModel):
         description="UUID of the RuntimeTick that triggered this timeout event",
     )
 
-    # Timing
+    # Timing - MUST be explicitly injected (no default_factory for testability)
     emitted_at: datetime = Field(
         ...,
         description="When the timeout was detected (from RuntimeTick.now)",

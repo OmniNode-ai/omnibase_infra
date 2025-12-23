@@ -366,9 +366,13 @@ class InMemoryEventBus:
         # Note: envelope is expected to have a model_dump() method (Pydantic)
         envelope_dict: object
         if hasattr(envelope, "model_dump"):
-            envelope_dict = envelope.model_dump(mode="json")  # type: ignore[union-attr]
+            # Use getattr for type-safe method access after hasattr check
+            model_dump_method = envelope.model_dump
+            envelope_dict = model_dump_method(mode="json")
         elif hasattr(envelope, "dict"):
-            envelope_dict = envelope.dict()  # type: ignore[union-attr]
+            # Use getattr for type-safe method access after hasattr check
+            dict_method = envelope.dict
+            envelope_dict = dict_method()
         elif isinstance(envelope, dict):
             envelope_dict = envelope
         else:

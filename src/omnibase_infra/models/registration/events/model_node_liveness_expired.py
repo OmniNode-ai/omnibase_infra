@@ -82,7 +82,7 @@ class ModelNodeLivenessExpired(BaseModel):
         description="UUID of the RuntimeTick that triggered this liveness expired event",
     )
 
-    # Timing
+    # Timing - MUST be explicitly injected (no default_factory for testability)
     emitted_at: datetime = Field(
         ...,
         description="When the liveness expiry was detected (from RuntimeTick.now)",

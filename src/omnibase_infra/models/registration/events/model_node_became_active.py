@@ -82,7 +82,7 @@ class ModelNodeBecameActive(BaseModel):
         description="Message ID of the event that triggered activation",
     )
 
-    # Timestamps
+    # Timestamps - MUST be explicitly injected (no default_factory for testability)
     emitted_at: datetime = Field(
         ...,
         description="Timestamp when the orchestrator emitted this event (UTC)",

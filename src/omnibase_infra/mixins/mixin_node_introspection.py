@@ -1097,7 +1097,7 @@ class MixinNodeIntrospection:
 
         # Check for get_state method
         if hasattr(self, "get_state"):
-            method = self.get_state  # type: ignore[attr-defined]
+            method = self.get_state
             if callable(method):
                 try:
                     result = method()
@@ -1330,8 +1330,11 @@ class MixinNodeIntrospection:
             )
 
             # Publish to event bus
-            if hasattr(self._introspection_event_bus, "publish_envelope"):
-                await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
+            # Type narrowing: we've already checked _introspection_event_bus is not None above
+            event_bus = self._introspection_event_bus
+            assert event_bus is not None  # Redundant but helps mypy
+            if hasattr(event_bus, "publish_envelope"):
+                await event_bus.publish_envelope(
                     envelope=publish_event,
                     topic=INTROSPECTION_TOPIC,
                 )
@@ -1339,7 +1342,7 @@ class MixinNodeIntrospection:
                 # Fallback to publish method with raw bytes
                 event_data = publish_event.model_dump(mode="json")
                 value = json.dumps(event_data).encode("utf-8")
-                await self._introspection_event_bus.publish(
+                await event_bus.publish(
                     topic=INTROSPECTION_TOPIC,
                     key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id
@@ -1431,14 +1434,17 @@ class MixinNodeIntrospection:
             )
 
             # Publish to event bus
-            if hasattr(self._introspection_event_bus, "publish_envelope"):
-                await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
+            # Type narrowing: we've already checked _introspection_event_bus is not None above
+            event_bus = self._introspection_event_bus
+            assert event_bus is not None  # Redundant but helps mypy
+            if hasattr(event_bus, "publish_envelope"):
+                await event_bus.publish_envelope(
                     envelope=heartbeat,
                     topic=HEARTBEAT_TOPIC,
                 )
             else:
                 value = json.dumps(heartbeat.model_dump(mode="json")).encode("utf-8")
-                await self._introspection_event_bus.publish(
+                await event_bus.publish(
                     topic=HEARTBEAT_TOPIC,
                     key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id

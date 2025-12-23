@@ -408,14 +408,14 @@ class TestContextPropagation:
                 return {"correlation_id": context.get("correlation_id")}
 
         plugin = ContextTrackingPlugin()
-        test_context = {"correlation_id": "test-789", "timestamp": "2024-01-01"}
+        test_context = {"correlation_id": "test-789", "timestamp": "2025-01-01"}
 
         # Act
         result = plugin.execute({}, test_context)
 
         # Assert: Context was received
         assert context_received["correlation_id"] == "test-789"
-        assert context_received["timestamp"] == "2024-01-01"
+        assert context_received["timestamp"] == "2025-01-01"
         assert result["correlation_id"] == "test-789"
 
     def test_context_available_in_validation_hooks(self) -> None:
