@@ -21,6 +21,16 @@ output_model:
   description: "Output containing dual registration outcome and workflow status."
 
 # OMN-973: Time injection context for timeout evaluation
+# FUTURE(OMN-973): Time injection wiring from contract to orchestrator workflow.
+# The infrastructure components (DispatchContextEnforcer, ModelDispatchContext) are
+# implemented and enforce time injection rules at dispatch time. However, this
+# contract-level declaration is not yet wired into the orchestrator's workflow
+# execution. To complete:
+#   1. Parse time_injection from contract at orchestrator initialization
+#   2. Configure workflow steps to receive injected `now` from dispatch context
+#   3. Wire RuntimeTick events to trigger timeout evaluation with injected time
+# Currently, time injection is handled implicitly by DispatchContextEnforcer when
+# dispatching to orchestrators (always receives `now`), not explicitly from contract.
 time_injection:
   enabled: true
   source: "RuntimeTick"
@@ -28,6 +38,17 @@ time_injection:
   description: "Use injected timestamp from RuntimeTick for timeout evaluation"
 
 # OMN-930: Projection reader integration for state decisions
+# FUTURE(OMN-930): Projection reader dependency injection and wiring.
+# The ProjectionReaderRegistration implementation exists and provides full
+# read access to registration projections. However, this contract declaration
+# is not yet fully wired:
+#   1. ProtocolProjectionReader does not yet exist in omnibase_spi.protocols
+#      (need to define the SPI protocol for projection reading)
+#   2. Orchestrator does not inject/resolve projection_reader as a dependency
+#   3. Workflow execution graph step "read_projection" references this but
+#      has no implementation in the orchestrator to invoke it
+# The concrete implementation (ProjectionReaderRegistration) is complete and
+# ready for use once the protocol is defined and dependency injection is wired.
 projection_reader:
   protocol: "ProtocolProjectionReader"
   module: "omnibase_spi.protocols"
@@ -70,6 +91,9 @@ workflow_coordination:
           step_config:
             event_pattern: ["node.introspection.*", "runtime-tick.*"]
 
+        # FUTURE(OMN-930): This step is declared but not yet executed.
+        # Requires ProtocolProjectionReader protocol in omnibase_spi and
+        # orchestrator wiring to invoke ProjectionReaderRegistration.
         - node_id: "read_projection"
           node_type: effect
           description: "Read current registration state from projection"
@@ -79,6 +103,9 @@ workflow_coordination:
             operation: "read_projection"
             projection_name: "node_registration_state"
 
+        # FUTURE(OMN-973): This step is declared but not yet executed.
+        # Requires orchestrator to receive injected `now` from dispatch context
+        # and pass it to a compute node for timeout evaluation logic.
         - node_id: "evaluate_timeout"
           node_type: compute
           description: "Evaluate timeout based on injected now from RuntimeTick"
@@ -129,11 +156,22 @@ workflow_coordination:
     # This section contains ALL coordination settings for the workflow.
     # Settings are grouped by concern: execution mode, failure handling,
     # timeouts, checkpointing, and rollback.
+    #
+    # Parallel Execution Design:
+    # The workflow uses parallel mode to execute Consul and Postgres registrations
+    # concurrently. Both depend only on compute_intents, so they run in the same
+    # wave. Error handling ensures one failure doesn't block the other's cleanup.
+    # See: omnibase_core.utils.workflow_executor._execute_parallel for wave-based
+    # parallel execution with proper error aggregation.
     coordination_rules:
       # Execution mode configuration
-      execution_mode: sequential
-      parallel_execution_allowed: false
-      max_parallel_branches: 1
+      # PARALLEL: Steps with same dependencies run concurrently (wave-based)
+      # - execute_consul_registration and execute_postgres_registration run in parallel
+      # - Both depend only on compute_intents, so they form a single wave
+      # - Reduces latency for successful registrations
+      execution_mode: parallel
+      parallel_execution_allowed: true
+      max_parallel_branches: 2
 
       # ┌─────────────────────────────────────────────────────────────────────┐
       # │ WORKFLOW STEP RETRIES (coordination_rules.max_retries)              │
@@ -214,6 +252,8 @@ dependencies:
     type: "node"
     module: "omnibase_infra.nodes.node_registry_effect"
     description: "Effect node for executing intents."
+  # FUTURE(OMN-930): This dependency is declared but protocol does not exist yet.
+  # ProtocolProjectionReader needs to be defined in omnibase_spi.protocols.
   - name: "projection_reader"
     type: "protocol"
     module: "omnibase_spi.protocols"
