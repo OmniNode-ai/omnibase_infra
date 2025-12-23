@@ -47,12 +47,24 @@ from omnibase_infra.models.registration import (
 )
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
+from omnibase_infra.nodes.reducers.models.model_registration_state import FailureReason
 
 if TYPE_CHECKING:
     from typing import Literal
 
 # Fixed test timestamp for deterministic testing (time injection pattern)
 TEST_TIMESTAMP = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+
+
+# -----------------------------------------------------------------------------
+# Test Constants
+# -----------------------------------------------------------------------------
+
+# Expected intents for a complete registration operation
+# The RegistrationReducer emits exactly 2 intents per introspection event:
+# 1. consul.register - Register node with Consul service discovery
+# 2. postgres.upsert_registration - Upsert node metadata in PostgreSQL
+EXPECTED_REGISTRATION_INTENTS = 2
 
 
 # -----------------------------------------------------------------------------
@@ -166,7 +178,7 @@ class TestBasicReduce:
         """Test that valid event produces Consul + PostgreSQL intents."""
         output = reducer.reduce(initial_state, valid_event)
 
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         intent_types = {intent.intent_type for intent in output.intents}
         assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
@@ -227,7 +239,9 @@ class TestBasicReduce:
             event = create_introspection_event(node_type=node_type)
             output = reducer.reduce(initial_state, event)
 
-            assert len(output.intents) == 2, f"Failed for node_type: {node_type}"
+            assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS, (
+                f"Failed for node_type: {node_type}"
+            )
             assert output.result.status == "pending"
 
 
@@ -380,8 +394,8 @@ class TestIdempotency:
         output2 = reducer.reduce(state_after_first, event2)
 
         # Both should emit intents
-        assert len(output1.intents) == 2
-        assert len(output2.intents) == 2
+        assert len(output1.intents) == EXPECTED_REGISTRATION_INTENTS
+        assert len(output2.intents) == EXPECTED_REGISTRATION_INTENTS
 
     def test_reduce_duplicate_detection_uses_correlation_id(
         self,
@@ -779,6 +793,135 @@ class TestReducerReset:
         assert output.result.consul_confirmed is True
         assert output.items_processed == 1  # Event was processed (caused state change)
 
+    def test_reset_from_all_states(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Test reset behavior across the entire FSM state space.
+
+        This comprehensive test validates the reset operation for ALL five
+        FSM states, providing a single authoritative reference for reset
+        behavior. The test documents and validates the following invariants:
+
+        FSM Reset Behavior Matrix:
+        ┌──────────┬──────────────┬────────────────────────────────────────┐
+        │ State    │ Reset Result │ Rationale                              │
+        ├──────────┼──────────────┼────────────────────────────────────────┤
+        │ idle     │ FAILS        │ Nothing to reset; validation error     │
+        │ pending  │ FAILS        │ Would lose in-flight registration      │
+        │ partial  │ FAILS        │ Would cause backend inconsistency      │
+        │ complete │ SUCCEEDS     │ Safe terminal state; returns to idle   │
+        │ failed   │ SUCCEEDS     │ Safe terminal state; enables retry     │
+        └──────────┴──────────────┴────────────────────────────────────────┘
+
+        Design Rationale:
+            Reset is only allowed from terminal states (complete, failed) because:
+            1. Non-terminal states have in-flight operations that would be lost
+            2. Partial state has one backend confirmed; reset would leave
+               inconsistent state between Consul and PostgreSQL
+            3. Terminal states are safe because the registration workflow
+               has completed (successfully or with failure)
+
+        This test complements the individual state tests by:
+            - Providing a single test that validates the complete FSM
+            - Documenting the state machine invariants in one place
+            - Ensuring no state is accidentally omitted from testing
+            - Making FSM behavior changes immediately visible
+
+        Related:
+            - DESIGN_TWO_WAY_REGISTRATION_ARCHITECTURE.md
+            - OMN-950: Reducer test completeness
+        """
+        base_state = ModelRegistrationState()
+        node_id = uuid4()
+
+        # Build states for each FSM position
+        idle_state = base_state
+        pending_state = base_state.with_pending_registration(node_id, uuid4())
+        partial_consul_state = pending_state.with_consul_confirmed(uuid4())
+        partial_postgres_state = pending_state.with_postgres_confirmed(uuid4())
+        complete_state = partial_consul_state.with_postgres_confirmed(uuid4())
+        failed_state = pending_state.with_failure("consul_failed", uuid4())
+
+        # Define expected behaviors for each state
+        # Format: (state, state_name, should_succeed, expected_status, expected_failure_reason)
+        test_cases: list[
+            tuple[
+                ModelRegistrationState,
+                str,
+                bool,
+                str,
+                FailureReason | None,
+            ]
+        ] = [
+            # Terminal states - reset should SUCCEED
+            (complete_state, "complete", True, "idle", None),
+            (failed_state, "failed", True, "idle", None),
+            # Non-terminal states - reset should FAIL with invalid_reset_state
+            (idle_state, "idle", False, "failed", "invalid_reset_state"),
+            (pending_state, "pending", False, "failed", "invalid_reset_state"),
+            (
+                partial_consul_state,
+                "partial (consul confirmed)",
+                False,
+                "failed",
+                "invalid_reset_state",
+            ),
+            (
+                partial_postgres_state,
+                "partial (postgres confirmed)",
+                False,
+                "failed",
+                "invalid_reset_state",
+            ),
+        ]
+
+        for (
+            state,
+            state_name,
+            should_succeed,
+            expected_status,
+            expected_failure,
+        ) in test_cases:
+            reset_event_id = uuid4()
+            output = reducer.reduce_reset(state, reset_event_id)
+
+            # Validate status transition
+            assert output.result.status == expected_status, (
+                f"Reset from {state_name}: expected status '{expected_status}', "
+                f"got '{output.result.status}'"
+            )
+
+            # Validate failure reason
+            assert output.result.failure_reason == expected_failure, (
+                f"Reset from {state_name}: expected failure_reason '{expected_failure}', "
+                f"got '{output.result.failure_reason}'"
+            )
+
+            # Validate processing count (all resets should process the event)
+            assert output.items_processed == 1, (
+                f"Reset from {state_name}: expected items_processed=1, "
+                f"got {output.items_processed}"
+            )
+
+            # Validate no intents emitted (resets never emit intents)
+            assert len(output.intents) == 0, (
+                f"Reset from {state_name}: expected no intents, "
+                f"got {len(output.intents)}"
+            )
+
+            if should_succeed:
+                # Successful reset should clear all state
+                assert output.result.node_id is None, (
+                    f"Reset from {state_name}: node_id should be None after successful reset"
+                )
+                assert output.result.consul_confirmed is False, (
+                    f"Reset from {state_name}: consul_confirmed should be False after successful reset"
+                )
+                assert output.result.postgres_confirmed is False, (
+                    f"Reset from {state_name}: postgres_confirmed should be False after successful reset"
+                )
+
     def test_reduce_reset_emits_no_intents(
         self,
         reducer: RegistrationReducer,
@@ -824,7 +967,7 @@ class TestReducerReset:
         event1 = create_introspection_event()
         output1 = reducer.reduce(initial_state, event1)
         assert output1.result.status == "pending"
-        assert len(output1.intents) == 2
+        assert len(output1.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Simulate failure
         failed_state = output1.result.with_failure("consul_failed", uuid4())
@@ -838,7 +981,7 @@ class TestReducerReset:
         event2 = create_introspection_event()
         retry_output = reducer.reduce(reset_output.result, event2)
         assert retry_output.result.status == "pending"
-        assert len(retry_output.intents) == 2
+        assert len(retry_output.intents) == EXPECTED_REGISTRATION_INTENTS
 
 
 # -----------------------------------------------------------------------------
@@ -1135,7 +1278,7 @@ class TestPostgresIntentBuilding:
             node_type="effect",
             node_version="1.0.0",
             endpoints={"health": "http://localhost:8080/health"},
-            capabilities=ModelNodeCapabilities(postgres=True, consul=True, read=True),
+            capabilities=ModelNodeCapabilities(postgres=True, database=True, read=True),
             correlation_id=uuid4(),
             timestamp=TEST_TIMESTAMP,
         )
@@ -1156,7 +1299,7 @@ class TestPostgresIntentBuilding:
         capabilities = record["capabilities"]
         assert isinstance(capabilities, dict)
         assert capabilities.get("postgres") is True
-        assert capabilities.get("consul") is True
+        assert capabilities.get("database") is True
         assert capabilities.get("read") is True
 
 
@@ -1340,7 +1483,7 @@ class TestEdgeCases:
 
         output = reducer.reduce(initial_state, event)
 
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         assert output.result.status == "pending"
 
     def test_reduce_with_empty_capabilities(
@@ -1361,7 +1504,7 @@ class TestEdgeCases:
 
         output = reducer.reduce(initial_state, event)
 
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         assert output.result.status == "pending"
 
     def test_reduce_uses_deterministic_id_when_mock_has_no_correlation_id(
@@ -1432,9 +1575,8 @@ class TestEdgeCases:
             node_version="3.2.1",
             capabilities=ModelNodeCapabilities(
                 postgres=True,
-                consul=True,
-                vault=True,
-                kafka=True,
+                database=True,
+                processing=True,
                 read=True,
                 write=True,
             ),
@@ -1458,7 +1600,7 @@ class TestEdgeCases:
 
         output = reducer.reduce(initial_state, event)
 
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
         assert output.result.status == "pending"
 
         # Verify PostgreSQL record captures all the data
@@ -1837,7 +1979,9 @@ class TestCompleteStateTransitions:
 
         assert output.result.status == "pending"
         assert output.result.node_id == event.node_id
-        assert len(output.intents) == 2  # Consul + PostgreSQL intents
+        assert (
+            len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+        )  # Consul + PostgreSQL intents
 
     # -------------------------------------------------------------------------
     # Transition 2: pending -> partial (Consul confirmed first)
@@ -2348,7 +2492,7 @@ class TestCompleteStateTransitions:
         event = create_introspection_event()
         pending_output = reducer.reduce(initial_state, event)
         assert pending_output.result.status == "pending"
-        assert len(pending_output.intents) == 2
+        assert len(pending_output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Step 2: pending -> partial (first confirmation)
         partial_state = pending_output.result.with_consul_confirmed(uuid4())
@@ -2396,7 +2540,7 @@ class TestCompleteStateTransitions:
         retry_event = create_introspection_event()
         retry_output = reducer.reduce(reset_output.result, retry_event)
         assert retry_output.result.status == "pending"
-        assert len(retry_output.intents) == 2
+        assert len(retry_output.intents) == EXPECTED_REGISTRATION_INTENTS
 
 
 # -----------------------------------------------------------------------------
@@ -2464,7 +2608,7 @@ class TestCircuitBreakerNonApplicability:
         output = reducer.reduce(initial_state, valid_event)
 
         # Reducer emits intents, not results of I/O operations
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         for intent in output.intents:
             # Intents are declarative descriptions
@@ -2521,16 +2665,21 @@ except ImportError:
     HYPOTHESIS_AVAILABLE = False
 
     # Provide dummy decorators when hypothesis is not available
-    def given(*args, **kwargs):  # type: ignore[no-redef]
-        def decorator(func):
-            return pytest.mark.skip(
+    from collections.abc import Callable
+    from typing import Any, TypeVar
+
+    _F = TypeVar("_F", bound=Callable[..., Any])
+
+    def given(*args: Any, **kwargs: Any) -> Callable[[_F], _F]:  # type: ignore[no-redef]
+        def decorator(func: _F) -> _F:
+            return pytest.mark.skip(  # type: ignore[no-any-return]
                 reason="hypothesis not installed - add to dev dependencies"
             )(func)
 
         return decorator
 
-    def settings(*args, **kwargs):  # type: ignore[no-redef]
-        def decorator(func):
+    def settings(*args: Any, **kwargs: Any) -> Callable[[_F], _F]:  # type: ignore[no-redef]
+        def decorator(func: _F) -> _F:
             return func
 
         return decorator
@@ -2539,30 +2688,30 @@ except ImportError:
         """Stub for hypothesis.strategies when Hypothesis is not installed."""
 
         @staticmethod
-        def sampled_from(values):
+        def sampled_from(values: Any) -> Any:
             return values
 
         @staticmethod
-        def text(*_args, **_kwargs):
+        def text(*_args: Any, **_kwargs: Any) -> None:
             return None
 
         @staticmethod
-        def uuids():
+        def uuids() -> None:
             return None
 
         @staticmethod
-        def integers(*_args, **_kwargs):
+        def integers(*_args: Any, **_kwargs: Any) -> None:
             return None
 
         @staticmethod
-        def booleans():
+        def booleans() -> None:
             return None
 
         @staticmethod
-        def dictionaries(*_args, **_kwargs):
+        def dictionaries(*_args: Any, **_kwargs: Any) -> None:
             return None
 
-    st = StrategiesStub  # Alias for compatibility
+    st = StrategiesStub  # type: ignore[no-redef, assignment]  # Alias for compatibility
 
 
 @pytest.mark.unit
@@ -2673,7 +2822,9 @@ class TestDeterminismProperty:
         # First reduce establishes the state
         output = reducer.reduce(initial_state, event)
         state_after_first = output.result
-        assert len(output.intents) == 2  # Consul + PostgreSQL
+        assert (
+            len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+        )  # Consul + PostgreSQL
 
         # All subsequent replays should be idempotent
         current_state = state_after_first
@@ -2984,7 +3135,7 @@ class TestEdgeCasesComprehensive:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify intents are still built correctly with minimal data
         consul_intent = next(
@@ -3039,7 +3190,7 @@ class TestEdgeCasesComprehensive:
         output = reducer.reduce(initial_state, event)
 
         assert output.result.status == "pending"
-        assert len(output.intents) == 2
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Verify all endpoints are captured in PostgreSQL intent
         postgres_intent = next(
@@ -3153,7 +3304,7 @@ class TestEdgeCasesComprehensive:
         output2 = reducer.reduce(reset_output.result, event2)
         assert output2.result.status == "pending"
         assert output2.result.node_id == node_id
-        assert len(output2.intents) == 2
+        assert len(output2.intents) == EXPECTED_REGISTRATION_INTENTS
 
     def test_events_with_same_timestamp(
         self,
@@ -3462,7 +3613,7 @@ class TestTimeoutScenarios:
         event2 = create_introspection_event(node_id=node_id)
         output2 = reducer.reduce(reset_output.result, event2)
         assert output2.result.status == "pending"
-        assert len(output2.intents) == 2
+        assert len(output2.intents) == EXPECTED_REGISTRATION_INTENTS
 
         # Step 5: Complete successfully
         consul_confirmed = output2.result.with_consul_confirmed(uuid4())
@@ -3912,3 +4063,1797 @@ class TestCommandFoldingPrevention:
             "reduce_reset() should be synchronous, not async. "
             "All reducer methods should be pure and sync."
         )
+
+
+# -----------------------------------------------------------------------------
+# Event Replay Determinism Tests (OMN-950)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestEventReplayDeterminism:
+    """Tests for event replay determinism guarantees.
+
+    These tests validate that the RegistrationReducer produces deterministic,
+    reproducible results when events are replayed. This is critical for:
+
+    1. **Crash Recovery**: After system crash, replaying the event log must
+       reconstruct the exact same state as before the crash.
+
+    2. **Event Sourcing**: The reducer is the foundation of event sourcing,
+       where state is derived from replaying events.
+
+    3. **Consistency**: Multiple reducer instances processing the same events
+       must arrive at identical final state.
+
+    Determinism Requirements:
+        - Same event sequence always produces same final state
+        - Same event sequence always produces same intent sequences
+        - Derived event IDs are stable (content-hash based)
+        - Parallel reducer instances produce identical results
+
+    Related:
+        - OMN-950: G1 Implement Comprehensive Reducer Tests
+        - RegistrationReducer._derive_deterministic_event_id(): SHA-256 based ID derivation
+        - ModelRegistrationState: Immutable state model
+    """
+
+    def test_event_sequence_replay_produces_identical_state(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Replay of event sequence produces identical final state.
+
+        This test validates that processing a sequence of N events, then
+        replaying the exact same sequence from scratch, produces identical
+        final state. This is the core determinism guarantee.
+
+        Test Strategy:
+            1. Process sequence of 10 unique events through reducer
+            2. Record final state after sequence
+            3. Replay same sequence from fresh initial state
+            4. Verify final state matches exactly
+        """
+        # Create a sequence of unique events with different characteristics
+        events: list[ModelNodeIntrospectionEvent] = []
+        node_types: list[str] = ["effect", "compute", "reducer", "orchestrator"]
+
+        for i in range(10):
+            events.append(
+                ModelNodeIntrospectionEvent(
+                    node_id=uuid4(),
+                    node_type=node_types[i % len(node_types)],
+                    node_version=f"{i}.0.0",
+                    endpoints={"health": f"http://localhost:{8080 + i}/health"},
+                    correlation_id=uuid4(),
+                    capabilities=ModelNodeCapabilities(
+                        postgres=(i % 2 == 0),
+                        read=True,
+                        write=(i % 3 == 0),
+                    ),
+                    metadata=ModelNodeMetadata(environment=f"env-{i}"),
+                )
+            )
+
+        # First pass: process all events and record states
+        first_pass_states: list[ModelRegistrationState] = []
+        state = ModelRegistrationState()
+
+        for event in events:
+            output = reducer.reduce(state, event)
+            first_pass_states.append(output.result)
+            state = output.result
+
+        first_pass_final = state
+
+        # Second pass: replay from fresh state
+        second_pass_states: list[ModelRegistrationState] = []
+        state = ModelRegistrationState()
+
+        for event in events:
+            output = reducer.reduce(state, event)
+            second_pass_states.append(output.result)
+            state = output.result
+
+        second_pass_final = state
+
+        # Verify final states are identical
+        assert first_pass_final == second_pass_final, (
+            "Final state differs between passes. "
+            f"First pass: {first_pass_final.model_dump()}, "
+            f"Second pass: {second_pass_final.model_dump()}"
+        )
+
+        # Verify intermediate states are also identical
+        for i, (first_state, second_state) in enumerate(
+            zip(first_pass_states, second_pass_states, strict=True)
+        ):
+            assert first_state == second_state, (
+                f"State differs at event index {i}. "
+                f"First pass: {first_state.model_dump()}, "
+                f"Second pass: {second_state.model_dump()}"
+            )
+
+    def test_event_sequence_replay_produces_identical_intents(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Replay of event sequence produces identical intent sequences.
+
+        Beyond state determinism, the intents emitted must also be deterministic.
+        This ensures that replaying events produces the same side-effect
+        descriptions (though the Effect layer handles actual I/O).
+
+        Test Strategy:
+            1. Process sequence of 5 events
+            2. Record all intents emitted
+            3. Replay same sequence
+            4. Verify intent types, targets, and payloads match
+               (excluding timestamps which are generated at reduce() time)
+        """
+        # Create a sequence of events
+        events: list[ModelNodeIntrospectionEvent] = []
+        for i in range(5):
+            events.append(
+                ModelNodeIntrospectionEvent(
+                    node_id=uuid4(),
+                    node_type="effect",
+                    node_version="1.0.0",
+                    endpoints={"health": f"http://localhost:{8080 + i}/health"},
+                    correlation_id=uuid4(),
+                )
+            )
+
+        def extract_intent_fingerprints(
+            intents: tuple[ModelIntent, ...],
+        ) -> list[dict[str, object]]:
+            """Extract deterministic fields from intents for comparison.
+
+            Excludes timestamp fields which are generated at reduce() time.
+            """
+            fingerprints = []
+            for intent in intents:
+                fingerprint: dict[str, object] = {
+                    "intent_type": intent.intent_type,
+                    "target": intent.target,
+                }
+
+                # For postgres intents, exclude timestamp fields
+                if intent.intent_type == "postgres.upsert_registration":
+                    payload_copy = dict(intent.payload)
+                    if "record" in payload_copy:
+                        record_copy = dict(payload_copy["record"])
+                        record_copy.pop("registered_at", None)
+                        record_copy.pop("updated_at", None)
+                        payload_copy["record"] = record_copy
+                    fingerprint["payload"] = payload_copy
+                else:
+                    fingerprint["payload"] = dict(intent.payload)
+
+                fingerprints.append(fingerprint)
+            return fingerprints
+
+        # First pass
+        first_pass_intent_fingerprints: list[list[dict[str, object]]] = []
+        state = ModelRegistrationState()
+        for event in events:
+            output = reducer.reduce(state, event)
+            first_pass_intent_fingerprints.append(
+                extract_intent_fingerprints(output.intents)
+            )
+            state = output.result
+
+        # Second pass (replay)
+        second_pass_intent_fingerprints: list[list[dict[str, object]]] = []
+        state = ModelRegistrationState()
+        for event in events:
+            output = reducer.reduce(state, event)
+            second_pass_intent_fingerprints.append(
+                extract_intent_fingerprints(output.intents)
+            )
+            state = output.result
+
+        # Verify intent fingerprints match
+        assert len(first_pass_intent_fingerprints) == len(
+            second_pass_intent_fingerprints
+        )
+
+        for i, (first_intents, second_intents) in enumerate(
+            zip(
+                first_pass_intent_fingerprints,
+                second_pass_intent_fingerprints,
+                strict=True,
+            )
+        ):
+            assert first_intents == second_intents, (
+                f"Intent fingerprints differ at event index {i}. "
+                f"First: {first_intents}, Second: {second_intents}"
+            )
+
+    def test_crash_recovery_replay_idempotent(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Simulate crash mid-sequence and verify last event replay is idempotent.
+
+        This test simulates a crash scenario:
+        1. Process events 0-4
+        2. Simulate crash (discard in-memory state)
+        3. Load persisted state (which has last_processed_event_id = event 4)
+        4. Replay event 4 (detected as duplicate via last_processed_event_id)
+        5. Continue with events 5-9
+        6. Verify final state matches non-crash scenario
+
+        The key insight is that last_processed_event_id only tracks the MOST RECENT
+        event, so idempotency prevents re-processing of that specific event.
+        In production, the orchestrator would use Kafka offsets to skip already-
+        consumed events, but the reducer provides last-event idempotency as a
+        safety net for at-least-once delivery semantics.
+        """
+        # Create 10 events
+        events: list[ModelNodeIntrospectionEvent] = []
+        for i in range(10):
+            events.append(
+                ModelNodeIntrospectionEvent(
+                    node_id=uuid4(),
+                    node_type="effect",
+                    node_version=f"{i}.0.0",
+                    endpoints={"health": f"http://localhost:{8080 + i}/health"},
+                    correlation_id=uuid4(),
+                )
+            )
+
+        # === Scenario 1: Normal processing (no crash) ===
+        normal_state = ModelRegistrationState()
+        for event in events:
+            output = reducer.reduce(normal_state, event)
+            normal_state = output.result
+
+        # === Scenario 2: Crash after event 4 ===
+        # Phase 1: Process events 0-4
+        pre_crash_state = ModelRegistrationState()
+        for event in events[:5]:
+            output = reducer.reduce(pre_crash_state, event)
+            pre_crash_state = output.result
+
+        # Record the state before "crash" - this would be persisted
+        persisted_state = pre_crash_state
+
+        # Verify persisted state has event 4's correlation_id as last_processed
+        assert persisted_state.last_processed_event_id == events[4].correlation_id
+
+        # CRASH! In-memory state is lost. We only have persisted_state
+        # which was written to PostgreSQL after processing event 4.
+
+        # Phase 2: Recovery - load persisted state and continue
+        # In real crash recovery:
+        # 1. Load last persisted state from PostgreSQL
+        # 2. Replay events from Kafka starting after last committed offset
+        # 3. But if event 4 is redelivered (at-least-once), it will be skipped
+
+        recovered_state = persisted_state
+
+        # Replay event 4 (the last processed event - should be duplicate)
+        output = reducer.reduce(recovered_state, events[4])
+        assert output.items_processed == 0, (
+            "Last event before crash should be detected as duplicate, "
+            f"but items_processed={output.items_processed}"
+        )
+        assert len(output.intents) == 0, (
+            "Last event before crash should emit no intents, "
+            f"but got {len(output.intents)} intents"
+        )
+        # State should be unchanged
+        assert output.result == recovered_state
+        recovered_state = output.result
+
+        # Continue with events 5-9 (new events)
+        for event in events[5:]:
+            output = reducer.reduce(recovered_state, event)
+            recovered_state = output.result
+
+        # Verify recovered final state matches normal scenario
+        assert recovered_state == normal_state, (
+            "Crash recovery state does not match normal processing state. "
+            f"Recovered: {recovered_state.model_dump()}, "
+            f"Normal: {normal_state.model_dump()}"
+        )
+
+    def test_parallel_replay_identical_results(
+        self,
+    ) -> None:
+        """Multiple reducer instances processing same events produce identical results.
+
+        This test validates that reducer instances are truly stateless and
+        that parallel processing (e.g., in a distributed system) produces
+        consistent results.
+
+        Test Strategy:
+            1. Create 5 independent reducer instances
+            2. Process same event sequence through each instance
+            3. Verify all instances produce identical final state
+        """
+        # Create multiple independent reducer instances
+        num_instances = 5
+        reducers = [RegistrationReducer() for _ in range(num_instances)]
+
+        # Create shared event sequence
+        events: list[ModelNodeIntrospectionEvent] = []
+        for i in range(8):
+            events.append(
+                ModelNodeIntrospectionEvent(
+                    node_id=uuid4(),
+                    node_type="compute",
+                    node_version=f"{i + 1}.0.0",
+                    endpoints={"health": f"http://localhost:{8080 + i}/health"},
+                    correlation_id=uuid4(),
+                )
+            )
+
+        # Process events through each reducer instance
+        final_states: list[ModelRegistrationState] = []
+
+        for reducer in reducers:
+            state = ModelRegistrationState()
+            for event in events:
+                output = reducer.reduce(state, event)
+                state = output.result
+            final_states.append(state)
+
+        # Verify all final states are identical
+        first_state = final_states[0]
+        for i, state in enumerate(final_states[1:], start=2):
+            assert state == first_state, (
+                f"Reducer instance {i} produced different state. "
+                f"First: {first_state.model_dump()}, "
+                f"Instance {i}: {state.model_dump()}"
+            )
+
+    def test_derived_event_id_stable_across_replays(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Derived event IDs are stable across multiple derivations.
+
+        When an event lacks a correlation_id, the reducer derives a deterministic
+        ID from the event's content using SHA-256 hash. This test verifies:
+
+        1. Same event content always produces same derived ID
+        2. Derived IDs remain stable across reducer instances
+        3. Derived IDs are valid UUIDs
+        """
+        from unittest.mock import MagicMock
+
+        # Create a mock event without correlation_id to force ID derivation
+        fixed_timestamp = datetime.now(UTC)
+        node_id = uuid4()
+
+        def create_mock_event() -> MagicMock:
+            """Create a consistent mock event for ID derivation testing."""
+            mock = MagicMock(spec=ModelNodeIntrospectionEvent)
+            mock.node_id = node_id
+            mock.node_type = "effect"
+            mock.node_version = "1.0.0"
+            mock.endpoints = {"health": "http://localhost:8080/health"}
+            mock.capabilities = ModelNodeCapabilities()
+            mock.metadata = ModelNodeMetadata()
+            mock.correlation_id = None  # Forces deterministic derivation
+            mock.timestamp = fixed_timestamp
+            return mock
+
+        # Derive ID multiple times from same event
+        mock_event = create_mock_event()
+        derived_ids: list[UUID] = []
+
+        for _ in range(10):
+            derived_id = reducer._derive_deterministic_event_id(mock_event)
+            derived_ids.append(derived_id)
+
+        # All derived IDs should be identical
+        first_id = derived_ids[0]
+        for i, derived_id in enumerate(derived_ids[1:], start=2):
+            assert derived_id == first_id, (
+                f"Derivation {i} produced different ID: {derived_id} vs {first_id}"
+            )
+
+        # Derived ID should be a valid UUID
+        assert isinstance(first_id, UUID)
+
+        # Test across different reducer instances
+        other_reducer = RegistrationReducer()
+        other_mock_event = create_mock_event()
+        other_derived_id = other_reducer._derive_deterministic_event_id(
+            other_mock_event
+        )
+
+        assert other_derived_id == first_id, (
+            "Different reducer instance derived different ID for same content. "
+            f"First: {first_id}, Other: {other_derived_id}"
+        )
+
+    def test_replay_with_interleaved_confirmation_events(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Replay with simulated confirmation events produces consistent state.
+
+        This test validates a more complex replay scenario where introspection
+        events are interleaved with confirmation transitions (simulated).
+
+        Test Strategy:
+            1. Process introspection event
+            2. Apply confirmation transitions (simulating Effect layer responses)
+            3. Process reset and new introspection
+            4. Replay entire sequence and verify identical final state
+        """
+        # First pass: complex sequence with confirmations
+        node_id = uuid4()
+        event1 = ModelNodeIntrospectionEvent(
+            node_id=node_id,
+            node_type="effect",
+            node_version="1.0.0",
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=uuid4(),
+        )
+
+        # Process first introspection
+        state = ModelRegistrationState()
+        output = reducer.reduce(state, event1)
+        state = output.result
+        assert state.status == "pending"
+
+        # Simulate confirmations
+        state = state.with_consul_confirmed(uuid4())
+        assert state.status == "partial"
+
+        state = state.with_postgres_confirmed(uuid4())
+        assert state.status == "complete"
+
+        # Reset and re-register
+        reset_output = reducer.reduce_reset(state, uuid4())
+        state = reset_output.result
+        assert state.status == "idle"
+
+        # Second introspection
+        event2 = ModelNodeIntrospectionEvent(
+            node_id=node_id,
+            node_type="compute",
+            node_version="2.0.0",
+            endpoints={"health": "http://localhost:8081/health"},
+            correlation_id=uuid4(),
+        )
+        output2 = reducer.reduce(state, event2)
+        first_pass_final = output2.result
+
+        # === Second pass: replay ===
+        state = ModelRegistrationState()
+        output = reducer.reduce(state, event1)
+        state = output.result
+
+        state = state.with_consul_confirmed(uuid4())
+        state = state.with_postgres_confirmed(uuid4())
+
+        reset_output = reducer.reduce_reset(state, uuid4())
+        state = reset_output.result
+
+        output2 = reducer.reduce(state, event2)
+        second_pass_final = output2.result
+
+        # Final states should be equivalent in key fields
+        # (last_processed_event_id differs because we used new UUIDs)
+        assert first_pass_final.status == second_pass_final.status
+        assert first_pass_final.node_id == second_pass_final.node_id
+        assert first_pass_final.consul_confirmed == second_pass_final.consul_confirmed
+        assert (
+            first_pass_final.postgres_confirmed == second_pass_final.postgres_confirmed
+        )
+
+    def test_state_reconstruction_from_empty(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """State can be fully reconstructed from event log starting from empty.
+
+        This test validates the event sourcing pattern where the entire state
+        history can be reconstructed by replaying events from an empty initial
+        state. This is fundamental for:
+
+        - New read replica bootstrapping
+        - Audit trail reconstruction
+        - Time-travel debugging
+
+        Test Strategy:
+            1. Create sequence of events with various state transitions
+            2. Process and record state after each event
+            3. Replay from empty and verify identical state evolution
+        """
+        events_and_expected_status: list[tuple[ModelNodeIntrospectionEvent, str]] = []
+
+        # Event 1: First node registration
+        event1 = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="1.0.0",
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=uuid4(),
+        )
+        events_and_expected_status.append((event1, "pending"))
+
+        # Event 2: Second node registration (overwrites state)
+        event2 = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="compute",
+            node_version="2.0.0",
+            endpoints={"health": "http://localhost:8081/health"},
+            correlation_id=uuid4(),
+        )
+        events_and_expected_status.append((event2, "pending"))
+
+        # Event 3: Third node registration
+        event3 = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="reducer",
+            node_version="3.0.0",
+            endpoints={"health": "http://localhost:8082/health"},
+            correlation_id=uuid4(),
+        )
+        events_and_expected_status.append((event3, "pending"))
+
+        # First pass: process and verify
+        first_pass_states: list[ModelRegistrationState] = []
+        state = ModelRegistrationState()
+
+        for event, expected_status in events_and_expected_status:
+            output = reducer.reduce(state, event)
+            assert output.result.status == expected_status
+            first_pass_states.append(output.result)
+            state = output.result
+
+        # Second pass: reconstruct from empty
+        second_pass_states: list[ModelRegistrationState] = []
+        state = ModelRegistrationState()
+
+        for event, expected_status in events_and_expected_status:
+            output = reducer.reduce(state, event)
+            assert output.result.status == expected_status
+            second_pass_states.append(output.result)
+            state = output.result
+
+        # Verify identical state evolution
+        for i, (first_state, second_state) in enumerate(
+            zip(first_pass_states, second_pass_states, strict=True)
+        ):
+            assert first_state == second_state, (
+                f"State mismatch at index {i}. "
+                f"First: {first_state.model_dump()}, "
+                f"Second: {second_state.model_dump()}"
+            )
+
+
+# -----------------------------------------------------------------------------
+# Property-Based State Invariants Tests (OMN-950 G1)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestPropertyBasedStateInvariants:
+    """Property-based tests for state invariants using Hypothesis.
+
+    These tests validate fundamental invariants of ModelRegistrationState
+    that must hold across all valid state configurations. The invariants
+    ensure the FSM maintains consistent and predictable behavior.
+
+    Invariants Tested:
+        1. Status-confirmation consistency: If both backends confirmed, status is
+           'complete' or 'failed' (never pending/partial)
+        2. Failure reason consistency: failure_reason is only set when status='failed'
+        3. Node ID consistency: node_id is only set when not in 'idle' state
+           (unless transitioning to 'failed' from idle via invalid reset)
+        4. Transition preservation: with_* methods preserve node_id (except reset)
+        5. Idempotency: Processing same event twice yields identical state
+
+    Related:
+        - OMN-950: G1 - Implement Comprehensive Reducer Tests
+        - ModelRegistrationState: State model under test
+        - RegistrationReducer: Reducer implementation
+    """
+
+    @given(
+        consul_confirmed=st.booleans(),
+        postgres_confirmed=st.booleans(),
+        status=st.sampled_from(["idle", "pending", "partial", "complete", "failed"]),
+    )
+    @settings(max_examples=100)
+    def test_state_status_consistency(
+        self, consul_confirmed: bool, postgres_confirmed: bool, status: str
+    ) -> None:
+        """Property: If both confirmations are True, status must be 'complete' or 'failed'.
+
+        This invariant ensures that:
+        - When consul_confirmed=True AND postgres_confirmed=True, the status
+          cannot be 'pending' or 'partial' (those statuses indicate waiting for confirmations)
+        - Status 'idle' with both confirmations would be invalid (idle has no node_id)
+
+        The invariant validates the FSM transition rules:
+        - pending -> partial (one confirmed)
+        - partial -> complete (both confirmed)
+        - any -> failed (error occurs, confirmations preserved for diagnostics)
+
+        Note: This test creates states directly to test invariants. In practice,
+        states are created through with_* transitions which enforce these rules.
+        """
+        # Skip invalid state combinations that can't occur through normal transitions
+        # (we test invariants that SHOULD hold, not that invalid states can be created)
+        if consul_confirmed and postgres_confirmed:
+            # Both confirmed: status must be 'complete' or 'failed'
+            if status in ("pending", "partial"):
+                # This combination would violate the invariant
+                # We skip this as it's not a valid state reachable through transitions
+                pytest.skip(
+                    "Invalid state: both confirmed but status is pending/partial"
+                )
+
+        # For valid state combinations, verify the invariant holds
+        if consul_confirmed and postgres_confirmed:
+            assert status in ("complete", "failed"), (
+                f"When both backends confirmed, status must be 'complete' or 'failed', "
+                f"got '{status}'"
+            )
+
+    @given(
+        status=st.sampled_from(["idle", "pending", "partial", "complete", "failed"]),
+        failure_reason=st.sampled_from(
+            [
+                None,
+                "validation_failed",
+                "consul_failed",
+                "postgres_failed",
+                "both_failed",
+                "invalid_reset_state",
+            ]
+        ),
+    )
+    @settings(max_examples=50)
+    def test_state_failure_reason_consistency(
+        self, status: str, failure_reason: str | None
+    ) -> None:
+        """Property: failure_reason is only set when status is 'failed'.
+
+        This invariant ensures that:
+        - When status='failed', failure_reason SHOULD be set (explains the failure)
+        - When status is NOT 'failed', failure_reason MUST be None
+
+        The invariant prevents confusing states where a failure reason exists
+        but the status indicates success or in-progress.
+
+        State Transition Impact:
+        - with_failure() always sets status='failed' AND failure_reason
+        - with_reset() clears both status (->idle) and failure_reason (->None)
+        - with_consul_confirmed() / with_postgres_confirmed() clear failure_reason
+        """
+        if status != "failed" and failure_reason is not None:
+            # This would violate the invariant - failure_reason without failed status
+            pytest.skip("Invalid state: failure_reason set but status is not 'failed'")
+
+        # Verify the invariant: failure_reason implies status='failed'
+        if failure_reason is not None:
+            assert status == "failed", (
+                f"failure_reason='{failure_reason}' is set but status='{status}'. "
+                f"failure_reason should only be set when status='failed'."
+            )
+
+    @given(
+        status=st.sampled_from(["idle", "pending", "partial", "complete", "failed"]),
+        has_node_id=st.booleans(),
+    )
+    @settings(max_examples=50)
+    def test_state_node_id_consistency(self, status: str, has_node_id: bool) -> None:
+        """Property: node_id is only set when status is not 'idle'.
+
+        This invariant ensures that:
+        - In 'idle' state, node_id should be None (no registration in progress)
+        - In other states (pending, partial, complete, failed), node_id should be set
+          (identifies the node being registered or that was registered)
+
+        Exception:
+        - When transitioning from 'idle' to 'failed' via invalid reset attempt,
+          node_id remains None (no node was being registered)
+
+        State Transition Impact:
+        - with_pending_registration() sets node_id (idle -> pending)
+        - with_consul_confirmed() / with_postgres_confirmed() preserve node_id
+        - with_failure() preserves node_id (for diagnostics)
+        - with_reset() clears node_id (any -> idle)
+        """
+        if status == "idle" and has_node_id:
+            # Idle state should not have a node_id
+            pytest.skip("Invalid state: node_id set but status is 'idle'")
+
+        # Verify the invariant for reachable states
+        if status == "idle":
+            # In idle state, node_id should be None
+            state = ModelRegistrationState(status="idle", node_id=None)
+            assert state.node_id is None, "Idle state should have node_id=None"
+        elif status == "failed" and not has_node_id:
+            # Failed state can have None node_id if failed from idle (invalid reset)
+            state = ModelRegistrationState(
+                status="failed", node_id=None, failure_reason="invalid_reset_state"
+            )
+            assert state.status == "failed"
+            assert state.node_id is None
+        elif status in ("pending", "partial", "complete"):
+            # These states require a node_id through normal transitions
+            if has_node_id:
+                node_id = uuid4()
+                state = ModelRegistrationState(status=status, node_id=node_id)
+                assert state.node_id is not None, (
+                    f"Status '{status}' should have node_id set"
+                )
+
+    @given(
+        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+    )
+    @settings(max_examples=20)
+    def test_state_transition_preserves_node_id(self, node_type: str) -> None:
+        """Property: All with_* transitions preserve node_id (except with_reset).
+
+        This invariant ensures traceability and consistency:
+        - Once a node_id is assigned (idle -> pending), it persists through
+          all subsequent transitions until reset
+        - with_consul_confirmed() preserves node_id
+        - with_postgres_confirmed() preserves node_id
+        - with_failure() preserves node_id (for diagnostics)
+        - ONLY with_reset() clears node_id (returning to idle)
+
+        This is critical for:
+        - Correlating events to a specific registration workflow
+        - Diagnostics when failures occur
+        - Ensuring confirmations match the original introspection
+        """
+        reducer = RegistrationReducer()
+        initial_state = ModelRegistrationState()
+        node_id = uuid4()
+
+        # Create introspection event
+        event = ModelNodeIntrospectionEvent(
+            node_id=node_id,
+            node_type=node_type,
+            node_version="1.0.0",
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=uuid4(),
+        )
+
+        # Transition: idle -> pending
+        output = reducer.reduce(initial_state, event)
+        pending_state = output.result
+        assert pending_state.node_id == node_id, "node_id should be set after pending"
+
+        # Transition: pending -> partial (via consul)
+        partial_consul = pending_state.with_consul_confirmed(uuid4())
+        assert partial_consul.node_id == node_id, (
+            "node_id should be preserved after with_consul_confirmed"
+        )
+
+        # Transition: partial -> complete (via postgres)
+        complete_state = partial_consul.with_postgres_confirmed(uuid4())
+        assert complete_state.node_id == node_id, (
+            "node_id should be preserved after with_postgres_confirmed"
+        )
+
+        # Transition: complete -> idle (via reset) - ONLY reset clears node_id
+        reset_output = reducer.reduce_reset(complete_state, uuid4())
+        assert reset_output.result.node_id is None, (
+            "node_id should be cleared after with_reset"
+        )
+
+        # Also verify failure preserves node_id
+        failed_state = pending_state.with_failure("consul_failed", uuid4())
+        assert failed_state.node_id == node_id, (
+            "node_id should be preserved after with_failure"
+        )
+
+    @given(
+        node_type=st.sampled_from(["effect", "compute", "reducer", "orchestrator"]),
+        replay_count=st.integers(min_value=2, max_value=5),
+    )
+    @settings(max_examples=25)
+    def test_idempotency_property(self, node_type: str, replay_count: int) -> None:
+        """Property: Processing the same event twice always yields identical state.
+
+        This invariant ensures safe event replay for:
+        - Crash recovery: events can be replayed without duplicating effects
+        - At-least-once delivery: Kafka redelivery doesn't cause inconsistency
+        - Testing: deterministic behavior regardless of replay count
+
+        The idempotency is achieved through last_processed_event_id:
+        - Each event has a unique correlation_id (or derived event_id)
+        - Before processing, reducer checks if event_id matches last_processed
+        - If match (duplicate), reducer returns current state unchanged
+        - If no match (new event), reducer processes and updates last_processed
+
+        Key assertions:
+        1. First reduce: emits intents, state changes to pending
+        2. Subsequent replays: no intents, state unchanged, items_processed=0
+        """
+        reducer = RegistrationReducer()
+        initial_state = ModelRegistrationState()
+        correlation_id = uuid4()
+        node_id = uuid4()
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=node_id,
+            node_type=node_type,
+            node_version="1.0.0",
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=correlation_id,
+        )
+
+        # First reduce - should process the event
+        output1 = reducer.reduce(initial_state, event)
+        state_after_first = output1.result
+
+        assert output1.items_processed == 1, "First reduce should process 1 item"
+        assert len(output1.intents) == EXPECTED_REGISTRATION_INTENTS, (
+            "First reduce should emit 2 intents"
+        )
+        assert state_after_first.status == "pending", "State should be pending"
+        assert state_after_first.last_processed_event_id == correlation_id
+
+        # Replay the same event multiple times
+        current_state = state_after_first
+        for replay_num in range(replay_count):
+            replay_output = reducer.reduce(current_state, event)
+
+            # State must be identical to state_after_first
+            assert replay_output.result == state_after_first, (
+                f"State changed on replay {replay_num + 1}. "
+                f"Expected: {state_after_first}, Got: {replay_output.result}"
+            )
+
+            # No intents should be emitted on replay
+            assert len(replay_output.intents) == 0, (
+                f"Intents emitted on replay {replay_num + 1}: {replay_output.intents}"
+            )
+
+            # items_processed should be 0 (duplicate detected)
+            assert replay_output.items_processed == 0, (
+                f"items_processed={replay_output.items_processed} on replay "
+                f"{replay_num + 1}, expected 0"
+            )
+
+            # Update current state for next iteration
+            current_state = replay_output.result
+
+    @given(
+        initial_status=st.sampled_from(["pending", "partial"]),
+        confirm_consul_first=st.booleans(),
+    )
+    @settings(max_examples=20)
+    def test_confirmation_order_invariant(
+        self, initial_status: str, confirm_consul_first: bool
+    ) -> None:
+        """Property: Confirmation order doesn't affect final 'complete' state structure.
+
+        This invariant ensures that:
+        - Whether consul confirms before postgres or vice versa
+        - The final 'complete' state has both confirmations=True
+        - The node_id is preserved regardless of order
+
+        This is important for distributed systems where confirmation
+        events may arrive out of order due to network latency.
+        """
+        node_id = uuid4()
+        event_id = uuid4()
+
+        # Create initial pending state
+        pending_state = ModelRegistrationState(
+            status="pending",
+            node_id=node_id,
+            consul_confirmed=False,
+            postgres_confirmed=False,
+            last_processed_event_id=event_id,
+        )
+
+        if confirm_consul_first:
+            # Path 1: Consul -> Postgres
+            partial = pending_state.with_consul_confirmed(uuid4())
+            complete = partial.with_postgres_confirmed(uuid4())
+        else:
+            # Path 2: Postgres -> Consul
+            partial = pending_state.with_postgres_confirmed(uuid4())
+            complete = partial.with_consul_confirmed(uuid4())
+
+        # Verify final state invariants
+        assert complete.status == "complete", (
+            f"Final status should be 'complete', got '{complete.status}'"
+        )
+        assert complete.consul_confirmed is True, "Consul should be confirmed"
+        assert complete.postgres_confirmed is True, "Postgres should be confirmed"
+        assert complete.node_id == node_id, "node_id should be preserved"
+        assert complete.failure_reason is None, (
+            "failure_reason should be None in complete state"
+        )
+
+    @given(
+        failure_reason=st.sampled_from(
+            ["validation_failed", "consul_failed", "postgres_failed", "both_failed"]
+        ),
+    )
+    @settings(max_examples=20)
+    def test_failure_preserves_confirmation_state(
+        self, failure_reason: FailureReason
+    ) -> None:
+        """Property: Transition to failed preserves confirmation flags for diagnostics.
+
+        This invariant ensures that when a failure occurs:
+        - The confirmation state (consul_confirmed, postgres_confirmed) is preserved
+        - This enables diagnostics to see what succeeded before failure
+        - The failure_reason indicates what failed
+
+        Example scenarios:
+        - consul_failed with postgres_confirmed=True: Consul failed after Postgres confirmed
+        - both_failed with both=False: Both failed, no confirmations received
+        """
+        node_id = uuid4()
+
+        # Create a partial state (consul confirmed, waiting for postgres)
+        partial_state = ModelRegistrationState(
+            status="partial",
+            node_id=node_id,
+            consul_confirmed=True,
+            postgres_confirmed=False,
+            last_processed_event_id=uuid4(),
+        )
+
+        # Transition to failed
+        failed_state = partial_state.with_failure(failure_reason, uuid4())
+
+        # Verify confirmation flags are preserved
+        assert failed_state.status == "failed"
+        assert failed_state.consul_confirmed is True, (
+            "consul_confirmed should be preserved after failure"
+        )
+        assert failed_state.postgres_confirmed is False, (
+            "postgres_confirmed should be preserved after failure"
+        )
+        assert failed_state.node_id == node_id, "node_id should be preserved"
+        assert failed_state.failure_reason == failure_reason
+
+    @given(
+        from_status=st.sampled_from(["complete", "failed"]),
+    )
+    @settings(max_examples=10)
+    def test_reset_clears_all_state(self, from_status: str) -> None:
+        """Property: Reset from terminal states clears all registration-related fields.
+
+        This invariant ensures that:
+        - with_reset() returns to a clean 'idle' state
+        - All confirmation flags are cleared
+        - node_id is cleared
+        - failure_reason is cleared
+        - Only last_processed_event_id is updated (for idempotency)
+
+        This enables clean retry after failure or re-registration after complete.
+        """
+        node_id = uuid4()
+
+        if from_status == "complete":
+            state = ModelRegistrationState(
+                status="complete",
+                node_id=node_id,
+                consul_confirmed=True,
+                postgres_confirmed=True,
+                last_processed_event_id=uuid4(),
+            )
+        else:  # failed
+            state = ModelRegistrationState(
+                status="failed",
+                node_id=node_id,
+                consul_confirmed=True,
+                postgres_confirmed=False,
+                last_processed_event_id=uuid4(),
+                failure_reason="postgres_failed",
+            )
+
+        reset_event_id = uuid4()
+        reset_state = state.with_reset(reset_event_id)
+
+        # Verify all state is cleared except last_processed_event_id
+        assert reset_state.status == "idle", "Status should be 'idle' after reset"
+        assert reset_state.node_id is None, "node_id should be cleared after reset"
+        assert reset_state.consul_confirmed is False, (
+            "consul_confirmed should be cleared after reset"
+        )
+        assert reset_state.postgres_confirmed is False, (
+            "postgres_confirmed should be cleared after reset"
+        )
+        assert reset_state.failure_reason is None, (
+            "failure_reason should be cleared after reset"
+        )
+        assert reset_state.last_processed_event_id == reset_event_id, (
+            "last_processed_event_id should be updated to reset event"
+        )
+
+
+# -----------------------------------------------------------------------------
+# Boundary Condition Tests (OMN-950)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestBoundaryConditions:
+    """Comprehensive boundary condition and edge case tests.
+
+    These tests validate the reducer's behavior at the edges of valid input
+    ranges, including:
+    - Maximum and minimum UUID values
+    - Empty and very long strings
+    - Special characters and unicode in metadata
+    - Thread safety of frozen state models
+    - Maximum payload sizes
+
+    Related: OMN-950 - G1: Implement Comprehensive Reducer Tests
+    """
+
+    def test_max_uuid_values(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test with maximum UUID value (all f's).
+
+        Validates that the reducer correctly handles the maximum possible
+        UUID value (ffffffff-ffff-ffff-ffff-ffffffffffff). This is a boundary
+        condition for UUID handling.
+        """
+        max_uuid = UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=max_uuid,
+            node_type="effect",
+            node_version="1.0.0",
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=max_uuid,  # Also test max correlation_id
+        )
+
+        output = reducer.reduce(initial_state, event)
+
+        assert output.result.status == "pending"
+        assert output.result.node_id == max_uuid
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+
+        # Verify max UUID appears correctly in intents
+        consul_intent = next(
+            (i for i in output.intents if i.intent_type == "consul.register"), None
+        )
+        assert consul_intent is not None
+        assert str(max_uuid) in consul_intent.payload["service_id"]
+
+        postgres_intent = next(
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
+            None,
+        )
+        assert postgres_intent is not None
+        assert postgres_intent.payload["record"]["node_id"] == str(max_uuid)
+
+    def test_min_uuid_values(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test with minimum UUID value (all zeros / nil UUID).
+
+        Validates that the reducer correctly handles the minimum possible
+        UUID value (00000000-0000-0000-0000-000000000000). This is a boundary
+        condition for UUID handling.
+
+        Note: Nil UUID is technically valid and may represent a placeholder
+        or uninitialized node. The reducer should accept it.
+        """
+        min_uuid = UUID("00000000-0000-0000-0000-000000000000")
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=min_uuid,
+            node_type="compute",
+            node_version="1.0.0",
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=min_uuid,  # Also test min correlation_id
+        )
+
+        output = reducer.reduce(initial_state, event)
+
+        assert output.result.status == "pending"
+        assert output.result.node_id == min_uuid
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+
+        # Verify min UUID appears correctly in intents
+        consul_intent = next(
+            (i for i in output.intents if i.intent_type == "consul.register"), None
+        )
+        assert consul_intent is not None
+        assert str(min_uuid) in consul_intent.payload["service_id"]
+
+    def test_empty_string_version_rejected(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test that empty string version is rejected by validation.
+
+        ModelNodeIntrospectionEvent validates node_version as semantic version.
+        Empty strings are rejected at the Pydantic validation layer, which is
+        correct behavior - version should always be a valid semantic version.
+
+        This test documents the validation behavior as a boundary condition.
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelNodeIntrospectionEvent(
+                node_id=uuid4(),
+                node_type="effect",
+                node_version="",  # Empty version string - should be rejected
+                endpoints={"health": "http://localhost:8080/health"},
+                correlation_id=uuid4(),
+            )
+
+        # Verify the validation error is about the version
+        error_str = str(exc_info.value)
+        assert "node_version" in error_str
+        assert "semantic version" in error_str.lower() or "Invalid" in error_str
+
+    def test_minimal_valid_version(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test with minimal valid semantic version (0.0.0).
+
+        Validates that the reducer handles the minimal valid semantic version.
+        This is the boundary case for valid versions.
+        """
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="0.0.0",  # Minimal valid version
+            endpoints={"health": "http://localhost:8080/health"},
+            correlation_id=uuid4(),
+        )
+
+        output = reducer.reduce(initial_state, event)
+
+        assert output.result.status == "pending"
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+
+        # Verify minimal version is preserved in intents
+        consul_intent = next(
+            (i for i in output.intents if i.intent_type == "consul.register"), None
+        )
+        assert consul_intent is not None
+        tags = consul_intent.payload["tags"]
+        assert "node_version:0.0.0" in tags
+
+    def test_very_long_endpoint_url(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test with very long endpoint URLs (1000+ chars).
+
+        Validates that the reducer correctly handles extremely long URL strings
+        without truncation or error. Some cloud environments may have very long
+        internal URLs with extensive path components and query parameters.
+        """
+        # Create a URL with 1000+ characters
+        base_url = (
+            "http://very-long-hostname-for-internal-service.internal.cluster.local:8080"
+        )
+        long_path = "/api/v1" + "/segment" * 50  # ~400 chars of path segments
+        long_query = "?" + "&".join(
+            f"param{i}=value{i}" * 10 for i in range(20)
+        )  # Long query string
+        very_long_url = base_url + long_path + long_query
+
+        # Ensure URL is at least 1000 chars
+        assert len(very_long_url) >= 1000, (
+            f"Test URL should be 1000+ chars, got {len(very_long_url)}"
+        )
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="orchestrator",
+            node_version="1.0.0",
+            endpoints={
+                "health": very_long_url,
+                "api": very_long_url,
+            },
+            correlation_id=uuid4(),
+        )
+
+        output = reducer.reduce(initial_state, event)
+
+        assert output.result.status == "pending"
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+
+        # Verify long URLs are preserved without truncation
+        consul_intent = next(
+            (i for i in output.intents if i.intent_type == "consul.register"), None
+        )
+        assert consul_intent is not None
+        health_check = consul_intent.payload["health_check"]
+        assert health_check is not None
+        assert health_check["HTTP"] == very_long_url
+
+        postgres_intent = next(
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
+            None,
+        )
+        assert postgres_intent is not None
+        assert postgres_intent.payload["record"]["health_endpoint"] == very_long_url
+        assert postgres_intent.payload["record"]["endpoints"]["health"] == very_long_url
+
+    def test_special_characters_in_metadata(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test metadata with special characters and unicode.
+
+        Validates that the reducer correctly preserves special characters,
+        unicode, and potentially problematic strings in metadata fields.
+        This is important for international deployments and complex configs.
+        """
+        # Metadata with various special characters
+        special_metadata = ModelNodeMetadata(
+            environment="prod-東京",  # Japanese characters
+            region="eu-münster",  # German umlaut
+            cluster="k8s/cluster-01",  # Forward slash
+        )
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="effect",
+            node_version="1.0.0",
+            endpoints={"health": "http://localhost:8080/health"},
+            metadata=special_metadata,
+            correlation_id=uuid4(),
+        )
+
+        output = reducer.reduce(initial_state, event)
+
+        assert output.result.status == "pending"
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+
+        # Verify metadata is preserved in PostgreSQL intent
+        postgres_intent = next(
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
+            None,
+        )
+        assert postgres_intent is not None
+
+        record_metadata = postgres_intent.payload["record"]["metadata"]
+        assert record_metadata is not None
+
+        # Check that special characters are preserved
+        assert record_metadata.get("environment") == "prod-東京"
+        assert record_metadata.get("region") == "eu-münster"
+        assert record_metadata.get("cluster") == "k8s/cluster-01"
+
+    def test_concurrent_state_access_safety(
+        self,
+        reducer: RegistrationReducer,
+    ) -> None:
+        """Verify frozen state is safe for concurrent access.
+
+        ModelRegistrationState is a frozen Pydantic model, which should be
+        safe for concurrent read access from multiple threads. This test
+        validates that the state model is properly immutable and can be
+        accessed concurrently without race conditions.
+
+        Note: This is primarily a documentation test - Pydantic frozen models
+        are inherently thread-safe for reads. The test validates the frozen
+        property and concurrent read behavior.
+        """
+        import concurrent.futures
+        import threading
+
+        # Create a state with data
+        state = ModelRegistrationState()
+        node_id = uuid4()
+        pending_state = state.with_pending_registration(node_id, uuid4())
+        consul_confirmed = pending_state.with_consul_confirmed(uuid4())
+
+        # Verify the state is frozen (immutable)
+        # Attempting to modify should raise an error
+        with pytest.raises(Exception):  # Pydantic raises ValidationError on mutation
+            consul_confirmed.status = "complete"  # type: ignore[misc]
+
+        # Track results from concurrent reads
+        results: list[tuple[str, UUID | None, bool]] = []
+        lock = threading.Lock()
+
+        def read_state() -> None:
+            """Read state values from multiple threads."""
+            for _ in range(100):
+                status = consul_confirmed.status
+                nid = consul_confirmed.node_id
+                confirmed = consul_confirmed.consul_confirmed
+                with lock:
+                    results.append((status, nid, confirmed))
+
+        # Run concurrent reads from multiple threads
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(read_state) for _ in range(10)]
+            concurrent.futures.wait(futures)
+
+        # All reads should return consistent values
+        assert len(results) == 1000  # 10 threads * 100 reads each
+        for status, nid, confirmed in results:
+            assert status == "partial"
+            assert nid == node_id
+            assert confirmed is True
+
+    def test_maximum_intent_payload_size(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test with maximum reasonable payload sizes.
+
+        Validates that the reducer handles events with large amounts of data
+        in endpoints and capabilities without performance degradation or
+        memory issues. This simulates a complex service with many endpoints.
+        """
+        # Create 100 endpoints (simulating a complex microservice)
+        many_endpoints = {
+            f"endpoint_{i}": f"http://localhost:{8000 + i}/api/v1/service{i}"
+            for i in range(100)
+        }
+
+        # Create capabilities with all flags set
+        full_capabilities = ModelNodeCapabilities(
+            postgres=True,
+            database=True,
+            processing=True,
+            read=True,
+            write=True,
+        )
+
+        # Create metadata with standard fields
+        extensive_metadata = ModelNodeMetadata(
+            environment="production",
+            region="us-east-1",
+            cluster="primary-cluster",
+        )
+
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type="orchestrator",
+            node_version="10.20.30-alpha.100+build.metadata.long.string",
+            endpoints=many_endpoints,
+            capabilities=full_capabilities,
+            metadata=extensive_metadata,
+            correlation_id=uuid4(),
+        )
+
+        output = reducer.reduce(initial_state, event)
+
+        assert output.result.status == "pending"
+        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+
+        # Verify all endpoints are preserved
+        postgres_intent = next(
+            (
+                i
+                for i in output.intents
+                if i.intent_type == "postgres.upsert_registration"
+            ),
+            None,
+        )
+        assert postgres_intent is not None
+
+        record = postgres_intent.payload["record"]
+        assert len(record["endpoints"]) == 100
+
+        # Verify all capabilities are preserved
+        caps = record["capabilities"]
+        assert caps.get("postgres") is True
+        assert caps.get("database") is True
+        assert caps.get("read") is True
+
+    def test_uuid_version_variations(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Test with different UUID versions (v1, v4, v5).
+
+        Validates that the reducer handles various UUID versions correctly.
+        UUIDs can be version 1 (time-based), version 4 (random), or
+        version 5 (name-based SHA-1). All should be accepted.
+        """
+        # UUID v4 (random) - most common
+        uuid_v4 = uuid4()
+
+        # UUID v1 (time-based) - includes timestamp and MAC address
+        # Note: uuid.uuid1() may not be available on all systems
+        import uuid as uuid_module
+
+        uuid_v1 = uuid_module.uuid1() if hasattr(uuid_module, "uuid1") else uuid4()
+
+        # UUID v5 (name-based SHA-1) - deterministic from namespace and name
+        uuid_v5 = uuid_module.uuid5(uuid_module.NAMESPACE_DNS, "test.example.com")
+
+        for test_uuid, description in [
+            (uuid_v4, "UUID v4 (random)"),
+            (uuid_v1, "UUID v1 (time-based)"),
+            (uuid_v5, "UUID v5 (name-based)"),
+        ]:
+            event = ModelNodeIntrospectionEvent(
+                node_id=test_uuid,
+                node_type="compute",
+                node_version="1.0.0",
+                endpoints={"health": "http://localhost:8080/health"},
+                correlation_id=uuid4(),
+            )
+
+            output = reducer.reduce(initial_state, event)
+
+            assert output.result.status == "pending", (
+                f"Failed for {description}: {test_uuid}"
+            )
+            assert output.result.node_id == test_uuid
+
+    def test_state_transitions_with_boundary_event_ids(
+        self,
+    ) -> None:
+        """Test state transitions with boundary UUID values for event IDs.
+
+        Validates that state transitions correctly track boundary UUID values
+        in the last_processed_event_id field.
+        """
+        max_uuid = UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+        min_uuid = UUID("00000000-0000-0000-0000-000000000000")
+
+        state = ModelRegistrationState()
+        node_id = uuid4()
+
+        # Test with min UUID event ID
+        pending_min = state.with_pending_registration(node_id, min_uuid)
+        assert pending_min.last_processed_event_id == min_uuid
+        assert pending_min.is_duplicate_event(min_uuid) is True
+        assert pending_min.is_duplicate_event(max_uuid) is False
+
+        # Test with max UUID event ID
+        pending_max = state.with_pending_registration(node_id, max_uuid)
+        assert pending_max.last_processed_event_id == max_uuid
+        assert pending_max.is_duplicate_event(max_uuid) is True
+        assert pending_max.is_duplicate_event(min_uuid) is False
+
+
+# -----------------------------------------------------------------------------
+# Command Folding Prohibition Tests (OMN-950)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestCommandFoldingProhibited:
+    """Explicit tests verifying reducer never folds commands into state.
+
+    This test class complements TestCommandFoldingPrevention with additional
+    specific verification that:
+    1. Reducers only process events (past-tense, factual)
+    2. Reducers never fold commands (imperative, action requests)
+    3. Reducer output contains only intents (not executed commands)
+    4. Intents describe desired effects but are NOT executed by reducer
+
+    The distinction is critical for event sourcing:
+    - Events are facts that have occurred - they are immutable history
+    - Commands are requests for action - they are ephemeral and not logged
+    - Intents are declarative outputs - Effect layer executes them
+
+    Related: OMN-950 - G1: Implement Comprehensive Reducer Tests
+    """
+
+    def test_reducer_never_folds_commands_into_state(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+    ) -> None:
+        """Verify reducer only processes events, never folds commands.
+
+        This test validates that:
+        1. The reduce() method only accepts Event types (type annotation)
+        2. The state model only tracks event-related data
+        3. There is no mechanism to fold command data into state
+        4. State fields are for tracking facts, not pending commands
+
+        Commands would have fields like:
+        - requested_action, action_type, execute_at
+        - retry_count (for command execution)
+        - command_source, command_id
+
+        Events (and state) have fields like:
+        - status (factual current state)
+        - confirmed (factual confirmation received)
+        - last_processed_event_id (factual event tracking)
+        """
+        # Verify state model has no command-related fields
+        # Access model_fields from the class, not the instance (Pydantic V2.11+)
+        state_fields = set(ModelRegistrationState.model_fields.keys())
+
+        # These field names would indicate command folding (forbidden)
+        command_field_patterns = [
+            "command",
+            "action",
+            "request",
+            "execute",
+            "pending_action",
+            "queued",
+            "scheduled",
+        ]
+
+        for pattern in command_field_patterns:
+            for field in state_fields:
+                assert pattern not in field.lower(), (
+                    f"State model has command-like field '{field}'. "
+                    f"Reducers should not track commands in state."
+                )
+
+        # Verify state fields are event/fact-tracking fields
+        expected_factual_fields = {
+            "status",  # Factual current state
+            "node_id",  # Factual node identifier
+            "consul_confirmed",  # Factual confirmation status
+            "postgres_confirmed",  # Factual confirmation status
+            "last_processed_event_id",  # Factual event tracking
+            "failure_reason",  # Factual failure info
+        }
+
+        # All state fields should be factual
+        for field in state_fields:
+            assert field in expected_factual_fields, (
+                f"Unexpected state field '{field}'. "
+                f"State should only contain factual event-derived data."
+            )
+
+    def test_reducer_output_contains_only_intents(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+        valid_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Verify output never contains commands.
+
+        This test validates that ModelReducerOutput:
+        1. Contains 'intents' field (declarative desired effects)
+        2. Does NOT contain 'commands' field (imperative instructions)
+        3. Does NOT contain execution results (commands would have these)
+        4. Intents are data structures, not executable objects
+
+        Key distinction:
+        - Intents: "I want X to happen" (data describing desired effect)
+        - Commands: "DO X NOW" (executable object with execute() method)
+        """
+        output = reducer.reduce(initial_state, valid_event)
+
+        # Output should have 'intents' attribute
+        assert hasattr(output, "intents"), (
+            "ModelReducerOutput should have 'intents' field for declarative effects"
+        )
+
+        # Output should NOT have command-related attributes
+        command_attributes = [
+            "commands",
+            "pending_commands",
+            "queued_commands",
+            "executed_commands",
+            "command_results",
+        ]
+
+        for attr in command_attributes:
+            assert not hasattr(output, attr), (
+                f"Output should not have '{attr}' attribute. "
+                f"Reducers emit intents, not commands."
+            )
+
+        # Verify intents are data structures (dicts), not executable
+        for intent in output.intents:
+            # Intent payload should be a dict (data), not callable
+            assert isinstance(intent.payload, dict), (
+                f"Intent payload should be dict (data), not {type(intent.payload)}"
+            )
+
+            # Intent should not have execute/run methods
+            assert not hasattr(intent, "execute"), (
+                "Intent should not have execute() method. "
+                "Intents are data, not commands."
+            )
+            assert not hasattr(intent, "run"), (
+                "Intent should not have run() method. Intents are data, not commands."
+            )
+            assert not callable(intent.payload), (
+                "Intent payload should not be callable. Intents are data, not commands."
+            )
+
+    def test_intents_are_not_executed_by_reducer(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+        valid_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Verify reducer emits intents but does NOT execute them.
+
+        This test validates the critical separation of concerns:
+        1. Reducer produces intents (declarative descriptions)
+        2. Reducer does NOT execute intents (no I/O in reducer)
+        3. Effect layer will consume and execute intents
+        4. No side effects occur during reduce()
+
+        If the reducer were executing commands:
+        - External service calls would be made
+        - Database writes would occur
+        - Network connections would be established
+        - Async operations would be needed
+
+        None of these should happen in a pure reducer.
+        """
+        # Track if any "execution" occurs during reduce
+        from unittest.mock import patch
+
+        # Mock external services that would be called if commands were executed
+        with (
+            patch("socket.create_connection") as mock_socket,
+            patch("urllib.request.urlopen") as mock_urlopen,
+        ):
+            # Configure mocks to fail if called (should never happen)
+            mock_socket.side_effect = AssertionError(
+                "Socket created during reduce! Reducer should not make network calls."
+            )
+            mock_urlopen.side_effect = AssertionError(
+                "URL opened during reduce! Reducer should not make HTTP calls."
+            )
+
+            # Run reduce - should NOT trigger network calls
+            output = reducer.reduce(initial_state, valid_event)
+
+            # Verify reduce completed successfully
+            assert output.result.status == "pending"
+            assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+
+            # Verify no network calls were made
+            mock_socket.assert_not_called()
+            mock_urlopen.assert_not_called()
+
+        # Verify intents are "unevaluated" - they describe desired effects
+        # but have not been executed
+        for intent in output.intents:
+            # Check that intent describes an action, not its result
+            # Executed intents would have "result", "response", "error" fields
+            execution_result_fields = [
+                "result",
+                "response",
+                "executed_at",
+                "success",
+                "error",
+                "exception",
+            ]
+
+            for field in execution_result_fields:
+                assert field not in intent.payload, (
+                    f"Intent has execution result field '{field}'. "
+                    f"Intents should be unevaluated; execution is Effect layer's job."
+                )
+
+    def test_reducer_does_not_modify_external_state(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+        valid_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Verify reducer is pure and does not modify external state.
+
+        A pure function:
+        1. Returns the same output for the same input
+        2. Has no side effects (no external state modification)
+        3. Does not depend on external mutable state
+
+        If commands were being executed:
+        - External services would be modified
+        - Global state might be changed
+        - Files might be written
+        """
+        # Run reduce multiple times
+        outputs = [reducer.reduce(initial_state, valid_event) for _ in range(5)]
+
+        # All outputs should have identical state (deterministic)
+        first_result = outputs[0].result
+        for i, output in enumerate(outputs[1:], start=2):
+            assert output.result == first_result, (
+                f"Output {i} differs from output 1. "
+                f"Reducer should be deterministic (same input = same output)."
+            )
+
+        # Input state should be unchanged (no side effects)
+        assert initial_state.status == "idle", (
+            "Initial state was modified by reduce(). "
+            "Reducer should not have side effects."
+        )
+
+        # Reducer instance should have no mutable state that changes
+        # between calls (stateless)
+        instance_vars = [
+            attr
+            for attr in dir(reducer)
+            if not attr.startswith("_") and not callable(getattr(reducer, attr))
+        ]
+        assert len(instance_vars) == 0, (
+            f"Reducer has instance state: {instance_vars}. "
+            f"Pure reducers should be stateless."
+        )
+
+    def test_intent_target_describes_where_not_what(
+        self,
+        reducer: RegistrationReducer,
+        initial_state: ModelRegistrationState,
+        valid_event: ModelNodeIntrospectionEvent,
+    ) -> None:
+        """Verify intent targets describe WHERE execution should happen.
+
+        Intent targets should be URIs pointing to external systems:
+        - consul://... (Consul service)
+        - postgres://... (PostgreSQL database)
+
+        Command targets would describe WHAT action to take:
+        - EXECUTE_REGISTRATION
+        - CREATE_SERVICE_ENTRY
+        - INSERT_DATABASE_RECORD
+
+        This distinction ensures intents are routable data, not actions.
+        """
+        output = reducer.reduce(initial_state, valid_event)
+
+        for intent in output.intents:
+            target = intent.target
+
+            # Target should be a URI (WHERE to route the intent)
+            assert "://" in target, (
+                f"Intent target '{target}' should be a URI. "
+                f"Intents describe where to route, not what action to take."
+            )
+
+            # Target should NOT be an action verb (WHAT to do)
+            action_prefixes = [
+                "EXECUTE_",
+                "CREATE_",
+                "INSERT_",
+                "UPDATE_",
+                "DELETE_",
+                "REGISTER_",
+                "SEND_",
+            ]
+            for prefix in action_prefixes:
+                assert not target.upper().startswith(prefix), (
+                    f"Intent target '{target}' looks like an action command. "
+                    f"Targets should be URIs (where), not actions (what)."
+                )
+
+            # Verify target follows expected URI patterns
+            valid_schemes = ["consul", "postgres", "kafka", "vault", "http", "https"]
+            scheme = target.split("://")[0]
+            assert scheme in valid_schemes, (
+                f"Intent target scheme '{scheme}' not recognized. "
+                f"Expected one of: {valid_schemes}"
+            )

@@ -1417,7 +1417,8 @@ class MixinNodeIntrospection:
                 node_id=node_id,
                 node_type=node_type,
                 uptime_seconds=uptime_seconds,
-                # TODO(OMN-XXX): Implement active operation tracking
+                # TODO(ACTIVE-OP-TRACKING): Implement active operation tracking
+                # Ticket: Create Linear ticket for active operation tracking implementation
                 # Currently hardcoded to 0. Full implementation requires:
                 # - Operation counter increment/decrement around async operations
                 # - Thread-safe counter for concurrent operations

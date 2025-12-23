@@ -67,9 +67,6 @@ from datetime import UTC, datetime, timezone
 from uuid import UUID, uuid4
 
 import asyncpg
-from omnibase_spi.protocols.storage.protocol_idempotency_store import (
-    ProtocolIdempotencyStore,
-)
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -83,6 +80,9 @@ from omnibase_infra.idempotency.models import (
     ModelHealthCheckResult,
     ModelIdempotencyStoreMetrics,
     ModelPostgresIdempotencyStoreConfig,
+)
+from omnibase_infra.idempotency.protocol_idempotency_store import (
+    ProtocolIdempotencyStore,
 )
 
 logger = logging.getLogger(__name__)
