@@ -22,20 +22,41 @@ import pytest
 
 from omnibase_infra.enums import EnumHandlerType
 
-# Module exports
-__all__ = [
-    "TestStructuralPurityGates",
-    "TestDeterminismGates",
-    "TestBehavioralPurityGates",
-    "TestAdditionalBehavioralGates",
-    "TestSecurityGates",
-]
-
 # =============================================================================
 # STRUCTURAL GATES: Dependency Graph
 # =============================================================================
 
+# TODO(OMN-future): Parameterize these tests to support multiple reducers.
+# Currently hard-coded for RegistrationReducer (OMN-914).
+# Future enhancement: Use pytest.mark.parametrize with:
+#   - REDUCER_FILES = list(Path("src/omnibase_infra/nodes/reducers").glob("*_reducer.py"))
+# This would enable automatic purity validation for all reducers in the codebase.
 REDUCER_FILE = Path("src/omnibase_infra/nodes/reducers/registration_reducer.py")
+
+
+def _get_imported_root_modules(tree: ast.AST) -> set[str]:
+    """Extract root module names from all import statements in an AST.
+
+    This helper function walks the AST and extracts the root module name from
+    both `import X` and `from X import Y` statements.
+
+    Args:
+        tree: The AST tree to analyze.
+
+    Returns:
+        A set of root module names (e.g., {"requests", "psycopg2", "pydantic"}).
+    """
+    imported_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                # Extract root module (e.g., "consul" from "consul.client")
+                imported_modules.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                imported_modules.add(node.module.split(".")[0])
+    return imported_modules
+
 
 # Forbidden I/O libraries that must NEVER appear in reducer imports
 FORBIDDEN_IO_MODULES: set[str] = {
@@ -44,11 +65,19 @@ FORBIDDEN_IO_MODULES: set[str] = {
     "psycopg2",
     "sqlalchemy",
     "asyncpg",
+    # Additional database clients
+    "pymongo",
+    "motor",
+    "elasticsearch",
+    "opensearchpy",
     # HTTP clients
     "requests",
     "httpx",
     "aiohttp",
     "urllib3",
+    # gRPC
+    "grpc",
+    "grpcio",
     # Message brokers
     "aiokafka",
     "confluent_kafka",
@@ -56,6 +85,21 @@ FORBIDDEN_IO_MODULES: set[str] = {
     # Service discovery
     "consul",
     "python_consul",
+    # Cloud SDKs
+    "boto3",
+    "botocore",
+    "google",  # google.cloud
+    "azure",
+    # Standard library network
+    "ftplib",
+    "smtplib",
+    "telnetlib",
+    "poplib",
+    "imaplib",
+    "nntplib",
+    # SSH/SFTP
+    "paramiko",
+    "fabric",
     # Other I/O
     "redis",
     "valkey",
@@ -80,20 +124,7 @@ class TestStructuralPurityGates:
         assert REDUCER_FILE.exists(), f"Reducer file not found: {REDUCER_FILE}"
 
         tree = ast.parse(REDUCER_FILE.read_text())
-
-        # Collect all import statements
-        imported_modules: set[str] = set()
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    # Extract root module (e.g., "consul" from "consul.client")
-                    root_module = alias.name.split(".")[0]
-                    imported_modules.add(root_module)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    root_module = node.module.split(".")[0]
-                    imported_modules.add(root_module)
+        imported_modules = _get_imported_root_modules(tree)
 
         violations = imported_modules & FORBIDDEN_IO_MODULES
         assert not violations, (
@@ -114,18 +145,7 @@ class TestStructuralPurityGates:
             pytest.skip("State model file not found")
 
         tree = ast.parse(state_model_file.read_text())
-
-        imported_modules: set[str] = set()
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    root_module = alias.name.split(".")[0]
-                    imported_modules.add(root_module)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    root_module = node.module.split(".")[0]
-                    imported_modules.add(root_module)
+        imported_modules = _get_imported_root_modules(tree)
 
         violations = imported_modules & FORBIDDEN_IO_MODULES
         assert not violations, (
@@ -1650,3 +1670,13 @@ class TestSecurityGates:
             # Restore logger state
             reducer_logger.removeHandler(capturing_handler)
             reducer_logger.setLevel(original_level)
+
+
+# Module exports
+__all__ = [
+    "TestStructuralPurityGates",
+    "TestDeterminismGates",
+    "TestBehavioralPurityGates",
+    "TestAdditionalBehavioralGates",
+    "TestSecurityGates",
+]
