@@ -83,12 +83,14 @@ from omnibase_infra.enums.enum_execution_shape_violation import (
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
+from omnibase_infra.enums.types import MessageOutputType
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
 )
 from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
+from omnibase_infra.validation.types import AnyFunctionDef
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +264,7 @@ class HandlerInfo:
 
     name: str
     handler_type: EnumHandlerType
-    node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+    node: ast.ClassDef | AnyFunctionDef
     line_number: int
     file_path: str
 
@@ -440,7 +442,7 @@ class ExecutionShapeValidator:
                             file_path=file_path,
                         )
                     )
-            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 handler_type = self._detect_handler_type_from_decorator(node)
                 if handler_type is not None:
                     handlers.append(
@@ -490,7 +492,7 @@ class ExecutionShapeValidator:
 
     def _detect_handler_type_from_decorator(
         self,
-        node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+        node: ast.ClassDef | AnyFunctionDef,
     ) -> EnumHandlerType | None:
         """Detect handler type from decorators.
 
@@ -614,10 +616,10 @@ class ExecutionShapeValidator:
             return violations
 
         # Get all methods if this is a class
-        methods: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+        methods: list[AnyFunctionDef] = []
         if isinstance(handler.node, ast.ClassDef):
             for item in handler.node.body:
-                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef):
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     methods.append(item)
         else:
             methods = [handler.node]
@@ -643,7 +645,7 @@ class ExecutionShapeValidator:
 
     def _check_return_type_violations(
         self,
-        method: ast.FunctionDef | ast.AsyncFunctionDef,
+        method: AnyFunctionDef,
         handler: HandlerInfo,
         rule: ModelExecutionShapeRule,
     ) -> list[ModelExecutionShapeViolationResult]:
@@ -687,7 +689,7 @@ class ExecutionShapeValidator:
 
     def _is_return_type_allowed(
         self,
-        category: EnumMessageCategory | EnumNodeOutputType,
+        category: MessageOutputType,
         handler_type: EnumHandlerType,
         rule: ModelExecutionShapeRule,
     ) -> bool:
@@ -778,9 +780,7 @@ class ExecutionShapeValidator:
 
         return violations
 
-    def _detect_message_category(
-        self, name: str
-    ) -> EnumMessageCategory | EnumNodeOutputType | None:
+    def _detect_message_category(self, name: str) -> MessageOutputType | None:
         """Detect message category or node output type from a type or variable name.
 
         Uses a multi-phase detection strategy:
@@ -813,7 +813,7 @@ class ExecutionShapeValidator:
         #
         # Check longer suffixes first to avoid partial matches:
         # "EventMessage" should match before "Event"
-        suffix_patterns: list[tuple[str, EnumMessageCategory | EnumNodeOutputType]] = [
+        suffix_patterns: list[tuple[str, MessageOutputType]] = [
             # Event suffixes - ordered by length (longest first)
             ("EventMessage", EnumMessageCategory.EVENT),
             ("Event", EnumMessageCategory.EVENT),
@@ -834,7 +834,7 @@ class ExecutionShapeValidator:
 
         # Phase 2: Check prefix patterns for Model* naming convention
         # ONEX models use "Model" prefix: ModelEvent, ModelCommand, etc.
-        prefix_patterns: list[tuple[str, EnumMessageCategory | EnumNodeOutputType]] = [
+        prefix_patterns: list[tuple[str, MessageOutputType]] = [
             ("ModelEvent", EnumMessageCategory.EVENT),
             ("ModelCommand", EnumMessageCategory.COMMAND),
             ("ModelIntent", EnumMessageCategory.INTENT),
@@ -847,7 +847,7 @@ class ExecutionShapeValidator:
 
         # Phase 3: Check for exact uppercase enum-style names
         # These are typically enum values like EVENT, COMMAND, etc.
-        uppercase_patterns: dict[str, EnumMessageCategory | EnumNodeOutputType] = {
+        uppercase_patterns: dict[str, MessageOutputType] = {
             "EVENT": EnumMessageCategory.EVENT,
             "COMMAND": EnumMessageCategory.COMMAND,
             "INTENT": EnumMessageCategory.INTENT,
@@ -884,7 +884,7 @@ class ExecutionShapeValidator:
         self,
         handler: HandlerInfo,
         line_number: int,
-        category: EnumMessageCategory | EnumNodeOutputType,
+        category: MessageOutputType,
         type_name: str,
     ) -> ModelExecutionShapeViolationResult | None:
         """Create a return type violation result.
@@ -902,15 +902,15 @@ class ExecutionShapeValidator:
         message = ""
 
         # Helper to check if category matches EVENT (from either enum)
-        def is_event(cat: EnumMessageCategory | EnumNodeOutputType) -> bool:
+        def is_event(cat: MessageOutputType) -> bool:
             return cat == EnumMessageCategory.EVENT or cat == EnumNodeOutputType.EVENT
 
         # Helper to check if category matches INTENT (from either enum)
-        def is_intent(cat: EnumMessageCategory | EnumNodeOutputType) -> bool:
+        def is_intent(cat: MessageOutputType) -> bool:
             return cat == EnumMessageCategory.INTENT or cat == EnumNodeOutputType.INTENT
 
         # Helper to check if category matches PROJECTION
-        def is_projection(cat: EnumMessageCategory | EnumNodeOutputType) -> bool:
+        def is_projection(cat: MessageOutputType) -> bool:
             return cat == EnumNodeOutputType.PROJECTION
 
         if handler.handler_type == EnumHandlerType.REDUCER:
@@ -965,7 +965,7 @@ class ExecutionShapeValidator:
 
     def _check_direct_publish_violations(
         self,
-        method: ast.FunctionDef | ast.AsyncFunctionDef,
+        method: AnyFunctionDef,
         handler: HandlerInfo,
     ) -> list[ModelExecutionShapeViolationResult]:
         """Check for direct publish method calls.
@@ -1009,7 +1009,7 @@ class ExecutionShapeValidator:
 
     def _check_system_time_violations(
         self,
-        method: ast.FunctionDef | ast.AsyncFunctionDef,
+        method: AnyFunctionDef,
         handler: HandlerInfo,
     ) -> list[ModelExecutionShapeViolationResult]:
         """Check for system time access in reducers.

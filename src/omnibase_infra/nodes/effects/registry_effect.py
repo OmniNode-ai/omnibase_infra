@@ -377,7 +377,7 @@ class NodeRegistryEffect:
 
             duration_ms = (time.perf_counter() - start_time) * 1000
 
-            if result.get("success", False):
+            if result.success:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=duration_ms,
@@ -388,7 +388,7 @@ class NodeRegistryEffect:
             else:
                 # Sanitize backend error to avoid exposing secrets
                 # (connection strings, credentials, internal hostnames)
-                sanitized_error = _sanitize_backend_error("Consul", result.get("error"))
+                sanitized_error = _sanitize_backend_error("Consul", result.error)
                 return ModelBackendResult(
                     success=False,
                     error=sanitized_error,
@@ -440,7 +440,7 @@ class NodeRegistryEffect:
 
             duration_ms = (time.perf_counter() - start_time) * 1000
 
-            if result.get("success", False):
+            if result.success:
                 return ModelBackendResult(
                     success=True,
                     duration_ms=duration_ms,
@@ -451,9 +451,7 @@ class NodeRegistryEffect:
             else:
                 # Sanitize backend error to avoid exposing secrets
                 # (connection strings, credentials, internal hostnames)
-                sanitized_error = _sanitize_backend_error(
-                    "PostgreSQL", result.get("error")
-                )
+                sanitized_error = _sanitize_backend_error("PostgreSQL", result.error)
                 return ModelBackendResult(
                     success=False,
                     error=sanitized_error,
