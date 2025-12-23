@@ -233,7 +233,9 @@ class TestBasicReduce:
             event = create_introspection_event(node_type=node_type)
             output = reducer.reduce(initial_state, event)
 
-            assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS, f"Failed for node_type: {node_type}"
+            assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS, (
+                f"Failed for node_type: {node_type}"
+            )
             assert output.result.status == "pending"
 
 
@@ -852,11 +854,29 @@ class TestReducerReset:
             # Non-terminal states - reset should FAIL with invalid_reset_state
             (idle_state, "idle", False, "failed", "invalid_reset_state"),
             (pending_state, "pending", False, "failed", "invalid_reset_state"),
-            (partial_consul_state, "partial (consul confirmed)", False, "failed", "invalid_reset_state"),
-            (partial_postgres_state, "partial (postgres confirmed)", False, "failed", "invalid_reset_state"),
+            (
+                partial_consul_state,
+                "partial (consul confirmed)",
+                False,
+                "failed",
+                "invalid_reset_state",
+            ),
+            (
+                partial_postgres_state,
+                "partial (postgres confirmed)",
+                False,
+                "failed",
+                "invalid_reset_state",
+            ),
         ]
 
-        for state, state_name, should_succeed, expected_status, expected_failure in test_cases:
+        for (
+            state,
+            state_name,
+            should_succeed,
+            expected_status,
+            expected_failure,
+        ) in test_cases:
             reset_event_id = uuid4()
             output = reducer.reduce_reset(state, reset_event_id)
 
@@ -1948,7 +1968,9 @@ class TestCompleteStateTransitions:
 
         assert output.result.status == "pending"
         assert output.result.node_id == event.node_id
-        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS  # Consul + PostgreSQL intents
+        assert (
+            len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+        )  # Consul + PostgreSQL intents
 
     # -------------------------------------------------------------------------
     # Transition 2: pending -> partial (Consul confirmed first)
@@ -2789,7 +2811,9 @@ class TestDeterminismProperty:
         # First reduce establishes the state
         output = reducer.reduce(initial_state, event)
         state_after_first = output.result
-        assert len(output.intents) == EXPECTED_REGISTRATION_INTENTS  # Consul + PostgreSQL
+        assert (
+            len(output.intents) == EXPECTED_REGISTRATION_INTENTS
+        )  # Consul + PostgreSQL
 
         # All subsequent replays should be idempotent
         current_state = state_after_first
@@ -4422,7 +4446,9 @@ class TestEventReplayDeterminism:
         # Test across different reducer instances
         other_reducer = RegistrationReducer()
         other_mock_event = create_mock_event()
-        other_derived_id = other_reducer._derive_deterministic_event_id(other_mock_event)
+        other_derived_id = other_reducer._derive_deterministic_event_id(
+            other_mock_event
+        )
 
         assert other_derived_id == first_id, (
             "Different reducer instance derived different ID for same content. "
@@ -4691,9 +4717,7 @@ class TestPropertyBasedStateInvariants:
         """
         if status != "failed" and failure_reason is not None:
             # This would violate the invariant - failure_reason without failed status
-            pytest.skip(
-                "Invalid state: failure_reason set but status is not 'failed'"
-            )
+            pytest.skip("Invalid state: failure_reason set but status is not 'failed'")
 
         # Verify the invariant: failure_reason implies status='failed'
         if failure_reason is not None:
@@ -4853,7 +4877,9 @@ class TestPropertyBasedStateInvariants:
         state_after_first = output1.result
 
         assert output1.items_processed == 1, "First reduce should process 1 item"
-        assert len(output1.intents) == EXPECTED_REGISTRATION_INTENTS, "First reduce should emit 2 intents"
+        assert len(output1.intents) == EXPECTED_REGISTRATION_INTENTS, (
+            "First reduce should emit 2 intents"
+        )
         assert state_after_first.status == "pending", "State should be pending"
         assert state_after_first.last_processed_event_id == correlation_id
 
@@ -5207,7 +5233,9 @@ class TestBoundaryConditions:
         internal URLs with extensive path components and query parameters.
         """
         # Create a URL with 1000+ characters
-        base_url = "http://very-long-hostname-for-internal-service.internal.cluster.local:8080"
+        base_url = (
+            "http://very-long-hostname-for-internal-service.internal.cluster.local:8080"
+        )
         long_path = "/api/v1" + "/segment" * 50  # ~400 chars of path segments
         long_query = "?" + "&".join(
             f"param{i}=value{i}" * 10 for i in range(20)
@@ -5638,12 +5666,10 @@ class TestCommandFoldingProhibited:
                 "Intents are data, not commands."
             )
             assert not hasattr(intent, "run"), (
-                "Intent should not have run() method. "
-                "Intents are data, not commands."
+                "Intent should not have run() method. Intents are data, not commands."
             )
             assert not callable(intent.payload), (
-                "Intent payload should not be callable. "
-                "Intents are data, not commands."
+                "Intent payload should not be callable. Intents are data, not commands."
             )
 
     def test_intents_are_not_executed_by_reducer(
@@ -5672,11 +5698,10 @@ class TestCommandFoldingProhibited:
         from unittest.mock import patch
 
         # Mock external services that would be called if commands were executed
-        with patch(
-            "socket.create_connection"
-        ) as mock_socket, patch(
-            "urllib.request.urlopen"
-        ) as mock_urlopen:
+        with (
+            patch("socket.create_connection") as mock_socket,
+            patch("urllib.request.urlopen") as mock_urlopen,
+        ):
             # Configure mocks to fail if called (should never happen)
             mock_socket.side_effect = AssertionError(
                 "Socket created during reduce! Reducer should not make network calls."
