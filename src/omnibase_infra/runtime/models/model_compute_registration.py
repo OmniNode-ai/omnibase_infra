@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.utils import validate_version_lenient
+
 if TYPE_CHECKING:
     from omnibase_infra.protocols import ProtocolPluginCompute
 
@@ -86,40 +88,7 @@ class ModelComputeRegistration(BaseModel):
         Raises:
             ValueError: If version format is invalid
         """
-        if not v or not v.strip():
-            raise ValueError("Version cannot be empty")
-
-        v = v.strip()
-        if "-" in v:
-            version_part, prerelease = v.split("-", 1)
-            if not prerelease:
-                raise ValueError(
-                    f"Invalid version '{v}': prerelease cannot be empty after '-'"
-                )
-        else:
-            version_part = v
-
-        parts = version_part.split(".")
-        if len(parts) < 1 or len(parts) > 3:
-            raise ValueError(
-                f"Invalid version '{v}': expected format 'major.minor.patch'"
-            )
-
-        for part in parts:
-            if not part:
-                raise ValueError(f"Invalid version '{v}': empty component")
-            try:
-                num = int(part)
-                if num < 0:
-                    raise ValueError(f"Invalid version '{v}': negative component")
-            except ValueError as e:
-                if "negative component" in str(e):
-                    raise
-                raise ValueError(
-                    f"Invalid version '{v}': non-integer component '{part}'"
-                ) from None
-
-        return v
+        return validate_version_lenient(v)
 
 
 __all__: list[str] = ["ModelComputeRegistration"]
