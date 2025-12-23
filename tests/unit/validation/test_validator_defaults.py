@@ -47,17 +47,9 @@ class TestInfraValidatorConstants:
 
         Threshold history:
         - 491 (2025-12-21): Initial baseline with DispatcherFunc | ContextAwareDispatcherFunc
-        - 503 (2025-12-22): PR #77 fix/ci-test-failures branch additions:
-          - ProtocolIdempotencyStore protocol addition (local definition pending omnibase_spi 0.5.0)
-          - ModelNodeIntrospectionEvent correlation_id field additions (UUID | None patterns)
-          - Additional nullable fields for CI test failure fixes
-        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots (~12 unions added)
-        - 530 (2025-12-22): PR #77 protocol tests + security documentation (~15 unions added)
-          - test_protocol_idempotency_store.py: type annotation tests with Union checks
-          - protocol_idempotency_store.py: security documentation additions
-        - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78) (~14 unions added)
-          - nodes/effects/ module with protocol and model definitions
-          - Legitimate X | None nullable patterns for optional fields
+        - 515 (2025-12-22): OMN-990 MessageDispatchEngine + OMN-947 snapshots
+        - 540 (2025-12-23): OMN-950 comprehensive reducer tests
+        - 544 (2025-12-23): OMN-954 effect idempotency and retry tests (PR #78)
 
         Threshold: 555 (11 buffer above 544 baseline for codebase growth)
         Target: Reduce to <200 through ongoing dict[str, object] -> JsonValue migration.
