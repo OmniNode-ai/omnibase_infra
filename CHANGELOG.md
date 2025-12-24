@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking Changes
 
 #### MixinNodeIntrospection API (PR #54)
+- **`invalidate_introspection_cache()` is now synchronous**: The cache invalidation method no longer requires `await`.
+  - **Old**: `await node.invalidate_introspection_cache()`
+  - **New**: `node.invalidate_introspection_cache()`
+  - **Migration**: Remove `await` from all calls to `invalidate_introspection_cache()`.
+  - **Rationale**: Cache invalidation is a simple in-memory operation that does not require async I/O. Synchronous semantics simplify usage and avoid unnecessary coroutine overhead.
 - **New configuration model**: Added `ModelIntrospectionConfig` as the preferred configuration method.
   - **Migration**: Use `initialize_introspection_from_config(config)` for new code; legacy `initialize_introspection()` method remains supported for backward compatibility.
   - **Rationale**: Typed configuration model provides better validation and extensibility.

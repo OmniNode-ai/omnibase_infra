@@ -369,10 +369,68 @@ class MixinNodeIntrospection:
         - Consider network segmentation for introspection event topics
         - Consider disabling ``enable_registry_listener`` if not needed
 
+    Thread Safety:
+        This mixin is designed for **single-threaded asyncio usage** and does NOT
+        provide internal thread synchronization.
+
+        **Instance-Level Cache** (``_introspection_cache``, ``_introspection_cached_at``):
+
+        - Cache operations are **synchronous** (no async locking)
+        - Safe for cooperative asyncio concurrency (single event loop)
+        - **NOT safe** for multi-threaded access without external synchronization
+        - The ``invalidate_introspection_cache()`` method is synchronous and does
+          not acquire any locks
+
+        **Class-Level Cache** (``_class_method_cache``):
+
+        - Shared ClassVar across all instances of the same class
+        - Population uses check-then-set pattern (not atomic)
+        - **Benign race condition**: Multiple threads may populate the cache
+          simultaneously, but all produce identical results since method
+          signatures are immutable after class definition
+        - Use ``_invalidate_class_method_cache()`` to clear if dynamic method
+          registration occurs
+
+        **Background Tasks** (heartbeat loop, registry listener):
+
+        - Run as asyncio tasks within the event loop
+        - Designed for cooperative async concurrency
+        - Share access to instance state without locking
+        - **NOT safe** to call task methods from multiple threads
+
+        **Multi-Threaded Usage**:
+
+        If using this mixin in a multi-threaded application (e.g., with
+        ``concurrent.futures.ThreadPoolExecutor``), external synchronization
+        is required:
+
+        .. code-block:: python
+
+            import threading
+
+            class ThreadSafeNode(MixinNodeIntrospection):
+                def __init__(self, config):
+                    self._introspection_lock = threading.Lock()
+                    self.initialize_introspection(...)
+
+                def invalidate_introspection_cache(self) -> None:
+                    with self._introspection_lock:
+                        super().invalidate_introspection_cache()
+
+                async def get_introspection_data(self):
+                    # Note: async lock needed for async methods
+                    # Consider asyncio.Lock() for async coordination
+                    return await super().get_introspection_data()
+
+        **Recommendation**: For high-concurrency async environments, prefer
+        using a single asyncio event loop with cooperative multitasking rather
+        than multi-threading.
+
     See Also:
         - Module docstring for detailed security documentation and threat model
         - CLAUDE.md "Node Introspection Security Considerations" section
         - ``get_capabilities()`` for filtering logic details
+        - ``docs/architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md`` for similar patterns
 
     Example:
         ```python
@@ -738,6 +796,32 @@ class MixinNodeIntrospection:
         instances of the same class, avoiding expensive reflection operations
         on each introspection call.
 
+        Thread Safety:
+            This method accesses a **class-level** cache (``_class_method_cache``)
+            shared across all instances. The cache population uses a check-then-set
+            pattern which is NOT atomic.
+
+            **Benign Race Condition**:
+
+            Multiple threads may simultaneously detect the cache is empty and
+            populate it concurrently. However, this is a **benign race** because:
+
+            1. Method signatures are immutable after class definition
+            2. All threads will produce identical cache entries
+            3. The final cached value is correct regardless of which thread wins
+
+            **When This Matters**:
+
+            - First access from multiple threads may duplicate reflection work
+            - No correctness issues, only minor performance impact
+            - Subsequent accesses are cache hits and thread-safe reads
+
+            **Dynamic Method Registration**:
+
+            If methods are added dynamically at runtime (rare), call
+            ``_invalidate_class_method_cache()`` to clear stale entries.
+            This invalidation is also not atomic and may race with reads.
+
         Security Note:
             This method uses Python's ``inspect`` module to extract method
             signatures, which exposes detailed type information:
@@ -800,6 +884,25 @@ class MixinNodeIntrospection:
         Call this method when methods are dynamically added or removed from
         a class at runtime. For most use cases, this is not necessary as
         class methods are defined at class creation time.
+
+        Thread Safety:
+            This method modifies the **class-level** cache (``_class_method_cache``)
+            which is shared across all instances and classes.
+
+            - **dict.pop()** and **dict.clear()** are atomic in CPython due to GIL
+            - However, racing with ``_get_class_method_signatures()`` may result in:
+              - Immediate re-population after invalidation (benign)
+              - Brief window where cache is empty causing reflection work
+
+            **Multi-Threaded Usage**:
+
+            For strict cache coherency in multi-threaded environments, coordinate
+            cache invalidation with all threads that may be reading. In practice,
+            this is rarely needed since:
+
+            1. Method signatures don't change after class definition
+            2. Dynamic method registration is uncommon
+            3. Re-population produces identical results
 
         Args:
             target_class: Specific class to invalidate cache for.
@@ -1137,6 +1240,29 @@ class MixinNodeIntrospection:
         ``_introspection_last_metrics``. Use ``get_performance_metrics()``
         to retrieve the most recent metrics.
 
+        Thread Safety:
+            This method performs cache read and write operations without
+            internal locking. It is designed for **single-threaded asyncio**
+            usage where cooperative multitasking prevents concurrent execution.
+
+            - **Safe** for sequential async calls within one event loop
+            - **NOT safe** for concurrent calls from multiple threads
+            - Cache reads (TTL check) and writes (update) are not atomic
+
+            **Potential Race Conditions** (multi-threaded only):
+
+            - Two threads may both detect cache expiry and refresh simultaneously
+            - ``invalidate_introspection_cache()`` called from another thread
+              during cache refresh may result in stale data being cached
+
+            For multi-threaded usage, use ``asyncio.Lock()`` for coordination:
+
+            .. code-block:: python
+
+                async def get_introspection_data(self):
+                    async with self._async_introspection_lock:
+                        return await super().get_introspection_data()
+
         Returns:
             ModelNodeIntrospectionEvent containing full introspection data.
 
@@ -1307,6 +1433,17 @@ class MixinNodeIntrospection:
             backwards compatibility with nodes that don't have contract
             topic declarations. Future versions may make this stricter.
         """
+        # Handle empty topic explicitly - this is a configuration error
+        if topic == "":
+            logger.warning(
+                f"Empty topic provided for {operation}",
+                extra={
+                    "node_id": str(self._introspection_node_id),
+                    "operation": operation,
+                },
+            )
+            return
+
         # Check if contract topics are defined on this node
         contract_topics = getattr(self, "_contract_topics", None)
         if contract_topics is None:
@@ -2030,6 +2167,25 @@ class MixinNodeIntrospection:
 
         Call this when node capabilities change to ensure fresh
         data is reported on next introspection request.
+
+        Thread Safety:
+            This method is **synchronous** and does NOT acquire any locks.
+            It performs simple attribute assignments which are atomic in
+            CPython due to the GIL, but this should not be relied upon for
+            multi-threaded correctness.
+
+            - **Safe** for single-threaded asyncio usage
+            - **NOT safe** for concurrent calls from multiple threads without
+              external synchronization
+            - If called concurrently with ``get_introspection_data()``, the
+              cache state may be inconsistent
+
+            For multi-threaded usage, wrap calls with external locking:
+
+            .. code-block:: python
+
+                with self._introspection_lock:
+                    self.invalidate_introspection_cache()
 
         Example:
             ```python

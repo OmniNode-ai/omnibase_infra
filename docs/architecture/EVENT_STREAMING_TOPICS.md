@@ -510,31 +510,32 @@ metadata:
   version: 1.0.0
   node_type: EFFECT
 
-  event_channels:
-    # Topics this node publishes to
-    publishes:
-      - topic: onex.node.introspection.published.v1
-        key: node_id
-        event_type: introspection
-        description: Announces node capabilities on startup and refresh
+# event_channels is at top level, NOT under metadata
+event_channels:
+  # Topics this node publishes to
+  publishes:
+    - topic: onex.node.introspection.published.v1
+      key: node_id
+      event_type: introspection
+      description: Announces node capabilities on startup and refresh
 
-      - topic: onex.node.heartbeat.published.v1
-        key: node_id
-        event_type: heartbeat
-        description: Periodic liveness signal
+    - topic: onex.node.heartbeat.published.v1
+      key: node_id
+      event_type: heartbeat
+      description: Periodic liveness signal
 
-      - topic: onex.node.shutdown.announced.v1
-        key: node_id
-        event_type: shutdown
-        description: Graceful shutdown notification
+    - topic: onex.node.shutdown.announced.v1
+      key: node_id
+      event_type: shutdown
+      description: Graceful shutdown notification
 
-    # Topics this node subscribes to
-    subscribes:
-      - topic: onex.registry.introspection.requested.v1
-        key: request_id
-        event_type: request
-        description: Registry broadcast requesting introspection refresh
-        handler: handle_introspection_request
+  # Topics this node subscribes to
+  subscribes:
+    - topic: onex.registry.introspection.requested.v1
+      key: request_id
+      event_type: request
+      description: Registry broadcast requesting introspection refresh
+      handler: handle_introspection_request
 ```
 
 ### Example: Orchestrator Contract with Workflow Events
@@ -546,39 +547,40 @@ metadata:
   version: 1.0.0
   node_type: ORCHESTRATOR
 
-  event_channels:
-    publishes:
-      - topic: onex.registry.node.registered.v1
-        key: node_id
-        event_type: state_change
-        description: Emitted when node registration completes successfully
+# event_channels is at top level, NOT under metadata
+event_channels:
+  publishes:
+    - topic: onex.registry.node.registered.v1
+      key: node_id
+      event_type: state_change
+      description: Emitted when node registration completes successfully
 
-      - topic: onex.registry.node.registration_failed.v1
-        key: node_id
-        event_type: state_change
-        description: Emitted when node registration fails
+    - topic: onex.registry.node.registration_failed.v1
+      key: node_id
+      event_type: state_change
+      description: Emitted when node registration fails
 
-      - topic: onex.registry.workflow.started.v1
-        key: workflow_id
-        event_type: workflow
-        description: Workflow audit trail - started
+    - topic: onex.registry.workflow.started.v1
+      key: workflow_id
+      event_type: workflow
+      description: Workflow audit trail - started
 
-      - topic: onex.registry.workflow.completed.v1
-        key: workflow_id
-        event_type: workflow
-        description: Workflow audit trail - completed
+    - topic: onex.registry.workflow.completed.v1
+      key: workflow_id
+      event_type: workflow
+      description: Workflow audit trail - completed
 
-      - topic: onex.registry.workflow.failed.v1
-        key: workflow_id
-        event_type: workflow
-        description: Workflow audit trail - failed
+    - topic: onex.registry.workflow.failed.v1
+      key: workflow_id
+      event_type: workflow
+      description: Workflow audit trail - failed
 
-    subscribes:
-      - topic: onex.node.introspection.published.v1
-        key: node_id
-        event_type: introspection
-        description: Triggers registration workflow for new/updated nodes
-        handler: handle_introspection_event
+  subscribes:
+    - topic: onex.node.introspection.published.v1
+      key: node_id
+      event_type: introspection
+      description: Triggers registration workflow for new/updated nodes
+      handler: handle_introspection_event
 ```
 
 ### Event Channel Schema Reference
@@ -635,7 +637,7 @@ except ValidationError as e:
 | `cache_ttl` | Non-negative | Must be >= 0.0 |
 | `extra` | Forbidden | No extra fields allowed (frozen model) |
 
-**Note:** Topic naming validation is planned for a future release when contract-driven topic configuration is implemented.
+**Note:** Topic naming validation is available via contract-driven topic configuration (implemented in OMN-881). Nodes can define their event channels in `contract.yaml` and the runtime validates topic names against the canonical list.
 
 See `src/omnibase_infra/mixins/model_introspection_config.py` for the configuration model implementation.
 
@@ -717,11 +719,11 @@ class RegistryEffectNode(MixinNodeIntrospection):
         event_bus: KafkaEventBus,
     ) -> None:
         # Configure introspection with typed configuration model
-        # Note: Topics are currently defined as module constants in mixin_node_introspection.py:
+        # Topics can be configured via contract.yaml event_channels (implemented in OMN-881).
+        # Default topic names in mixin_node_introspection.py are used if not overridden:
         # - INTROSPECTION_TOPIC = "node.introspection"
         # - HEARTBEAT_TOPIC = "node.heartbeat"
         # - REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
-        # Contract-driven topic configuration is planned for a future release.
         config = ModelIntrospectionConfig(
             node_id=UUID(contract.metadata.name) if isinstance(contract.metadata.name, str) else contract.metadata.name,
             node_type=contract.metadata.node_type,
@@ -733,14 +735,14 @@ class RegistryEffectNode(MixinNodeIntrospection):
 
 **Key Points:**
 - Topics are declared in `contract.yaml` for documentation and topology analysis
-- `MixinNodeIntrospection` currently uses module-level topic constants (`INTROSPECTION_TOPIC`, `HEARTBEAT_TOPIC`, `REQUEST_INTROSPECTION_TOPIC`)
-- Contract-driven topic configuration via `ModelIntrospectionConfig` is planned for a future release
+- `MixinNodeIntrospection` uses module-level topic constants as defaults (`INTROSPECTION_TOPIC`, `HEARTBEAT_TOPIC`, `REQUEST_INTROSPECTION_TOPIC`)
+- Contract-driven topic configuration via `ModelIntrospectionConfig` is implemented (OMN-881) and can override defaults
 - **Shutdown events are a separate concern**: The `onex.node.shutdown.announced.v1` topic is not managed by `MixinNodeIntrospection`. Nodes should publish shutdown events directly via their shutdown/cleanup logic, not through the introspection mixin.
 - Contract validation (see Validation Rules above) ensures topics exist in the canonical list
 - This pattern enables static analysis of event topology across all nodes
 
 **Current Behavior:**
-Topic names are defined as module-level constants in `mixin_node_introspection.py`. Contract-driven topic configuration is planned for a future release to enable topology analysis and multi-tenant deployments.
+Topic names are defined as module-level constants in `mixin_node_introspection.py` as defaults. Contract-driven topic configuration is available via `ModelIntrospectionConfig` (implemented in OMN-881), enabling topology analysis and multi-tenant deployments.
 
 ---
 
@@ -760,6 +762,7 @@ Consider introducing an `EnumONEXTopic` enum for topic name type safety. Benefit
 
 ## Related Tickets
 
+- **OMN-881**: Contract-driven topic configuration (Done)
 - **OMN-888**: Node Registration Orchestrator (FSM)
 - **OMN-889**: Dual Registration Reducer
 - **OMN-890**: Registry Effect Node (Done)

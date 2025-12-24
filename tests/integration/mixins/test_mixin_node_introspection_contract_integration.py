@@ -566,9 +566,7 @@ class TestEndToEndIntrospectionWorkflow:
 
             # Verify group ID includes node ID (now a UUID)
             node_id_str = str(node._introspection_node_id)
-            assert any(
-                node_id_str in group for group in event_bus.subscribed_groups
-            )
+            assert any(node_id_str in group for group in event_bus.subscribed_groups)
         finally:
             await node.stop_introspection_tasks()
 

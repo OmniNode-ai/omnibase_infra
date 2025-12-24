@@ -59,7 +59,6 @@ PERF_MULTIPLIER: float = 3.0 if _CI_MODE else 2.0
 # Test timing constants (in seconds)
 # CI environments may be slower, so apply multiplier to timing waits
 CACHE_TTL_WAIT = 0.15  # Wait for cache TTL expiration (TTL=0.1s + buffer)
-HEARTBEAT_INTERVAL = 0.05  # Default heartbeat interval for tests
 HEARTBEAT_WAIT = 0.1 * (
     PERF_MULTIPLIER if _CI_MODE else 1.0
 )  # Wait for at least one heartbeat
@@ -932,9 +931,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_introspection_data()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < threshold_ms
-        ), f"Introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_cached_introspection_under_1ms(self, mock_node: MockNode) -> None:
         """Test that cached introspection returns within threshold."""
@@ -946,9 +945,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_introspection_data()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < threshold_ms
-        ), f"Cached introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Cached introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_capability_extraction_under_10ms(self, mock_node: MockNode) -> None:
         """Test that capability extraction completes within threshold."""
@@ -957,9 +956,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_capabilities()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < threshold_ms
-        ), f"Capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_endpoint_discovery_under_10ms(self, mock_node: MockNode) -> None:
         """Test that endpoint discovery completes within threshold."""
@@ -968,9 +967,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_endpoints()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < threshold_ms
-        ), f"Endpoint discovery took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Endpoint discovery took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_state_extraction_under_1ms(self, mock_node: MockNode) -> None:
         """Test that state extraction completes within threshold."""
@@ -979,9 +978,9 @@ class TestMixinNodeIntrospectionPerformance:
         await mock_node.get_current_state()
         elapsed_ms = (time.time() - start) * 1000
 
-        assert (
-            elapsed_ms < threshold_ms
-        ), f"State extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        assert elapsed_ms < threshold_ms, (
+            f"State extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_multiple_introspection_calls_consistent_performance(
         self, mock_node: MockNode
@@ -1005,12 +1004,12 @@ class TestMixinNodeIntrospectionPerformance:
         avg_threshold_ms = 30 * PERF_MULTIPLIER
         max_threshold_ms = 50 * PERF_MULTIPLIER
 
-        assert (
-            avg_time < avg_threshold_ms
-        ), f"Average time {avg_time:.2f}ms, expected <{avg_threshold_ms:.0f}ms"
-        assert (
-            max_time < max_threshold_ms
-        ), f"Max time {max_time:.2f}ms, expected <{max_threshold_ms:.0f}ms"
+        assert avg_time < avg_threshold_ms, (
+            f"Average time {avg_time:.2f}ms, expected <{avg_threshold_ms:.0f}ms"
+        )
+        assert max_time < max_threshold_ms, (
+            f"Max time {max_time:.2f}ms, expected <{max_threshold_ms:.0f}ms"
+        )
 
 
 @pytest.mark.unit
@@ -1088,9 +1087,9 @@ class TestMixinNodeIntrospectionBenchmark:
         avg_total = sum(timings["total_introspection"]) / len(
             timings["total_introspection"]
         )
-        assert (
-            avg_total < threshold_ms
-        ), f"Average introspection {avg_total:.2f}ms exceeds {threshold_ms:.0f}ms"
+        assert avg_total < threshold_ms, (
+            f"Average introspection {avg_total:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
 
     async def test_introspection_concurrent_load_benchmark(self) -> None:
         """Benchmark introspection under concurrent load."""
@@ -1122,12 +1121,12 @@ class TestMixinNodeIntrospectionBenchmark:
         )
 
         threshold_ms = 100 * PERF_MULTIPLIER  # Higher threshold for concurrent load
-        assert (
-            avg_time < threshold_ms
-        ), f"Average concurrent time {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
-        assert (
-            max_time < threshold_ms * 2
-        ), f"Max concurrent time {max_time:.2f}ms exceeds {threshold_ms * 2:.0f}ms"
+        assert avg_time < threshold_ms, (
+            f"Average concurrent time {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
+        assert max_time < threshold_ms * 2, (
+            f"Max concurrent time {max_time:.2f}ms exceeds {threshold_ms * 2:.0f}ms"
+        )
 
     async def test_cache_hit_performance(self) -> None:
         """Verify cache hits are sub-millisecond."""
@@ -1161,9 +1160,9 @@ class TestMixinNodeIntrospectionBenchmark:
 
         # Cache hits should be very fast
         threshold_ms = 0.5 * PERF_MULTIPLIER
-        assert (
-            avg_time < threshold_ms
-        ), f"Cache hit avg {avg_time:.3f}ms exceeds {threshold_ms:.1f}ms"
+        assert avg_time < threshold_ms, (
+            f"Cache hit avg {avg_time:.3f}ms exceeds {threshold_ms:.1f}ms"
+        )
 
     async def test_introspection_p95_latency(self) -> None:
         """Test that p95 latency meets requirements."""
@@ -1198,9 +1197,9 @@ class TestMixinNodeIntrospectionBenchmark:
 
         # p95 should be under 50ms threshold (with CI buffer)
         threshold_ms = 50 * PERF_MULTIPLIER
-        assert (
-            p95 < threshold_ms
-        ), f"p95 latency {p95:.2f}ms exceeds {threshold_ms:.0f}ms"
+        assert p95 < threshold_ms, (
+            f"p95 latency {p95:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
 
     async def test_component_timing_breakdown(self) -> None:
         """Test timing breakdown of individual introspection components."""
@@ -1322,9 +1321,9 @@ class TestMixinNodeIntrospectionEdgeCases:
         operations = capabilities["operations"]
         assert isinstance(operations, list)
         assert len(operations) >= 10
-        assert (
-            elapsed_ms < threshold_ms
-        ), f"Large capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        assert elapsed_ms < threshold_ms, (
+            f"Large capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_concurrent_introspection_calls(self) -> None:
         """Test concurrent introspection data requests."""
@@ -1523,9 +1522,9 @@ class TestMixinNodeIntrospectionClassLevelCache:
 
         # Warm cache calls should be reasonably fast
         threshold_ms = 5 * PERF_MULTIPLIER
-        assert (
-            avg_warm_ms < threshold_ms
-        ), f"Warm cache calls averaged {avg_warm_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        assert avg_warm_ms < threshold_ms, (
+            f"Warm cache calls averaged {avg_warm_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
+        )
 
     async def test_different_classes_have_separate_cache_entries(self) -> None:
         """Test that different classes have separate cache entries."""
@@ -1962,9 +1961,9 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         # Should be well under the threshold
         threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
-        assert (
-            avg_time < threshold_ms
-        ), f"Minimal methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        assert avg_time < threshold_ms, (
+            f"Minimal methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
 
     async def test_benchmark_medium_methods_node(self) -> None:
         """Benchmark introspection on a node with ~20 methods."""
@@ -2064,9 +2063,9 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         # Should still be under the threshold
         threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
-        assert (
-            avg_time < threshold_ms
-        ), f"Medium methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        assert avg_time < threshold_ms, (
+            f"Medium methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
 
     async def test_benchmark_large_methods_node(self) -> None:
         """Benchmark introspection on a node with ~50 methods."""
@@ -2119,9 +2118,9 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         # Should still be under the threshold even with 50+ methods
         threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
-        assert (
-            avg_time < threshold_ms
-        ), f"Large methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        assert avg_time < threshold_ms, (
+            f"Large methods avg {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+        )
 
     async def test_benchmark_cache_hit_performance_50_methods(self) -> None:
         """Benchmark cache hit performance with large method count."""
@@ -2165,9 +2164,9 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
 
         # Cache hits should be very fast regardless of method count
         threshold_ms = PERF_THRESHOLD_CACHE_HIT_MS * PERF_MULTIPLIER
-        assert (
-            avg_time < threshold_ms
-        ), f"Cache hit avg {avg_time:.3f}ms exceeds {threshold_ms:.1f}ms"
+        assert avg_time < threshold_ms, (
+            f"Cache hit avg {avg_time:.3f}ms exceeds {threshold_ms:.1f}ms"
+        )
 
     async def test_method_count_scaling_analysis(self) -> None:
         """Analyze how introspection time scales with method count."""
@@ -2221,9 +2220,9 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
         # All should be under threshold
         threshold_ms = PERF_THRESHOLD_GET_INTROSPECTION_DATA_MS * PERF_MULTIPLIER
         for method_count, avg_time in results:
-            assert (
-                avg_time < threshold_ms
-            ), f"{method_count} methods: {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+            assert avg_time < threshold_ms, (
+                f"{method_count} methods: {avg_time:.2f}ms exceeds {threshold_ms:.0f}ms"
+            )
 
 
 @pytest.mark.unit
@@ -2501,18 +2500,18 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
         # Verify get_capabilities (most expensive due to reflection)
         cap_p95 = self._calculate_percentile(component_timings["get_capabilities"], 95)
         cap_threshold = PERF_THRESHOLD_GET_CAPABILITIES_MS * PERF_MULTIPLIER
-        assert (
-            cap_p95 < cap_threshold
-        ), f"get_capabilities p95 {cap_p95:.2f}ms exceeds {cap_threshold:.0f}ms"
+        assert cap_p95 < cap_threshold, (
+            f"get_capabilities p95 {cap_p95:.2f}ms exceeds {cap_threshold:.0f}ms"
+        )
 
         # Verify get_current_state (should be very fast)
         state_p95 = self._calculate_percentile(
             component_timings["get_current_state"], 95
         )
         state_threshold = 1.0 * PERF_MULTIPLIER  # Should be sub-millisecond
-        assert (
-            state_p95 < state_threshold
-        ), f"get_current_state p95 {state_p95:.2f}ms exceeds {state_threshold:.1f}ms"
+        assert state_p95 < state_threshold, (
+            f"get_current_state p95 {state_p95:.2f}ms exceeds {state_threshold:.1f}ms"
+        )
 
     async def test_benchmark_50ms_target_verification(self) -> None:
         """Verify that the <50ms target is consistently met.
@@ -2588,9 +2587,9 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
         assert isinstance(metrics, IntrospectionPerformanceMetrics)
 
         # Validate timing fields are populated
-        assert (
-            metrics.total_introspection_ms > 0
-        ), "total_introspection_ms should be > 0"
+        assert metrics.total_introspection_ms > 0, (
+            "total_introspection_ms should be > 0"
+        )
         assert metrics.get_capabilities_ms >= 0, "get_capabilities_ms should be >= 0"
         assert metrics.get_endpoints_ms >= 0, "get_endpoints_ms should be >= 0"
         assert metrics.get_current_state_ms >= 0, "get_current_state_ms should be >= 0"
@@ -2624,9 +2623,9 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             "threshold_exceeded",
             "slow_operations",
         }
-        assert (
-            set(metrics_dict.keys()) == expected_keys
-        ), f"to_dict() missing keys: {expected_keys - set(metrics_dict.keys())}"
+        assert set(metrics_dict.keys()) == expected_keys, (
+            f"to_dict() missing keys: {expected_keys - set(metrics_dict.keys())}"
+        )
 
         print("\nPerformance Metrics Validation:")
         print(f"  total_introspection_ms: {metrics.total_introspection_ms:.2f}")
@@ -2930,6 +2929,88 @@ class TestModelIntrospectionConfigTopicValidation:
             )
             assert config.introspection_topic == valid_topic
 
+    def test_topic_validation_accepts_version_suffix_pattern(self) -> None:
+        """Test that topics with version suffix pattern (.v\\d+) are accepted.
+
+        Version suffixes like .v1, .v2, .v10 are commonly used in event-driven
+        architectures to version topic schemas. This test ensures these patterns
+        are properly accepted by the validator.
+        """
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        version_suffix_topics = [
+            "node.introspection.v1",
+            "custom.heartbeat.v2",
+            "events.user-created.v10",
+            "service.notification.v99",
+            "domain.entity.action.v1",
+            "a.v1",  # minimal topic with version
+        ]
+
+        for topic in version_suffix_topics:
+            config = ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                introspection_topic=topic,
+            )
+            assert config.introspection_topic == topic
+
+    def test_topic_validation_rejects_invalid_version_suffix_patterns(self) -> None:
+        """Test that malformed version suffix patterns are rejected.
+
+        Version suffixes must be lowercase (.v1, not .V1) and must end with
+        alphanumeric characters (not trailing dots or special chars).
+        """
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        # Note: "topic.v" is actually valid (ends with lowercase letter 'v')
+        # per TOPIC_VALIDATION_PATTERN, so we only test truly invalid patterns
+        invalid_version_topics = [
+            "topic.V1",  # uppercase V
+            "topic.v1.",  # trailing dot
+            "Topic.v1",  # uppercase start
+        ]
+
+        for invalid_topic in invalid_version_topics:
+            with pytest.raises(ValidationError):
+                ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    introspection_topic=invalid_topic,
+                )
+
+    def test_all_custom_topics_configured_together(self) -> None:
+        """Test that all three custom topics can be configured simultaneously.
+
+        This ensures there are no conflicts when setting all topic parameters
+        at once during configuration.
+        """
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        custom_introspection = "custom.introspection.v1"
+        custom_heartbeat = "custom.heartbeat.v1"
+        custom_request = "custom.request-introspection.v1"
+
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            introspection_topic=custom_introspection,
+            heartbeat_topic=custom_heartbeat,
+            request_introspection_topic=custom_request,
+        )
+
+        assert config.introspection_topic == custom_introspection
+        assert config.heartbeat_topic == custom_heartbeat
+        assert config.request_introspection_topic == custom_request
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
@@ -3037,9 +3118,9 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
 
         # All calls should succeed
         exceptions = [r for r in results if isinstance(r, Exception)]
-        assert (
-            len(exceptions) == 0
-        ), f"Concurrent access produced exceptions: {exceptions}"
+        assert len(exceptions) == 0, (
+            f"Concurrent access produced exceptions: {exceptions}"
+        )
 
         # All results should be the same (cache consistency)
         valid_results = [
@@ -3073,7 +3154,7 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
         async def invalidate_cache() -> None:
             nonlocal invalidation_count
             await asyncio.sleep(0.0001)  # Small delay
-            await node.invalidate_introspection_cache()
+            node.invalidate_introspection_cache()
             invalidation_count += 1
 
         # Mix introspection calls with cache invalidations
@@ -3088,9 +3169,9 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
 
         # All introspection calls should succeed despite concurrent invalidation
         exceptions = [r for r in gathered_results if isinstance(r, Exception)]
-        assert (
-            len(exceptions) == 0
-        ), f"Concurrent invalidation produced exceptions: {exceptions}"
+        assert len(exceptions) == 0, (
+            f"Concurrent invalidation produced exceptions: {exceptions}"
+        )
 
     async def test_concurrent_cache_expiration_handling(self) -> None:
         """Test cache expiration under concurrent access.
@@ -3120,9 +3201,9 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         exceptions = [r for r in results if isinstance(r, Exception)]
-        assert (
-            len(exceptions) == 0
-        ), f"Cache expiration produced exceptions: {exceptions}"
+        assert len(exceptions) == 0, (
+            f"Cache expiration produced exceptions: {exceptions}"
+        )
 
     async def test_concurrent_initialization_and_access(self) -> None:
         """Test that initialization and access don't race.
@@ -3148,9 +3229,9 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         exceptions = [r for r in results if isinstance(r, Exception)]
-        assert (
-            len(exceptions) == 0
-        ), f"Concurrent init/access produced exceptions: {exceptions}"
+        assert len(exceptions) == 0, (
+            f"Concurrent init/access produced exceptions: {exceptions}"
+        )
         assert len(nodes) == 50
 
     async def test_multiple_instances_cache_isolation(self) -> None:
@@ -3180,9 +3261,9 @@ class TestMixinNodeIntrospectionConcurrentCacheAccess:
 
         # All should succeed
         exceptions = [r for r in results if isinstance(r, Exception)]
-        assert (
-            len(exceptions) == 0
-        ), f"Multi-instance access produced exceptions: {exceptions}"
+        assert len(exceptions) == 0, (
+            f"Multi-instance access produced exceptions: {exceptions}"
+        )
 
         # Verify each node's data is isolated
         valid_results = [

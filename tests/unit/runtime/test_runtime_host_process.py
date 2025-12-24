@@ -1764,9 +1764,9 @@ class TestRuntimeHostProcessLogWarnings:
 
         # Filter for warnings from our module
         runtime_warnings = filter_handler_warnings(caplog.records, self.RUNTIME_MODULE)
-        assert (
-            len(runtime_warnings) == 0
-        ), f"Unexpected warnings: {[w.message for w in runtime_warnings]}"
+        assert len(runtime_warnings) == 0, (
+            f"Unexpected warnings: {[w.message for w in runtime_warnings]}"
+        )
 
 
 # =============================================================================
@@ -2212,9 +2212,9 @@ class TestRuntimeHostProcessGracefulDrain:
 
         # Verify "Stopping RuntimeHostProcess" was logged
         info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
-        assert any(
-            "Stopping RuntimeHostProcess" in msg for msg in info_messages
-        ), f"Expected 'Stopping RuntimeHostProcess' in logs, got: {info_messages}"
+        assert any("Stopping RuntimeHostProcess" in msg for msg in info_messages), (
+            f"Expected 'Stopping RuntimeHostProcess' in logs, got: {info_messages}"
+        )
 
     @pytest.mark.asyncio
     async def test_stop_logs_drain_period_completed(
@@ -2258,28 +2258,28 @@ class TestRuntimeHostProcessGracefulDrain:
 
         # Check that drain_duration_seconds is logged (via extra dict)
         # The extra fields are available as attributes on the record
-        assert hasattr(
-            drain_record, "drain_duration_seconds"
-        ), "Expected 'drain_duration_seconds' in log extra fields"
+        assert hasattr(drain_record, "drain_duration_seconds"), (
+            "Expected 'drain_duration_seconds' in log extra fields"
+        )
         assert isinstance(drain_record.drain_duration_seconds, float), (
             f"drain_duration_seconds should be float, got "
             f"{type(drain_record.drain_duration_seconds)}"
         )
-        assert (
-            drain_record.drain_duration_seconds >= 0
-        ), "drain_duration_seconds should be non-negative"
+        assert drain_record.drain_duration_seconds >= 0, (
+            "drain_duration_seconds should be non-negative"
+        )
 
         # Check that pending_messages is logged
-        assert hasattr(
-            drain_record, "pending_messages"
-        ), "Expected 'pending_messages' in log extra fields"
-        assert isinstance(
-            drain_record.pending_messages, int
-        ), f"pending_messages should be int, got {type(drain_record.pending_messages)}"
+        assert hasattr(drain_record, "pending_messages"), (
+            "Expected 'pending_messages' in log extra fields"
+        )
+        assert isinstance(drain_record.pending_messages, int), (
+            f"pending_messages should be int, got {type(drain_record.pending_messages)}"
+        )
         # When no messages pending, should be 0
-        assert (
-            drain_record.pending_messages == 0
-        ), f"Expected pending_messages=0, got {drain_record.pending_messages}"
+        assert drain_record.pending_messages == 0, (
+            f"Expected pending_messages=0, got {drain_record.pending_messages}"
+        )
 
 
 # =============================================================================
@@ -2450,9 +2450,9 @@ class TestRuntimeHostProcessDrainState:
 
             # Verify drain state fields are present
             assert "is_draining" in health, "Expected 'is_draining' in health check"
-            assert (
-                "pending_message_count" in health
-            ), "Expected 'pending_message_count' in health check"
+            assert "pending_message_count" in health, (
+                "Expected 'pending_message_count' in health check"
+            )
 
             # Normal operation - not draining
             assert health["is_draining"] is False

@@ -140,9 +140,9 @@ class TestEffectRetryBackoff:
 
             # Assert: Backoff was applied (at least initial_backoff delay of 0.1s)
             # Use 0.08s tolerance to account for timing precision
-            assert (
-                elapsed >= 0.08
-            ), f"Expected at least 0.08s delay for backoff, got {elapsed:.3f}s"
+            assert elapsed >= 0.08, (
+                f"Expected at least 0.08s delay for backoff, got {elapsed:.3f}s"
+            )
 
             # Assert: Operation succeeded on retry
             result = output.result
@@ -199,9 +199,9 @@ class TestEffectRetryBackoff:
             # Assert: Total delay should be at least initial_backoff + 2*initial_backoff
             # Delay pattern: 0.1s (after 1st fail) + 0.2s (after 2nd fail) = 0.3s minimum
             # Using lower tolerance of 0.2s to account for timing precision
-            assert (
-                elapsed >= 0.2
-            ), f"Expected at least 0.2s total delay from backoff (0.1s + 0.2s), got {elapsed:.3f}s"
+            assert elapsed >= 0.2, (
+                f"Expected at least 0.2s total delay from backoff (0.1s + 0.2s), got {elapsed:.3f}s"
+            )
 
             # Assert: Validate exponential growth by checking elapsed is NOT too fast
             # If no backoff was applied, it would complete in <0.1s
@@ -449,9 +449,9 @@ class TestEffectRetryBackoff:
             assert mock_consul_client.kv.get.call_count == 3
 
             # Assert: Backoff delays were applied (0.1s + 0.2s minimum)
-            assert (
-                elapsed >= 0.25
-            ), f"Expected at least 0.25s total delay for retries, got {elapsed:.3f}s"
+            assert elapsed >= 0.25, (
+                f"Expected at least 0.25s total delay for retries, got {elapsed:.3f}s"
+            )
 
     async def test_success_on_last_retry(
         self,
