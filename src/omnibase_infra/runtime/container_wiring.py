@@ -53,6 +53,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from omnibase_infra.models.model_semver import SEMVER_DEFAULT
 from omnibase_infra.runtime.handler_registry import ProtocolBindingRegistry
 from omnibase_infra.runtime.policy_registry import PolicyRegistry
 from omnibase_infra.runtime.registry_compute import RegistryCompute
@@ -115,7 +116,7 @@ async def wire_infrastructure_services(
             scope="global",
             metadata={
                 "description": "ONEX policy plugin registry",
-                "version": "1.0.0",
+                "version": str(SEMVER_DEFAULT),
             },
         )
 
@@ -132,7 +133,7 @@ async def wire_infrastructure_services(
             scope="global",
             metadata={
                 "description": "ONEX protocol handler binding registry",
-                "version": "1.0.0",
+                "version": str(SEMVER_DEFAULT),
             },
         )
 
@@ -149,7 +150,7 @@ async def wire_infrastructure_services(
             scope="global",
             metadata={
                 "description": "ONEX compute plugin registry",
-                "version": "1.0.0",
+                "version": str(SEMVER_DEFAULT),
             },
         )
 
@@ -399,7 +400,7 @@ async def get_or_create_policy_registry(
                 scope="global",
                 metadata={
                     "description": "ONEX policy plugin registry (auto-registered)",
-                    "version": "1.0.0",
+                    "version": str(SEMVER_DEFAULT),
                     "auto_registered": True,
                 },
             )
@@ -641,7 +642,7 @@ async def get_or_create_compute_registry(
                 scope="global",
                 metadata={
                     "description": "ONEX compute plugin registry (auto-registered)",
-                    "version": "1.0.0",
+                    "version": str(SEMVER_DEFAULT),
                     "auto_registered": True,
                 },
             )

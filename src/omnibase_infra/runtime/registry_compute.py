@@ -76,7 +76,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import os
 import threading
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -85,18 +87,69 @@ from omnibase_infra.runtime.models import ModelComputeRegistration
 from omnibase_infra.runtime.models.model_compute_key import ModelComputeKey
 
 if TYPE_CHECKING:
-    from omnibase_infra.protocols import ProtocolPluginCompute
+    from omnibase_infra.protocols import ProtocolPluginCompute, ProtocolRegistryMetrics
+
+
+# =============================================================================
+# Metrics Timer Utility
+# =============================================================================
+
+
+class _MetricsTimer:
+    """Context manager for timing operations.
+
+    Provides high-precision timing using time.perf_counter() for accurate
+    latency measurements in the registry metrics system.
+
+    Attributes:
+        elapsed_ms: Time elapsed in milliseconds after exiting the context.
+
+    Example:
+        >>> timer = _MetricsTimer()
+        >>> with timer:
+        ...     # perform operation
+        ...     result = expensive_operation()
+        >>> print(f"Operation took {timer.elapsed_ms:.2f}ms")
+    """
+
+    def __init__(self) -> None:
+        """Initialize timer with zero elapsed time."""
+        self.elapsed_ms: float = 0.0
+        self._start: float = 0.0
+
+    def __enter__(self) -> _MetricsTimer:
+        """Start timing on context entry."""
+        self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        """Calculate elapsed time on context exit."""
+        self.elapsed_ms = (time.perf_counter() - self._start) * 1000
 
 
 # =============================================================================
 # Compute Registry
 # =============================================================================
 
-# Semver sorting sentinel value
-# High ASCII value (127) ensures stable sorting when version components are missing.
-# Used in semantic version comparison to pad shorter version tuples for consistent
-# lexicographic sorting (e.g., "1.0" becomes ("1", "0", chr(127)) to sort after "1.0.0-alpha").
+# Semver sorting sentinel value (chr(127) = DEL character, ASCII 127)
+# WHY chr(127): In semantic versioning, releases sort AFTER prereleases:
+#   - "1.0.0-alpha" < "1.0.0" (prerelease comes before release)
+#   - "1.0.0-beta" < "1.0.0"
+#
+# For string comparison to work correctly:
+#   - Prerelease strings (e.g., "alpha", "beta") are compared lexicographically
+#   - Empty prerelease (release version) needs to sort AFTER any prerelease string
+#   - chr(127) is the highest printable ASCII value (DEL character)
+#   - Any prerelease string ("alpha", "rc", "beta") < chr(127)
+#   - Therefore: ("1.0.0-alpha") < ("1.0.0") because "alpha" < chr(127)
 _SEMVER_SORT_SENTINEL = chr(127)
+
+# Environment variable for configuring the semver LRU cache size
+# Set COMPUTE_REGISTRY_CACHE_SIZE to tune cache size for large deployments
+ENV_COMPUTE_REGISTRY_CACHE_SIZE = "COMPUTE_REGISTRY_CACHE_SIZE"
+
+# Default cache size when environment variable is not set
+_DEFAULT_SEMVER_CACHE_SIZE = 128
 
 
 class RegistryCompute:
@@ -180,14 +233,21 @@ class RegistryCompute:
                 - 500 registrations: ~110 KB
 
             Cache Overhead:
-                - Semver LRU cache: 128 entries x ~100 bytes = ~12.8 KB
-                - Total with cache: Registry memory + 12.8 KB
+                - Semver LRU cache: Configurable via COMPUTE_REGISTRY_CACHE_SIZE env var
+                  (default: 128 entries x ~100 bytes = ~12.8 KB)
+                - Total with cache: Registry memory + cache overhead
+
+    Environment Variables:
+        COMPUTE_REGISTRY_CACHE_SIZE: Configure the semver LRU cache size for large
+            deployments. Set to a higher value (e.g., 256, 512) if you have many
+            unique version strings. Default: 128.
 
     Attributes:
         _registry: Internal dictionary mapping ModelComputeKey instances to plugin classes
         _lock: Threading lock for thread-safe registration operations
         _plugin_id_index: Secondary index for O(1) plugin_id lookup
-        SEMVER_CACHE_SIZE: Class variable for configuring LRU cache size (default: 128)
+        SEMVER_CACHE_SIZE: Class variable for LRU cache size, read from
+            COMPUTE_REGISTRY_CACHE_SIZE environment variable (default: 128)
 
     Example:
         >>> from omnibase_infra.runtime.models import ModelComputeRegistration
@@ -207,8 +267,11 @@ class RegistryCompute:
     # Class-level semver cache configuration
     # ==========================================================================
 
-    # Semver cache size - can be overridden via class attribute before first parse
-    SEMVER_CACHE_SIZE: int = 128
+    # Semver cache size - configurable via COMPUTE_REGISTRY_CACHE_SIZE env var
+    # Read at class definition time; can be overridden via class attribute before first parse
+    SEMVER_CACHE_SIZE: int = int(
+        os.environ.get(ENV_COMPUTE_REGISTRY_CACHE_SIZE, str(_DEFAULT_SEMVER_CACHE_SIZE))
+    )
 
     # Cached semver parser function (lazily initialized)
     _semver_cache: Callable[[str], tuple[int, int, int, str]] | None = None
@@ -216,8 +279,17 @@ class RegistryCompute:
     # Lock for thread-safe cache initialization
     _semver_cache_lock: threading.Lock = threading.Lock()
 
-    def __init__(self) -> None:
-        """Initialize an empty compute registry with thread lock."""
+    def __init__(
+        self, metrics_collector: ProtocolRegistryMetrics | None = None
+    ) -> None:
+        """Initialize an empty compute registry with thread lock.
+
+        Args:
+            metrics_collector: Optional metrics collector for production monitoring.
+                If provided, registry operations will record latency, cache hits/misses,
+                registry size changes, and errors to the collector.
+                See ProtocolRegistryMetrics for the expected interface.
+        """
         # Key: ModelComputeKey -> plugin_class (strong typing replaces tuple pattern)
         self._registry: dict[ModelComputeKey, type[ProtocolPluginCompute]] = {}
         self._lock: threading.Lock = threading.Lock()
@@ -225,6 +297,31 @@ class RegistryCompute:
         # Performance optimization: Secondary indexes for O(1) lookups
         # Maps plugin_id -> list of ModelComputeKey instances
         self._plugin_id_index: dict[str, list[ModelComputeKey]] = {}
+
+        # Optional metrics collector for production monitoring
+        self._metrics: ProtocolRegistryMetrics | None = metrics_collector
+
+    def set_metrics_collector(
+        self, collector: ProtocolRegistryMetrics | None
+    ) -> None:
+        """Set the metrics collector for production monitoring.
+
+        This method allows setting or changing the metrics collector after
+        initialization. Pass None to disable metrics collection.
+
+        Args:
+            collector: Metrics collector implementing ProtocolRegistryMetrics,
+                or None to disable metrics collection.
+
+        Example:
+            >>> from omnibase_infra.runtime.registry_compute import RegistryCompute
+            >>> registry = RegistryCompute()
+            >>> # Later, enable metrics
+            >>> registry.set_metrics_collector(my_metrics)
+            >>> # Or disable
+            >>> registry.set_metrics_collector(None)
+        """
+        self._metrics = collector
 
     def _validate_sync_enforcement(
         self,
@@ -354,6 +451,15 @@ class RegistryCompute:
                 self._plugin_id_index[plugin_id] = []
             if key not in self._plugin_id_index[plugin_id]:
                 self._plugin_id_index[plugin_id].append(key)
+            registry_size = len(self._registry)
+
+        # Record registry size if metrics collector is set
+        if self._metrics is not None:
+            try:
+                self._metrics.record_registry_size(registry_size)
+            except Exception:
+                # Metrics recording should never break registry operations
+                pass
 
     def register_plugin(
         self,
@@ -429,50 +535,77 @@ class RegistryCompute:
             >>> plugin_cls = registry.get("normalizer")
             >>> plugin_cls = registry.get("normalizer", version="1.0.0")
         """
-        with self._lock:
-            # Performance optimization: Use secondary index for O(1) lookup by plugin_id
-            # This avoids iterating through all registry entries (O(n) -> O(1))
-            candidate_keys = self._plugin_id_index.get(plugin_id, [])
+        timer = _MetricsTimer()
+        try:
+            with timer:
+                with self._lock:
+                    # Performance optimization: Use secondary index for O(1) lookup
+                    # This avoids iterating through all registry entries (O(n) -> O(1))
+                    candidate_keys = self._plugin_id_index.get(plugin_id, [])
 
-            # Early exit if plugin_id not found - avoid building matches list
-            if not candidate_keys:
-                # Defer expensive list computation until actually raising error
-                registered = [k.plugin_id for k in self._registry]
-                raise ComputeRegistryError(
-                    f"No compute plugin registered with id={plugin_id!r}. "
-                    f"Registered plugins: {registered}",
-                    plugin_id=plugin_id,
-                    registered_plugins=registered,
-                )
+                    # Early exit if plugin_id not found - avoid building matches list
+                    if not candidate_keys:
+                        # Record error before raising
+                        if self._metrics is not None:
+                            try:
+                                self._metrics.record_error("not_found", plugin_id)
+                            except Exception:
+                                pass
+                        # Defer expensive list computation until actually raising error
+                        registered = [k.plugin_id for k in self._registry]
+                        raise ComputeRegistryError(
+                            f"No compute plugin registered with id={plugin_id!r}. "
+                            f"Registered plugins: {registered}",
+                            plugin_id=plugin_id,
+                            registered_plugins=registered,
+                        )
 
-            # If version specified, do exact match
-            if version is not None:
-                for key in candidate_keys:
-                    if key.version == version:
-                        return self._registry[key]
-                # Version not found - get versions from candidate_keys (already have lock)
-                available_versions = sorted(
-                    [key.version for key in candidate_keys],
-                    key=self._parse_semver,
-                )
-                raise ComputeRegistryError(
-                    f"Compute plugin {plugin_id!r} version {version!r} not found. "
-                    f"Available versions: {available_versions}",
-                    plugin_id=plugin_id,
-                    version=version,
-                )
+                    # If version specified, do exact match
+                    if version is not None:
+                        for key in candidate_keys:
+                            if key.version == version:
+                                return self._registry[key]
+                        # Record error before raising
+                        if self._metrics is not None:
+                            try:
+                                self._metrics.record_error(
+                                    "version_not_found", plugin_id
+                                )
+                            except Exception:
+                                pass
+                        # Version not found - get versions from candidate_keys
+                        available_versions = sorted(
+                            [key.version for key in candidate_keys],
+                            key=self._parse_semver,
+                        )
+                        raise ComputeRegistryError(
+                            f"Compute plugin {plugin_id!r} version {version!r} "
+                            f"not found. Available versions: {available_versions}",
+                            plugin_id=plugin_id,
+                            version=version,
+                        )
 
-            # Return latest version (no version filter)
-            # Fast path optimization: avoid sorting if only one version
-            if len(candidate_keys) == 1:
-                return self._registry[candidate_keys[0]]
+                    # Return latest version (no version filter)
+                    # Fast path optimization: avoid sorting if only one version
+                    if len(candidate_keys) == 1:
+                        return self._registry[candidate_keys[0]]
 
-            # Multiple versions - find latest using semver comparison
-            latest_key = max(
-                candidate_keys,
-                key=lambda k: self._parse_semver(k.version),
-            )
-            return self._registry[latest_key]
+                    # Multiple versions - find latest using semver comparison
+                    latest_key = max(
+                        candidate_keys,
+                        key=lambda k: self._parse_semver(k.version),
+                    )
+                    return self._registry[latest_key]
+        finally:
+            # Record latency if metrics collector is set
+            if self._metrics is not None:
+                try:
+                    self._metrics.record_get_latency(
+                        plugin_id, version, timer.elapsed_ms
+                    )
+                except Exception:
+                    # Metrics recording should never break registry operations
+                    pass
 
     def list_keys(self) -> list[tuple[str, str]]:
         """List registered plugin keys as (plugin_id, version) tuples.
@@ -597,7 +730,18 @@ class RegistryCompute:
             ):
                 del self._plugin_id_index[plugin_id]
 
-            return len(keys_to_remove)
+            registry_size = len(self._registry)
+            removed_count = len(keys_to_remove)
+
+        # Record registry size if metrics collector is set and we removed something
+        if removed_count > 0 and self._metrics is not None:
+            try:
+                self._metrics.record_registry_size(registry_size)
+            except Exception:
+                # Metrics recording should never break registry operations
+                pass
+
+        return removed_count
 
     def clear(self) -> None:
         """Clear all plugin registrations.
@@ -749,8 +893,8 @@ class RegistryCompute:
                         version=version,
                     )
 
-                # Empty prerelease sorts after non-empty (release > prerelease)
-                # Use sentinel value for empty to sort after any prerelease string
+                # Empty prerelease uses sentinel (chr(127)) to sort AFTER any prerelease string
+                # This ensures "1.0.0" > "1.0.0-alpha" in version comparisons
                 sort_prerelease = prerelease if prerelease else _SEMVER_SORT_SENTINEL
 
                 return (major, minor, patch, sort_prerelease)
@@ -829,6 +973,8 @@ class RegistryCompute:
 __all__: list[str] = [
     # Registry class
     "RegistryCompute",
+    # Environment variable constants
+    "ENV_COMPUTE_REGISTRY_CACHE_SIZE",
     # Re-export models for convenience
     "ModelComputeKey",
     "ModelComputeRegistration",
