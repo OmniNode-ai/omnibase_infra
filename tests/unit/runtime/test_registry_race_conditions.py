@@ -298,9 +298,9 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
         for i in range(num_threads):
             policy_id = f"policy-{i}"
             versions = policy_registry.list_versions(policy_id)
-            assert (
-                len(versions) == 5
-            ), f"Policy {policy_id} has {len(versions)} versions, expected 5"
+            assert len(versions) == 5, (
+                f"Policy {policy_id} has {len(versions)} versions, expected 5"
+            )
 
     def test_secondary_index_consistency_during_unregister(
         self, policy_registry: PolicyRegistry
@@ -346,9 +346,9 @@ class TestPolicyRegistrySecondaryIndexRaceConditions:
         # Verify remaining versions
         for i in range(num_policies):
             versions = policy_registry.list_versions(f"policy-{i}")
-            assert (
-                len(versions) == 2
-            ), f"Policy policy-{i} should have 2 versions remaining"
+            assert len(versions) == 2, (
+                f"Policy policy-{i} should have 2 versions remaining"
+            )
 
 
 class TestPolicyRegistrySemverCacheRaceConditions:
@@ -412,9 +412,9 @@ class TestPolicyRegistrySemverCacheRaceConditions:
         # Each version should have consistent results
         for version, version_results in results.items():
             first = version_results[0]
-            assert all(
-                r == first for r in version_results
-            ), f"Inconsistent results for {version}: {set(version_results)}"
+            assert all(r == first for r in version_results), (
+                f"Inconsistent results for {version}: {set(version_results)}"
+            )
 
 
 class TestPolicyRegistryStressTest:
@@ -1193,9 +1193,9 @@ class TestComputeRegistryConcurrentWriteRead:
 
         # Verify all plugins were registered
         expected_count = num_writers * plugins_per_writer
-        assert (
-            len(compute_registry) == expected_count
-        ), f"Expected {expected_count} plugins, got {len(compute_registry)}"
+        assert len(compute_registry) == expected_count, (
+            f"Expected {expected_count} plugins, got {len(compute_registry)}"
+        )
 
         # Verify each plugin can be retrieved
         for thread_id in range(num_writers):
@@ -1725,9 +1725,9 @@ class TestComputeRegistryHighContention:
 
         # Verify operations were performed
         total_ops = sum(operation_counts.values())
-        assert (
-            total_ops == num_threads * operations_per_thread
-        ), f"Expected {num_threads * operations_per_thread} operations, got {total_ops}"
+        assert total_ops == num_threads * operations_per_thread, (
+            f"Expected {num_threads * operations_per_thread} operations, got {total_ops}"
+        )
 
         # Registry should be in a consistent state (no corruption)
         final_keys = compute_registry.list_keys()

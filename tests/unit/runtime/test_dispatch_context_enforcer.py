@@ -568,14 +568,14 @@ class TestProtocolCompliance:
         # Verify required properties via duck typing
         required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
         for prop in required_props:
-            assert hasattr(
-                reducer_dispatcher, prop
-            ), f"Dispatcher must have '{prop}' property"
+            assert hasattr(reducer_dispatcher, prop), (
+                f"Dispatcher must have '{prop}' property"
+            )
 
         # Verify handle method exists and is callable
-        assert hasattr(
-            reducer_dispatcher, "handle"
-        ), "Dispatcher must have 'handle' method"
+        assert hasattr(reducer_dispatcher, "handle"), (
+            "Dispatcher must have 'handle' method"
+        )
         assert callable(reducer_dispatcher.handle), "'handle' must be callable"
 
     def test_enforcer_works_with_protocol_dispatcher(
@@ -637,9 +637,9 @@ class TestOMN973ReducerCannotAccessNow:
         )
 
         # SECONDARY ASSERTION: has_time_injection property must be False
-        assert (
-            context.has_time_injection is False
-        ), "has_time_injection reports True despite now=None"
+        assert context.has_time_injection is False, (
+            "has_time_injection reports True despite now=None"
+        )
 
     def test_cannot_manually_inject_time_into_reducer_via_model(self) -> None:
         """
@@ -809,9 +809,9 @@ class TestOMN973ComputeCannotAccessNow:
         )
 
         # SECONDARY ASSERTION: has_time_injection property must be False
-        assert (
-            context.has_time_injection is False
-        ), "has_time_injection reports True despite now=None"
+        assert context.has_time_injection is False, (
+            "has_time_injection reports True despite now=None"
+        )
 
 
 class TestOMN973OrchestratorReceivesTime:
