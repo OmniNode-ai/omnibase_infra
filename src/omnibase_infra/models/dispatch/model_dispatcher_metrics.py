@@ -46,10 +46,10 @@ class ModelDispatcherMetrics(BaseModel):
         success_count: Number of successful executions.
         error_count: Number of failed executions.
         total_latency_ms: Cumulative latency across all executions.
-        min_latency_ms: Minimum observed latency.
-        max_latency_ms: Maximum observed latency.
-        last_error_message: Most recent error message (if any).
-        last_execution_topic: Topic of the most recent execution.
+        min_latency_ms: Minimum observed latency (-1.0 if no executions).
+        max_latency_ms: Maximum observed latency (-1.0 if no executions).
+        last_error_message: Most recent error message (empty string if none).
+        last_execution_topic: Topic of the most recent execution (empty string if none).
 
     Example:
         >>> metrics = ModelDispatcherMetrics(dispatcher_id="my-dispatcher")
@@ -94,23 +94,34 @@ class ModelDispatcherMetrics(BaseModel):
         description="Cumulative latency across all executions in milliseconds.",
         ge=0,
     )
-    min_latency_ms: float | None = Field(
-        default=None,
-        description="Minimum observed latency in milliseconds.",
+    min_latency_ms: float = Field(
+        default=-1.0,
+        description=(
+            "Minimum observed latency in milliseconds. "
+            "Value of -1.0 indicates no executions recorded yet."
+        ),
     )
-    max_latency_ms: float | None = Field(
-        default=None,
-        description="Maximum observed latency in milliseconds.",
+    max_latency_ms: float = Field(
+        default=-1.0,
+        description=(
+            "Maximum observed latency in milliseconds. "
+            "Value of -1.0 indicates no executions recorded yet."
+        ),
     )
 
     # ---- Last Execution Info ----
-    last_error_message: str | None = Field(
-        default=None,
-        description="Most recent error message (if any).",
+    last_error_message: str = Field(
+        default="",
+        description=(
+            "Most recent error message. Empty string indicates no errors recorded."
+        ),
     )
-    last_execution_topic: str | None = Field(
-        default=None,
-        description="Topic of the most recent execution.",
+    last_execution_topic: str = Field(
+        default="",
+        description=(
+            "Topic of the most recent execution. "
+            "Empty string indicates no executions recorded yet."
+        ),
     )
 
     @property
@@ -208,14 +219,15 @@ class ModelDispatcherMetrics(BaseModel):
             >>> metrics.execution_count
             1
         """
+        # Sentinel value -1.0 means "not yet computed"
         new_min = (
             duration_ms
-            if self.min_latency_ms is None
+            if self.min_latency_ms < 0
             else min(self.min_latency_ms, duration_ms)
         )
         new_max = (
             duration_ms
-            if self.max_latency_ms is None
+            if self.max_latency_ms < 0
             else max(self.max_latency_ms, duration_ms)
         )
 
@@ -228,19 +240,21 @@ class ModelDispatcherMetrics(BaseModel):
                 "total_latency_ms": self.total_latency_ms + duration_ms,
                 "min_latency_ms": new_min,
                 "max_latency_ms": new_max,
-                "last_error_message": error_message
+                # On failure: use error_message (or empty string); on success: preserve previous
+                "last_error_message": (error_message or "")
                 if not success
                 else self.last_error_message,
                 "last_execution_topic": topic if topic else self.last_execution_topic,
             }
         )
 
-    def to_dict(self) -> dict[str, float | int | str | None]:
+    def to_dict(self) -> dict[str, object]:
         """
         Convert to dictionary with computed properties included.
 
         Returns:
             Dictionary with all metrics including computed properties.
+            Values are float, int, or str types.
         """
         return {
             "dispatcher_id": self.dispatcher_id,
