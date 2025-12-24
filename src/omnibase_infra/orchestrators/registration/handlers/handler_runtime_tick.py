@@ -190,16 +190,12 @@ class HandlerRuntimeTick:
             if not projection.needs_ack_timeout_event(now):
                 continue
 
-            # Type narrowing: needs_ack_timeout_event() checks ack_deadline is not None,
-            # but the type checker doesn't know this. Explicit narrowing required.
+            # Type narrowing: needs_ack_timeout_event() guarantees ack_deadline is not None
             ack_deadline = projection.ack_deadline
-            if ack_deadline is None:
-                # This shouldn't happen since needs_ack_timeout_event checks this
-                logger.warning(
-                    "Unexpected None ack_deadline for overdue projection",
-                    extra={"entity_id": str(projection.entity_id)},
-                )
-                continue
+            assert ack_deadline is not None, (
+                f"needs_ack_timeout_event() guarantees ack_deadline is not None: "
+                f"{projection.entity_id}"
+            )
 
             event = ModelNodeRegistrationAckTimedOut(
                 entity_id=projection.entity_id,

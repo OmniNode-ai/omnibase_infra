@@ -69,6 +69,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _resolve_correlation_id(
+    explicit: UUID | None,
+    envelope: ModelEventEnvelope[object],
+) -> UUID:
+    """Resolve correlation ID from explicit param, envelope, or generate new.
+
+    Resolution order:
+    1. Explicit correlation_id parameter if provided
+    2. Envelope's correlation_id attribute if present
+    3. Generate new UUID4 as fallback
+
+    Args:
+        explicit: Explicitly passed correlation ID (highest priority).
+        envelope: Event envelope that may contain correlation_id.
+
+    Returns:
+        Resolved correlation ID for tracing.
+    """
+    return explicit or getattr(envelope, "correlation_id", None) or uuid4()
+
+
 class NodeRegistrationOrchestrator:
     """Registration orchestrator - emits EVENTS only, no I/O.
 
@@ -171,7 +192,7 @@ class NodeRegistrationOrchestrator:
             ...     await event_bus.publish(event)
         """
         # Resolve correlation ID
-        corr_id = correlation_id or getattr(envelope, "correlation_id", None) or uuid4()
+        corr_id = _resolve_correlation_id(correlation_id, envelope)
 
         # Extract payload
         payload = envelope.payload

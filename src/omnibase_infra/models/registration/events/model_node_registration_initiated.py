@@ -7,6 +7,13 @@ registration pattern. Emitted by the Registration Orchestrator when it
 receives a NodeIntrospected event to represent the start of a registration
 attempt.
 
+IMPORTANT: Timestamp fields (emitted_at) have NO default_factory (no datetime.now()).
+This is intentional per ONEX architecture - orchestrators use injected `now` parameter
+from RuntimeTick or dispatch context. This ensures:
+    - Deterministic testing (fixed time in tests)
+    - Consistent ordering (no clock skew between nodes)
+    - Explicit time injection (no hidden time dependencies)
+
 See Also:
     - docs/design/ONEX_RUNTIME_REGISTRATION_TICKET_PLAN.md (C1 section)
 """
