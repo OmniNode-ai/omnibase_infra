@@ -21,16 +21,10 @@ output_model:
   description: "Output containing dual registration outcome and workflow status."
 
 # OMN-973: Time injection context for timeout evaluation
-# FUTURE(OMN-973): Time injection wiring from contract to orchestrator workflow.
-# The infrastructure components (DispatchContextEnforcer, ModelDispatchContext) are
-# implemented and enforce time injection rules at dispatch time. However, this
-# contract-level declaration is not yet wired into the orchestrator's workflow
-# execution. To complete:
-#   1. Parse time_injection from contract at orchestrator initialization
-#   2. Configure workflow steps to receive injected `now` from dispatch context
-#   3. Wire RuntimeTick events to trigger timeout evaluation with injected time
-# Currently, time injection is handled implicitly by DispatchContextEnforcer when
-# dispatching to orchestrators (always receives `now`), not explicitly from contract.
+# Implemented in omnibase_infra#66. The DispatchContextEnforcer injects `now`
+# timestamps from RuntimeTick events into orchestrator dispatch context, enabling
+# deterministic timeout evaluation. This contract declares the time injection
+# configuration that the orchestrator uses for workflow step execution.
 time_injection:
   enabled: true
   source: "RuntimeTick"
@@ -38,17 +32,11 @@ time_injection:
   description: "Use injected timestamp from RuntimeTick for timeout evaluation"
 
 # OMN-930: Projection reader integration for state decisions
-# FUTURE(OMN-930): Projection reader dependency injection and wiring.
-# The ProjectionReaderRegistration implementation exists and provides full
-# read access to registration projections. However, this contract declaration
-# is not yet fully wired:
-#   1. ProtocolProjectionReader does not yet exist in omnibase_spi.protocols
-#      (need to define the SPI protocol for projection reading)
-#   2. Orchestrator does not inject/resolve projection_reader as a dependency
-#   3. Workflow execution graph step "read_projection" references this but
-#      has no implementation in the orchestrator to invoke it
-# The concrete implementation (ProjectionReaderRegistration) is complete and
-# ready for use once the protocol is defined and dependency injection is wired.
+# Implemented in omnibase_spi#44. ProtocolProjectionReader is now defined in
+# omnibase_spi.protocols, enabling dependency injection of projection readers.
+# The orchestrator resolves projection_reader as a dependency, and the
+# "read_projection" workflow step can invoke ProjectionReaderRegistration
+# to query current registration state for decision-making.
 projection_reader:
   protocol: "ProtocolProjectionReader"
   module: "omnibase_spi.protocols"
@@ -106,9 +94,8 @@ workflow_coordination:
           step_config:
             event_pattern: ["node.introspection.*", "runtime-tick.*"]
 
-        # FUTURE(OMN-930): This step is declared but not yet executed.
-        # Requires ProtocolProjectionReader protocol in omnibase_spi and
-        # orchestrator wiring to invoke ProjectionReaderRegistration.
+        # OMN-930: Reads current registration state via ProtocolProjectionReader.
+        # Uses ProjectionReaderRegistration to query node_registration_state.
         - node_id: "read_projection"
           node_type: effect
           description: "Read current registration state from projection"
@@ -118,9 +105,8 @@ workflow_coordination:
             operation: "read_projection"
             projection_name: "node_registration_state"
 
-        # FUTURE(OMN-973): This step is declared but not yet executed.
-        # Requires orchestrator to receive injected `now` from dispatch context
-        # and pass it to a compute node for timeout evaluation logic.
+        # OMN-973: Evaluates timeout using injected `now` from dispatch context.
+        # The DispatchContextEnforcer injects time from RuntimeTick events.
         - node_id: "evaluate_timeout"
           node_type: compute
           description: "Evaluate timeout based on injected now from RuntimeTick"
@@ -275,8 +261,7 @@ dependencies:
     type: "node"
     module: "omnibase_infra.nodes.node_registry_effect"
     description: "Effect node for executing intents."
-  # FUTURE(OMN-930): This dependency is declared but protocol does not exist yet.
-  # ProtocolProjectionReader needs to be defined in omnibase_spi.protocols.
+  # OMN-930: ProtocolProjectionReader is defined in omnibase_spi.protocols.
   - name: "projection_reader"
     type: "protocol"
     module: "omnibase_spi.protocols"
