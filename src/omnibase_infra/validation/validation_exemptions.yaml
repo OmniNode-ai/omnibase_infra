@@ -398,7 +398,14 @@ architecture_exemptions:
       - Thread safety requirements (lines 13-24): Implementations MUST be thread-safe
       - Error sanitization guidelines (lines 26-52): NEVER include credentials in errors
       - Protocol contracts with examples in docstrings
-    documentation: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
+
+      Full architectural documentation:
+      - Node architecture: docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - Protocol design: docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
+      - Node README: src/omnibase_infra/nodes/node_registration_orchestrator/README.md
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
     ticket: OMN-888
   # ==========================================================================
   # Registration Intent Models Exemption (OMN-888)

@@ -31,6 +31,9 @@ from omnibase_infra.runtime.dispatcher_registry import (
     DispatcherRegistry,
 )
 
+# Import shared conformance helper
+from tests.conftest import assert_dispatcher_protocol_interface
+
 
 class MockMessageDispatcher:
     """Mock dispatcher implementing ProtocolMessageDispatcher for testing."""
@@ -164,18 +167,8 @@ class TestProtocolMessageDispatcher:
         Per ONEX conventions, protocol conformance is verified via duck typing
         by checking for required properties and methods.
         """
-        # Verify required properties via duck typing
-        required_props = ["dispatcher_id", "category", "message_types", "node_kind"]
-        for prop in required_props:
-            assert hasattr(
-                event_reducer_dispatcher, prop
-            ), f"Dispatcher must have '{prop}' property"
-
-        # Verify handle method exists and is callable
-        assert hasattr(
-            event_reducer_dispatcher, "handle"
-        ), "Dispatcher must have 'handle' method"
-        assert callable(event_reducer_dispatcher.handle), "'handle' must be callable"
+        # Use shared conformance helper for dispatcher protocol verification
+        assert_dispatcher_protocol_interface(event_reducer_dispatcher)
 
     def test_duck_typing_rejects_non_dispatcher(self) -> None:
         """Duck typing should identify objects that don't implement the protocol.

@@ -16,7 +16,6 @@ Related Tickets:
 
 from __future__ import annotations
 
-
 from omnibase_infra.enums import EnumRegistrationState
 
 

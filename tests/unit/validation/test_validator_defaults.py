@@ -698,11 +698,14 @@ class TestUnionValidatorEdgeCases:
         assert result.is_valid, "Simple code should be valid"
         # Metadata should be present
         assert result.metadata is not None, "Metadata should be present"
-        # total_unions should be 0 for code without unions (consistent with other tests)
-        if hasattr(result.metadata, "total_unions"):
-            assert (
-                result.metadata.total_unions == 0
-            ), "total_unions should be 0 for code without unions"
+        # Metadata must have total_unions attribute (consistent structure requirement)
+        assert hasattr(
+            result.metadata, "total_unions"
+        ), "Metadata must have 'total_unions' attribute for consistent structure"
+        # total_unions should be 0 for code without unions
+        assert (
+            result.metadata.total_unions == 0
+        ), "total_unions should be 0 for code without unions"
 
 
 class TestDefaultsConsistency:

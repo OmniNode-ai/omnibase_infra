@@ -60,19 +60,34 @@ projection_reader:
 # ====================================
 # Design Decision: Single Source of Truth for Coordination Settings
 #
-# All workflow coordination settings are consolidated within coordination_rules
-# (see lines below). This prevents duplication that could occur if coordination
-# settings were split between top-level workflow_coordination and nested
-# coordination_rules sections.
+# CONSOLIDATION NOTE (PR #57 Review):
+# Previously, coordination settings could appear at two levels:
+#   1. Top-level workflow_coordination (parallel_execution, timeouts, etc.)
+#   2. Nested coordination_rules within workflow_definition
 #
-# Structure:
-#   workflow_coordination.workflow_definition:
-#     - workflow_metadata: Name, version, description
-#     - execution_graph: DAG of nodes with dependencies
-#     - coordination_rules: ALL execution/failure/timeout/checkpoint settings
+# This created ambiguity about which settings took precedence. The resolution:
+# ALL coordination settings are now consolidated ONLY within coordination_rules
+# (nested under workflow_definition). This eliminates duplication and ambiguity.
 #
-# Note: No top-level coordination settings exist outside workflow_definition
-# to ensure a single authoritative source for all coordination behavior.
+# Configuration Hierarchy (Single Source of Truth):
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ workflow_coordination                                                    │
+# │   └── workflow_definition                                               │
+# │         ├── workflow_metadata     → Name, version, description          │
+# │         ├── execution_graph       → DAG of nodes with dependencies      │
+# │         └── coordination_rules    → ALL coordination settings:          │
+# │               ├── execution_mode, parallel_execution_allowed            │
+# │               ├── max_parallel_branches                                 │
+# │               ├── failure_recovery_strategy, max_retries                │
+# │               ├── timeout_ms                                            │
+# │               ├── checkpoint_enabled, checkpoint_interval_ms            │
+# │               ├── state_persistence_enabled                             │
+# │               └── rollback_enabled                                      │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# IMPORTANT: No coordination settings exist at the workflow_coordination level
+# itself. All such settings MUST be placed in coordination_rules to ensure
+# a single authoritative source for all coordination behavior.
 workflow_coordination:
   workflow_definition:
     workflow_metadata:
@@ -152,10 +167,18 @@ workflow_coordination:
           step_config:
             event_type: "NodeRegistrationResultEvent"
 
-    # Coordination Rules (Single Source of Truth)
-    # This section contains ALL coordination settings for the workflow.
-    # Settings are grouped by concern: execution mode, failure handling,
-    # timeouts, checkpointing, and rollback.
+    # ┌─────────────────────────────────────────────────────────────────────────┐
+    # │ COORDINATION RULES (Single Source of Truth - See header comments)        │
+    # ├─────────────────────────────────────────────────────────────────────────┤
+    # │ This section contains ALL coordination settings for the workflow.        │
+    # │ Per PR #57 consolidation, no coordination settings exist elsewhere.      │
+    # │ Settings are grouped by concern:                                         │
+    # │   - Execution mode (parallel vs sequential)                              │
+    # │   - Failure handling and recovery                                        │
+    # │   - Timeouts                                                             │
+    # │   - Checkpointing and state persistence                                  │
+    # │   - Rollback configuration                                               │
+    # └─────────────────────────────────────────────────────────────────────────┘
     #
     # Parallel Execution Design:
     # The workflow uses parallel mode to execute Consul and Postgres registrations

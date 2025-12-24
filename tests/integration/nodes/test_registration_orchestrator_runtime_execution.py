@@ -61,6 +61,14 @@ from omnibase_infra.nodes.node_registration_orchestrator.protocols import (
     ProtocolReducer,
 )
 
+# Import shared conformance helpers
+from tests.conftest import (
+    assert_effect_protocol_interface,
+    assert_has_async_methods,
+    assert_has_methods,
+    assert_reducer_protocol_interface,
+)
+
 # Module-level markers - all tests in this file are integration tests
 pytestmark = [
     pytest.mark.integration,
@@ -281,9 +289,8 @@ def orchestrator_input(
 def mock_reducer() -> MockReducerImpl:
     """Create mock reducer for testing."""
     mock = MockReducerImpl()
-    # Verify duck typing compliance
-    assert hasattr(mock, "reduce"), "MockReducerImpl must have 'reduce' method"
-    assert callable(mock.reduce), "MockReducerImpl.reduce must be callable"
+    # Verify ProtocolReducer interface via shared conformance helper
+    assert_reducer_protocol_interface(mock)
     return mock
 
 
@@ -291,13 +298,8 @@ def mock_reducer() -> MockReducerImpl:
 def mock_effect() -> MockEffectImpl:
     """Create mock effect for testing."""
     mock = MockEffectImpl()
-    # Verify duck typing compliance
-    assert hasattr(
-        mock, "execute_intent"
-    ), "MockEffectImpl must have 'execute_intent' method"
-    assert callable(
-        mock.execute_intent
-    ), "MockEffectImpl.execute_intent must be callable"
+    # Verify ProtocolEffect interface via shared conformance helper
+    assert_effect_protocol_interface(mock)
     return mock
 
 
@@ -452,22 +454,39 @@ class TestWorkflowSequenceExecution:
         initial_state = ModelReducerState.initial()
         _, intents = await mock_reducer.reduce(initial_state, introspection_event)
 
+        # Execute sequentially first to measure baseline
+        sequential_start = time.perf_counter()
+        for intent in intents:
+            await mock_effect.execute_intent(intent, correlation_id)
+        sequential_elapsed = (time.perf_counter() - sequential_start) * 1000
+
+        # Reset for parallel execution
+        mock_effect.executed_intents.clear()
+
         # Execute in parallel
         start_time = time.perf_counter()
         tasks = [
             mock_effect.execute_intent(intent, correlation_id) for intent in intents
         ]
         results = await asyncio.gather(*tasks)
-        elapsed = (time.perf_counter() - start_time) * 1000
+        parallel_elapsed = (time.perf_counter() - start_time) * 1000
 
         # Verify all completed
         assert len(results) == len(intents)
         assert all(r.success for r in results)
 
-        # Parallel execution should be faster than sequential
-        # Sequential would take at least 50ms * 2 = 100ms
-        # Parallel should be close to 50ms + overhead
-        assert elapsed < 100, f"Parallel execution took {elapsed}ms, expected < 100ms"
+        # CI-friendly timing assertion: Use relative comparison instead of absolute
+        # threshold to avoid flakiness across different CI environments.
+        # Parallel execution should be meaningfully faster than sequential execution.
+        # We use a generous 0.9x multiplier to account for CI variance while still
+        # proving parallelism provides a speedup.
+        #
+        # Local benchmark: parallel ~50ms vs sequential ~100ms (2x speedup)
+        # CI allowance: parallel can be up to 90% of sequential and still pass
+        assert parallel_elapsed < sequential_elapsed * 0.9, (
+            f"Parallel execution ({parallel_elapsed:.1f}ms) should be faster than "
+            f"sequential ({sequential_elapsed:.1f}ms) * 0.9 = {sequential_elapsed * 0.9:.1f}ms"
+        )
 
 
 # =============================================================================
@@ -1075,14 +1094,9 @@ class TestOrchestratorIntegration:
         assert hasattr(configured_container, "_test_effect")
         assert hasattr(configured_container, "_test_emitter")
 
-        # Verify duck typing compliance
-        reducer = configured_container._test_reducer
-        assert hasattr(reducer, "reduce")
-        assert callable(reducer.reduce)
-
-        effect = configured_container._test_effect
-        assert hasattr(effect, "execute_intent")
-        assert callable(effect.execute_intent)
+        # Verify protocol interfaces via shared conformance helpers
+        assert_reducer_protocol_interface(configured_container._test_reducer)
+        assert_effect_protocol_interface(configured_container._test_effect)
 
 
 # =============================================================================

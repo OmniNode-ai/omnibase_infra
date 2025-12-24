@@ -587,13 +587,18 @@ class ContractLinter:
                     )
                 )
         except ImportError as e:
+            # Import failures are ERROR severity because they violate the type
+            # consistency guarantee documented in the module docstring: contracts
+            # must reference importable modules to ensure type safety.
+            # Use check_imports=False to skip this check in environments where
+            # dependencies may not be available.
             violations.append(
                 ModelContractViolation(
                     file_path=file_path,
                     field_path=f"{field_name}.module",
                     message=f"Cannot import module '{module_name}': {e}",
-                    severity=EnumContractViolationSeverity.WARNING,
-                    suggestion="Verify module path and ensure it's installed",
+                    severity=EnumContractViolationSeverity.ERROR,
+                    suggestion="Verify module path and ensure it's installed, or use check_imports=False",
                 )
             )
 

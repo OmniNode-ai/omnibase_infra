@@ -20,7 +20,6 @@ from datetime import datetime
 from typing import get_type_hints
 from uuid import UUID
 
-
 from omnibase_infra.idempotency import (
     InMemoryIdempotencyStore,
     PostgresIdempotencyStore,

@@ -23,7 +23,6 @@ import concurrent.futures
 import copy
 from typing import Any
 
-
 from omnibase_infra.plugins.examples.plugin_json_normalizer import PluginJsonNormalizer
 
 

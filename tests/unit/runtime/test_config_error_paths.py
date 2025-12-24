@@ -157,9 +157,9 @@ class TestInvalidYamlSyntaxScenarios:
     def test_invalid_yaml_tab_indentation_raises_error(self, tmp_path: Path) -> None:
         """Test that tabs used for indentation in YAML raise appropriate error.
 
-        Note: Tabs are invalid as indentation in YAML per the YAML 1.1 and 1.2
-        specifications, though some lenient parsers may accept them. PyYAML
-        follows the spec strictly and rejects tab indentation.
+        Note: While tabs are valid in YAML string values, they are prohibited
+        for indentation per the YAML 1.1 and 1.2 specifications. PyYAML follows
+        the spec strictly and rejects tab characters used for indentation.
         """
         config_file = tmp_path / "invalid.yaml"
         config_file.write_text("parent:\n\tchild: value")

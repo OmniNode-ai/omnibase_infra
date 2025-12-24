@@ -489,7 +489,7 @@ This node is part of the MVP implementation for OMN-888. The following limitatio
 
 | Limitation | Ticket | Description |
 |------------|--------|-------------|
-| Effect Node Placeholder | OMN-890 | `node_registry_effect` module exists but contains no implementation. Intents cannot be executed until this is implemented. |
+| Effect Node Integration | OMN-890 | `NodeRegistryEffect` is implemented in `nodes/effects/registry_effect.py`. The `node_registry_effect` module re-exports from this location. Integration with orchestrator workflow pending reducer implementation. |
 | Reducer Not Implemented | OMN-889 | `ProtocolReducer` is defined but no concrete implementation exists. Intent computation is pending. |
 | Projection Reader Not Wired | OMN-930 | `ProtocolProjectionReader` protocol does not exist in `omnibase_spi.protocols`. The `read_projection` workflow step cannot execute. |
 | Time Injection Not Wired | OMN-973 | Contract declares time injection but orchestrator does not parse or use it. Timeout evaluation uses implicit dispatch context. |
@@ -504,7 +504,7 @@ This node is part of the MVP implementation for OMN-888. The following limitatio
 | Protocols | **Complete** | `protocols.py` | `ProtocolReducer`, `ProtocolEffect` defined |
 | Models | **Complete** | `models/` | Input, output, intent, state models |
 | README | **Complete** | `README.md` | This file |
-| Effect Node | **Placeholder** | `nodes/node_registry_effect/` | Empty module (OMN-890) |
+| Effect Node | **Complete** | `nodes/effects/registry_effect.py` | Alias at `nodes/node_registry_effect/` |
 | Reducer Impl | **Pending** | N/A | No implementation yet (OMN-889) |
 | Projection Reader | **Pending** | N/A | SPI protocol needed (OMN-930) |
 
@@ -517,10 +517,14 @@ This node is part of the MVP implementation for OMN-888. The following limitatio
 
 ### What Does NOT Work Today
 
-1. **End-to-End Registration**: Cannot register nodes (effect node is placeholder)
+1. **End-to-End Registration**: Cannot register nodes (reducer → effect integration pending)
 2. **Intent Computation**: Cannot generate intents (reducer not implemented)
 3. **Projection Reading**: Cannot read current state (protocol not in SPI)
 4. **Timeout Evaluation**: Uses implicit time, not contract-driven injection
+
+Note: The effect node (`NodeRegistryEffect`) is fully implemented and tested. The
+blocker for end-to-end registration is the reducer implementation (OMN-889) which
+must generate intents that the effect node will execute.
 
 ## Related Tickets
 
@@ -533,5 +537,6 @@ This node is part of the MVP implementation for OMN-888. The following limitatio
 
 ## Related Documentation
 
+- [Node Architecture](../../../docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md) - Complete architectural design
 - [Protocol Architecture](../../../docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md) - Detailed protocol design
 - [Validation Exemptions](../../validation/validation_exemptions.yaml) - Exemption for domain-grouped protocols

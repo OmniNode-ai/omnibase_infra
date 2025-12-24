@@ -18,12 +18,13 @@ Usage:
     ```python
     from omnibase_infra.protocols import ProtocolPluginCompute, ProtocolSnapshotPublisher
 
-    # Check if class implements protocol
+    # Verify protocol compliance via duck typing (per ONEX conventions)
     plugin = MyComputePlugin()
-    assert isinstance(plugin, ProtocolPluginCompute)  # Runtime check
+    assert hasattr(plugin, 'execute') and callable(plugin.execute)
 
     publisher = MySnapshotPublisher()
-    assert isinstance(publisher, ProtocolSnapshotPublisher)  # Runtime check
+    assert hasattr(publisher, 'publish_snapshot') and callable(publisher.publish_snapshot)
+    assert hasattr(publisher, 'delete_snapshot') and callable(publisher.delete_snapshot)
     ```
 
 See Also:

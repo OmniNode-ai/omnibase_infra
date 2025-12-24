@@ -154,9 +154,11 @@ This exemption should be reviewed if:
 
 ## Related Documentation
 
+- **Node Architecture**: `docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md` - Complete architectural design
 - **Implementation**: `src/omnibase_infra/nodes/node_registration_orchestrator/protocols.py`
 - **Models**: `src/omnibase_infra/nodes/node_registration_orchestrator/models/`
 - **Orchestrator Node**: `src/omnibase_infra/nodes/node_registration_orchestrator/node.py`
+- **Node README**: `src/omnibase_infra/nodes/node_registration_orchestrator/README.md` - Usage and diagrams
 - **CLAUDE.md**: "Protocol File Naming" section
 - **Ticket**: OMN-888 (Node Registration Orchestrator Workflow)
 
@@ -168,18 +170,30 @@ This exemption should be reviewed if:
 | Models | **Complete** | `models/` | OMN-888 |
 | Orchestrator Node | **Complete** | `node.py` | OMN-888 |
 | Reducer Implementation | **Pending** | N/A | OMN-889 |
-| Effect Implementation | **Placeholder** | `nodes/node_registry_effect/` | OMN-890 |
+| Effect Implementation | **Complete** | `nodes/effects/registry_effect.py` | OMN-890 |
 | Intent Models (Core) | **Pending** | N/A | OMN-912 |
 | Projection Reader | **Pending** | N/A | OMN-930 |
 | Time Injection Wiring | **Pending** | N/A | OMN-973 |
 
 ### Effect Node Status (OMN-890)
 
-The `node_registry_effect` module at `src/omnibase_infra/nodes/node_registry_effect/` is currently a **placeholder**:
+The `NodeRegistryEffect` implementation is **complete** at `src/omnibase_infra/nodes/effects/registry_effect.py`.
 
-- The `__init__.py` exists but exports nothing (`__all__: list[str] = []`)
-- No `node.py` or `contract.yaml` implementation
-- Cannot execute Consul or PostgreSQL registration intents
-- Blocked by: OMN-889 (reducer must generate intents first)
+**Architecture Note**: The effect node follows a domain-organized pattern where multiple effect nodes
+are grouped under the `effects/` directory. The `node_registry_effect/` module serves as an alias
+that re-exports from the canonical implementation location.
 
-This is documented in the module docstring and tracked by OMN-890.
+**Import Paths** (both work identically):
+```python
+from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+from omnibase_infra.nodes.effects import NodeRegistryEffect
+```
+
+**Implementation Features**:
+- Dual-backend registration (Consul + PostgreSQL)
+- Partial failure handling with targeted retries
+- Idempotency store for retry safety (bounded LRU cache, configurable TTL)
+- Error sanitization for security (no secrets in error messages)
+- Protocol-based dependency injection (ProtocolConsulClient, ProtocolPostgresAdapter)
+
+**Contract**: `src/omnibase_infra/nodes/effects/contract.yaml`
