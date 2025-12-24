@@ -21,78 +21,16 @@ Related tickets:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-import yaml
 
 # =============================================================================
 # Test Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to contract.yaml.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-    """
-    path = Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-    if not path.exists():
-        pytest.skip(f"Contract file not found: {path}")
-    return path
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist (allows tests to be skipped gracefully).
-        pytest.fail: If contract file contains invalid YAML.
-    """
-    if not contract_path.exists():
-        pytest.skip(f"Contract file not found: {contract_path}")
-
-    with open(contract_path, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
-
-
-@pytest.fixture
-def execution_graph_nodes(contract_data: dict) -> list[dict]:
-    """Extract execution graph nodes from contract data.
-
-    Returns:
-        List of node dictionaries from the execution graph.
-
-    Raises:
-        pytest.fail: If execution_graph.nodes is not found in contract.
-    """
-    try:
-        return contract_data["workflow_coordination"]["workflow_definition"][
-            "execution_graph"
-        ]["nodes"]
-    except KeyError as e:
-        pytest.fail(f"Missing key in contract structure: {e}")
-
-
-@pytest.fixture
-def dependencies(contract_data: dict) -> list[dict]:
-    """Extract dependencies from contract data.
-
-    Returns:
-        List of dependency dictionaries from the contract.
-
-    Raises:
-        pytest.fail: If dependencies section is not found in contract.
-    """
-    if "dependencies" not in contract_data:
-        pytest.fail("Missing 'dependencies' section in contract")
-    return contract_data["dependencies"]
+# Note: The following fixtures are provided by conftest.py with module-level
+# scope for performance (parse once per module):
+#   - contract_path, contract_data: Contract loading
+#   - execution_graph_nodes: Nodes from contract's execution graph
+#   - dependencies: Dependencies list from contract
 
 
 # =============================================================================

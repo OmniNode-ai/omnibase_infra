@@ -46,53 +46,17 @@ Running Tests:
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
-import yaml
 
 # =============================================================================
 # Test Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to the orchestrator contract.yaml.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist.
-    """
-    path = Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-    if not path.exists():
-        pytest.skip(f"Contract file not found: {path}")
-    return path
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.fail: If contract file contains invalid YAML.
-    """
-    with open(contract_path, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
-
-
-@pytest.fixture
-def published_events(contract_data: dict) -> list[dict]:
-    """Extract published_events from contract data."""
-    return contract_data.get("published_events", [])
-
-
-@pytest.fixture
-def event_types_map(published_events: list[dict]) -> dict[str, dict]:
-    """Build a map of event_type -> event definition for quick lookup."""
-    return {event["event_type"]: event for event in published_events}
+# Note: The following fixtures are provided by conftest.py with module-level
+# scope for performance (parse once per module):
+#   - contract_path, contract_data: Contract loading
+#   - published_events: List of published events from contract
+#   - event_types_map: Map of event_type -> event definition
 
 
 # =============================================================================
@@ -479,3 +443,173 @@ class TestEventStructure:
         duplicates = [t for t in topics if topics.count(t) > 1]
 
         assert not duplicates, f"Duplicate topics found: {list(set(duplicates))}"
+
+
+# =============================================================================
+# TestConsumedEventHandlers
+# =============================================================================
+
+
+class TestConsumedEventHandlers:
+    """Tests for contract consistency between consumed events and workflow handlers.
+
+    This test class validates that every event declared in consumed_events has
+    a corresponding receive step in the execution graph. This ensures contract
+    completeness - if we declare we consume an event, there must be workflow
+    logic that handles it.
+    """
+
+    @staticmethod
+    def _extract_topic_slug(topic: str) -> str:
+        """Extract the event slug from a topic pattern.
+
+        Topic patterns follow: {env}.{namespace}.onex.evt.<slug>.v1
+        or: {env}.{namespace}.onex.internal.<slug>.v1
+
+        Args:
+            topic: The full topic pattern string.
+
+        Returns:
+            The extracted slug (e.g., 'node-introspection' from the topic).
+        """
+        # Remove template placeholders and split by dots
+        parts = topic.split(".")
+        # The slug is typically the second-to-last part (before version)
+        # Pattern: {env}.{namespace}.onex.(evt|internal).<slug>.v1
+        if len(parts) >= 2:
+            return parts[-2]  # e.g., 'node-introspection', 'runtime-tick'
+        return topic
+
+    @staticmethod
+    def _pattern_matches_slug(pattern: str, slug: str) -> bool:
+        """Check if an event pattern matches a topic slug.
+
+        Event patterns use dot-separated segments with wildcards.
+        Examples:
+            - 'node.introspection.*' matches 'node-introspection'
+            - 'runtime-tick.*' matches 'runtime-tick'
+
+        The matching logic:
+            1. Remove trailing wildcard from pattern
+            2. Convert pattern dots to dashes for comparison
+            3. Check if slug starts with the normalized pattern
+
+        Args:
+            pattern: Event pattern from step_config (e.g., 'node.introspection.*').
+            slug: Topic slug to match (e.g., 'node-introspection').
+
+        Returns:
+            True if the pattern matches the slug.
+        """
+        # Remove trailing wildcard
+        normalized_pattern = pattern.rstrip("*").rstrip(".")
+
+        # Convert pattern dots to dashes for slug comparison
+        normalized_pattern = normalized_pattern.replace(".", "-")
+
+        # Check if slug starts with the pattern prefix
+        return slug.startswith(normalized_pattern)
+
+    def test_consumed_events_have_workflow_handlers(
+        self, contract_data: dict, execution_graph_nodes: list[dict]
+    ) -> None:
+        """Ensure every consumed event has a corresponding receive step.
+
+        This validates contract consistency - if we declare we consume an event,
+        there must be a workflow step that handles it. Events without handlers
+        indicate either:
+            1. A missing receive step in the execution graph
+            2. An event that should be removed from consumed_events
+
+        The test extracts event patterns from all effect nodes that have
+        event_pattern in their step_config, then validates each consumed
+        event matches at least one pattern.
+        """
+        # Get consumed events
+        consumed_events = contract_data.get("consumed_events", [])
+        if not consumed_events:
+            pytest.skip("No consumed_events defined in contract")
+
+        # Extract topic slugs from consumed events
+        consumed_slugs: dict[str, str] = {}  # slug -> event_type for error messages
+        for event in consumed_events:
+            topic = event.get("topic", "")
+            event_type = event.get("event_type", "unknown")
+            if topic:
+                slug = self._extract_topic_slug(topic)
+                consumed_slugs[slug] = event_type
+
+        # Collect all event patterns from execution graph nodes
+        handled_patterns: list[str] = []
+        for node in execution_graph_nodes:
+            step_config = node.get("step_config", {})
+            event_pattern = step_config.get("event_pattern")
+
+            if event_pattern:
+                # event_pattern can be a list or a string
+                if isinstance(event_pattern, list):
+                    handled_patterns.extend(event_pattern)
+                else:
+                    handled_patterns.append(event_pattern)
+
+        if not handled_patterns:
+            pytest.fail(
+                "No event_pattern found in any execution_graph node step_config. "
+                "At least one receive step should declare event patterns."
+            )
+
+        # Validate each consumed event matches at least one handler pattern
+        unhandled: list[str] = []
+        for slug, event_type in consumed_slugs.items():
+            matches = any(
+                self._pattern_matches_slug(pattern, slug)
+                for pattern in handled_patterns
+            )
+            if not matches:
+                unhandled.append(f"{event_type} (slug: {slug})")
+
+        assert not unhandled, (
+            f"Consumed events without workflow handlers: {unhandled}\n"
+            f"Every consumed event must have a corresponding receive step "
+            f"with matching event_pattern in execution_graph.\n"
+            f"Available patterns: {handled_patterns}\n"
+            f"Either add a receive step with matching pattern, "
+            f"or remove the event from consumed_events."
+        )
+
+    def test_consumed_events_section_exists(self, contract_data: dict) -> None:
+        """Test that consumed_events section is defined in the contract.
+
+        An orchestrator must declare which events it consumes to enable
+        proper event routing and subscription management.
+        """
+        assert "consumed_events" in contract_data, (
+            "Contract must define 'consumed_events' section. "
+            "This declares which events the orchestrator subscribes to."
+        )
+
+    def test_consumed_events_have_required_fields(self, contract_data: dict) -> None:
+        """Test that all consumed events have required fields.
+
+        Each consumed event must include:
+            - topic: The Kafka topic pattern to subscribe to
+            - event_type: The event type name for deserialization
+        """
+        consumed_events = contract_data.get("consumed_events", [])
+        events_missing_fields: list[str] = []
+
+        for event in consumed_events:
+            missing_fields: list[str] = []
+            if "topic" not in event:
+                missing_fields.append("topic")
+            if "event_type" not in event:
+                missing_fields.append("event_type")
+
+            if missing_fields:
+                event_id = event.get("event_type", event.get("topic", "unknown"))
+                events_missing_fields.append(f"{event_id}: missing {missing_fields}")
+
+        assert not events_missing_fields, (
+            "Consumed events with missing required fields:\n"
+            + "\n".join(f"  - {e}" for e in events_missing_fields)
+        )

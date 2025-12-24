@@ -34,10 +34,8 @@ See Also:
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
 import pytest
-import yaml
 
 __all__ = [
     "TestOrchestratorNoSystemClockCalls",
@@ -45,55 +43,12 @@ __all__ = [
 ]
 
 # =============================================================================
-# Test Constants
-# =============================================================================
-
-# Path to the orchestrator node implementation
-ORCHESTRATOR_NODE_FILE = Path(
-    "src/omnibase_infra/nodes/node_registration_orchestrator/node.py"
-)
-
-# Path to the orchestrator contract
-ORCHESTRATOR_CONTRACT_FILE = Path(
-    "src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml"
-)
-
-
-# =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def node_ast() -> ast.AST:
-    """Parse the orchestrator node.py and return its AST.
-
-    Raises:
-        pytest.skip: If node.py doesn't exist.
-    """
-    if not ORCHESTRATOR_NODE_FILE.exists():
-        pytest.skip(f"Orchestrator node file not found: {ORCHESTRATOR_NODE_FILE}")
-
-    source = ORCHESTRATOR_NODE_FILE.read_text(encoding="utf-8")
-    return ast.parse(source, filename=str(ORCHESTRATOR_NODE_FILE))
-
-
-@pytest.fixture
-def contract_data() -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist.
-        pytest.fail: If contract file contains invalid YAML.
-    """
-    if not ORCHESTRATOR_CONTRACT_FILE.exists():
-        pytest.skip(f"Contract file not found: {ORCHESTRATOR_CONTRACT_FILE}")
-
-    with open(ORCHESTRATOR_CONTRACT_FILE, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
+# Note: The following fixtures are provided by conftest.py with module-level
+# scope for performance (parse once per module):
+#   - contract_path, contract_data: Contract loading
+#   - node_module_path, node_source_code, node_ast: Node source/AST parsing
 
 
 # =============================================================================

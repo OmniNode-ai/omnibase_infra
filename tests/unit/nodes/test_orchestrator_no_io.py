@@ -23,50 +23,80 @@ from __future__ import annotations
 
 import ast
 import inspect
-from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-import yaml
 
 # =============================================================================
 # Constants
 # =============================================================================
 
-# I/O libraries that should NOT be imported by an orchestrator
+# I/O libraries that should NOT be imported by an orchestrator.
+# This list is comprehensive for ONEX infrastructure patterns.
+# Organized by category to aid maintenance.
 IO_LIBRARIES = frozenset(
     {
-        # HTTP clients
+        # ---------------------------------------------------------------------
+        # HTTP Clients
+        # REST API calls, webhooks, external service communication
+        # ---------------------------------------------------------------------
         "httpx",
         "requests",
         "aiohttp",
         "urllib",
         "urllib3",
-        # Database clients
+        # ---------------------------------------------------------------------
+        # Database Clients
+        # PostgreSQL, SQLAlchemy ORM, async database access
+        # ---------------------------------------------------------------------
         "psycopg",
         "psycopg2",
         "asyncpg",
         "sqlalchemy",
         "databases",
-        # Message queue clients
+        # ---------------------------------------------------------------------
+        # Message Queue / Kafka Clients
+        # Event streaming, pub/sub messaging
+        # ---------------------------------------------------------------------
         "kafka",
         "kafka-python",
         "aiokafka",
         "confluent_kafka",
-        # Service discovery / infrastructure
+        # ---------------------------------------------------------------------
+        # Service Discovery
+        # Consul for service registration and health checks
+        # ---------------------------------------------------------------------
         "consul",
         "python-consul",
-        # Secret management
+        # ---------------------------------------------------------------------
+        # Secret Management
+        # HashiCorp Vault clients (hvac is the primary Python client)
+        # ---------------------------------------------------------------------
         "hvac",
-        # Cache clients
+        "vault",
+        # ---------------------------------------------------------------------
+        # Cache Clients
+        # Redis, Valkey (Redis-compatible) for caching and pub/sub
+        # ---------------------------------------------------------------------
         "redis",
         "aioredis",
         "valkey",
+        # ---------------------------------------------------------------------
         # gRPC
+        # Remote procedure calls, service-to-service communication
+        # ---------------------------------------------------------------------
         "grpc",
         "grpcio",
-        # File I/O modules (network-related)
+        # ---------------------------------------------------------------------
+        # Async File I/O
+        # Filesystem operations that bypass standard blocking I/O
+        # Note: Standard `open()` is checked separately via method patterns
+        # ---------------------------------------------------------------------
+        "aiofiles",
+        # ---------------------------------------------------------------------
+        # Network Protocols
+        # SSH, FTP, SMTP - remote file transfer and email
+        # ---------------------------------------------------------------------
         "paramiko",
         "ftplib",
         "smtplib",
@@ -109,51 +139,14 @@ IO_METHOD_PATTERNS = frozenset(
 # =============================================================================
 # Test Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def orchestrator_module_path() -> Path:
-    """Return path to the orchestrator node.py file."""
-    path = Path("src/omnibase_infra/nodes/node_registration_orchestrator/node.py")
-    if not path.exists():
-        pytest.skip(f"Orchestrator file not found: {path}")
-    return path
-
-
-@pytest.fixture
-def orchestrator_source(orchestrator_module_path: Path) -> str:
-    """Load and return the orchestrator source code."""
-    return orchestrator_module_path.read_text(encoding="utf-8")
-
-
-@pytest.fixture
-def orchestrator_ast(orchestrator_source: str) -> ast.Module:
-    """Parse and return the orchestrator AST."""
-    return ast.parse(orchestrator_source)
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to contract.yaml."""
-    path = Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-    if not path.exists():
-        pytest.skip(f"Contract file not found: {path}")
-    return path
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict."""
-    with open(contract_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-@pytest.fixture
-def mock_container() -> MagicMock:
-    """Create a mock ONEX container."""
-    container = MagicMock()
-    container.config = MagicMock()
-    return container
+# Note: The following fixtures are provided by conftest.py with module-level
+# scope for performance (parse once per module):
+#   - contract_path, contract_data: Contract loading
+#   - node_module_path, node_source_code, node_ast: Node source/AST parsing
+#   - mock_container: From tests/conftest.py (top-level)
+#
+# Legacy fixture names are aliased below for backwards compatibility with
+# existing tests in this file.
 
 
 # =============================================================================
@@ -164,7 +157,7 @@ def mock_container() -> MagicMock:
 class TestOrchestratorNoIOImports:
     """Tests verifying orchestrator has no I/O library imports."""
 
-    def test_orchestrator_has_no_io_imports(self, orchestrator_ast: ast.Module) -> None:
+    def test_orchestrator_has_no_io_imports(self, node_ast: ast.Module) -> None:
         """Verify node.py does not import I/O libraries.
 
         The orchestrator should only import:
@@ -180,7 +173,7 @@ class TestOrchestratorNoIOImports:
         """
         imported_modules: set[str] = set()
 
-        for node in ast.walk(orchestrator_ast):
+        for node in ast.walk(node_ast):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     # Get the top-level module name
@@ -198,16 +191,19 @@ class TestOrchestratorNoIOImports:
 
         assert not io_imports_found, (
             f"Orchestrator should not import I/O libraries.\n"
-            f"Found I/O imports: {sorted(io_imports_found)}\n"
-            f"All I/O operations must be delegated to effect nodes via ProtocolEffect."
+            f"Found I/O imports: {sorted(io_imports_found)}\n\n"
+            f"HOW TO FIX: Delegate I/O operations to effect nodes via ProtocolEffect.\n"
+            f"Example: Use 'node_registry_effect' for Consul/PostgreSQL operations.\n"
+            f"Pattern: orchestrator -> ProtocolEffect.execute_intent(intent) -> effect node\n"
+            f"See: nodes/node_registration_orchestrator/protocols.py for ProtocolEffect definition."
         )
 
-    def test_no_socket_or_network_imports(self, orchestrator_ast: ast.Module) -> None:
+    def test_no_socket_or_network_imports(self, node_ast: ast.Module) -> None:
         """Verify no low-level socket or network imports."""
         network_modules = {"socket", "ssl", "http", "http.client"}
         imported_modules: set[str] = set()
 
-        for node in ast.walk(orchestrator_ast):
+        for node in ast.walk(node_ast):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imported_modules.add(alias.name)
@@ -219,8 +215,11 @@ class TestOrchestratorNoIOImports:
 
         assert not network_imports_found, (
             f"Orchestrator should not import network modules.\n"
-            f"Found: {sorted(network_imports_found)}\n"
-            f"All network I/O must be delegated to effect nodes."
+            f"Found: {sorted(network_imports_found)}\n\n"
+            f"HOW TO FIX: Delegate all network operations to effect nodes.\n"
+            f"Example: Use 'node_kafka_effect' for Kafka operations, "
+            f"'node_registry_effect' for Consul/PostgreSQL.\n"
+            f"Pattern: Create an intent model and call ProtocolEffect.execute_intent()."
         )
 
 
@@ -233,7 +232,7 @@ class TestOrchestratorNoDirectNetworkCalls:
     """Tests verifying orchestrator has no direct network/I/O calls."""
 
     def test_orchestrator_has_no_direct_network_calls(
-        self, orchestrator_ast: ast.Module
+        self, node_ast: ast.Module
     ) -> None:
         """Verify orchestrator class has no methods that make direct network calls.
 
@@ -245,7 +244,7 @@ class TestOrchestratorNoDirectNetworkCalls:
         """
         io_calls_found: list[str] = []
 
-        for node in ast.walk(orchestrator_ast):
+        for node in ast.walk(node_ast):
             if isinstance(node, ast.ClassDef):
                 if node.name == "NodeRegistrationOrchestrator":
                     # Walk through all function definitions in the class
@@ -261,8 +260,11 @@ class TestOrchestratorNoDirectNetworkCalls:
 
         assert not io_calls_found, (
             f"Orchestrator should not make direct I/O calls.\n"
-            f"Found potential I/O calls: {io_calls_found}\n"
-            f"All I/O must be delegated to effect nodes."
+            f"Found potential I/O calls: {io_calls_found}\n\n"
+            f"HOW TO FIX: Replace direct I/O calls with intent-based delegation.\n"
+            f"Instead of: client.get('/service/node'), cursor.execute(query)\n"
+            f"Use: await effect_node.execute_intent(ModelConsulReadIntent(...))\n"
+            f"The effect node handles the actual I/O and returns results."
         )
 
     def test_orchestrator_methods_are_minimal(self, mock_container: MagicMock) -> None:
@@ -318,7 +320,11 @@ class TestOrchestratorDelegatesToEffectProtocol:
 
         # Verify ProtocolEffect exists and has the delegation method
         assert hasattr(ProtocolEffect, "execute_intent"), (
-            "ProtocolEffect must have execute_intent() method for I/O delegation"
+            "ProtocolEffect must have execute_intent() method for I/O delegation.\n\n"
+            "HOW TO FIX: Add execute_intent() to ProtocolEffect in protocols.py:\n"
+            "  async def execute_intent(\n"
+            "      self, intent: ModelIntent, correlation_id: UUID\n"
+            "  ) -> ModelEffectResult: ..."
         )
 
         # Verify it's a Protocol (runtime_checkable)
@@ -341,10 +347,14 @@ class TestOrchestratorDelegatesToEffectProtocol:
 
         # Should accept intent and correlation_id for tracing
         assert "intent" in params, (
-            "execute_intent must accept 'intent' parameter for I/O operation details"
+            "execute_intent must accept 'intent' parameter for I/O operation details.\n\n"
+            "HOW TO FIX: Update signature to include intent parameter:\n"
+            "  async def execute_intent(self, intent: ModelIntent, ...) -> ModelEffectResult"
         )
         assert "correlation_id" in params, (
-            "execute_intent must accept 'correlation_id' for distributed tracing"
+            "execute_intent must accept 'correlation_id' for distributed tracing.\n\n"
+            "HOW TO FIX: Update signature to include correlation_id:\n"
+            "  async def execute_intent(self, intent: ModelIntent, correlation_id: UUID) -> ..."
         )
 
     def test_reducer_protocol_performs_no_io(self) -> None:
@@ -364,7 +374,13 @@ class TestOrchestratorDelegatesToEffectProtocol:
         assert (
             "MUST NOT perform I/O" in docstring
             or "Reducer MUST NOT perform I/O" in docstring
-        ), "ProtocolReducer docstring must explicitly state reducers perform no I/O"
+        ), (
+            "ProtocolReducer docstring must explicitly state reducers perform no I/O.\n\n"
+            "HOW TO FIX: Add to ProtocolReducer docstring:\n"
+            '  """Protocol for reducer operations.\n\n'
+            "  Reducer MUST NOT perform I/O. All I/O operations must be\n"
+            '  expressed as intents returned to the orchestrator."""'
+        )
 
 
 # =============================================================================
@@ -376,7 +392,7 @@ class TestOrchestratorIsPureCoordinator:
     """Tests verifying orchestrator is a pure workflow coordinator."""
 
     def test_orchestrator_is_pure_coordinator(
-        self, orchestrator_source: str, mock_container: MagicMock
+        self, node_source_code: str, mock_container: MagicMock
     ) -> None:
         """Verify orchestrator only coordinates workflow, doesn't execute I/O.
 
@@ -406,7 +422,7 @@ class TestOrchestratorIsPureCoordinator:
         in_docstring = False
         docstring_delimiter = None
 
-        for line in orchestrator_source.split("\n"):
+        for line in node_source_code.split("\n"):
             stripped = line.strip()
 
             if "class NodeRegistrationOrchestrator" in line:
@@ -640,11 +656,11 @@ class TestOrchestratorModuleStructure:
     """Additional structural tests for orchestrator module."""
 
     def test_module_docstring_documents_no_io_pattern(
-        self, orchestrator_source: str
+        self, node_source_code: str
     ) -> None:
         """Verify module docstring documents the no-I/O pattern."""
         # Extract module docstring (first string literal)
-        tree = ast.parse(orchestrator_source)
+        tree = ast.parse(node_source_code)
         module_docstring = ast.get_docstring(tree) or ""
 
         # Should mention key architectural principles
@@ -660,9 +676,9 @@ class TestOrchestratorModuleStructure:
             f"Found: {found}, expected at least 1 of: {patterns_to_find}"
         )
 
-    def test_all_exports_are_minimal(self, orchestrator_source: str) -> None:
+    def test_all_exports_are_minimal(self, node_source_code: str) -> None:
         """Verify __all__ exports are minimal (just the orchestrator class)."""
-        tree = ast.parse(orchestrator_source)
+        tree = ast.parse(node_source_code)
 
         all_value = None
         for node in ast.walk(tree):

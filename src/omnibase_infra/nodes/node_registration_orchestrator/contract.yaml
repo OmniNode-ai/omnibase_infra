@@ -92,7 +92,7 @@ workflow_coordination:
           node_type: effect
           description: "Receive introspection or tick event"
           step_config:
-            event_pattern: ["node.introspection.*", "runtime-tick.*"]
+            event_pattern: ["node-introspection.*", "registry-request-introspection.*", "runtime-tick.*"]
 
         # OMN-930: Reads current registration state via ProtocolProjectionReader.
         # Uses ProjectionReaderRegistration to query node_registration_state.

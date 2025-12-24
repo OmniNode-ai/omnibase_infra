@@ -39,39 +39,14 @@ Running Tests:
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
-import yaml
 
 # =============================================================================
 # Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def contract_path() -> Path:
-    """Return path to contract.yaml."""
-    return Path("src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml")
-
-
-@pytest.fixture
-def contract_data(contract_path: Path) -> dict:
-    """Load and return contract.yaml as dict.
-
-    Raises:
-        pytest.skip: If contract file doesn't exist.
-        pytest.fail: If contract file contains invalid YAML.
-    """
-    if not contract_path.exists():
-        pytest.skip(f"Contract file not found: {contract_path}")
-
-    with open(contract_path, encoding="utf-8") as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML in contract file: {e}")
-
+# Note: contract_path and contract_data fixtures are provided by conftest.py
+# with module-level scope for performance (parse YAML once per module).
 
 # =============================================================================
 # ONEX Topic Pattern Constants
