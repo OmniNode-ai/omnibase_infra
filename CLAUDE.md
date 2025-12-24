@@ -1164,22 +1164,15 @@ capabilities = node.get_capabilities()
 5. Monitor introspection topic consumer groups for unexpected consumers
 6. Use network segmentation to isolate introspection traffic if required
 
-**Thread Safety**:
-The mixin uses `asyncio.Lock` for thread-safe cache operations:
+**Cache Operations**:
+The mixin manages introspection cache with TTL-based invalidation:
 
-- **Lock**: `_introspection_cache_lock` (asyncio.Lock)
-- **Protected Variables**: `_introspection_cache`, `_introspection_cached_at`
-- **Thread-Safe Methods**:
-  - `get_introspection_data()` - Cache read/write is atomic under lock
-  - `invalidate_introspection_cache()` - Cache invalidation is atomic under lock
+- **Cache Variables**: `_introspection_cache`, `_introspection_cached_at`, `_introspection_cache_ttl`
+- **Cache Methods**:
+  - `get_introspection_data()` - Returns cached data if TTL not expired, otherwise refreshes
+  - `invalidate_introspection_cache()` - Clears cache to force refresh on next call (synchronous)
 
-Unlike `MixinAsyncCircuitBreaker` which uses a caller-held locking pattern, `MixinNodeIntrospection` manages the lock internally - callers do not need to acquire the lock manually.
-
-**Breaking Change (PR #54)**: The `invalidate_introspection_cache()` method was changed from synchronous to asynchronous:
-- **Old**: `def invalidate_introspection_cache(self) -> None`
-- **New**: `async def invalidate_introspection_cache(self) -> None`
-- **Migration**: Add `await` before all calls to `invalidate_introspection_cache()`
-- **Rationale**: Thread-safe cache invalidation requires holding the async lock (`_introspection_cache_lock`), which can only be acquired in an async context. Making the method async ensures proper concurrency control and prevents race conditions when multiple coroutines attempt to invalidate the cache simultaneously.
+**Note**: Cache operations are currently synchronous. For concurrent access patterns in high-contention async environments, external coordination may be needed.
 
 **Related**:
 - Implementation: `src/omnibase_infra/mixins/mixin_node_introspection.py`

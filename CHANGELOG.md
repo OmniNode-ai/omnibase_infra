@@ -10,11 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking Changes
 
 #### MixinNodeIntrospection API (PR #54)
-- **`invalidate_introspection_cache()` is now async**: The cache invalidation method was changed from synchronous to asynchronous to ensure thread-safe cache operations using async lock.
-  - **Old**: `def invalidate_introspection_cache(self) -> None`
-  - **New**: `async def invalidate_introspection_cache(self) -> None`
-  - **Migration**: Add `await` before calls to `invalidate_introspection_cache()`
-  - **Rationale**: Thread-safe cache invalidation requires holding the async lock, which requires the method to be async.
+- **New configuration model**: Added `ModelIntrospectionConfig` as the preferred configuration method.
+  - **Migration**: Use `initialize_introspection_from_config(config)` for new code; legacy `initialize_introspection()` method remains supported for backward compatibility.
+  - **Rationale**: Typed configuration model provides better validation and extensibility.
 
 #### Error Code for Unhandled node_kind (OMN-990, PR #73)
 - **Error code changed from `VALIDATION_ERROR` to `INTERNAL_ERROR`**: When `DispatchContextEnforcer.create_context_for_dispatcher()` encounters an unhandled `node_kind` value, it now raises `ModelOnexError` with `INTERNAL_ERROR` instead of `VALIDATION_ERROR`.
@@ -33,20 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### Node Introspection (OMN-881, PR #54)
-- **ModelIntrospectionConfig**: Configuration model for `MixinNodeIntrospection` that enables contract-driven topic configuration
-  - `node_id` (required): Unique identifier for this node instance
+- **ModelIntrospectionConfig**: Configuration model for `MixinNodeIntrospection` that provides typed configuration
+  - `node_id` (required): Unique identifier for this node instance (UUID, strings auto-converted)
   - `node_type` (required): Type of node (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
   - `event_bus`: Optional event bus for publishing introspection and heartbeat events (must have `publish_envelope()` method if provided)
   - `version`: Node version string (default: `"1.0.0"`)
   - `cache_ttl`: Cache time-to-live in seconds (default: `300.0`)
   - `operation_keywords`: Optional set of keywords to identify operation methods (if None, uses DEFAULT_OPERATION_KEYWORDS)
   - `exclude_prefixes`: Optional set of prefixes to exclude from capability discovery (if None, uses DEFAULT_EXCLUDE_PREFIXES)
-  - `introspection_topic`: Optional topic for publishing introspection events (if None, uses `MixinNodeIntrospection.DEFAULT_INTROSPECTION_TOPIC` class default)
-  - `heartbeat_topic`: Optional topic for publishing heartbeat events (if None, uses `MixinNodeIntrospection.DEFAULT_HEARTBEAT_TOPIC` class default)
-  - `request_introspection_topic`: Optional topic for listening to introspection requests (if None, uses `MixinNodeIntrospection.DEFAULT_REQUEST_INTROSPECTION_TOPIC` class default)
-- **Contract-Driven Topic Configuration**: Topics can now be customized via configuration rather than hardcoded, enabling multi-tenant and environment-specific deployments
-- **Performance Metrics Tracking**: Added tracking for cache hits/misses, publish latency, and last publish timestamp via `get_introspection_metrics()` method
-- **Async Cache Lock**: Thread-safe cache operations using `asyncio.Lock` for concurrent access protection
+- **Performance Metrics Tracking**: Added `IntrospectionPerformanceMetrics` dataclass and `get_performance_metrics()` method for monitoring introspection operation timing and threshold violations
 
 #### Handlers
 - **HttpHandler** (OMN-237, PR #26): HTTP REST protocol handler for MVP

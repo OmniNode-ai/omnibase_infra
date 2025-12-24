@@ -602,74 +602,42 @@ Contract event channels are validated against this specification:
 
 ### Validation Tooling
 
-Topic names are validated at configuration time using Pydantic field validators. The `ModelIntrospectionConfig` class enforces ONEX naming conventions:
+The `ModelIntrospectionConfig` class provides typed configuration validation using Pydantic:
 
 ```python
+from uuid import uuid4
+
 from omnibase_infra.mixins import ModelIntrospectionConfig
 from pydantic import ValidationError
 
-# Valid topic configuration
+# Valid configuration
 config = ModelIntrospectionConfig(
-    node_id="my-node",
+    node_id=uuid4(),
     node_type="EFFECT",
-    introspection_topic="onex.custom.introspection.published.v1",  # Valid: starts with "onex."
 )
 
-# Invalid topic - raises ValidationError
+# Invalid - empty node_type raises ValidationError
 try:
     config = ModelIntrospectionConfig(
-        node_id="my-node",
-        node_type="EFFECT",
-        introspection_topic="custom.topic.v1",  # Invalid: missing "onex." prefix
+        node_id=uuid4(),
+        node_type="",  # Invalid: must have min_length=1
     )
 except ValidationError as e:
-    print(e)  # Topic name must start with 'onex.' prefix. Got: 'custom.topic.v1'
+    print(e)  # String should have at least 1 character
 ```
 
-**Validation Rules Enforced**:
+**Validation Rules Enforced by ModelIntrospectionConfig**:
 
-| Rule | Description | Example Error |
-|------|-------------|---------------|
-| ONEX prefix | Topic names must start with `onex.` | `"custom.topic.v1"` fails |
-| Valid characters | Only alphanumeric, dots (`.`), hyphens (`-`), and underscores (`_`) | `"onex.topic@invalid.v1"` fails |
-| Non-empty suffix | Topic must have content after `onex.` prefix | `"onex."` fails |
-| Version suffix | Topic names must end with `.v` followed by a number | `"onex.node.topic"` fails (missing `.v1`) |
+| Field | Rule | Description |
+|-------|------|-------------|
+| `node_id` | UUID format | Must be valid UUID (strings auto-converted) |
+| `node_type` | Non-empty | Must have at least 1 character |
+| `cache_ttl` | Non-negative | Must be >= 0.0 |
+| `extra` | Forbidden | No extra fields allowed (frozen model) |
 
-**Additional Invalid Examples**:
+**Note:** Topic naming validation is planned for a future release when contract-driven topic configuration is implemented.
 
-```python
-# Invalid: contains special characters
-try:
-    config = ModelIntrospectionConfig(
-        node_id="my-node",
-        node_type="EFFECT",
-        introspection_topic="onex.topic@invalid!",  # Invalid characters
-    )
-except ValidationError:
-    pass  # "Topic name contains invalid characters..."
-
-# Invalid: empty after prefix
-try:
-    config = ModelIntrospectionConfig(
-        node_id="my-node",
-        node_type="EFFECT",
-        introspection_topic="onex.",  # Nothing after prefix
-    )
-except ValidationError:
-    pass  # "Topic name must have content after 'onex.' prefix..."
-
-# Invalid: missing version suffix
-try:
-    config = ModelIntrospectionConfig(
-        node_id="my-node",
-        node_type="EFFECT",
-        introspection_topic="onex.node.introspection.published",  # Missing .v1
-    )
-except ValidationError:
-    pass  # "Topic name must end with version suffix (e.g., .v1, .v2)..."
-```
-
-See `src/omnibase_infra/mixins/mixin_node_introspection.py` for the complete validator implementation.
+See `src/omnibase_infra/mixins/model_introspection_config.py` for the configuration model implementation.
 
 ### Code Integration Example
 
@@ -720,67 +688,59 @@ event_channels:
 
 **Contract-to-Code Mapping:**
 
-| Contract `event_type` | Contract `topic` | Python Config Field |
-|-----------------------|------------------|---------------------|
-| `introspection` | `onex.node.introspection.published.v1` | `introspection_topic` |
-| `heartbeat` | `onex.node.heartbeat.published.v1` | `heartbeat_topic` |
+| Contract `event_type` | Contract `topic` | Module Constant |
+|-----------------------|------------------|-----------------|
+| `introspection` | `onex.node.introspection.published.v1` | `INTROSPECTION_TOPIC` |
+| `heartbeat` | `onex.node.heartbeat.published.v1` | `HEARTBEAT_TOPIC` |
 | `shutdown` | `onex.node.shutdown.announced.v1` | *(not in MixinNodeIntrospection)* |
-| `request` | `onex.registry.introspection.requested.v1` | `request_introspection_topic` |
+| `request` | `onex.registry.introspection.requested.v1` | `REQUEST_INTROSPECTION_TOPIC` |
+
+**Note:** The contract topics listed above are the canonical ONEX topics. The current implementation uses legacy topic names (`node.introspection`, `node.heartbeat`, `node.request_introspection`). Migration to canonical topic names is tracked in Section 9.
 
 #### Python Integration
 
-The node code reads the contract and wires topics to `MixinNodeIntrospection`. The `event_type` field from the contract is used as the dictionary key to look up topic names:
+The node code reads the contract and initializes `MixinNodeIntrospection` using `ModelIntrospectionConfig`:
 
 ```python
-# node.py - Wiring contract-defined topics to MixinNodeIntrospection
+# node.py - Initializing MixinNodeIntrospection with configuration
+from uuid import UUID
+
 from omnibase_infra.mixins import MixinNodeIntrospection, ModelIntrospectionConfig
 from omnibase_infra.event_bus import KafkaEventBus
 
 class RegistryEffectNode(MixinNodeIntrospection):
-    """Effect node that uses contract-defined topics for introspection."""
+    """Effect node that uses MixinNodeIntrospection for capability discovery."""
 
     def __init__(
         self,
         contract: NodeContract,
         event_bus: KafkaEventBus,
     ) -> None:
-        # Extract topic names from contract event_channels
-        publishes = {ch.event_type: ch.topic for ch in contract.event_channels.publishes}
-        subscribes = {ch.event_type: ch.topic for ch in contract.event_channels.subscribes}
-
-        # Configure introspection with contract-defined topics
-        # Note: ModelIntrospectionConfig supports 3 configurable topics:
-        # - introspection_topic (publish)
-        # - heartbeat_topic (publish)
-        # - request_introspection_topic (subscribe)
-        # Shutdown events are NOT part of the introspection mixin - they are
-        # a separate lifecycle concern handled by the node's shutdown logic.
+        # Configure introspection with typed configuration model
+        # Note: Topics are currently defined as module constants in mixin_node_introspection.py:
+        # - INTROSPECTION_TOPIC = "node.introspection"
+        # - HEARTBEAT_TOPIC = "node.heartbeat"
+        # - REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
+        # Contract-driven topic configuration is planned for a future release.
         config = ModelIntrospectionConfig(
-            node_id=contract.metadata.name,
+            node_id=UUID(contract.metadata.name) if isinstance(contract.metadata.name, str) else contract.metadata.name,
             node_type=contract.metadata.node_type,
             version=contract.metadata.version,
             event_bus=event_bus,
-            # Map contract event_channels to introspection topics
-            introspection_topic=publishes.get("introspection"),  # onex.node.introspection.published.v1
-            heartbeat_topic=publishes.get("heartbeat"),          # onex.node.heartbeat.published.v1
-            request_introspection_topic=subscribes.get("request"),  # onex.registry.introspection.requested.v1
         )
-        self.initialize_introspection(config=config)
+        self.initialize_introspection_from_config(config)
 ```
 
 **Key Points:**
-- Topics are declared in `contract.yaml`, not hardcoded in Python
-- `MixinNodeIntrospection` accepts topic names via `ModelIntrospectionConfig`
-- **Only 3 topics are configurable** via `ModelIntrospectionConfig`:
-  - `introspection_topic` - for publishing node capabilities
-  - `heartbeat_topic` - for publishing liveness signals
-  - `request_introspection_topic` - for subscribing to refresh requests
+- Topics are declared in `contract.yaml` for documentation and topology analysis
+- `MixinNodeIntrospection` currently uses module-level topic constants (`INTROSPECTION_TOPIC`, `HEARTBEAT_TOPIC`, `REQUEST_INTROSPECTION_TOPIC`)
+- Contract-driven topic configuration via `ModelIntrospectionConfig` is planned for a future release
 - **Shutdown events are a separate concern**: The `onex.node.shutdown.announced.v1` topic is not managed by `MixinNodeIntrospection`. Nodes should publish shutdown events directly via their shutdown/cleanup logic, not through the introspection mixin.
 - Contract validation (see Validation Rules above) ensures topics exist in the canonical list
 - This pattern enables static analysis of event topology across all nodes
 
-**Default Behavior:**
-If topic names are not provided in the config, `MixinNodeIntrospection` falls back to default topic names defined in `ModelIntrospectionConfig`. Contract-driven configuration is recommended for production deployments to enable topology analysis and validation.
+**Current Behavior:**
+Topic names are defined as module-level constants in `mixin_node_introspection.py`. Contract-driven topic configuration is planned for a future release to enable topology analysis and multi-tenant deployments.
 
 ---
 

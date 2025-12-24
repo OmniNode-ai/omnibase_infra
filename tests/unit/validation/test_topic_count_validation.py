@@ -218,3 +218,143 @@ class TestTopicCategorization:
             assert expected in registration_topics, (
                 f"Missing registration state topic: {expected}"
             )
+
+
+class TestTopicVersionSuffixValidation:
+    """Test validation of version suffix pattern (.v\\d+)."""
+
+    def test_valid_version_suffix_v1(self) -> None:
+        """Test that .v1 suffix is valid."""
+        topic = "onex.node.introspection.published.v1"
+        version_pattern = re.compile(r"\.v[0-9]+$")
+        assert version_pattern.search(topic), (
+            f"Topic '{topic}' should have valid version suffix"
+        )
+
+    def test_valid_version_suffix_v2(self) -> None:
+        """Test that .v2 suffix is valid."""
+        topic = "onex.node.heartbeat.published.v2"
+        version_pattern = re.compile(r"\.v[0-9]+$")
+        assert version_pattern.search(topic), (
+            f"Topic '{topic}' should have valid version suffix"
+        )
+
+    def test_valid_version_suffix_v10(self) -> None:
+        """Test that multi-digit version suffix is valid."""
+        topic = "onex.registry.workflow.completed.v10"
+        version_pattern = re.compile(r"\.v[0-9]+$")
+        assert version_pattern.search(topic), (
+            f"Topic '{topic}' should have valid multi-digit version suffix"
+        )
+
+    def test_invalid_missing_version_suffix(self) -> None:
+        """Test that topic without version suffix is invalid."""
+        topic = "onex.node.introspection.published"
+        version_pattern = re.compile(r"\.v[0-9]+$")
+        assert not version_pattern.search(topic), (
+            f"Topic '{topic}' should be invalid without version suffix"
+        )
+
+    def test_invalid_wrong_version_format(self) -> None:
+        """Test that incorrect version format is invalid."""
+        invalid_topics = [
+            "onex.node.introspection.published.1",  # Missing 'v' prefix
+            "onex.node.introspection.published.ver1",  # Wrong prefix
+            "onex.node.introspection.published.V1",  # Uppercase V
+            "onex.node.introspection.published.v",  # No version number
+            "onex.node.introspection.published.v1.0",  # Semantic versioning
+        ]
+        version_pattern = re.compile(r"\.v[0-9]+$")
+        for topic in invalid_topics:
+            assert not version_pattern.search(topic), (
+                f"Topic '{topic}' should be invalid - incorrect version format"
+            )
+
+
+class TestTopicInvalidNamesValidation:
+    """Test rejection of invalid topic names."""
+
+    def test_reject_special_characters(self) -> None:
+        """Test that special characters in topic names are rejected."""
+        invalid_topics = [
+            "onex.topic@invalid!",
+            "onex.topic#name",
+            "onex.topic$value",
+            "onex.topic%test",
+            "onex.topic&invalid",
+            "onex.topic*wildcard",
+            "onex.topic+plus",
+            "onex.topic=equals",
+            "onex.topic<angle>",
+            "onex.topic[bracket]",
+            "onex.topic{brace}",
+        ]
+        for topic in invalid_topics:
+            assert not ONEX_TOPIC_PATTERN.match(topic), (
+                f"Topic '{topic}' should be rejected - contains special characters"
+            )
+
+    def test_reject_empty_after_prefix(self) -> None:
+        """Test that empty topic after prefix is rejected."""
+        invalid_topics = [
+            "onex.",
+            "onex..",
+            "onex...",
+        ]
+        for topic in invalid_topics:
+            assert not ONEX_TOPIC_PATTERN.match(topic), (
+                f"Topic '{topic}' should be rejected - empty after prefix"
+            )
+
+    def test_reject_missing_onex_prefix(self) -> None:
+        """Test that topics without onex. prefix are rejected."""
+        invalid_topics = [
+            "custom.node.introspection.published.v1",
+            "node.introspection.published.v1",
+            "ONEX.node.introspection.published.v1",  # Uppercase ONEX
+            "Onex.node.introspection.published.v1",  # Mixed case
+        ]
+        for topic in invalid_topics:
+            assert not ONEX_TOPIC_PATTERN.match(topic), (
+                f"Topic '{topic}' should be rejected - missing or invalid onex. prefix"
+            )
+
+    def test_reject_whitespace_in_topic(self) -> None:
+        """Test that whitespace in topic names is rejected."""
+        invalid_topics = [
+            "onex.node .introspection.published.v1",
+            "onex. node.introspection.published.v1",
+            "onex.node.introspection .published.v1",
+            "onex.node.introspection.published. v1",
+            " onex.node.introspection.published.v1",
+            "onex.node.introspection.published.v1 ",
+            "onex.\tnode.introspection.published.v1",
+        ]
+        for topic in invalid_topics:
+            assert not ONEX_TOPIC_PATTERN.match(topic), (
+                f"Topic '{topic}' should be rejected - contains whitespace"
+            )
+
+    def test_reject_uppercase_domain(self) -> None:
+        """Test that uppercase in domain is rejected."""
+        invalid_topics = [
+            "onex.Node.introspection.published.v1",
+            "onex.NODE.introspection.published.v1",
+            "onex.nOdE.introspection.published.v1",
+        ]
+        for topic in invalid_topics:
+            assert not ONEX_TOPIC_PATTERN.match(topic), (
+                f"Topic '{topic}' should be rejected - uppercase in domain"
+            )
+
+    def test_reject_invalid_domain_start(self) -> None:
+        """Test that domain starting with number or hyphen is rejected."""
+        invalid_topics = [
+            "onex.1node.introspection.published.v1",  # Starts with number
+            "onex.-node.introspection.published.v1",  # Starts with hyphen
+            "onex._node.introspection.published.v1",  # Starts with underscore
+        ]
+        for topic in invalid_topics:
+            assert not ONEX_TOPIC_PATTERN.match(topic), (
+                f"Topic '{topic}' should be rejected - invalid domain start character"
+            )

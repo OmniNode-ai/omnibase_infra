@@ -57,10 +57,11 @@ _CI_MODE: bool = os.environ.get("CI", "false").lower() == "true"
 PERF_MULTIPLIER: float = 3.0 if _CI_MODE else 2.0
 
 # Test timing constants (in seconds)
+# CI environments may be slower, so apply multiplier to timing waits
 CACHE_TTL_WAIT = 0.15  # Wait for cache TTL expiration (TTL=0.1s + buffer)
 HEARTBEAT_INTERVAL = 0.05  # Default heartbeat interval for tests
-HEARTBEAT_WAIT = 0.1  # Wait for at least one heartbeat
-MULTIPLE_HEARTBEAT_WAIT = 0.2  # Wait for multiple heartbeats
+HEARTBEAT_WAIT = 0.1 * (PERF_MULTIPLIER if _CI_MODE else 1.0)  # Wait for at least one heartbeat
+MULTIPLE_HEARTBEAT_WAIT = 0.2 * (PERF_MULTIPLIER if _CI_MODE else 1.0)  # Wait for multiple heartbeats
 CACHE_EXPIRE_WAIT = 0.01  # Brief wait for cache expiration
 
 # Type alias for event bus published event structure
@@ -2747,3 +2748,426 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             f"p99/p50 ratio {p99_to_p50_ratio:.1f} exceeds {max_p99_to_p50_ratio:.1f}, "
             f"indicating excessive outliers"
         )
+
+
+@pytest.mark.unit
+class TestModelIntrospectionConfigTopicValidation:
+    """Tests for custom topic parameter validation in ModelIntrospectionConfig."""
+
+    def test_default_topic_values(self) -> None:
+        """Test that default topic values are set correctly."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            DEFAULT_HEARTBEAT_TOPIC,
+            DEFAULT_INTROSPECTION_TOPIC,
+            DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+            ModelIntrospectionConfig,
+        )
+
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+        )
+
+        assert config.introspection_topic == DEFAULT_INTROSPECTION_TOPIC
+        assert config.heartbeat_topic == DEFAULT_HEARTBEAT_TOPIC
+        assert config.request_introspection_topic == DEFAULT_REQUEST_INTROSPECTION_TOPIC
+
+    def test_custom_introspection_topic_works(self) -> None:
+        """Test that custom introspection_topic is accepted and stored."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        custom_topic = "custom.introspection.topic"
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            introspection_topic=custom_topic,
+        )
+
+        assert config.introspection_topic == custom_topic
+
+    def test_custom_heartbeat_topic_works(self) -> None:
+        """Test that custom heartbeat_topic is accepted and stored."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        custom_topic = "custom.heartbeat.topic"
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            heartbeat_topic=custom_topic,
+        )
+
+        assert config.heartbeat_topic == custom_topic
+
+    def test_custom_request_introspection_topic_works(self) -> None:
+        """Test that custom request_introspection_topic is accepted and stored."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        custom_topic = "custom.request-introspection.topic"
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            request_introspection_topic=custom_topic,
+        )
+
+        assert config.request_introspection_topic == custom_topic
+
+    def test_topic_validation_rejects_special_characters(self) -> None:
+        """Test that topics with special characters are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        invalid_topics = [
+            "topic@invalid",
+            "topic#name",
+            "topic$value",
+            "topic%test",
+            "topic&invalid",
+            "topic*wildcard",
+            "topic+plus",
+            "topic[bracket]",
+        ]
+
+        for invalid_topic in invalid_topics:
+            with pytest.raises(ValidationError) as exc_info:
+                ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    introspection_topic=invalid_topic,
+                )
+            assert "invalid characters" in str(exc_info.value).lower() or \
+                   "must start with" in str(exc_info.value).lower()
+
+    def test_topic_validation_rejects_whitespace(self) -> None:
+        """Test that topics with whitespace are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        invalid_topics = [
+            "topic with space",
+            "topic\twith\ttab",
+            " leading.space",
+            "trailing.space ",
+        ]
+
+        for invalid_topic in invalid_topics:
+            with pytest.raises(ValidationError) as exc_info:
+                ModelIntrospectionConfig(
+                    node_id=uuid4(),
+                    node_type="EFFECT",
+                    heartbeat_topic=invalid_topic,
+                )
+            assert "whitespace" in str(exc_info.value).lower()
+
+    def test_topic_validation_rejects_consecutive_dots(self) -> None:
+        """Test that topics with consecutive dots are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                introspection_topic="topic..invalid",
+            )
+        assert "consecutive dots" in str(exc_info.value).lower()
+
+    def test_topic_validation_rejects_uppercase(self) -> None:
+        """Test that topics with uppercase letters are rejected."""
+        from pydantic import ValidationError
+
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                introspection_topic="Topic.With.Uppercase",
+            )
+        assert "lowercase" in str(exc_info.value).lower()
+
+    def test_topic_validation_accepts_valid_topics(self) -> None:
+        """Test that valid topic formats are accepted."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        valid_topics = [
+            "node.introspection",
+            "custom-topic.name",
+            "topic_with_underscore",
+            "a.b.c.d.e",
+            "single",
+        ]
+
+        for valid_topic in valid_topics:
+            config = ModelIntrospectionConfig(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                introspection_topic=valid_topic,
+            )
+            assert config.introspection_topic == valid_topic
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinNodeIntrospectionCustomTopics:
+    """Tests for custom topic usage in MixinNodeIntrospection."""
+
+    async def test_mixin_uses_custom_introspection_topic(self) -> None:
+        """Test that mixin uses custom introspection_topic when publishing."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        custom_topic = "custom.introspection.v1"
+        event_bus = MockEventBus()
+        node = MockNode()
+
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=event_bus,
+            introspection_topic=custom_topic,
+        )
+        node.initialize_introspection_from_config(config)
+
+        await node.publish_introspection(reason="test")
+
+        # Verify the custom topic was used
+        # MockEventBus uses publish_envelope which stores in published_envelopes
+        assert len(event_bus.published_envelopes) == 1
+        _envelope, topic = event_bus.published_envelopes[0]
+        assert topic == custom_topic
+
+    async def test_mixin_uses_custom_heartbeat_topic(self) -> None:
+        """Test that mixin uses custom heartbeat_topic when publishing heartbeats."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        custom_topic = "custom.heartbeat.v1"
+        event_bus = MockEventBus()
+        node = MockNode()
+
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=event_bus,
+            heartbeat_topic=custom_topic,
+        )
+        node.initialize_introspection_from_config(config)
+
+        # Publish heartbeat directly
+        await node._publish_heartbeat()
+
+        # Verify the custom topic was used
+        # MockEventBus uses publish_envelope which stores in published_envelopes
+        assert len(event_bus.published_envelopes) == 1
+        _envelope, topic = event_bus.published_envelopes[0]
+        assert topic == custom_topic
+
+    async def test_mixin_stores_custom_request_topic(self) -> None:
+        """Test that mixin stores custom request_introspection_topic."""
+        from omnibase_infra.mixins.model_introspection_config import (
+            ModelIntrospectionConfig,
+        )
+
+        custom_topic = "custom.request-introspection.v1"
+        node = MockNode()
+
+        config = ModelIntrospectionConfig(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            request_introspection_topic=custom_topic,
+        )
+        node.initialize_introspection_from_config(config)
+
+        # Verify the custom topic is stored
+        assert node._request_introspection_topic == custom_topic
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestMixinNodeIntrospectionConcurrentCacheAccess:
+    """Enhanced thread-safety tests for concurrent cache access and invalidation."""
+
+    async def test_concurrent_get_introspection_data_race_condition(self) -> None:
+        """Test concurrent introspection data access for race conditions.
+
+        This test runs many concurrent introspection calls to detect
+        race conditions in cache access.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=10.0,  # Long TTL so cache is hit
+        )
+
+        # Run 200 concurrent calls to stress test cache access
+        async def get_data() -> ModelNodeIntrospectionEvent:
+            return await node.get_introspection_data()
+
+        tasks = [get_data() for _ in range(200)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # All calls should succeed
+        exceptions = [r for r in results if isinstance(r, Exception)]
+        assert len(exceptions) == 0, f"Concurrent access produced exceptions: {exceptions}"
+
+        # All results should be the same (cache consistency)
+        valid_results = [r for r in results if isinstance(r, ModelNodeIntrospectionEvent)]
+        assert len(valid_results) == 200
+        first_node_id = valid_results[0].node_id
+        assert all(r.node_id == first_node_id for r in valid_results)
+
+    async def test_concurrent_cache_invalidation_safety(self) -> None:
+        """Test that cache invalidation is thread-safe under concurrent access.
+
+        This test runs concurrent introspection calls while also
+        invalidating the cache to detect race conditions.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.001,  # Very short TTL to force cache misses
+        )
+
+        results: list[ModelNodeIntrospectionEvent | Exception] = []
+        invalidation_count = 0
+        invalidation_tasks: list[asyncio.Task[None]] = []
+
+        async def get_data() -> ModelNodeIntrospectionEvent:
+            return await node.get_introspection_data()
+
+        async def invalidate_cache() -> None:
+            nonlocal invalidation_count
+            await asyncio.sleep(0.0001)  # Small delay
+            await node.invalidate_introspection_cache()
+            invalidation_count += 1
+
+        # Mix introspection calls with cache invalidations
+        tasks: list[asyncio.Task[ModelNodeIntrospectionEvent | None]] = []
+        for i in range(100):
+            tasks.append(asyncio.create_task(get_data()))
+            if i % 10 == 0:
+                # Run invalidation concurrently - store reference to satisfy linter
+                invalidation_tasks.append(asyncio.create_task(invalidate_cache()))
+
+        gathered_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # All introspection calls should succeed despite concurrent invalidation
+        exceptions = [r for r in gathered_results if isinstance(r, Exception)]
+        assert len(exceptions) == 0, f"Concurrent invalidation produced exceptions: {exceptions}"
+
+    async def test_concurrent_cache_expiration_handling(self) -> None:
+        """Test cache expiration under concurrent access.
+
+        This test verifies that cache expiration is handled correctly
+        when multiple coroutines access the cache simultaneously.
+        """
+        node = MockNode()
+        node.initialize_introspection(
+            node_id=uuid4(),
+            node_type="EFFECT",
+            event_bus=None,
+            cache_ttl=0.05,  # 50ms TTL for testing
+        )
+
+        # Warm the cache
+        await node.get_introspection_data()
+
+        # Wait for cache to expire
+        await asyncio.sleep(0.06)
+
+        # Now run concurrent calls - all should recompute and succeed
+        async def get_data() -> ModelNodeIntrospectionEvent:
+            return await node.get_introspection_data()
+
+        tasks = [get_data() for _ in range(50)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        exceptions = [r for r in results if isinstance(r, Exception)]
+        assert len(exceptions) == 0, f"Cache expiration produced exceptions: {exceptions}"
+
+    async def test_concurrent_initialization_and_access(self) -> None:
+        """Test that initialization and access don't race.
+
+        This test verifies that accessing introspection data while
+        still initializing doesn't cause race conditions.
+        """
+        nodes: list[MockNode] = []
+        results: list[ModelNodeIntrospectionEvent | Exception] = []
+
+        async def create_and_access() -> ModelNodeIntrospectionEvent:
+            node = MockNode()
+            node.initialize_introspection(
+                node_id=uuid4(),
+                node_type="EFFECT",
+                event_bus=None,
+            )
+            nodes.append(node)
+            return await node.get_introspection_data()
+
+        # Create and access 50 nodes concurrently
+        tasks = [create_and_access() for _ in range(50)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        exceptions = [r for r in results if isinstance(r, Exception)]
+        assert len(exceptions) == 0, f"Concurrent init/access produced exceptions: {exceptions}"
+        assert len(nodes) == 50
+
+    async def test_multiple_instances_cache_isolation(self) -> None:
+        """Test that cache is isolated between instances.
+
+        This test verifies that concurrent access to multiple instances
+        doesn't cause cache cross-contamination.
+        """
+        node_ids = [uuid4() for _ in range(10)]
+        nodes: list[MockNode] = []
+
+        for node_id in node_ids:
+            node = MockNode()
+            node.initialize_introspection(
+                node_id=node_id,
+                node_type="EFFECT",
+                event_bus=None,
+            )
+            nodes.append(node)
+
+        async def get_data(node: MockNode) -> ModelNodeIntrospectionEvent:
+            return await node.get_introspection_data()
+
+        # Run concurrent access to all nodes
+        tasks = [get_data(node) for node in nodes for _ in range(10)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # All should succeed
+        exceptions = [r for r in results if isinstance(r, Exception)]
+        assert len(exceptions) == 0, f"Multi-instance access produced exceptions: {exceptions}"
+
+        # Verify each node's data is isolated
+        valid_results = [r for r in results if isinstance(r, ModelNodeIntrospectionEvent)]
+        for i, node in enumerate(nodes):
+            node_results = [r for r in valid_results if r.node_id == node_ids[i]]
+            assert len(node_results) == 10, f"Node {i} should have 10 results"

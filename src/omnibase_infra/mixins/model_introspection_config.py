@@ -8,12 +8,42 @@ mixin, consolidating initialization parameters into a single typed configuration
 
 from __future__ import annotations
 
+import re
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
+
+# Valid node types in the ONEX 4-node architecture
+# Accept both uppercase (used in tests/contracts) and lowercase (EnumHandlerType values)
+VALID_NODE_TYPES = frozenset(
+    {
+        "EFFECT",
+        "COMPUTE",
+        "REDUCER",
+        "ORCHESTRATOR",
+        "effect",
+        "compute",
+        "reducer",
+        "orchestrator",
+    }
+)
+
+# Maximum cache TTL in seconds (24 hours)
+# Prevents unreasonably long cache durations that could cause stale data issues
+MAX_CACHE_TTL_SECONDS = 86400.0
+
+# Default topic names for introspection events
+DEFAULT_INTROSPECTION_TOPIC = "node.introspection"
+DEFAULT_HEARTBEAT_TOPIC = "node.heartbeat"
+DEFAULT_REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
+
+# Topic validation pattern
+# Valid topics: lowercase alphanumeric with dots, hyphens, and underscores
+# Must start with a letter and not have consecutive dots
+TOPIC_VALIDATION_PATTERN = re.compile(r"^[a-z][a-z0-9._-]*[a-z0-9]$|^[a-z]$")
 
 
 def _coerce_to_uuid(value: str | UUID) -> UUID:
@@ -115,6 +145,122 @@ class ModelIntrospectionConfig(BaseModel):
         default=None,
         description="Prefixes to exclude from capability discovery; uses mixin defaults if None",
     )
+    introspection_topic: str = Field(
+        default=DEFAULT_INTROSPECTION_TOPIC,
+        min_length=1,
+        description="Custom topic for introspection events (default: node.introspection)",
+    )
+    heartbeat_topic: str = Field(
+        default=DEFAULT_HEARTBEAT_TOPIC,
+        min_length=1,
+        description="Custom topic for heartbeat events (default: node.heartbeat)",
+    )
+    request_introspection_topic: str = Field(
+        default=DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+        min_length=1,
+        description="Custom topic for request introspection events (default: node.request_introspection)",
+    )
+
+    @field_validator("node_type", mode="after")
+    @classmethod
+    def validate_node_type(cls, v: str) -> str:
+        """Validate node_type against ONEX 4-node architecture types.
+
+        Args:
+            v: Node type value after Pydantic's initial validation.
+
+        Returns:
+            Validated node type string.
+
+        Raises:
+            ValueError: If node_type is not a valid ONEX node type.
+        """
+        if v not in VALID_NODE_TYPES:
+            valid_types = ", ".join(sorted(t for t in VALID_NODE_TYPES if t.isupper()))
+            raise ValueError(
+                f"Invalid node_type '{v}'. Must be one of: {valid_types}"
+            )
+        return v
+
+    @field_validator("cache_ttl", mode="after")
+    @classmethod
+    def validate_cache_ttl_upper_bound(cls, v: float) -> float:
+        """Validate cache_ttl has a reasonable upper bound.
+
+        Args:
+            v: Cache TTL value in seconds after Pydantic's initial validation.
+
+        Returns:
+            Validated cache TTL value.
+
+        Raises:
+            ValueError: If cache_ttl exceeds MAX_CACHE_TTL_SECONDS (24 hours).
+        """
+        if v > MAX_CACHE_TTL_SECONDS:
+            raise ValueError(
+                f"cache_ttl {v} exceeds maximum allowed value of "
+                f"{MAX_CACHE_TTL_SECONDS} seconds (24 hours)"
+            )
+        return v
+
+    @field_validator(
+        "introspection_topic",
+        "heartbeat_topic",
+        "request_introspection_topic",
+        mode="after",
+    )
+    @classmethod
+    def validate_topic_format(cls, v: str) -> str:
+        """Validate topic name format.
+
+        Topic names must:
+        - Start with a lowercase letter
+        - Contain only lowercase alphanumeric, dots, hyphens, and underscores
+        - Not contain consecutive dots
+        - Not contain special characters (@, #, $, %, etc.)
+        - Not contain whitespace
+
+        Args:
+            v: Topic name after Pydantic's initial validation.
+
+        Returns:
+            Validated topic name.
+
+        Raises:
+            ValueError: If topic name contains invalid characters or format.
+        """
+        # Check for whitespace
+        if " " in v or "\t" in v or "\n" in v:
+            raise ValueError(f"Topic '{v}' must not contain whitespace")
+
+        # Check for consecutive dots
+        if ".." in v:
+            raise ValueError(f"Topic '{v}' must not contain consecutive dots")
+
+        # Check for special characters
+        invalid_chars = set("@#$%^&*+=<>[]{}|\\;:'\"")
+        found_invalid = [c for c in v if c in invalid_chars]
+        if found_invalid:
+            raise ValueError(
+                f"Topic '{v}' contains invalid characters: {found_invalid}"
+            )
+
+        # Check topic pattern
+        if not TOPIC_VALIDATION_PATTERN.match(v):
+            raise ValueError(
+                f"Topic '{v}' must start with a lowercase letter and contain "
+                "only lowercase alphanumeric characters, dots, hyphens, and underscores"
+            )
+
+        return v
 
 
-__all__: list[str] = ["ModelIntrospectionConfig"]
+__all__: list[str] = [
+    "ModelIntrospectionConfig",
+    "VALID_NODE_TYPES",
+    "MAX_CACHE_TTL_SECONDS",
+    "DEFAULT_INTROSPECTION_TOPIC",
+    "DEFAULT_HEARTBEAT_TOPIC",
+    "DEFAULT_REQUEST_INTROSPECTION_TOPIC",
+    "TOPIC_VALIDATION_PATTERN",
+]

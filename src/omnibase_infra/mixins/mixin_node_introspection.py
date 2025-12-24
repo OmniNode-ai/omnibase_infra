@@ -169,7 +169,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
-from omnibase_infra.mixins.model_introspection_config import ModelIntrospectionConfig
+from omnibase_infra.mixins.model_introspection_config import (
+    DEFAULT_HEARTBEAT_TOPIC,
+    DEFAULT_INTROSPECTION_TOPIC,
+    DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+    ModelIntrospectionConfig,
+)
 from omnibase_infra.mixins.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.models.discovery import ModelNodeIntrospectionEvent
 from omnibase_infra.models.discovery.model_node_introspection_event import (
@@ -182,10 +187,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Event topic constants
-INTROSPECTION_TOPIC = "node.introspection"
-HEARTBEAT_TOPIC = "node.heartbeat"
-REQUEST_INTROSPECTION_TOPIC = "node.request_introspection"
+# Event topic constants - kept for backward compatibility
+# New code should use DEFAULT_*_TOPIC from model_introspection_config
+INTROSPECTION_TOPIC = DEFAULT_INTROSPECTION_TOPIC
+HEARTBEAT_TOPIC = DEFAULT_HEARTBEAT_TOPIC
+REQUEST_INTROSPECTION_TOPIC = DEFAULT_REQUEST_INTROSPECTION_TOPIC
 
 # Backward-compatible alias for CapabilitiesTypedDict
 # The canonical definition is in model_node_introspection_event.py
@@ -586,6 +592,11 @@ class MixinNodeIntrospection:
 
         # Performance metrics tracking
         self._introspection_last_metrics = None
+
+        # Custom topic configuration
+        self._introspection_topic = config.introspection_topic
+        self._heartbeat_topic = config.heartbeat_topic
+        self._request_introspection_topic = config.request_introspection_topic
 
         if config.event_bus is None:
             logger.warning(
@@ -1356,7 +1367,7 @@ class MixinNodeIntrospection:
         self._ensure_initialized()
 
         # Validate contract topic declaration
-        self._validate_contract_topic(INTROSPECTION_TOPIC, "publish_introspection")
+        self._validate_contract_topic(self._introspection_topic, "publish_introspection")
 
         if self._introspection_event_bus is None:
             logger.warning(
@@ -1386,14 +1397,14 @@ class MixinNodeIntrospection:
             if hasattr(self._introspection_event_bus, "publish_envelope"):
                 await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
                     envelope=publish_event,
-                    topic=INTROSPECTION_TOPIC,
+                    topic=self._introspection_topic,
                 )
             else:
                 # Fallback to publish method with raw bytes
                 event_data = publish_event.model_dump(mode="json")
                 value = json.dumps(event_data).encode("utf-8")
                 await self._introspection_event_bus.publish(
-                    topic=INTROSPECTION_TOPIC,
+                    topic=self._introspection_topic,
                     key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id
                     else None,
@@ -1445,7 +1456,7 @@ class MixinNodeIntrospection:
             return False
 
         # Validate contract topic declaration
-        self._validate_contract_topic(HEARTBEAT_TOPIC, "_publish_heartbeat")
+        self._validate_contract_topic(self._heartbeat_topic, "_publish_heartbeat")
 
         try:
             # Calculate uptime
@@ -1495,12 +1506,12 @@ class MixinNodeIntrospection:
             if hasattr(self._introspection_event_bus, "publish_envelope"):
                 await self._introspection_event_bus.publish_envelope(  # type: ignore[union-attr]
                     envelope=heartbeat,
-                    topic=HEARTBEAT_TOPIC,
+                    topic=self._heartbeat_topic,
                 )
             else:
                 value = json.dumps(heartbeat.model_dump(mode="json")).encode("utf-8")
                 await self._introspection_event_bus.publish(
-                    topic=HEARTBEAT_TOPIC,
+                    topic=self._heartbeat_topic,
                     key=str(self._introspection_node_id).encode("utf-8")
                     if self._introspection_node_id
                     else None,
@@ -1805,7 +1816,7 @@ class MixinNodeIntrospection:
                 # Subscribe to request topic
                 if hasattr(self._introspection_event_bus, "subscribe"):
                     unsubscribe = await self._introspection_event_bus.subscribe(
-                        topic=REQUEST_INTROSPECTION_TOPIC,
+                        topic=self._request_introspection_topic,
                         group_id=f"introspection-{self._introspection_node_id}",
                         on_message=on_request,
                     )
@@ -1818,7 +1829,7 @@ class MixinNodeIntrospection:
                         f"Registry listener subscribed for {self._introspection_node_id}",
                         extra={
                             "node_id": self._introspection_node_id,
-                            "topic": REQUEST_INTROSPECTION_TOPIC,
+                            "topic": self._request_introspection_topic,
                         },
                     )
 
