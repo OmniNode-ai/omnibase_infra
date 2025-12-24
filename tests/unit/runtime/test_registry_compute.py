@@ -1276,7 +1276,7 @@ class TestUnicodePluginId:
        - Debugging difficulties
 
     3. Unicode confusables (homoglyphs) can cause:
-       - Spoofing: "normalizer" (ASCII) vs "nοrmalizer" (Greek omicron)
+       - Spoofing: "normalizer" (ASCII) vs "n\\u03bfrmalizer" (Greek omicron)
        - Accidental collisions in different scripts
 
     Design Considerations:
@@ -1501,7 +1501,7 @@ class TestUnicodePluginId:
         Current behavior: ALLOWED
         Uses Greek letters alpha and beta.
         """
-        plugin_id = "transformer_α_β"
+        plugin_id = "transformer_α_β"  # noqa: RUF001
 
         registry.register_plugin(
             plugin_id=plugin_id,
@@ -1730,7 +1730,7 @@ class TestUnicodePluginId:
 
         # Verify they are different strings
         assert plugin_id_ascii != plugin_id_greek
-        assert "o" != "\u03bf"  # ASCII 'o' vs Greek omicron
+        assert "o" != "\u03bf"  # noqa: PLR0133 - Intentional: ASCII 'o' vs Greek omicron
 
         registry.register_plugin(
             plugin_id=plugin_id_ascii,
@@ -1890,7 +1890,7 @@ class TestStressAndPerformance:
                 """Dynamically created plugin for stress testing."""
 
                 def execute(self, data: dict[str, object]) -> dict[str, object]:
-                    return {"plugin_id": i}
+                    return {"plugin_id": i}  # noqa: B023
 
             registry.register_plugin(
                 plugin_id=f"plugin_{i:04d}",
@@ -1914,7 +1914,7 @@ class TestStressAndPerformance:
                 """Plugin with specific version for testing."""
 
                 def execute(self, data: dict[str, object]) -> dict[str, object]:
-                    return {"version": i}
+                    return {"version": i}  # noqa: B023
 
             registry.register_plugin(
                 plugin_id="versioned_plugin",
@@ -1942,7 +1942,7 @@ class TestStressAndPerformance:
 
             class DynamicPlugin:
                 def execute(self, data: dict[str, object]) -> dict[str, object]:
-                    return {"id": i}
+                    return {"id": i}  # noqa: B023
 
             registry.register_plugin(
                 plugin_id=f"stress_plugin_{i:04d}",
@@ -1979,7 +1979,7 @@ class TestStressAndPerformance:
 
             class VersionPlugin:
                 def execute(self, data: dict[str, object]) -> dict[str, object]:
-                    return {"v": i}
+                    return {"v": i}  # noqa: B023
 
             registry.register_plugin(
                 plugin_id="multi_version_plugin",
@@ -2254,7 +2254,7 @@ class TestStressAndPerformance:
 
                 class CyclePlugin:
                     def execute(self, data: dict[str, object]) -> dict[str, object]:
-                        return {"cycle": cycle}
+                        return {"cycle": cycle}  # noqa: B023
 
                 registry.register_plugin(f"cycle_plugin_{i:04d}", CyclePlugin, "1.0.0")
 

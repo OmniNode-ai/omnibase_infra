@@ -1649,7 +1649,7 @@ class TestComputeRegistryHighContention:
 
         def random_operations_task(thread_id: int) -> None:
             """Perform random operations."""
-            local_counts: dict[str, int] = {k: 0 for k in operation_counts}
+            local_counts: dict[str, int] = dict.fromkeys(operation_counts, 0)
             try:
                 for i in range(operations_per_thread):
                     op = random.choice(
