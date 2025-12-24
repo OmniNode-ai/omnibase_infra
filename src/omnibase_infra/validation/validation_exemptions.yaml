@@ -348,7 +348,7 @@ pattern_exemptions:
   # ==========================================================================
   # service_name in ModelConsulIntentPayload is the Consul service name to register,
   # NOT a reference to an internal entity. It is a Consul-specific configuration field.
-  - file_pattern: 'model_registration_intent\.py'
+  - file_pattern: 'model_consul_intent_payload\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
       service_name is the Consul service name to register in service discovery
@@ -407,26 +407,6 @@ architecture_exemptions:
       - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
       - docs/architecture/NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md
     ticket: OMN-888
-  # ==========================================================================
-  # Registration Intent Models Exemption (OMN-888)
-  # ==========================================================================
-  # model_registration_intent.py contains a discriminated union pattern with
-  # typed intent models that must be defined together for type narrowing.
-  # The models form a cohesive discriminated union:
-  # - ModelConsulIntentPayload + ModelConsulRegistrationIntent (consul kind)
-  # - ModelPostgresIntentPayload + ModelPostgresUpsertIntent (postgres kind)
-  # - ModelRegistrationIntent = Annotated[Union, Field(discriminator="kind")]
-  - file_pattern: 'models/model_registration_intent\.py'
-    violation_pattern: '\d+ models in one file'
-    reason: >
-      Discriminated union pattern for registration intents. The 4 models form
-      a cohesive type-safe union: payload models (ModelConsulIntentPayload,
-      ModelPostgresIntentPayload) paired with intent models that contain them
-      (ModelConsulRegistrationIntent, ModelPostgresUpsertIntent). The union
-      ModelRegistrationIntent uses Annotated[..., Field(discriminator="kind")]
-      for type narrowing. Splitting would break the discriminated union pattern.
-    ticket: OMN-888
-
 # Union usage validator exemptions
 # These handle complex union type violations
 union_exemptions:

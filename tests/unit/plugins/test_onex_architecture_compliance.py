@@ -65,7 +65,7 @@ class TestOnexArchitectureCompliance:
                 self, input_data: dict[str, Any], context: dict[str, Any]
             ) -> dict[str, Any]:
                 # ARCHITECTURAL VIOLATION: File I/O in COMPUTE layer
-                with open("/tmp/data.txt") as f:  # noqa: S108 - Intentional violation for testing
+                with open("/tmp/data.txt", encoding="utf-8") as f:  # noqa: S108 - Intentional violation for testing
                     return {"data": f.read()}
 
         plugin = FileIOViolator()

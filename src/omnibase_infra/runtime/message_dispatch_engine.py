@@ -1399,27 +1399,62 @@ class MessageDispatchEngine:
                 # Update status to reflect validation error
                 status = EnumDispatchStatus.HANDLER_ERROR
 
-        return ModelDispatchResult(
-            dispatch_id=dispatch_id,
-            status=status,
-            route_id=matched_route_id,
-            dispatcher_id=dispatcher_ids_str,
-            topic=topic,
-            message_category=topic_category,
-            message_type=message_type,
-            duration_ms=duration_ms,
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-            outputs=dispatch_outputs,
-            output_count=len(outputs),
-            error_message="; ".join(dispatcher_errors) if dispatcher_errors else None,
-            error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR
-            if dispatcher_errors
-            else None,
-            correlation_id=envelope.correlation_id,
-            trace_id=envelope.trace_id,
-            span_id=envelope.span_id,
-        )
+        # Construct final dispatch result with ValidationError protection
+        # This ensures any Pydantic validation failure in ModelDispatchResult
+        # is handled gracefully rather than propagating as an unhandled exception
+        try:
+            return ModelDispatchResult(
+                dispatch_id=dispatch_id,
+                status=status,
+                route_id=matched_route_id,
+                dispatcher_id=dispatcher_ids_str,
+                topic=topic,
+                message_category=topic_category,
+                message_type=message_type,
+                duration_ms=duration_ms,
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+                outputs=dispatch_outputs,
+                output_count=len(outputs),
+                error_message="; ".join(dispatcher_errors)
+                if dispatcher_errors
+                else None,
+                error_code=EnumCoreErrorCode.HANDLER_EXECUTION_ERROR
+                if dispatcher_errors
+                else None,
+                correlation_id=envelope.correlation_id,
+                trace_id=envelope.trace_id,
+                span_id=envelope.span_id,
+            )
+        except ValidationError as result_validation_error:
+            # Pydantic validation failed during result construction
+            # This is a critical internal error - log and return a minimal error result
+            sanitized_result_error = _sanitize_error_message(result_validation_error)
+            # TRY400: Intentionally using error() instead of exception() for security
+            self._logger.error(  # noqa: TRY400
+                "Failed to construct ModelDispatchResult: %s",
+                sanitized_result_error,
+                extra=self._build_log_context(
+                    topic=topic,
+                    category=topic_category,
+                    message_type=message_type,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
+                    error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+                ),
+            )
+            # Return a minimal fallback result that should always succeed
+            return ModelDispatchResult(
+                dispatch_id=dispatch_id,
+                status=EnumDispatchStatus.INTERNAL_ERROR,
+                topic=topic,
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+                duration_ms=duration_ms,
+                error_message=f"Internal error constructing dispatch result: {sanitized_result_error}",
+                error_code=EnumCoreErrorCode.INTERNAL_ERROR,
+                correlation_id=envelope.correlation_id,
+            )
 
     def _find_matching_dispatchers(
         self,

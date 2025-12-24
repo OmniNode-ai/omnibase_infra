@@ -6,6 +6,7 @@ This module provides protocol definitions (duck-typed interfaces) for infrastruc
 components in the ONEX ecosystem.
 
 Protocols:
+    - ProtocolIdempotencyStore: Interface for idempotency checking and deduplication
     - ProtocolPluginCompute: Interface for deterministic compute plugins
     - ProtocolSnapshotPublisher: Interface for snapshot publishing services (F2)
 
@@ -16,7 +17,11 @@ Architecture:
 
 Usage:
     ```python
-    from omnibase_infra.protocols import ProtocolPluginCompute, ProtocolSnapshotPublisher
+    from omnibase_infra.protocols import (
+        ProtocolIdempotencyStore,
+        ProtocolPluginCompute,
+        ProtocolSnapshotPublisher,
+    )
 
     # Verify protocol compliance via duck typing (per ONEX conventions)
     plugin = MyComputePlugin()
@@ -25,6 +30,9 @@ Usage:
     publisher = MySnapshotPublisher()
     assert hasattr(publisher, 'publish_snapshot') and callable(publisher.publish_snapshot)
     assert hasattr(publisher, 'delete_snapshot') and callable(publisher.delete_snapshot)
+
+    store = MyIdempotencyStore()
+    assert hasattr(store, 'check_and_record') and callable(store.check_and_record)
     ```
 
 See Also:
